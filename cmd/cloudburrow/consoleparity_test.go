@@ -2807,9 +2807,11 @@ var parityRows = []parityRow{
 		Methods: []string{"PipelineService/CreatePipelineJob", "PipelineService/GetPipelineJob", "PipelineService/ListPipelineJobs",
 			"PipelineService/CancelPipelineJob", "PipelineService/DeletePipelineJob"},
 		Provider: "vertex-pipeline-runs", Offers: "Pipelines' Runs: a Region menu, Create run (Create pipeline run: Upload file or Import from Cloud Storage, " +
-			"Run name, Run schedule, Advanced options' service account, Cloud storage location, Failure policy, Pipeline parameters), a run's tasks, Cancel and Delete; " +
+			"Run name, Run schedule, Advanced options' service account, Cloud storage location, Caching configuration, Failure policy, Pipeline parameters), " +
+			"a run's page (its runtime graph: nested DAGs, conditions and loops expanded in place, Expand artifacts, and the Pipeline run analysis pane's " +
+			"run details, run parameters and each node's Node info), Cancel and Delete; " +
 			"the Schedules tab (vertex-pipeline-schedules, the schedule methods' Colab row) with Pause, Resume and Delete",
-		Tests: []string{"TestVertexAIPipelinesThroughThePages"}},
+		Tests: []string{"TestVertexAIPipelinesThroughThePages", "TestVertexAIPipelineRunGraphThroughThePages"}},
 	// Agent Platform Model Monitoring and data labeling (#2214).
 	{Resource: "Agent Platform Model Monitoring: model monitors", Service: "vertexaiv1beta1",
 		Methods: []string{"ModelMonitoringService/CreateModelMonitor", "ModelMonitoringService/GetModelMonitor",
@@ -2845,6 +2847,84 @@ var parityRows = []parityRow{
 	{Resource: "Vertex AI Pipelines: batch delete and cancel", Service: "vertexai",
 		Methods:  []string{"PipelineService/BatchDeletePipelineJobs", "PipelineService/BatchCancelPipelineJobs"},
 		Excluded: "Google's Pipelines docs describe no bulk action (https://docs.cloud.google.com/vertex-ai/docs/pipelines/run-pipeline); the API's batch methods are served"},
+	// Vertex AI Training and batch inference (#2210).
+	{Resource: "Vertex AI Training: training pipelines", Service: "vertexai",
+		Methods: []string{"PipelineService/CreateTrainingPipeline", "PipelineService/GetTrainingPipeline", "PipelineService/ListTrainingPipelines",
+			"PipelineService/CancelTrainingPipeline", "PipelineService/DeleteTrainingPipeline"},
+		Provider: "vertex-training-pipelines", Offers: "Training's Training pipelines: a Region menu, Create (Train new model: Training method, Model details' " +
+			"Train new model or Train new version, Training container's Prebuilt container (Model framework, Model framework version, Package location, " +
+			"Python module) or Custom container (Container image), Model output directory, Arguments, Compute and pricing's Worker pool 0, Prediction " +
+			"container's No prediction container, Prebuilt container or Custom container; Start training), a pipeline's page (its details, worker pools, " +
+			"custom job and model), Cancel and Delete",
+		Tests: []string{"TestVertexAITrainingThroughThePages"}},
+	{Resource: "Vertex AI Training: custom jobs", Service: "vertexai",
+		Methods:  []string{"JobService/GetCustomJob", "JobService/ListCustomJobs", "JobService/CancelCustomJob", "JobService/DeleteCustomJob"},
+		Provider: "vertex-custom-jobs", Offers: "Training's Custom jobs tab: a Region menu, a job's page (its details and worker pools), Cancel and Delete",
+		Tests: []string{"TestVertexAITrainingThroughThePages"}},
+	{Resource: "Vertex AI Training: create a custom job", Service: "vertexai", Methods: []string{"JobService/CreateCustomJob"},
+		Excluded: "Google's console creates a CustomJob only through a training pipeline (https://docs.cloud.google.com/vertex-ai/docs/training/create-custom-job: " +
+			"\"you can't create a CustomJob directly\" in the console); Train new model does"},
+	{Resource: "Vertex AI Training: hyperparameter tuning jobs", Service: "vertexai",
+		Methods: []string{"JobService/GetHyperparameterTuningJob", "JobService/ListHyperparameterTuningJobs", "JobService/CancelHyperparameterTuningJob",
+			"JobService/DeleteHyperparameterTuningJob"},
+		Provider: "vertex-hyperparameter-tuning-jobs", Offers: "Training's Hyperparameter tuning jobs tab: a Region menu, a job's page (its details, study, " +
+			"trial worker pools and Trials table, each trial linking its custom job), Cancel and Delete; Train new model's Hyperparameter tuning step " +
+			"(Enable hyperparameter tuning, hyperparameters, Metric to optimize and Goal, Maximum number of trials and of parallel trials, Search algorithm)",
+		Tests: []string{"TestVertexAITrainingHyperparameterTuningThroughThePages"}},
+	{Resource: "Vertex AI Training: create a hyperparameter tuning job", Service: "vertexai", Methods: []string{"JobService/CreateHyperparameterTuningJob"},
+		Excluded: "Google's console creates hyperparameter tuning through Train new model's Hyperparameter tuning step, a training pipeline with the " +
+			"hyperparameter tuning task (https://docs.cloud.google.com/vertex-ai/docs/training/using-hyperparameter-tuning, Console tab), which this console offers"},
+	{Resource: "Vertex AI batch inference", Service: "vertexai",
+		Methods: []string{"JobService/CreateBatchPredictionJob", "JobService/GetBatchPredictionJob", "JobService/ListBatchPredictionJobs",
+			"JobService/CancelBatchPredictionJob", "JobService/DeleteBatchPredictionJob"},
+		Provider: "vertex-batch-predictions", Offers: "Batch inference: a Region menu, Create (New batch prediction: name, Model name, Select source " +
+			"(File on Cloud Storage, Files on Cloud Storage (other), BigQuery path), Destination path, Enable feature attributions, Number of compute nodes, " +
+			"Machine type, Accelerator type and count; Create), a job's page (source, destination, output location, completion stats), Cancel and Delete",
+		Tests: []string{"TestVertexAITrainingThroughThePages"}},
+	// Vertex AI managed datasets (#2210).
+	{Resource: "Vertex AI datasets", Service: "vertexai",
+		Methods: []string{"DatasetService/CreateDataset", "DatasetService/GetDataset", "DatasetService/ListDatasets", "DatasetService/DeleteDataset",
+			"DatasetService/ImportData", "DatasetService/ExportData", "DatasetService/ListDataItems", "DatasetService/ListAnnotations"},
+		Provider: "vertex-datasets", Offers: "Datasets: a Region menu, Create (Create dataset: Dataset name, the data type (Image, Tabular, Text, Video) " +
+			"and its objective, then Select an import file from Cloud Storage, or a tabular dataset's Select CSV files from Cloud Storage or Select a table " +
+			"or view from BigQuery; Create), a dataset's page (Browse: its data items with their labels and ML use; Details; a tabular dataset's Source), " +
+			"Import, Export and Delete",
+		Tests: []string{"TestVertexAIDatasetsThroughThePages"}},
+	{Resource: "Vertex AI datasets: versions, saved queries, search and annotation specs", Service: "vertexai",
+		Methods: []string{"DatasetService/UpdateDataset", "DatasetService/CreateDatasetVersion", "DatasetService/GetDatasetVersion", "DatasetService/ListDatasetVersions",
+			"DatasetService/UpdateDatasetVersion", "DatasetService/DeleteDatasetVersion", "DatasetService/RestoreDatasetVersion", "DatasetService/ListSavedQueries",
+			"DatasetService/DeleteSavedQuery", "DatasetService/SearchDataItems", "DatasetService/GetAnnotationSpec"},
+		Excluded: "the dataset pages Google documents (image-data/classification/create-dataset, tabular-data/classification-regression/create-dataset, " +
+			"read 2026-11-24) do not describe editing a dataset, its versions, annotation sets, search or annotation specs; the API and the Vertex AI SDK do"},
+	// Vertex ML Metadata (#2205).
+	{Resource: "Vertex ML Metadata: artifacts", Service: "vertexai",
+		Methods:  []string{"MetadataService/ListArtifacts", "MetadataService/GetArtifact", "MetadataService/QueryArtifactLineageSubgraph", "MetadataService/DeleteArtifact"},
+		Provider: "vertex-metadata-artifacts", Offers: "Metadata's Artifacts: a Region menu, the default store's artifacts, an artifact's page " +
+			"(its properties, Lineage: the artifacts and executions of its lineage, each opening its page; Executions: those that produced or consumed it; Metadata as JSON) and Delete",
+		Tests: []string{"TestVertexAIMetadataThroughThePages"}},
+	{Resource: "Vertex ML Metadata: executions", Service: "vertexai",
+		Methods:  []string{"MetadataService/ListExecutions", "MetadataService/GetExecution", "MetadataService/QueryExecutionInputsAndOutputs", "MetadataService/DeleteExecution"},
+		Provider: "vertex-metadata-executions", Offers: "Metadata's Executions: an execution's page (its properties, Input artifacts, Output artifacts, Metadata) and Delete",
+		Tests: []string{"TestVertexAIMetadataThroughThePages"}},
+	{Resource: "Vertex ML Metadata: contexts", Service: "vertexai",
+		Methods:  []string{"MetadataService/ListContexts", "MetadataService/GetContext", "MetadataService/DeleteContext"},
+		Provider: "vertex-metadata-contexts", Offers: "Metadata's Contexts: a context's page (its properties, parent contexts, Artifacts, Executions, Child contexts, Metadata) and Delete",
+		Tests: []string{"TestVertexAIMetadataThroughThePages"}},
+	{Resource: "Vertex ML Metadata: stores", Service: "vertexai",
+		Methods:  []string{"MetadataService/CreateMetadataStore", "MetadataService/GetMetadataStore", "MetadataService/ListMetadataStores", "MetadataService/DeleteMetadataStore"},
+		Excluded: "Google's Metadata page \"lists the artifacts that have been created in the default metadata store\" (https://docs.cloud.google.com/vertex-ai/docs/pipelines/lineage) and offers no store management; the API's store methods are served"},
+	{Resource: "Vertex ML Metadata: create, update and purge", Service: "vertexai",
+		Methods: []string{"MetadataService/CreateArtifact", "MetadataService/UpdateArtifact", "MetadataService/PurgeArtifacts",
+			"MetadataService/CreateExecution", "MetadataService/UpdateExecution", "MetadataService/PurgeExecutions",
+			"MetadataService/CreateContext", "MetadataService/UpdateContext", "MetadataService/PurgeContexts"},
+		Excluded: "Google's docs do these \"Use either REST or the Vertex AI SDK for Python\" and purges with REST only (https://docs.cloud.google.com/vertex-ai/docs/ml-metadata/managing-metadata); Vertex AI Pipelines records its runs' nodes itself"},
+	{Resource: "Vertex ML Metadata: events and context membership", Service: "vertexai",
+		Methods: []string{"MetadataService/AddExecutionEvents", "MetadataService/AddContextArtifactsAndExecutions", "MetadataService/AddContextChildren",
+			"MetadataService/RemoveContextChildren", "MetadataService/QueryContextLineageSubgraph"},
+		Excluded: "events and a context's artifacts, executions and children are recorded through REST or the SDK (https://docs.cloud.google.com/vertex-ai/docs/ml-metadata/tracking); the console's lineage graph is an artifact's (https://docs.cloud.google.com/vertex-ai/docs/pipelines/lineage), and a context's page lists its members with the list filters"},
+	{Resource: "Vertex ML Metadata: schemas", Service: "vertexai",
+		Methods:  []string{"MetadataService/CreateMetadataSchema", "MetadataService/GetMetadataSchema", "MetadataService/ListMetadataSchemas"},
+		Excluded: "Google's ML Metadata docs describe metadata schemas through the API only (https://docs.cloud.google.com/vertex-ai/docs/ml-metadata/managing-metadata, https://docs.cloud.google.com/vertex-ai/docs/ml-metadata/tracking); no console page shows them"},
 	{Resource: "Colab Enterprise: runtime upgrade", Service: "vertexai", Methods: []string{"NotebookService/UpgradeNotebookRuntime"},
 		Excluded: "a runtime here is always on the instance's runtime image (is_upgradable false), so Google's Upgrade, offered only for an upgradable runtime, never shows"},
 	// Vertex AI Workbench instances (#2173).

@@ -174,7 +174,12 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	}
 	switch {
 	case len(e.SourceModel) > 0 && string(e.SourceModel) != "null":
-		notImplemented("of a model. The emulator behind CloudBurrow has no models.")
+		// A model's export (modelexport.go, #2210).
+		if f.models == nil {
+			notImplemented("of a model: this front keeps no models.")
+			return
+		}
+		f.modelExtractJob(w, r, e, uris)
 		return
 	case e.SourceTable == nil || len(uris) == 0:
 		f.next.ServeHTTP(w, r)

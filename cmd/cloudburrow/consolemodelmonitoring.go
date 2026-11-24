@@ -32,7 +32,6 @@ import (
 	"strings"
 	"time"
 
-	aiplatform "cloud.google.com/go/aiplatform/apiv1"
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	aiplatformbeta "cloud.google.com/go/aiplatform/apiv1beta1"
 	betapb "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
@@ -57,17 +56,10 @@ func (v vertexAPI) betaSchedules(ctx context.Context) (*aiplatformbeta.ScheduleC
 	return aiplatformbeta.NewScheduleClient(ctx, v.opts()...)
 }
 
-func (v vertexAPI) jobs(ctx context.Context) (*aiplatform.JobClient, error) {
-	if v.at() == "" {
-		return nil, errors.New("the local AI endpoint is not running")
-	}
-	return aiplatform.NewJobClient(ctx, v.opts()...)
-}
-
 var monitorTabs = []string{"vertex-model-monitors", "vertex-model-monitoring-schedules", "vertex-model-deployment-monitoring"}
 
-// jobStateText is a job's state as the lists word it.
-func jobStateText(s fmt.Stringer) string {
+// monitorStateText is a v1 or v1beta1 job's state as the lists word it.
+func monitorStateText(s fmt.Stringer) string {
 	t := strings.TrimPrefix(s.String(), "JOB_STATE_")
 	if t == "" || t == "UNSPECIFIED" {
 		return "Unknown"
@@ -237,7 +229,7 @@ func (p modelMonitorsProvider) Detail(ctx context.Context, project string, path 
 			}
 		}
 		runs.Items = append(runs.Items, console.Resource{Name: vertexLast(j.GetName()), Fields: map[string]string{
-			"Run name": dashIfEmpty(j.GetDisplayName()), "Status": jobStateText(j.GetState()),
+			"Run name": dashIfEmpty(j.GetDisplayName()), "Status": monitorStateText(j.GetState()),
 			"Target dataset": inputText(j.GetModelMonitoringSpec().GetObjectiveSpec().GetTargetDataset()),
 			"Schedule":       dashIfEmpty(vertexLast(j.GetSchedule())), "Created": vertexTime(j.GetCreateTime()), "Error": dashIfEmpty(msg)}})
 	}
@@ -580,7 +572,7 @@ func (p mdmJobsProvider) List(ctx context.Context, project string) (console.List
 		if m := j.GetLatestMonitoringPipelineMetadata(); m != nil {
 			last = vertexTime(m.GetRunTime())
 		}
-		l.Items = append(l.Items, console.Resource{Name: vertexLast(j.GetName()), Status: jobStateText(j.GetState()), Actions: mdmActions(j.GetState()), Fields: map[string]string{
+		l.Items = append(l.Items, console.Resource{Name: vertexLast(j.GetName()), Status: monitorStateText(j.GetState()), Actions: mdmActions(j.GetState()), Fields: map[string]string{
 			"Job name": j.GetDisplayName(), "Endpoint": vertexLast(j.GetEndpoint()),
 			"Monitoring frequency": j.GetModelDeploymentMonitoringScheduleConfig().GetMonitorInterval().AsDuration().String(),
 			"Last run":             last, "Next run": colabOptTime(j.GetNextScheduleTime(), j.GetNextScheduleTime() != nil), "Created": vertexTime(j.GetCreateTime())}})
@@ -617,7 +609,7 @@ func (p mdmJobsProvider) Detail(ctx context.Context, project string, path []stri
 	d := console.Detail{Title: j.GetDisplayName(), Summary: []console.Property{
 		{Label: "Job name", Value: j.GetDisplayName()},
 		{Label: "Name", Value: j.GetName(), Copy: j.GetName()},
-		{Label: "Status", Value: jobStateText(j.GetState())},
+		{Label: "Status", Value: monitorStateText(j.GetState())},
 		{Label: "Endpoint", Value: j.GetEndpoint()},
 		{Label: "Monitoring frequency", Value: j.GetModelDeploymentMonitoringScheduleConfig().GetMonitorInterval().AsDuration().String()},
 		{Label: "Sampling rate", Value: dashIfEmpty(strconv.FormatFloat(j.GetLoggingSamplingStrategy().GetRandomSampleConfig().GetSampleRate(), 'g', -1, 64))},

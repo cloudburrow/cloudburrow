@@ -15,12 +15,23 @@ package main
 //     options menu has Pause (Active), Resume (Paused) and Delete, whose
 //     dialog's Delete confirms it.
 //
-// UNVERIFIED (re-read 2026-11-22): the Runs list's columns and a run's page
-// (Google's docs show neither; a run's page here has its tasks and their
-// states); "Select from existing pipelines" and "Select a Template Gallery
-// pipeline" are not offered (templates are not served); the pipeline
-// parameters are entered as one JSON object; Caching configuration is not
-// offered (caching is not run).
+//   - a run's page is its runtime graph with the Pipeline run analysis
+//     pane (consolepipelinegraph.go, #2205).
+//
+//   - Select from existing pipelines (#2210): "Select the Repository
+//     containing the pipeline or component definition file", then "the
+//     Pipeline or component and Version"; the run's template_uri is the
+//     Artifact Registry KFP repository's
+//     https://REGION-kfp.pkg.dev/PROJECT/REPOSITORY/PACKAGE/VERSION
+//     (https://docs.cloud.google.com/vertex-ai/docs/pipelines/run-pipeline,
+//     .../pipelines/create-pipeline-template, read 2026-11-24).
+//
+// UNVERIFIED (re-read 2026-11-24): the Runs list's columns (Google's docs
+// do not show them); "Select a Template Gallery pipeline" is not offered
+// (Google's gallery holds Google-authored templates, which a local
+// instance does not have); the pipeline parameters are entered as one JSON
+// object; Caching configuration applies to an uploaded or imported file,
+// a template running as it was compiled.
 
 import (
 	"context"
@@ -185,40 +196,43 @@ func (p pipelineRunsProvider) Detail(ctx context.Context, project string, path [
 	if e := j.GetError(); e != nil && e.GetCode() != 0 {
 		d.Summary = append(d.Summary, console.Property{Label: "Error", Value: e.GetMessage()})
 	}
-	tasks := console.Listing{Columns: []string{"Task", "State", "Started", "Ended", "Outputs", "Error"}, NameColumn: "ID", Noun: "tasks"}
-	for _, t := range j.GetJobDetail().GetTaskDetails() {
-		if t.GetParentTaskId() == 0 {
-			continue
+	// The Pipeline run analysis pane: the run's details and parameters.
+	// The parameters the run used: runtime_config's, else the pipeline's
+	// defaults.
+	used := map[string]*structpb.Value{}
+	defs := j.GetPipelineSpec().GetFields()["root"].GetStructValue().GetFields()["inputDefinitions"].GetStructValue().GetFields()["parameters"].GetStructValue()
+	for k, def := range defs.GetFields() {
+		if v, ok := def.GetStructValue().GetFields()["defaultValue"]; ok {
+			used[k] = v
 		}
-		var outs []string
-		for _, k := range sortedKeysOf(t.GetOutputs()) {
-			for _, a := range t.GetOutputs()[k].GetArtifacts() {
-				outs = append(outs, k+": "+a.GetUri())
-			}
-		}
-		tasks.Items = append(tasks.Items, console.Resource{Name: fmt.Sprint(t.GetTaskId()), Fields: map[string]string{
-			"Task": t.GetTaskName(), "State": pipelineTaskStateText(t.GetState()),
-			"Started": colabOptTime(t.GetStartTime(), t.GetStartTime() != nil), "Ended": colabOptTime(t.GetEndTime(), t.GetEndTime() != nil),
-			"Outputs": dashIfEmpty(strings.Join(outs, ", ")), "Error": dashIfEmpty(t.GetError().GetMessage())}})
 	}
-	tasks.Total = len(tasks.Items)
-	params := map[string]any{}
 	for k, v := range j.GetRuntimeConfig().GetParameterValues() {
-		params[k] = v.AsInterface()
+		used[k] = v
 	}
-	pb, _ := json.MarshalIndent(params, "", "  ")
+	var params []console.Property
+	for _, k := range sortedKeysOf(used) {
+		params = append(params, console.Property{Label: k, Value: valueText(used[k])})
+	}
+	summary := []console.PropertyGroup{{Heading: "Run details", Properties: d.Summary}}
+	if len(params) > 0 {
+		summary = append(summary, console.PropertyGroup{Heading: "Run parameters", Properties: params})
+	}
 	d.Sections = []console.Section{
-		{ID: "tasks", Label: "Tasks", Listing: tasks},
-		{ID: "parameters", Label: "Pipeline parameters", Kind: console.KindText, Text: string(pb)},
+		{ID: "graph", Label: "Runtime graph", Kind: console.KindPipelineGraph, Pipeline: pipelineGraph(j, summary, project)},
 	}
 	return d, nil
 }
 
 func (pipelineRunsProvider) CreateForm() (string, []console.Field) {
 	return "Create run", []console.Field{
-		{Name: "source", Label: "Run source", Type: "select", Section: "Run details", Options: []string{"upload", "gcs"}, Default: "upload",
-			OptionLabels: map[string]string{"upload": "Upload file", "gcs": "Import from Cloud Storage"},
-			Help:         "The compiled pipeline definition (the JSON or YAML file the Kubeflow Pipelines compiler writes)."},
+		{Name: "source", Label: "Run source", Type: "select", Section: "Run details", Options: []string{"existing", "upload", "gcs"}, Default: "upload",
+			OptionLabels: map[string]string{"existing": "Select from existing pipelines", "upload": "Upload file", "gcs": "Import from Cloud Storage"},
+			Help:         "The compiled pipeline definition (the JSON or YAML file the Kubeflow Pipelines compiler writes), or a template in an Artifact Registry Kubeflow Pipelines repository."},
+		{Name: "repository", Label: "Repository", Type: "text", Section: "Run details", ShowWhen: "source=existing", Pattern: `^([a-z]([a-z0-9\-]*[a-z0-9])?)?$`,
+			Help: "The Artifact Registry Kubeflow Pipelines repository, in this region, containing the pipeline or component definition file."},
+		{Name: "template", Label: "Pipeline or component", Type: "text", Section: "Run details", ShowWhen: "source=existing", Pattern: `^([a-z0-9][a-z0-9\-]{3,127})?$`},
+		{Name: "version", Label: "Version", Type: "text", Section: "Run details", ShowWhen: "source=existing", Default: "latest",
+			Help: "A tag (latest, v1) or a version (sha256:...)."},
 		{Name: "spec", Label: "Pipeline file contents", Type: "textarea", Section: "Run details", ShowWhen: "source=upload",
 			Help: "Paste the compiled pipeline (pipeline.json or pipeline.yaml)."},
 		{Name: "specUri", Label: "Cloud Storage URL", Type: "text", Section: "Run details", ShowWhen: "source=gcs", Pattern: `^(gs://[a-z0-9][\-a-z0-9._]+/.+)?$`,
@@ -238,6 +252,9 @@ func (pipelineRunsProvider) CreateForm() (string, []console.Field) {
 			Help: "The run's identity; you need the Service Account User role on it. Empty: the Compute Engine default service account."},
 		{Name: "output", Label: "Cloud storage location", Type: "text", Required: true, Section: "Runtime configuration", Pattern: `^(gs://)?[a-z0-9][\-a-z0-9._]{1,221}(/.*)?$`,
 			Help: "gs://BUCKET/folder: the root output directory of the pipeline, where its artifacts are written."},
+		{Name: "caching", Label: "Caching configuration", Type: "select", Section: "Runtime configuration", Options: []string{"default", "enabled", "disabled"}, Default: "default",
+			OptionLabels: map[string]string{"default": "Use the pipeline's settings", "enabled": "Enable execution caching", "disabled": "Disable execution caching"},
+			Help:         "Whether the run's steps reuse the outputs of earlier executions with the same inputs, as PipelineJob's enable_caching sets every step's caching option."},
 		{Name: "failurePolicy", Label: "Failure policy", Type: "select", Section: "Runtime configuration", Options: []string{"slow", "fast"}, Default: "slow",
 			OptionLabels: map[string]string{"slow": "Run all steps to completion", "fast": "Fail the pipeline run after one step fails"}},
 		{Name: "parameters", Label: "Pipeline parameters", Type: "textarea", Section: "Runtime configuration",
@@ -289,6 +306,13 @@ func (p pipelineRunsProvider) Create(ctx context.Context, project string, values
 	if project == "" {
 		return "", errors.New("choose a project before creating a run")
 	}
+	if values["source"] == "existing" {
+		uri, err := pipelineTemplateURI(colabRegion(ctx), project, values)
+		if err != nil {
+			return "", err
+		}
+		return p.createRun(ctx, project, values, &aiplatformpb.PipelineJob{TemplateUri: uri})
+	}
 	text := values["spec"]
 	if values["source"] == "gcs" {
 		var err error
@@ -303,6 +327,29 @@ func (p pipelineRunsProvider) Create(ctx context.Context, project string, values
 	if err != nil {
 		return "", err
 	}
+	if c := values["caching"]; c == "enabled" || c == "disabled" {
+		setPipelineCaching(spec, c == "enabled")
+	}
+	return p.createRun(ctx, project, values, &aiplatformpb.PipelineJob{PipelineSpec: spec})
+}
+
+// pipelineTemplateURI is Select from existing pipelines' template_uri.
+func pipelineTemplateURI(region, project string, values map[string]string) (string, error) {
+	repo, pkg := strings.TrimSpace(values["repository"]), strings.TrimSpace(values["template"])
+	version := strings.TrimSpace(values["version"])
+	if repo == "" || pkg == "" {
+		return "", errors.New("Select from existing pipelines needs the Repository and the Pipeline or component")
+	}
+	if version == "" {
+		version = "latest"
+	}
+	return "https://" + region + "-kfp.pkg.dev/" + project + "/" + repo + "/" + pkg + "/" + version, nil
+}
+
+// createRun sets the form's run details and runtime configuration on job
+// (its pipeline_spec or template_uri already set) and creates the run, or
+// its schedule.
+func (p pipelineRunsProvider) createRun(ctx context.Context, project string, values map[string]string, job *aiplatformpb.PipelineJob) (string, error) {
 	out := strings.TrimSpace(values["output"])
 	if !strings.HasPrefix(out, "gs://") {
 		out = "gs://" + out
@@ -325,7 +372,7 @@ func (p pipelineRunsProvider) Create(ctx context.Context, project string, values
 			rc.ParameterValues[k] = sv
 		}
 	}
-	job := &aiplatformpb.PipelineJob{DisplayName: values["displayName"], PipelineSpec: spec, RuntimeConfig: rc, ServiceAccount: strings.TrimSpace(values["serviceAccount"])}
+	job.DisplayName, job.RuntimeConfig, job.ServiceAccount = values["displayName"], rc, strings.TrimSpace(values["serviceAccount"])
 	parent := colabParent(ctx, project)
 	if values["runSchedule"] == "recurring" {
 		sc := &aiplatformpb.Schedule{DisplayName: values["displayName"], TimeSpecification: &aiplatformpb.Schedule_Cron{Cron: values["cron"]},
@@ -463,4 +510,20 @@ func (p pipelineSchedulesProvider) Detail(ctx context.Context, project string, p
 		{Label: "Last scheduled run", Value: last},
 		{Label: "Created", Value: vertexTime(s.GetCreateTime())},
 	}}, nil
+}
+
+// setPipelineCaching sets every task's cachingOptions.enableCache, as the
+// Vertex AI SDK's PipelineJob(enable_caching=...) does.
+func setPipelineCaching(spec *structpb.Struct, on bool) {
+	comps := []*structpb.Struct{spec.GetFields()["root"].GetStructValue()}
+	for _, c := range spec.GetFields()["components"].GetStructValue().GetFields() {
+		comps = append(comps, c.GetStructValue())
+	}
+	for _, c := range comps {
+		for _, t := range c.GetFields()["dag"].GetStructValue().GetFields()["tasks"].GetStructValue().GetFields() {
+			if ts := t.GetStructValue(); ts != nil {
+				ts.Fields["cachingOptions"] = structpb.NewStructValue(&structpb.Struct{Fields: map[string]*structpb.Value{"enableCache": structpb.NewBoolValue(on)}})
+			}
+		}
+	}
 }

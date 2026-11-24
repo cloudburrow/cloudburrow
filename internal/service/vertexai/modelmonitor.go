@@ -456,13 +456,6 @@ func readMasked(m proto.Message, paths []string) {
 	}
 }
 
-func pageSize(n int32) int {
-	if n <= 0 {
-		return 100
-	}
-	return int(n)
-}
-
 func (x *modelMonitoringService) ListModelMonitors(_ context.Context, req *betapb.ListModelMonitorsRequest) (*betapb.ListModelMonitorsResponse, error) {
 	if _, _, err := parseParent("parent", req.GetParent()); err != nil {
 		return nil, grpcError(err)

@@ -14,14 +14,14 @@ import (
 
 // Context is the image's build context.
 //
-//go:embed Dockerfile convert.py
+//go:embed Dockerfile convert.py transform.py
 var Context embed.FS
 
 // Tag is the image's tag: the build context's hash, so a changed
 // Dockerfile or script is a new image, never a stale one.
 func Tag() string {
 	h := sha256.New()
-	for _, name := range []string{"Dockerfile", "convert.py"} {
+	for _, name := range []string{"Dockerfile", "convert.py", "transform.py"} {
 		b, _ := Context.ReadFile(name)
 		h.Write([]byte(name))
 		h.Write(b)
@@ -33,7 +33,7 @@ func Tag() string {
 func Tar() (io.Reader, error) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	for _, name := range []string{"Dockerfile", "convert.py"} {
+	for _, name := range []string{"Dockerfile", "convert.py", "transform.py"} {
 		b, err := Context.ReadFile(name)
 		if err != nil {
 			return nil, err

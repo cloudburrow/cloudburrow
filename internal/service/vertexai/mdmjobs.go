@@ -58,15 +58,6 @@ var (
 		"predict_instance_schema_uri": true, "sample_predict_instance": true, "analysis_instance_schema_uri": true, "stats_anomalies_base_directory": true}
 )
 
-// jobService serves google.cloud.aiplatform.v1.JobService's
-// ModelDeploymentMonitoringJob and DataLabelingJob methods (datalabeling.go);
-// the others (custom, batch prediction, hyperparameter tuning and Neural
-// Architecture Search jobs) are UNIMPLEMENTED.
-type jobService struct {
-	aiplatformpb.UnimplementedJobServiceServer
-	s *Server
-}
-
 // mdmStat is one run's statistics of one feature.
 type mdmStat struct {
 	Job, DeployedModel string

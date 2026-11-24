@@ -300,6 +300,13 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			colabNotebooksProvider{api: api, df: d.dataform.API}, colabExecutionsProvider{api: api}, colabSchedulesProvider{api: api},
 			// Vertex AI Pipelines' Runs and Schedules (consolepipelines.go, #2173).
 			pipelineRunsProvider{api: api, storage: map[bool]string{true: storageAddr}[enabled[config.ServiceStorage]]}, pipelineSchedulesProvider{colabSchedulesProvider{api: api}},
+			// Vertex ML Metadata's Artifacts, Executions and Contexts (consolemetadata.go, #2205).
+			metadataProvider{api: api, kind: "artifacts"}, metadataProvider{api: api, kind: "executions"}, metadataProvider{api: api, kind: "contexts"},
+			// Vertex AI Training's Training pipelines and Custom jobs, and
+			// Batch inference (consoletraining.go, #2210).
+			trainingPipelinesProvider{api: api}, customJobsProvider{api: api}, hpTuningProvider{api: api}, batchPredictionsProvider{api: api},
+			// Vertex AI managed datasets (consoledatasets.go, #2210).
+			datasetsProvider{api: api},
 			// Agent Platform's Monitoring page (consolemodelmonitoring.go, #2214).
 			modelMonitorsProvider{api: api}, monitoringSchedulesProvider{colabSchedulesProvider{api: api}}, mdmJobsProvider{api: api})
 		// Vertex AI Workbench's Instances (consoleworkbench.go, #2173).

@@ -152,10 +152,15 @@ func (s *Server) Handler() http.Handler {
 	// operations (notebookruntimes.go, #2105).
 	// Notebook executions, schedules and the templates' IAM policies
 	// (notebookjobs.go, schedules.go, notebookiam.go) too.
-	// Vertex AI pipeline jobs (pipelines.go, #2173) too.
-	for _, c := range []string{"notebookRuntimeTemplates", "notebookRuntimes", "notebookExecutionJobs", "schedules", "pipelineJobs"} {
+	// Vertex AI pipeline jobs (pipelines.go, #2173) and ML Metadata
+	// (metadata.go, #2205) too.
+	for _, c := range []string{"notebookRuntimeTemplates", "notebookRuntimes", "notebookExecutionJobs", "schedules", "pipelineJobs", "metadataStores",
+		"customJobs", "batchPredictionJobs", "trainingPipelines", "hyperparameterTuningJobs", "datasets"} {
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c, s.serveNotebookREST)
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
+		// Their operations as the Python SDK polls them, under /ui (#1940).
+		mux.HandleFunc("GET /ui/projects/{project}/locations/{location}/"+c+"/{id}/operations/{op}", s.serveNotebookREST)
+		mux.HandleFunc("GET /ui/projects/{project}/locations/{location}/"+c+"/{id}/{sub}/{subid}/operations/{op}", s.serveNotebookREST)
 	}
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/notebookRuntimes:assign", s.serveNotebookREST)
 	// Workbench instances, notebooks.googleapis.com v2 (#2173).

@@ -1219,7 +1219,35 @@ const (
 	// result dialog draws it (page images with their boxes beside the text
 	// and rows), on a page of its own: Document AI's analysis page (#2084).
 	KindResult SectionKind = "result"
+	// KindPipelineGraph is a pipeline run's runtime graph (Section.Pipeline,
+	// #2205): its tasks drawn as Google's run page draws them, nested DAGs
+	// expandable in place, artifacts shown with Expand artifacts, and the
+	// Pipeline run analysis pane beside it, its Node info the chosen node's.
+	KindPipelineGraph SectionKind = "pipelinegraph"
 )
+
+// PipelineGraph is a KindPipelineGraph section's run: its nodes and the
+// run's summary for the Pipeline run analysis pane.
+type PipelineGraph struct {
+	Nodes   []PipelineNode  `json:"nodes"`
+	Summary []PropertyGroup `json:"summary,omitempty"`
+}
+
+// PipelineNode is one node of a run's graph: a task, a DAG (a nested
+// pipeline, a condition, an exit handler), a loop, a loop's iteration or
+// an artifact. Parent is the DAG node it is drawn in ("" the root);
+// After are the nodes of the same parent it runs after, Inputs the
+// artifact nodes it takes (drawn as edges when artifacts are shown).
+type PipelineNode struct {
+	ID     string          `json:"id"`
+	Parent string          `json:"parent,omitempty"`
+	Name   string          `json:"name"`
+	Kind   string          `json:"kind"`
+	State  string          `json:"state"`
+	After  []string        `json:"after,omitempty"`
+	Inputs []string        `json:"inputs,omitempty"`
+	Info   []PropertyGroup `json:"info,omitempty"`
+}
 
 // Media is a KindMedia section's player: Src is the console's own media
 // route for the object, Type its audio type, and Label what the player is
@@ -1278,6 +1306,8 @@ type Section struct {
 	// details, its variables with detailed history, and its Parent,
 	// Children, Next and Previous entries, each a link to that entry.
 	StepEntries []StepEntryView `json:"stepEntries,omitempty"`
+	// Pipeline is the content when Kind is KindPipelineGraph.
+	Pipeline *PipelineGraph `json:"pipeline,omitempty"`
 	// Series is the content when Kind is KindChart.
 	Series []ChartSeries `json:"series,omitempty"`
 	// SeriesTitle, on a listing section with Series, draws them as one

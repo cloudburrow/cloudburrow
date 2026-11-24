@@ -17,7 +17,7 @@
 # Re-resolve with `docker buildx imagetools inspect tensorflow/tensorflow:2.20.0`.
 FROM --platform=linux/amd64 tensorflow/tensorflow:2.20.0@sha256:6b0a7db409e62b7cf188ce72074c520af3e8c21f6d4d5b206f700520594dfb5a
 
-COPY convert.py /opt/cloudburrow/convert.py
+COPY convert.py transform.py /opt/cloudburrow/
 
 # No route out when it runs: the converter reads /model and writes /out.
 USER 65534:65534

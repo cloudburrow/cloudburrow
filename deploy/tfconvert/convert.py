@@ -37,6 +37,17 @@ the SparseTensor's dense shape after the batch (-1 where free).
 predict: reads JSON {"name": [values...]} on stdin and prints TensorFlow's
          own serving_default output for it (the reference tests check
          CloudBurrow's TensorFlow Lite run against).
+
+export:  BigQuery ML's EXPORT MODEL of a model BigQuery ML trained (#2210):
+         reads /spec/spec.json, the model's preprocessing and weights as the
+         BigQuery front wrote them (internal/bigqueryfront/modelexport.go), and
+         writes /out/model, a TensorFlow SavedModel ("TF SavedModel": a
+         saved_model.pb, a variables/ folder and an assets/ folder of text
+         files, the categorical features' vocabularies) whose
+         serving_default signature takes each feature as a [batch] tensor of
+         its name and answers the model's predictions; or /out/error.json.
+         A spec of {"transform": ...} is a TRANSFORM's preprocessing
+         SavedModel instead (transform.py).
 """
 
 import json
@@ -802,5 +813,215 @@ def serve():
         proto.flush()
 
 
+SELU_SCALE = 1.0507009873554805
+SELU_ALPHA = 1.6732632423543772
+
+
+def export():
+    """Writes the SavedModel of /spec/spec.json to /out/model.
+
+    spec: {"inputs": [{"name", "dtype"}], "features": [encoder], "head": {...},
+    "label": name, "labelType": BigQuery type}. Each encoder makes the
+    encoded columns BigQuery ML's preprocessing gives a feature (numeric:
+    (x - sub) / div, or 0 when div is 0; onehot: one column a vocabulary
+    entry, the dropped one always 0, then a NULL column when null; label:
+    the entry's index + 1, 0 unseen; target: the entry's target, prior
+    unseen). The model computes in float32, as TensorFlow Lite's builtin
+    operators do, so BigQuery ML imports the export back (CREATE MODEL ...
+    model_type='TENSORFLOW'); FLOAT64 features are float64 inputs, cast.
+    The head is the model's: linear (K rows of weights over the
+    encoded columns, the intercept first), dnn (layers and activation, an
+    optional wide part), kmeans, pca, autoencoder or mf.
+    """
+    import numpy as np
+    import tensorflow as tf
+
+    spec = json.load(open("/spec/spec.json"))
+    if "transform" in spec:
+        # -I leaves the script's folder off the path: transform.py is next to it.
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import transform
+        return transform.export(spec["transform"], fail)
+    dtypes = {"float64": tf.float64, "int64": tf.int64, "string": tf.string, "bool": tf.bool}
+    module = tf.Module()
+    assets = "/tmp/assets"
+    os.makedirs(assets, exist_ok=True)
+    module.vars = []
+    module.tables = []
+
+    def var(name, value):
+        v = tf.Variable(np.asarray(value, dtype=np.float32), trainable=False, name=name)
+        module.vars.append(v)
+        return v
+
+    def text(x):
+        if x.dtype == tf.string:
+            return x
+        if x.dtype == tf.bool:
+            return tf.where(x, "true", "false")
+        return tf.strings.as_string(x)
+
+    def vocab(i, ft):
+        # The feature's vocabulary, an asset file of one entry a line.
+        path = os.path.join(assets, "%s.txt" % i)
+        with open(path, "w") as f:
+            for v in ft["vocab"]:
+                f.write(v.replace("\n", " ") + "\n")
+        init = tf.lookup.TextFileInitializer(tf.saved_model.Asset(path), tf.string, tf.lookup.TextFileIndex.WHOLE_LINE,
+                                             tf.int64, tf.lookup.TextFileIndex.LINE_NUMBER)
+        table = tf.lookup.StaticHashTable(init, -1)
+        module.tables.append(table)
+        return table
+
+    encoders = []
+    for i, ft in enumerate(spec["features"]):
+        kind = ft["kind"]
+        if kind == "numeric":
+            def enc(x, ft=ft):
+                x = tf.cast(x, tf.float32)
+                if not ft["div"]:
+                    return tf.zeros_like(x)[:, None]
+                return ((x - ft["sub"]) / ft["div"])[:, None]
+        elif kind in ("onehot", "label", "target"):
+            table = vocab(i, ft) if ft["vocab"] else None
+            tv = var("targets_%d" % i, ft.get("targets") or [0.0]) if kind == "target" else None
+
+            def enc(x, ft=ft, kind=kind, table=table, tv=tv):
+                n = len(ft["vocab"])
+                idx = table.lookup(text(x)) if table is not None else tf.fill(tf.shape(x), tf.constant(-1, tf.int64))
+                if kind == "label":
+                    return tf.cast(idx + 1, tf.float32)[:, None]
+                if kind == "target":
+                    got = tf.gather(tv, tf.maximum(idx, 0))
+                    return tf.where(idx >= 0, got, tf.constant(ft["prior"], tf.float32))[:, None]
+                cols = tf.one_hot(idx, n, dtype=tf.float32)
+                if ft.get("dropped", -1) >= 0:
+                    keep = np.ones(n)
+                    keep[ft["dropped"]] = 0
+                    cols = cols * keep.astype(np.float32)
+                if ft.get("null"):
+                    cols = tf.concat([cols, tf.zeros_like(cols[:, :1])], 1)
+                return cols
+        else:
+            fail("convert", "unknown encoder " + kind)
+        encoders.append((ft["name"], enc))
+
+    def act(fn, a):
+        if fn == "RELU":
+            return tf.nn.relu(a)
+        if fn == "RELU6":
+            return tf.nn.relu6(a)
+        if fn == "ELU":
+            return tf.nn.elu(a)
+        if fn == "SELU":
+            return tf.where(a > 0, SELU_SCALE * a, SELU_SCALE * SELU_ALPHA * tf.math.expm1(a))
+        if fn == "SIGMOID":
+            return tf.sigmoid(a)
+        if fn == "TANH":
+            return tf.tanh(a)
+        if fn == "CRELU":
+            return tf.concat([tf.nn.relu(a), tf.nn.relu(-a)], 1)
+        return a
+
+    head = spec["head"]
+    label = spec.get("label", "")
+    weights = {}
+    for k in ("w", "centroids", "components", "userF", "itemF", "userB", "itemB"):
+        if head.get(k):
+            weights[k] = var(k, head[k])
+    layers = [(var("layer_%d_w" % l, ly["w"]), var("layer_%d_b" % l, ly["b"])) for l, ly in enumerate(head.get("layers") or [])]
+    wide = (var("wide_w", head["wide"]["w"]), var("wide_b", head["wide"]["b"])) if head.get("wide") else None
+    module.layers, module.wide, module.weights = layers, wide, weights
+    classes = head.get("classes") or []
+    label_dtype = dtypes[spec.get("labelDtype") or "string"]
+
+    def network(x, upto=None):
+        h = x
+        for l, (w, b) in enumerate(layers):
+            a = tf.matmul(h, w, transpose_b=True) + b
+            if l < len(layers) - 1:
+                a = act(head["activation"], a)
+                if upto is not None and l == upto:
+                    return a
+            elif wide is not None:
+                a = a + tf.matmul(x, wide[0], transpose_b=True) + wide[1]
+            h = a
+        return h
+
+    def class_list():
+        if label_dtype == tf.string:
+            return tf.constant(classes)
+        if label_dtype == tf.bool:
+            return tf.constant([c.lower() == "true" for c in classes])
+        if label_dtype == tf.int64:
+            return tf.constant([int(float(c)) for c in classes], tf.int64)
+        return tf.constant([float(c) for c in classes], tf.float64)
+
+    def class_values(n):
+        return tf.tile(tf.expand_dims(class_list(), 0), [n, 1])
+
+    mf_tables = []
+    if head["kind"] == "mf":
+        # The users' and items' vocabularies, asset files as the features'.
+        for n, key in (("user", "users"), ("item", "items")):
+            mf_tables.append(vocab(n, {"vocab": head[key]}))
+
+    def serve(*args):
+        n = tf.shape(args[0])[0]
+        if head["kind"] == "mf":
+            ui, ii = mf_tables[0].lookup(text(args[0])), mf_tables[1].lookup(text(args[1]))
+            uf = tf.gather(weights["userF"], tf.maximum(ui, 0))
+            itf = tf.gather(weights["itemF"], tf.maximum(ii, 0))
+            z = tf.reduce_sum(uf * itf, 1) + tf.gather(weights["userB"], tf.maximum(ui, 0)) + tf.gather(weights["itemB"], tf.maximum(ii, 0))
+            z = tf.where((ui >= 0) & (ii >= 0), z, tf.constant(float("nan"), tf.float32))
+            return {head["output"]: z}
+        vals = dict(zip([s["name"] for s in spec["inputs"]], args))
+        x = tf.concat([enc(vals[name]) for name, enc in encoders], 1)
+        kind = head["kind"]
+        if kind == "kmeans":
+            c = weights["centroids"]
+            if head.get("distance") == "COSINE":
+                num = tf.matmul(x, c, transpose_b=True)
+                den = tf.expand_dims(tf.norm(x, axis=1), 1) * tf.expand_dims(tf.norm(c, axis=1), 0)
+                d = tf.where(den > 0, 1 - num / tf.where(den > 0, den, 1.0), tf.ones_like(num))
+            else:
+                d = tf.sqrt(tf.maximum(tf.reduce_sum(tf.square(tf.expand_dims(x, 1) - tf.expand_dims(c, 0)), 2), 0))
+            return {"centroid_id": tf.argmin(d, 1) + 1, "centroid_distances": d,
+                    "centroid_ids": tf.tile(tf.expand_dims(tf.range(1, len(head["centroids"]) + 1, dtype=tf.int64), 0), [n, 1])}
+        if kind == "pca":
+            pcs = tf.matmul(x, weights["components"], transpose_b=True)
+            return {"principal_component_%d" % (k + 1): pcs[:, k] for k in range(len(head["components"]))}
+        if kind == "autoencoder":
+            lat = network(x, upto=head["latent"])
+            return {"latent_col_%d" % (j + 1): lat[:, j] for j in range(lat.shape[1])}
+        if kind == "linear":
+            z = tf.matmul(x, weights["w"][:, 1:], transpose_b=True) + weights["w"][:, 0]
+        else:  # dnn
+            z = network(x)
+        task = head["task"]
+        if task == "regression":
+            return {"predicted_" + label: z[:, 0]}
+        if task == "binary":
+            p = tf.sigmoid(z[:, 0])
+            probs = tf.stack([p, 1 - p], 1)
+            values = class_values(n)  # [positive, negative], as ML.PREDICT lists them
+            # The class's index, 0 the positive, gathered (TensorFlow Lite's
+            # builtins select no strings).
+            pred = tf.gather(class_list(), tf.cast(p < head.get("threshold", 0.5), tf.int32))
+            return {"predicted_" + label: pred, label + "_probs": probs, label + "_values": values}
+        probs = tf.nn.softmax(z, 1)
+        values = class_values(n)
+        pred = tf.gather(class_list(), tf.argmax(z, 1, output_type=tf.int32))
+        return {"predicted_" + label: pred, label + "_probs": probs, label + "_values": values}
+
+    specs = [tf.TensorSpec([None], dtypes[s["dtype"]], name=s["name"]) for s in spec["inputs"]]
+    fn = tf.function(serve, input_signature=specs)
+    module.serve = fn
+    try:
+        tf.saved_model.save(module, "/out/model", signatures={"serving_default": fn.get_concrete_function()})
+    except Exception as e:  # noqa: BLE001
+        fail("convert", "TensorFlow could not save the SavedModel: " + str(e).strip()[:2000])
+
+
 if __name__ == "__main__":
-    {"convert": convert, "predict": predict, "serve": serve}[sys.argv[1] if len(sys.argv) > 1 else "convert"]()
+    {"convert": convert, "predict": predict, "serve": serve, "export": export}[sys.argv[1] if len(sys.argv) > 1 else "convert"]()
