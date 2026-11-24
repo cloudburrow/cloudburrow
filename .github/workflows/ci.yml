@@ -1261,6 +1261,9 @@ jobs:
           # reached, and the kubeconfig the Deploy test cleans up with
           # (#1913, #1925).
           if [ "$SHARD" = served ]; then BROWSER_VARS+=,GKE,KUBECONFIG,TRACE,LOGGING; fi
+          # The vpcvms shard's: the Compute Engine API, which the load balancer,
+          # router and IPv6 pages' fixtures and read-backs go through (Landing 168).
+          if [ "$SHARD" = vpcvms ]; then BROWSER_VARS+=,COMPUTE; fi
           # The localai shard's: the Embeddings page's Cloud Storage objects,
           # and the local AI endpoints (#1985).
           if [ "$SHARD" = localai ]; then BROWSER_VARS+=,STORAGE,LOCALAI,EMBEDDINGS; fi

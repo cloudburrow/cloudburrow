@@ -499,6 +499,9 @@ browser_suite() {  # <shard> <dir> <flags...>
   if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE; fi
   # The served shard's: the Kubernetes Engine API and the kubeconfig (#1913).
   if [ "$shard" = served ]; then BROWSER_VARS+=,GKE,KUBECONFIG,TRACE,LOGGING; fi
+  # The vpcvms shard's: the Compute Engine API, which the load balancer,
+  # router and IPv6 pages' fixtures and read-backs go through (Landing 168).
+  if [ "$shard" = vpcvms ]; then BROWSER_VARS+=,COMPUTE; fi
   # The localai shard's: the Embeddings page's Cloud Storage objects (#1985).
   if [ "$shard" = localai ]; then BROWSER_VARS+=,STORAGE,LOCALAI,EMBEDDINGS; fi
   BROWSER_ENV=$(scripts/compat-env.sh --only "$BROWSER_VARS" --cli "$CLI" -- "$@" 2>/dev/null)
