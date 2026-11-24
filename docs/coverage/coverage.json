@@ -16575,14 +16575,16 @@
         "method": "compute.instanceGroupManagers.get",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU",
+          "test/compat/computemigautoheal2225_test.go:30 TestComputeMIGAutohealing2225"
         ]
       },
       {
         "method": "compute.instanceGroupManagers.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU",
+          "test/compat/computemigautoheal2225_test.go:30 TestComputeMIGAutohealing2225"
         ]
       },
       {
@@ -16601,6 +16603,7 @@
         "method": "compute.instanceGroupManagers.listManagedInstances",
         "status": "Verified",
         "tests": [
+          "test/compat/computemigautoheal2225_test.go:30 TestComputeMIGAutohealing2225",
           "test/compat/computemigretry2220_test.go:77 TestComputeMIGCreationRetries2220",
           "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139"
         ]
@@ -16614,6 +16617,7 @@
         "method": "compute.instanceGroupManagers.patch",
         "status": "Verified",
         "tests": [
+          "test/compat/computemigautoheal2225_test.go:30 TestComputeMIGAutohealing2225",
           "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139"
         ]
       },
