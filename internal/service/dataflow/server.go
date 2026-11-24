@@ -95,6 +95,8 @@ type Options struct {
 	Storage Storage
 	// Launcher runs Flex Templates; nil refuses them.
 	Launcher Launcher
+	// Provided stages Google-provided templates; nil refuses them.
+	Provided Provided
 	// Logs receives the workers' lines; nil drops them.
 	Logs Logger
 	// Now is the clock; nil is time.Now.

@@ -511,3 +511,51 @@ func TestRESTGzipBody(t *testing.T) {
 		t.Errorf("a body that is not gzip = %d; want 400", rec.Code)
 	}
 }
+
+type fakeProvided map[string]string
+
+func (f fakeProvided) Stage(_ context.Context, name string) (string, error) {
+	if p, ok := f[name]; ok {
+		return p, nil
+	}
+	return "", ErrNoProvidedTemplate
+}
+
+// TestProvidedTemplates: Google's provided-template paths, global and
+// regional, any version folder, read the Provided's local copy; a name it
+// does not have is INVALID_ARGUMENT (an unreadable template file), and
+// without a Provided they are FAILED_PRECONDITION. The job runs in the
+// launching project.
+func TestProvidedTemplates(t *testing.T) {
+	ctx := context.Background()
+	tmpl := `{"type": "JOB_TYPE_BATCH", "environment": {"sdkPipelineOptions": {"options": {"pipelineUrl": "gs://dataflow-templates/p.pb", "project": "google"}}}}`
+	meta := `{"name": "Word Count", "parameters": [{"name": "inputFile", "label": "Input"}]}`
+	st := memStorage{"gs://dataflow-templates/latest/Word_Count": tmpl, "gs://dataflow-templates/latest/Word_Count_metadata": meta}
+	s := newTestServer(t, Options{Storage: st, Provided: fakeProvided{"Word_Count": "gs://dataflow-templates/latest/Word_Count"}})
+	for _, p := range []string{"gs://dataflow-templates/latest/Word_Count", "gs://dataflow-templates-us-central1/latest/Word_Count",
+		"gs://dataflow-templates-europe-west1/2026-11-18-00_RC00/Word_Count"} {
+		g, err := s.GetTemplate(ctx, &dataflowpb.GetTemplateRequest{ProjectId: "p", Template: &dataflowpb.GetTemplateRequest_GcsPath{GcsPath: p}})
+		if err != nil || g.GetMetadata().GetName() != "Word Count" {
+			t.Errorf("GetTemplate(%s) = %v, %v", p, g, err)
+		}
+	}
+	if _, err := s.GetTemplate(ctx, &dataflowpb.GetTemplateRequest{ProjectId: "p",
+		Template: &dataflowpb.GetTemplateRequest_GcsPath{GcsPath: "gs://dataflow-templates-us-central1/latest/Nope"}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("GetTemplate of an unknown provided template = %v; want INVALID_ARGUMENT", err)
+	}
+	r, err := s.LaunchTemplate(ctx, &dataflowpb.LaunchTemplateRequest{ProjectId: "p",
+		Template:         &dataflowpb.LaunchTemplateRequest_GcsPath{GcsPath: "gs://dataflow-templates-us-central1/latest/Word_Count"},
+		LaunchParameters: &dataflowpb.LaunchTemplateParameters{JobName: "wc", Parameters: map[string]string{"inputFile": "gs://b/in"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := waitState(t, s, r.GetJob().GetId(), dataflowpb.JobState_JOB_STATE_DONE)
+	if o := j.GetEnvironment().GetSdkPipelineOptions().GetFields()["options"].GetStructValue().GetFields(); o["project"].GetStringValue() != "p" {
+		t.Errorf("the job's project option is %v; want the launching project", o["project"])
+	}
+	bare := newTestServer(t, Options{Storage: st})
+	if _, err := bare.GetTemplate(ctx, &dataflowpb.GetTemplateRequest{ProjectId: "p",
+		Template: &dataflowpb.GetTemplateRequest_GcsPath{GcsPath: "gs://dataflow-templates-us-central1/latest/Word_Count"}}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("a provided template without a Provided = %v; want FAILED_PRECONDITION", err)
+	}
+}

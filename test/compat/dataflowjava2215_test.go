@@ -58,8 +58,17 @@ func buildBeamJava(t *testing.T, ctx context.Context) string {
 // reachable.
 func runBeamJava(t *testing.T, ctx context.Context, network, work, main string, args ...string) string {
 	t.Helper()
-	run := append([]string{"run", "--rm", "--network", network, "-v", work + ":/w:ro", "--entrypoint", "java", beamJavaBuildImage,
-		"-cp", "/w/classes:/w/deps/*", main}, args...)
+	return runBeamJavaEnv(t, ctx, network, work, nil, main, args...)
+}
+
+// runBeamJavaEnv is runBeamJava with env (NAME=value) set.
+func runBeamJavaEnv(t *testing.T, ctx context.Context, network, work string, env []string, main string, args ...string) string {
+	t.Helper()
+	run := []string{"run", "--rm", "--network", network, "-v", work + ":/w:ro"}
+	for _, e := range env {
+		run = append(run, "-e", e)
+	}
+	run = append(append(run, "--entrypoint", "java", beamJavaBuildImage, "-cp", "/w/classes:/w/deps/*", main), args...)
 	out, err := exec.CommandContext(ctx, "docker", run...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("java %s: %v\n%s", main, err, out)

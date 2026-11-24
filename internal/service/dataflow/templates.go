@@ -27,7 +27,11 @@ func (s *Server) readTemplate(ctx context.Context, gcsPath string) (*dataflowpb.
 	if s.opts.Storage == nil {
 		return nil, apierror.FailedPrecondition("Templates are read from Cloud Storage, which this instance does not serve.")
 	}
-	b, err := s.opts.Storage.Read(ctx, gcsPath)
+	local, err := s.templatePath(ctx, gcsPath)
+	if err != nil {
+		return nil, err
+	}
+	b, err := s.opts.Storage.Read(ctx, local)
 	if err != nil {
 		return nil, apierror.InvalidArgument("(%s): Unable to open template file: %s.", gcsPath, gcsPath)
 	}
@@ -43,7 +47,11 @@ func (s *Server) metadataOf(ctx context.Context, gcsPath string) *dataflowpb.Tem
 	if s.opts.Storage == nil {
 		return nil
 	}
-	b, err := s.opts.Storage.Read(ctx, gcsPath+"_metadata")
+	local, err := s.templatePath(ctx, gcsPath)
+	if err != nil {
+		return nil
+	}
+	b, err := s.opts.Storage.Read(ctx, local+"_metadata")
 	if err != nil {
 		return nil
 	}
@@ -92,7 +100,7 @@ func checkParameters(meta *dataflowpb.TemplateMetadata, params map[string]string
 // fromTemplate is the job a classic template launches: its file's job
 // with the launch's name, parameters (pipeline options, which the
 // workers' RuntimeValueProviders read) and runtime environment.
-func fromTemplate(job *dataflowpb.Job, gcsPath, name string, params map[string]string, env *dataflowpb.RuntimeEnvironment) *dataflowpb.Job {
+func fromTemplate(job *dataflowpb.Job, project, gcsPath, name string, params map[string]string, env *dataflowpb.RuntimeEnvironment) *dataflowpb.Job {
 	job.Id, job.Name, job.CurrentState, job.ClientRequestId = "", name, 0, ""
 	if job.Environment == nil {
 		job.Environment = &dataflowpb.Environment{}
@@ -111,6 +119,9 @@ func fromTemplate(job *dataflowpb.Job, gcsPath, name string, params map[string]s
 		o.Fields[k] = structpb.NewStringValue(v)
 	}
 	o.Fields["job_name"] = structpb.NewStringValue(name)
+	// The job runs in the launching project, whichever project staged
+	// the template (a Google-provided template's is Google's).
+	o.Fields["project"] = structpb.NewStringValue(project)
 	delete(o.Fields, "template_location")
 	// A templated job's options name its template and its temporary
 	// location, as Google's do (templateLocation, tempLocation): the
@@ -176,7 +187,7 @@ func (s *Server) CreateJobFromTemplate(ctx context.Context, req *dataflowpb.Crea
 	if err := checkParameters(s.metadataOf(ctx, req.GetGcsPath()), req.GetParameters()); err != nil {
 		return nil, err
 	}
-	return s.create(req.GetProjectId(), loc, fromTemplate(job, req.GetGcsPath(), req.GetJobName(), req.GetParameters(), req.GetEnvironment()), "", dataflowpb.JobView_JOB_VIEW_SUMMARY)
+	return s.create(req.GetProjectId(), loc, fromTemplate(job, req.GetProjectId(), req.GetGcsPath(), req.GetJobName(), req.GetParameters(), req.GetEnvironment()), "", dataflowpb.JobView_JOB_VIEW_SUMMARY)
 }
 
 // LaunchTemplate launches a classic template (projects.locations.templates.launch).
@@ -205,7 +216,7 @@ func (s *Server) LaunchTemplate(ctx context.Context, req *dataflowpb.LaunchTempl
 	if err := checkParameters(s.metadataOf(ctx, req.GetGcsPath()), lp.GetParameters()); err != nil {
 		return nil, err
 	}
-	job = fromTemplate(job, req.GetGcsPath(), lp.GetJobName(), lp.GetParameters(), lp.GetEnvironment())
+	job = fromTemplate(job, req.GetProjectId(), req.GetGcsPath(), lp.GetJobName(), lp.GetParameters(), lp.GetEnvironment())
 	job.TransformNameMapping = lp.GetTransformNameMapping()
 	if req.GetValidateOnly() {
 		if !validName(job.GetName()) {
@@ -258,7 +269,11 @@ func (s *Server) GetTemplate(ctx context.Context, req *dataflowpb.GetTemplateReq
 		return nil, apierror.FailedPrecondition("Templates are read from Cloud Storage, which this instance does not serve.")
 	}
 	path := req.GetGcsPath()
-	b, err := s.opts.Storage.Read(ctx, path)
+	local, err := s.templatePath(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	b, err := s.opts.Storage.Read(ctx, local)
 	if err != nil {
 		return nil, apierror.InvalidArgument("(%s): Unable to open template file: %s.", path, path)
 	}

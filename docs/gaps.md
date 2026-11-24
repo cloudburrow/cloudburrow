@@ -396,7 +396,7 @@ data kept across `stop` and `up` in persistent mode; the console's Filestore pag
 Built (#2215, part): the Dataflow v1b3 API over gRPC and JSON (jobs create, get, list, aggregated
 list, update with cancel, drain and runtime parameters, replacement by `replaceJobId`; messages,
 autoscaling events, metrics, execution details; classic templates through `templates.launch`,
-`templates.get` and `templates.create`; Python Flex Templates from the instance's Artifact Registry); each job's Beam pipeline run on Apache Beam 2.78.0's
+`templates.get` and `templates.create`; Python Flex Templates from the instance's Artifact Registry; Google-provided Word Count and Text Files on Cloud Storage to BigQuery, built from Google's DataflowTemplates sources (#2215 round 3)); each job's Beam pipeline run on Apache Beam 2.78.0's
 Flink 1.20 portable runner with the Python 3.12 SDK harness, or for the Java SDK's pipelines the Java 11, 17 or 21 harness (#2215 round 2), in Docker on an `--internal` network
 whose one route is the instance's Cloud Storage, Pub/Sub, BigQuery, Dataflow and database emulators; the Python SDK's
 DataflowRunner, batch and streaming with drain; the Java SDK's DataflowRunner; snapshots as Flink savepoints, and jobs created from them; gcloud `dataflow jobs`, `snapshots` and `flex-template`, Terraform
@@ -406,9 +406,9 @@ Create job from template.
 | Gap | Why open | Size |
 |---|---|---|
 | Flex Templates' `FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE`, `_SETUP_FILE` and `_EXTRA_PACKAGES` are not installed at launch (the launcher has no route to PyPI; the image must hold its packages), and Java Flex Templates (#2215) | no emulator support | S |
-| Google-provided templates (Pub/Sub to BigQuery, Cloud Storage Text to BigQuery, Word Count), offered in Create job from template's menu: Google stages them only in its own Cloud Storage (`gs://dataflow-templates*`) and Container Registry, which the instance never reads; they are to be built from Google's DataflowTemplates sources (Apache-2.0) and staged in the instance's Cloud Storage and Artifact Registry, now that Java pipelines run (#2215) | not built yet | M |
+| Google-provided templates: Word Count and Text Files on Cloud Storage to BigQuery run, built from Google's DataflowTemplates sources (release 2026-11-18-00_RC00, Apache-2.0) with Maven on first use, staged in the instance's own `gs://dataflow-templates` and served at Google's `gs://dataflow-templates[-REGION]/VERSION/NAME` paths (#2215 round 3). Pub/Sub Subscription and Topic to BigQuery are built and staged, but their jobs fail: the Flink job server refuses the pipeline (`Run` INVALID_ARGUMENT), the Java SDK's `PubsubIO.readMessagesWithAttributes` not being runnable there yet (with Java Pub/Sub on Java 11 and 21 workers). The other classic templates and Google's Flex Templates are not built yet | not built yet | M |
 | Go SDK pipelines: their environment is refused with the reason (#2215) | not built yet | M |
-| Cross-language transforms (`ReadFromBigtable`, Beam YAML's Java providers): a Python pipeline's Java expansion is not served, though Java pipelines run (#2215) | not built yet | M |
+| Cross-language transforms (Python's `ReadFromBigtable`, Beam YAML's Java providers): a Python pipeline's Java expansion is not served; Java pipelines' own `BigtableIO.read` runs (#2215 round 3) | not built yet | M |
 | Java workers report no metrics (ElementCount, user counters): the Python harness's bundle reports feed them (#2215) | not built yet | S |
 | The pipeline components (#2210) | not built yet | M |
 | Workers are one local Flink cluster per job: machine types, zones, networks, disk sizes and service accounts are recorded, not used; `maxNumWorkers` bounds the job's parallelism | no emulator support | S |

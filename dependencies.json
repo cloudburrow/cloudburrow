@@ -81,6 +81,21 @@
         "notes": "Resolved 2026-11-24. The SDK container the Apache Beam project publishes for its portable runners. Verified by TestJavaDataflowWordCount.",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/beam_java17_sdk:2.78.0`."
       },
+      "mavenTemurin17": {
+        "$comment": "Dataflow (#2215 round 3): Maven 3.9.9 on Eclipse Temurin 17. internal/beamrun builds Google's DataflowTemplates v1 module (the Google-provided classic templates, release 2026-11-18-00_RC00 from github.com/GoogleCloudPlatform/DataflowTemplates, Apache-2.0, archive SHA-256 checked) in it, once per state directory, on a provided template's first use.",
+        "image": "maven:3.9.9-eclipse-temurin-17",
+        "digest": "sha256:f58d59b6273e785ac0a4477f6e9b5ba1d7731c75b906c0f7b34076f1851318cc",
+        "license": "Apache-2.0 (Apache Maven) and the Ubuntu and Eclipse Temurin packages it is built on",
+        "redistribution": "not published: pulled by digest by the local CLI on a Google-provided template's first use",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-24 (the digest the Java test pipelines pin). Verified by TestDataflowProvidedTemplates.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect maven:3.9.9-eclipse-temurin-17`."
+      },
       "beamJavaSDK21": {
         "$comment": "Dataflow (#2215): the Apache Beam 2.78.0 Java 21 SDK harness. internal/beamrun runs a Java job's workers in it as Beam's ExternalWorkerService (org.apache.beam.fn.harness.ExternalWorkerService) on the job's staged jars, in the job server's network namespace, when the job's pipeline names beam_java21_sdk.",
         "image": "apache/beam_java21_sdk:2.78.0",

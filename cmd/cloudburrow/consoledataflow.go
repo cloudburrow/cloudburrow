@@ -149,11 +149,15 @@ func (dataflowProvider) CreateForm() (string, []console.Field) {
 			Help: "Lowercase letters, digits and dashes, starting with a letter and ending with a letter or digit. It must be unique among the project's running jobs."},
 		{Name: "region", Label: "Regional endpoint", Type: "text", Required: true, Default: dataflow.DefaultLocation,
 			Help: "The region the job runs in and its metadata is kept."},
-		{Name: "template", Label: "Dataflow template", Type: "select", Default: "custom", Options: []string{"custom"},
-			OptionLabels: map[string]string{"custom": "Custom Template"},
-			Help:         "A classic template staged in Cloud Storage, such as one the Beam SDK writes with --template_location. Google's own templates are not built here yet."},
+		{Name: "template", Label: "Dataflow template", Type: "select", Default: "custom",
+			Options: []string{"custom", "PubSub_Subscription_to_BigQuery", "PubSub_to_BigQuery", "GCS_Text_to_BigQuery", "Word_Count"},
+			OptionLabels: map[string]string{"custom": "Custom Template", "PubSub_Subscription_to_BigQuery": "Pub/Sub Subscription to BigQuery",
+				"PubSub_to_BigQuery": "Pub/Sub Topic to BigQuery", "GCS_Text_to_BigQuery": "Text Files on Cloud Storage to BigQuery",
+				"Word_Count": "Word Count"},
+			Help: "A Google-provided template (gs://dataflow-templates-REGION/latest/NAME, built here from Google's DataflowTemplates sources), or a Custom Template: a classic template staged in Cloud Storage, such as one the Beam SDK writes with --template_location, or a Flex Template's spec. Give a template's parameters under Additional parameters."},
 		{Name: "gcsPath", Label: "Template path", Type: "text", Required: true, Pattern: `^gs://[^\/]+\/.+$`, Section: "Required parameters",
-			Help: "gs://BUCKET/PATH of the template file. Its metadata, if any, is read from PATH_metadata."},
+			VisibleWhen: map[string]string{"template": "custom"},
+			Help:        "gs://BUCKET/PATH of the template file. Its metadata, if any, is read from PATH_metadata."},
 		{Name: "tempLocation", Label: "Temporary location", Type: "text", Required: true, Pattern: `^gs://[^\/]+(\/.*)?$`, Section: "Required parameters",
 			Help: "gs://BUCKET/PATH for the job's temporary files."},
 		{Name: "parameters", Label: "Additional parameters", Type: "map", Section: "Optional parameters",
@@ -194,6 +198,10 @@ func (p dataflowProvider) Create(ctx context.Context, project string, values map
 	}
 	region := strings.TrimSpace(values["region"])
 	gcsPath := strings.TrimSpace(values["gcsPath"])
+	if t := strings.TrimSpace(values["template"]); t != "" && t != "custom" {
+		// A Google-provided template, from Google's regional path.
+		gcsPath = "gs://dataflow-templates-" + region + "/latest/" + t
+	}
 	// A Custom Template's path is a classic template's file or a Flex
 	// Template's spec; Google's page launches either.
 	if t, err := s.GetTemplate(ctx, &dataflowpb.GetTemplateRequest{ProjectId: project, Location: region,

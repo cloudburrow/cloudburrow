@@ -124,7 +124,11 @@ func (s *dataflowService) Start(ctx context.Context) error {
 	opts := dataflow.Options{State: state, Engine: dataflowEngine{d: s.docker}, Launcher: flexLauncher{d: s.docker},
 		Logf: func(format string, args ...any) { fmt.Printf("cloudburrow: "+format+"\n", args...) }}
 	if s.live != nil && serviceEnabled(s.cfg, config.ServiceStorage) {
-		opts.Storage = &dataprocStorage{live: s.live}
+		st := &dataprocStorage{live: s.live}
+		opts.Storage = st
+		// Google-provided templates, built once per state directory.
+		opts.Provided = &providedTemplates{p: &beamrun.Provided{D: s.docker, Cache: s.cfg.StateDir}, storage: st,
+			project: func() string { return s.cfg.DefaultProject() }}
 	}
 	if s.live != nil {
 		opts.Logs = dataflowLogger{logging: func() string { return s.live()["logging"] }}

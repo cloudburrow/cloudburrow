@@ -24244,7 +24244,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount",
-          "test/compat/dataflowjava2215_test.go:102 TestJavaDataflowWordCount"
+          "test/compat/dataflowbigtable2215_test.go:24 TestJavaDataflowBigtableRead",
+          "test/compat/dataflowjava2215_test.go:111 TestJavaDataflowWordCount"
         ]
       },
       {
@@ -24252,7 +24253,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount",
-          "test/compat/dataflowjava2215_test.go:102 TestJavaDataflowWordCount"
+          "test/compat/dataflowjava2215_test.go:111 TestJavaDataflowWordCount"
         ]
       },
       {
@@ -24337,6 +24338,7 @@
         "method": "google.dataflow.v1beta3.TemplatesService/GetTemplate",
         "status": "Verified",
         "tests": [
+          "test/compat/dataflowprovided2215_test.go:40 TestDataflowProvidedTemplates",
           "test/compat/dataflowtools_test.go:104 TestGcloudDataflow"
         ]
       },
@@ -24344,6 +24346,7 @@
         "method": "google.dataflow.v1beta3.TemplatesService/LaunchTemplate",
         "status": "Verified",
         "tests": [
+          "test/compat/dataflowprovided2215_test.go:40 TestDataflowProvidedTemplates",
           "test/compat/dataflowtools_test.go:104 TestGcloudDataflow"
         ]
       }
