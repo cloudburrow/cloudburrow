@@ -221,6 +221,31 @@ func (d *sqlDumper) CopyAt(ctx context.Context, src, dst sqladmin.DumpTarget, at
 }
 
 func (d *sqlDumper) pgCopyAt(ctx context.Context, src, dst sqladmin.DumpTarget, at time.Time, id int64, dir string) error {
+	if err := d.pgRecoverTo(ctx, src, at, id, dir); err != nil {
+		return err
+	}
+	return d.Load(ctx, dst, dir)
+}
+
+// pgRecoverToDir dumps, into dir, src's PostgreSQL databases as they were
+// at at: an AlloyDB point-in-time restore (#2191) loads them into the new
+// cluster's primary once it is created.
+func (d *sqlDumper) pgRecoverToDir(ctx context.Context, src sqladmin.DumpTarget, at time.Time, dir string) error {
+	defer pitrLock(d.deployment(src))()
+	ids, _, err := d.bases(ctx, src)
+	if err != nil {
+		return err
+	}
+	id, ok := baseFor(ids, at)
+	if !ok {
+		return fmt.Errorf("no base was complete by %s", at.UTC().Format(time.RFC3339Nano))
+	}
+	return d.pgRecoverTo(ctx, src, at, id, dir)
+}
+
+// pgRecoverTo replays src's base id and WAL up to at in a scratch server
+// and dumps it into dir.
+func (d *sqlDumper) pgRecoverTo(ctx context.Context, src sqladmin.DumpTarget, at time.Time, id int64, dir string) error {
 	target := at.UTC().Format("2006-01-02 15:04:05.999999") + "+00"
 	// A commit after the target ends the replay there, and the WAL switch
 	// archives the segment holding it.
@@ -247,7 +272,16 @@ recovery_target_time = '$2'
 recovery_target_action = 'promote'
 EOF
 chown postgres "$conf"
-"$asuser" postgres pg_ctl -D "$W" -l "$W/recovery.log" -w -t 280 -o "-c port=` + pgRecoveryPort + ` -c listen_addresses='' -c unix_socket_directories=$W -c archive_mode=off" start >/dev/null || { tail -5 "$W/recovery.log" >&2; exit 1; }
+# Recovery refuses settings lower than those the WAL was written under
+# ("insufficient parameter settings"): the source's, which a flag such as
+# max_connections raises, are the scratch server's too. wal_level comes
+# with them: PostgreSQL 9.6 defaults to minimal, under which a
+# max_wal_senders above 0 refuses to start.
+x=""
+for s in wal_level max_connections max_worker_processes max_wal_senders max_prepared_transactions max_locks_per_transaction; do
+  v=$(psql -U postgres -d template1 -AtX -c "SHOW $s") && x="$x -c $s=$v"
+done
+"$asuser" postgres pg_ctl -D "$W" -l "$W/recovery.log" -w -t 280 -o "-c port=` + pgRecoveryPort + ` -c listen_addresses='' -c unix_socket_directories=$W -c archive_mode=off$x" start >/dev/null || { tail -5 "$W/recovery.log" >&2; exit 1; }
 i=0; until [ "$("$asuser" postgres psql -h "$W" -p ` + pgRecoveryPort + ` -U postgres -d template1 -AtX -c 'SELECT pg_is_in_recovery()')" = f ]; do
   i=$((i+1)); [ $i -lt 280 ] || { tail -5 "$W/recovery.log" >&2; exit 1; }; sleep 1
 done`
@@ -264,7 +298,7 @@ done`
 	if err := scratch.Export(ctx, dirEntries(dir)); err != nil {
 		return fmt.Errorf("dump the recovered server: %w", err)
 	}
-	return d.Load(ctx, dst, dir)
+	return nil
 }
 
 // mysqlPITRUser is the replication user a MySQL recovery's clone

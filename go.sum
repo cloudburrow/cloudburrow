@@ -80,6 +80,10 @@ cloud.google.com/go/accesscontextmanager v1.15.0/go.mod h1:YjW9urferk8i9ALwBF3bm
 cloud.google.com/go/aiplatform v1.126.0/go.mod h1:iR3za3evdprLe1XL2pLu0cYVCuTbc87QG0pgvcgiJlE=
 cloud.google.com/go/aiplatform v1.127.0 h1:3Uqc0p/Kalpm8KeFEzNd06wXFvgGonZUFbVZ+6mhyVY=
 cloud.google.com/go/aiplatform v1.127.0/go.mod h1:kfb8xcl3pMoS5vkH8cX1XT3x818YuIHK29wLpa28B6Y=
+cloud.google.com/go/alloydb v1.33.1 h1:R1sSbm+mQMid3dBF604dR2wuNL87dMBpWEJqyma9Hd0=
+cloud.google.com/go/alloydb v1.33.1/go.mod h1:LQ1M5pgEolh9lf6z/25SQtD6pCq8vVcDt3lpmzvQ8is=
+cloud.google.com/go/alloydbconn v1.20.0 h1:Ll3GSOlPsqjmh+NgBhMQKl7qSZQoOxjMbunuC0zRuDY=
+cloud.google.com/go/alloydbconn v1.20.0/go.mod h1:UJC2Yl4yKK/kNoaKM3bZE506FfVuHXfCA/lJTkDXU4c=
 cloud.google.com/go/analytics v0.35.0/go.mod h1:V9Qef2N0y8GDqQ9FTlmM2XpDEMYonZJRPSUNGZlPCcc=
 cloud.google.com/go/apigateway v1.13.0/go.mod h1:pvEpOuuOIw2ev9VCcOyVkDXHHL4lvgMuqIe7XjJ8JoU=
 cloud.google.com/go/apigeeconnect v1.12.0/go.mod h1:mYJekCKZHc2ia5yZX5lwtexTn9CzsOfb6+sh/2hi42Q=

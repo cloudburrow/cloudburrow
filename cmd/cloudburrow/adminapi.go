@@ -96,6 +96,8 @@ type adminDeps struct {
 	dataform *dataformService
 	// appHub is App Hub (#2110), nil unless enabled.
 	appHub *appHubService
+	// alloyDB is AlloyDB for PostgreSQL (#2191), nil unless enabled.
+	alloyDB *alloyDBService
 	// trace is Cloud Trace (#2118), nil unless enabled.
 	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
@@ -243,6 +245,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.dataform != nil {
 		api.RegisterResetter(&dataformResetter{svc: d.dataform})
+	}
+	if d.alloyDB != nil {
+		api.RegisterResetter(&alloyDBResetter{svc: d.alloyDB})
 	}
 	if d.appHub != nil {
 		api.RegisterResetter(&appHubResetter{svc: d.appHub})

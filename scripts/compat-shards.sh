@@ -323,7 +323,10 @@ COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 # page (TestConnectionPoliciesThroughTheBrowser, #2141) need Cloud SQL and
 # Compute Engine on one instance: the sql shard's (main run 45102950103
 # skipped it in storage, which serves neither).
-COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS|ConnectionPolicies)'
+# AlloyDB's pages (TestAlloyDB*, #2191) need AlloyDB, and its exports and
+# imports Cloud Storage beside it, which only the sql shard's instance
+# serves.
+COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS|ConnectionPolicies|AlloyDB)'
 # The Studio's local models (#1396) and the Embeddings page's image (#1454),
 # audio and Cloud Storage objects (#1651) and its scanned PDF read with
 # document_ocr (#1733) need a -tags onnx build started with
@@ -718,9 +721,11 @@ compat_shard() {
       # Cloud Logging as SQL_LOGGING, for Backup and DR's job logs (#1924);
       # LOGGING is not in TEST_VARS, so the Logging suites stay in theirs.
       # Compute Engine (#1936) as SQL_COMPUTE: private networks are
-      # checked against its networks.
-      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging,compute
-      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING,SQL_COMPUTE
+      # checked against its networks. AlloyDB for PostgreSQL (#2191), whose
+      # servers are PostgreSQL deployments as Cloud SQL's are, and its
+      # connectors' listener when it is not at port 5433.
+      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging,compute,alloydb
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING,SQL_COMPUTE,ALLOYDB,ALLOYDB_CONNECTOR,ALLOYDB_TLS,ALLOYDB_CA
       # The replica tests run in sqlreplicas, against the same instance,
       # and the restart probes in sql.
       if [ "$1" = sqlreplicas ]; then

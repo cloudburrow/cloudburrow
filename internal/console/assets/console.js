@@ -337,6 +337,13 @@ const ROUTES = [
   // Cloud SQL Studio, opened from the instance `up` runs for each, and
   // keep their addresses. MySQL's page is not under /cloudsql/, where it
   // would shadow a PostgreSQL database named "mysql".
+  // AlloyDB for PostgreSQL (#2191): Clusters (a cluster's page has its
+  // Overview with the instances, Backups, Users and Databases) and
+  // Backups, at Google's addresses.
+  { path: "/alloydb/clusters", service: "alloydb", title: "Clusters", kind: "Cluster", section: "Databases",
+    product: "alloydb", productTitle: "AlloyDB", icon: "alloydb" },
+  { path: "/alloydb/backups", service: "alloydb-backups", title: "Backups", kind: "Backup", section: "Databases",
+    product: "alloydb", productTitle: "AlloyDB", icon: "alloydb" },
   { path: "/cloudsql-instances", service: "cloudsql-instances", title: "Instances", kind: "Instance", section: "Databases",
     product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql", logs: true },
   { path: "/cloudsql-backups", service: "cloudsql-backups", title: "Backups", section: "Databases",
@@ -1003,6 +1010,7 @@ const ICONS = {
   // Memorystore: a memory module, for an in-memory store.
   memorystore: '<rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 17v3M12 17v3M17 17v3M7 11h2M11 11h2M15 11h2"/>',
   // Cloud SQL: a database cylinder with a query line.
+  alloydb:  '<ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13"/><path d="M8.5 15.5l3.5-7 3.5 7M9.8 13h4.4"/>',
   cloudsql:  '<ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13"/><path d="M9 12h6M9 16h4"/>',
   monitoring:'<path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/>',
   requests:  '<path d="M4 7h13M13 3l4 4-4 4"/><path d="M20 17H7M11 13l-4 4 4 4"/>',

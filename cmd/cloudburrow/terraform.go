@@ -166,6 +166,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// data source. TestTerraformAppHub applies them, plans clean and
 	// destroys.
 	{config.ServiceAppHub, "apphub_custom_endpoint", "GOOGLE_APPHUB_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// AlloyDB for PostgreSQL (#2191): google_alloydb_cluster, _instance,
+	// _user and _backup. TestTerraformAlloyDB applies them, plans clean and
+	// destroys.
+	{config.ServiceAlloyDB, "alloydb_custom_endpoint", "GOOGLE_ALLOYDB_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// The Kubernetes Engine API (#1913): a google_container_cluster with
 	// remove_default_node_pool and a google_container_node_pool apply, plan
 	// clean, update in place and destroy in
@@ -368,6 +372,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceParameterManager: cfg.Endpoints.ParameterManager,
 		config.ServiceDataform:         cfg.Endpoints.Dataform,
 		config.ServiceAppHub:           cfg.Endpoints.AppHub,
+		config.ServiceAlloyDB:          cfg.Endpoints.AlloyDB,
 		localAIEndpoint:                cfg.Endpoints.LocalAI,
 		storageTransferService:         cfg.Endpoints.StorageTransfer,
 		storageInsightsService:         cfg.Endpoints.StorageInsights,
@@ -387,6 +392,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	enabled[config.ServiceParameterManager] = parameterManagerEnabled(cfg)
 	enabled[config.ServiceDataform] = dataformEnabled(cfg)
 	enabled[config.ServiceAppHub] = appHubEnabled(cfg)
+	enabled[config.ServiceAlloyDB] = alloyDBEnabled(cfg)
 	enabled[localAIEndpoint] = localAIServed(cfg)
 	enabled[storageTransferService] = storageJobsEnabled(cfg)
 	enabled[storageInsightsService] = storageJobsEnabled(cfg)

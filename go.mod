@@ -6,6 +6,8 @@ require (
 	cel.dev/cel-go v0.33.4
 	cloud.google.com/go v0.123.0
 	cloud.google.com/go/aiplatform v1.127.0
+	cloud.google.com/go/alloydb v1.33.1
+	cloud.google.com/go/alloydbconn v1.20.0
 	cloud.google.com/go/apphub v1.4.1
 	cloud.google.com/go/artifactregistry v1.27.0
 	cloud.google.com/go/asset v1.30.1

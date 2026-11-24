@@ -148,6 +148,11 @@ const (
 	// #2118), with the Telemetry API's OTLP trace ingestion
 	// (telemetry.googleapis.com), served in the CLI process on one port.
 	ServiceTrace Service = "trace"
+	// ServiceAlloyDB is AlloyDB for PostgreSQL (alloydb.googleapis.com,
+	// #2191): its API served in the CLI process on its own port, its
+	// instances PostgreSQL servers in the cluster, and the connectors'
+	// server-side proxy on port 5433.
+	ServiceAlloyDB Service = "alloydb"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -160,7 +165,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceAlloyDB}
 }
 
 // KnownServices lists every selectable service.
@@ -221,7 +226,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceAlloyDB:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -423,6 +428,10 @@ type Endpoints struct {
 	// #2118), gRPC and JSON on one port, and of OTLP's trace ingestion
 	// (telemetry.googleapis.com): OTLP/gRPC and POST /v1/traces.
 	Trace int `json:"trace"`
+	// AlloyDB is the host port of AlloyDB for PostgreSQL
+	// (alloydb.googleapis.com, #2191): gRPC and JSON on one port, v1,
+	// v1beta and v1alpha.
+	AlloyDB int `json:"alloydb"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -515,6 +524,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"dataform", &e.Dataform},
 		{"apphub", &e.AppHub},
 		{"trace", &e.Trace},
+		{"alloydb", &e.AlloyDB},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 		{"spark", &e.Spark},
@@ -601,6 +611,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.AppHub
 	case ServiceTrace:
 		return e.Trace
+	case ServiceAlloyDB:
+		return e.AlloyDB
 	default:
 		return 0
 	}
@@ -986,6 +998,8 @@ func Default() Config {
 			AppHub: 9048,
 			// Cloud Trace (#2118): past the ports open branches took.
 			Trace: 9052,
+			// AlloyDB (#2191): past the ports open branches took.
+			AlloyDB: 9063,
 			// The Spark procedure runner (#2104): the next free port after
 			// App Hub's 9048.
 			Spark: 9049,

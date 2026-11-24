@@ -460,6 +460,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	appHubSvc.register(coord)
+	// AlloyDB for PostgreSQL (#2191), in process; its instances are
+	// servers in the cluster, so it is registered after the cluster.
+	alloyDBSvc := newAlloyDBService(cfg, stderr)
 	if gkeSvc != nil && runSvc != nil && runSvc.events != nil {
 		// Eventarc's GKE destinations (#1877) reach its clusters' services.
 		runSvc.events.gke = gkeSvc.clusterAccess
@@ -660,6 +663,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManager: parameterManagerSvc,
 		dataform:         dataformSvc,
 		appHub:           appHubSvc,
+		alloyDB:          alloyDBSvc,
 		trace:            traceSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
@@ -757,6 +761,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		workflowsSvc.calls = callEvents(recorder, requestMetrics, "workflows")
 		workflowsSvc.interpose = append(workflowsSvc.interpose, grpctransport.LogInterceptor(logger, "workflows"), faults.Interceptor("workflows"))
 		workflowsSvc.requests = requestEvents(recorder, requestMetrics, "workflows")
+	}
+	if alloyDBSvc != nil {
+		alloyDBSvc.tracing = tracing
+		alloyDBSvc.calls = callEvents(recorder, requestMetrics, "alloydb")
+		alloyDBSvc.interpose = append(alloyDBSvc.interpose, grpctransport.LogInterceptor(logger, "alloydb"), faults.Interceptor("alloydb"))
+		alloyDBSvc.requests = requestEvents(recorder, requestMetrics, "alloydb")
 	}
 	if appHubSvc != nil {
 		appHubSvc.tracing = tracing
@@ -1216,6 +1226,21 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		coord.Register(sqlAdminSrv)
 	}
+	if alloyDBSvc != nil {
+		// AUTO_IAM connections present a token this instance minted.
+		alloyDBSvc.creds = creds
+		// Exports and imports (#2191) go to and from the instance's own
+		// Cloud Storage, through its tunnel's bound address.
+		if serviceEnabled(cfg, config.ServiceStorage) {
+			alloyDBSvc.storage = func() string {
+				if f := forwarderFor(forwarders, "storage"); f != nil {
+					return f.HostAddr()
+				}
+				return ""
+			}
+		}
+		alloyDBSvc.register(coord)
+	}
 	// The Backup and DR Service (#1433), over the Admin API's backups.
 	backupDRSrv := newBackupDRServer(cfg, sqlAdminSrv)
 	if backupDRSrv != nil {
@@ -1363,6 +1388,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManager: parameterManagerSvc,
 		dataform:         dataformSvc,
 		appHub:           appHubSvc,
+		alloyDB:          alloyDBSvc,
 		trace:            traceSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
@@ -1485,6 +1511,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := appHubSvc.Addr(); a != "" {
 			live["apphub"] = a
+		}
+		if a := alloyDBSvc.Addr(); a != "" {
+			live["alloydb"] = a
 		}
 		if a := traceSvc.Addr(); a != "" {
 			live["trace"] = a

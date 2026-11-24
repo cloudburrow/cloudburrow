@@ -1252,8 +1252,9 @@ jobs:
           # The sql shard's read back through the Cloud SQL Admin API, the Backup
           # and DR Service and Secret Manager, which holds Run SQL's password,
           # and the Compute Engine API, whose VMs and disks Backup and DR backs
-          # up and restores through the pages (#2084's round, TestBackupDRCompute*).
-          if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE; fi
+          # up and restores through the pages (#2084's round, TestBackupDRCompute*),
+          # and Cloud Storage, which AlloyDB's Export writes to (#2191).
+          if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE; fi
           # The served shard's: the Kubernetes Engine API, whose cluster the
           # pages make is removed through it by name whatever the test
           # reached, and the kubeconfig the Deploy test cleans up with
@@ -1323,7 +1324,9 @@ jobs:
           # Each is now about half its 30m, and each job (71 and 83 of its 90
           # minutes for run then, 44 to 56 for crossservice, whose compat
           # suite took 1,930 s and 2,145 s) about a quarter of an hour from it.
-          BROWSER_TIMEOUT=10m; case "$SHARD" in served|sql) BROWSER_TIMEOUT=20m ;; run|crossservice|storage) BROWSER_TIMEOUT=30m ;; esac
+          # And 30m in sql since AlloyDB's pages joined it (#2191): their two
+          # tests start four PostgreSQL servers, a minute or so each.
+          BROWSER_TIMEOUT=10m; case "$SHARD" in served) BROWSER_TIMEOUT=20m ;; run|crossservice|storage|sql) BROWSER_TIMEOUT=30m ;; esac
           go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
           for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}" | grep -vE "$NOT"); do
             grep -q -- "^--- PASS: $t (" browser.log ||
