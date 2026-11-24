@@ -1,0 +1,12 @@
+[Unit]
+Description=CloudBurrow: the Ops Agent's egress, fenced to this instance's Cloud Logging and Cloud Monitoring
+After=network-online.target cloudburrow-network.service
+Wants=network-online.target
+Before=google-cloud-ops-agent.service google-cloud-ops-agent-fluent-bit.service google-cloud-ops-agent-opentelemetry-collector.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+PassEnvironment=CLOUDBURROW_LOGGING_HOST CLOUDBURROW_MONITORING_HOST
+ExecStart=/usr/lib/cloudburrow/ops-agent fence
+[Install]
+WantedBy=multi-user.target

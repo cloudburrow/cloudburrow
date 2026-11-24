@@ -149,7 +149,11 @@ func (s *Server) writeOne(project string, i int, in *monitoringpb.TimeSeries, au
 	if t == "" || !metricTypeRE.MatchString(t) {
 		return apierror.InvalidArgument("The metric type must be a URL-formatted string with a domain and non-empty path")
 	}
-	if !isUserDefined(t) {
+	if strings.HasPrefix(t, PromPrefix) && s.prom != nil {
+		return s.writeProm(i, ts)
+	}
+	agent := isAgentMetric(t)
+	if !isUserDefined(t) && !agent {
 		if md, _ := s.lookup(project, t); md != nil {
 			return status.Errorf(codes.PermissionDenied, "User does not have permission to write to metric %s: only user-defined metrics can be written", t)
 		}
@@ -171,6 +175,9 @@ func (s *Server) writeOne(project string, i int, in *monitoringpb.TimeSeries, au
 	}
 	if !writableResources[r.GetType()] {
 		return apierror.InvalidArgument("Field timeSeries[%d].resource.type had an invalid value of %q: unrecognized resource type %q", i, r.GetType(), r.GetType())
+	}
+	if agent && !agentResources[r.GetType()] {
+		return apierror.InvalidArgument("Field timeSeries[%d].resource.type had an invalid value of %q: the metric %s is not defined for the resource type %q", i, r.GetType(), t, r.GetType())
 	}
 	for k := range r.GetLabels() {
 		if !hasResourceLabel(r.GetType(), k) {
@@ -207,11 +214,15 @@ func (s *Server) writeOne(project string, i int, in *monitoringpb.TimeSeries, au
 		if vt == metricpb.MetricDescriptor_BOOL && kind != metricpb.MetricDescriptor_GAUGE {
 			return apierror.InvalidArgument("metric kind for metric %s must be GAUGE, but is %s", t, kind)
 		}
-		if s.countDescriptors(project) >= MaxDescriptors {
+		if !agent && s.countDescriptors(project) >= MaxDescriptors {
 			return &apierror.Error{Code: codes.ResourceExhausted, Message: "Your Metric Descriptors quota has been exhausted"}
 		}
+		desc := "Auto created custom metric."
+		if agent {
+			desc = "An Ops Agent metric (agent.googleapis.com), as the agent writes it."
+		}
 		md = &metricpb.MetricDescriptor{Name: name, Type: t, MetricKind: kind, ValueType: vt,
-			Description: "Auto created custom metric."}
+			Description: desc}
 		s.descriptors[name] = md
 	}
 	if md.GetValueType() != vt {
@@ -344,4 +355,44 @@ func bucketCount(b *distribution.Distribution_BucketOptions) int {
 		return len(o.ExplicitBuckets.GetBounds()) + 1
 	}
 	return 0
+}
+
+// writeProm records a Managed Service for Prometheus point, as Google's
+// collectors write them (prombuiltin.go): a prometheus.googleapis.com type
+// of a known kind, on prometheus_target, of the kind's value type.
+func (s *Server) writeProm(i int, ts *monitoringpb.TimeSeries) error {
+	t := ts.GetMetric().GetType()
+	name, kind, ok := promKindOf(t)
+	if !ok {
+		return apierror.InvalidArgument("Field timeSeries[%d].metric.type had an invalid value of %q: a Prometheus metric type is prometheus.googleapis.com/NAME/KIND", i, t)
+	}
+	r := ts.GetResource()
+	if r.GetType() != PromTarget {
+		return apierror.InvalidArgument("Field timeSeries[%d].resource.type had an invalid value of %q: Prometheus metrics are written on %s", i, r.GetType(), PromTarget)
+	}
+	for k := range r.GetLabels() {
+		if !hasResourceLabel(PromTarget, k) {
+			return apierror.InvalidArgument("Field timeSeries[%d].resource.labels had an invalid value of %q: unrecognized resource label %q", i, k, k)
+		}
+	}
+	p := ts.GetPoints()[0]
+	want := promKindFor(name, kind)
+	if vt := pointValueType(p.GetValue()); vt != want.value {
+		return apierror.InvalidArgument("Field timeSeries[%d].points[0].value had an invalid value: value type for metric %s must be %s, but is %s", i, t, want.value, vt)
+	}
+	if p.GetInterval().GetEndTime() == nil {
+		return apierror.InvalidArgument("Field timeSeries[%d].points[0].interval.endTime had an invalid value: Request was missing field interval.endTime", i)
+	}
+	pt := PromPoint{Type: t, Labels: ts.GetMetric().GetLabels(), Resource: r.GetLabels(), End: p.GetInterval().GetEndTime().AsTime()}
+	if st := p.GetInterval().GetStartTime(); st != nil {
+		pt.Start = st.AsTime()
+	}
+	if d := p.GetValue().GetDistributionValue(); d != nil {
+		pt.Histogram = &PromHistogram{Bounds: d.GetBucketOptions().GetExplicitBuckets().GetBounds(), Counts: d.GetBucketCounts(),
+			Count: d.GetCount(), Sum: d.GetMean() * float64(d.GetCount())}
+	} else {
+		pt.Value = p.GetValue().GetDoubleValue()
+	}
+	s.prom.Record(pt)
+	return nil
 }

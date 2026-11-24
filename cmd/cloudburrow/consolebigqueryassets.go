@@ -47,6 +47,11 @@ var dataformAssetFiles = map[string]string{
 	"sql":         "content.sql",
 	"notebook":    "content.ipynb",
 	"data_canvas": "content.canvas.json",
+	// A pipeline and a data preparation (#2105) keep the editor's model
+	// here and the Dataform project it describes beside it
+	// (consolebigqueryorchestration.go).
+	"pipeline":         "content.pipeline.json",
+	"data_preparation": "content.dataprep.json",
 }
 
 // dataformAssetLimit bounds an asset's content, as a request body is.
@@ -55,7 +60,43 @@ const dataformAssetLimit = 1 << 17
 // dataformIsAsset reports whether a repository is a Studio code asset,
 // which the Dataform page leaves out, as Google's does.
 func dataformIsAsset(r *dfpb.Repository) bool {
-	return r.GetLabels()[dataformAssetLabel] != ""
+	return dataformAssetKind(r) != ""
+}
+
+// dataformPipelineLabel is the label Google's Studio puts on a pipeline's
+// repository, with any value; a data preparation kept as SQLX is
+// single-file-asset-type data_preparation_sqlx, one kept as YAML
+// data_preparation (https://docs.cloud.google.com/dataform/docs/manage-repository,
+// read 2026-11-23: "Pipelines | bigquery-workflow | (Any value)").
+const dataformPipelineLabel = "bigquery-workflow"
+
+// dataformAssetKind is the Studio asset type of a repository: sql,
+// notebook, data_canvas, pipeline or data_preparation, "" for none. It
+// reads Google's labels and the ones an earlier CloudBurrow wrote
+// (single-file-asset-type pipeline).
+func dataformAssetKind(r *dfpb.Repository) string {
+	l := r.GetLabels()
+	if _, ok := l[dataformPipelineLabel]; ok {
+		return "pipeline"
+	}
+	switch k := l[dataformAssetLabel]; k {
+	case "data_preparation_sqlx":
+		return "data_preparation"
+	default:
+		return k
+	}
+}
+
+// dataformAssetLabels are the labels a new asset of kind is made with, as
+// Google's Studio labels it. This Studio keeps a data preparation as SQLX.
+func dataformAssetLabels(kind string) map[string]string {
+	switch kind {
+	case "pipeline":
+		return map[string]string{dataformPipelineLabel: "true"}
+	case "data_preparation":
+		return map[string]string{dataformAssetLabel: "data_preparation_sqlx"}
+	}
+	return map[string]string{dataformAssetLabel: kind}
 }
 
 // studioEntry is one row of the Files pane: a folder, a team folder or a
@@ -98,6 +139,9 @@ func (p dataformProvider) StudioCall(ctx context.Context, project, call string, 
 	}
 	if project == "" {
 		return nil, errors.New("choose a project first")
+	}
+	if out, ok, err := studioOrchestration(ctx, s, project, call, body); ok {
+		return out, err
 	}
 	var in studioAssetReq
 	if len(body) > 0 {
@@ -209,7 +253,7 @@ func studioFiles(ctx context.Context, s *dataform.Server, project string) (any, 
 				entries = append(entries, studioEntry{Kind: "folder", Name: f.GetName(), DisplayName: f.GetDisplayName(), Parent: container, Location: loc, Created: kmsTime(f.GetCreateTime())})
 				queue = append(queue, f.GetName())
 			case r != nil && dataformIsAsset(r):
-				entries = append(entries, studioEntry{Kind: r.GetLabels()[dataformAssetLabel], Name: r.GetName(), DisplayName: studioDisplay(r), Parent: container, Location: loc, Created: kmsTime(r.GetCreateTime())})
+				entries = append(entries, studioEntry{Kind: dataformAssetKind(r), Name: r.GetName(), DisplayName: studioDisplay(r), Parent: container, Location: loc, Created: kmsTime(r.GetCreateTime())})
 			}
 		}
 		root, err := s.QueryUserRootContents(ctx, &dfpb.QueryUserRootContentsRequest{Location: parent, PageSize: 1000})
@@ -267,9 +311,9 @@ func studioAsset(ctx context.Context, s *dataform.Server, name string) (*dfpb.Re
 	if err != nil {
 		return nil, "", err
 	}
-	file, ok := dataformAssetFiles[r.GetLabels()[dataformAssetLabel]]
+	file, ok := dataformAssetFiles[dataformAssetKind(r)]
 	if !ok {
-		return nil, "", fmt.Errorf("%s is not a saved query, notebook or data canvas", name)
+		return nil, "", fmt.Errorf("%s is not a saved query, notebook, data canvas, pipeline or data preparation", name)
 	}
 	return r, file, nil
 }
@@ -288,7 +332,7 @@ func studioReadAsset(ctx context.Context, s *dataform.Server, in studioAssetReq)
 	} else if in.Commit != "" {
 		return nil, err
 	}
-	return map[string]any{"name": r.GetName(), "kind": r.GetLabels()[dataformAssetLabel], "displayName": studioDisplay(r),
+	return map[string]any{"name": r.GetName(), "kind": dataformAssetKind(r), "displayName": studioDisplay(r),
 		"location": kmsLocation(r.GetName()), "parent": r.GetContainingFolder(), "content": content}, nil
 }
 
@@ -304,10 +348,17 @@ func studioSaveAsset(ctx context.Context, s *dataform.Server, project string, in
 	if name == "" {
 		_, ok := dataformAssetFiles[in.Kind]
 		if !ok {
-			return nil, fmt.Errorf("%q is not a code asset type: sql, notebook or data_canvas", in.Kind)
+			return nil, fmt.Errorf("%q is not a code asset type: sql, notebook, data_canvas, pipeline or data_preparation", in.Kind)
 		}
 		if in.DisplayName == "" {
 			return nil, errors.New("a code asset needs a name")
+		}
+		if studioGeneratedKinds[in.Kind] {
+			// Checked before the repository is made, so a model that does
+			// not compile leaves nothing behind.
+			if _, err := studioGeneratedFiles(project, in.Kind, in.Content); err != nil {
+				return nil, err
+			}
 		}
 		if len(in.DisplayName) > 256 {
 			return nil, errors.New("a code asset's name is at most 256 characters")
@@ -316,7 +367,7 @@ func studioSaveAsset(ctx context.Context, s *dataform.Server, project string, in
 		if loc == "" {
 			loc = "us-central1"
 		}
-		r := &dfpb.Repository{DisplayName: in.DisplayName, Labels: map[string]string{dataformAssetLabel: in.Kind}, SetAuthenticatedUserAdmin: true}
+		r := &dfpb.Repository{DisplayName: in.DisplayName, Labels: dataformAssetLabels(in.Kind), SetAuthenticatedUserAdmin: true}
 		if in.Parent != "" {
 			r.ContainingFolder = proto.String(in.Parent)
 		}
@@ -335,13 +386,25 @@ func studioSaveAsset(ctx context.Context, s *dataform.Server, project string, in
 	if err != nil {
 		return nil, err
 	}
+	kind := dataformAssetKind(r)
+	ops := map[string]*dfpb.CommitRepositoryChangesRequest_FileOperation{}
+	if studioGeneratedKinds[kind] {
+		// A pipeline or data preparation saves the Dataform project its
+		// model describes, so Run and its schedules compile it.
+		files, err := studioGeneratedFiles(project, kind, in.Content)
+		if err != nil {
+			return nil, err
+		}
+		ops = studioGeneratedOps(ctx, s, name, files)
+	}
+	ops[file] = &dfpb.CommitRepositoryChangesRequest_FileOperation{Operation: &dfpb.CommitRepositoryChangesRequest_FileOperation_WriteFile_{
+		WriteFile: &dfpb.CommitRepositoryChangesRequest_FileOperation_WriteFile{Contents: []byte(in.Content)}}}
 	if _, err := s.CommitRepositoryChanges(ctx, &dfpb.CommitRepositoryChangesRequest{Name: name,
 		CommitMetadata: &dfpb.CommitMetadata{Author: &dfpb.CommitAuthor{Name: "BigQuery Studio", EmailAddress: "studio@cloudburrow.local"}, CommitMessage: "Save " + studioDisplay(r)},
-		FileOperations: map[string]*dfpb.CommitRepositoryChangesRequest_FileOperation{file: {Operation: &dfpb.CommitRepositoryChangesRequest_FileOperation_WriteFile_{
-			WriteFile: &dfpb.CommitRepositoryChangesRequest_FileOperation_WriteFile{Contents: []byte(in.Content)}}}}}); err != nil {
+		FileOperations: ops}); err != nil {
 		return nil, err
 	}
-	return map[string]any{"name": name, "kind": r.GetLabels()[dataformAssetLabel], "displayName": studioDisplay(r), "location": kmsLocation(name), "parent": r.GetContainingFolder()}, nil
+	return map[string]any{"name": name, "kind": dataformAssetKind(r), "displayName": studioDisplay(r), "location": kmsLocation(name), "parent": r.GetContainingFolder()}, nil
 }
 
 func newAssetID() string {

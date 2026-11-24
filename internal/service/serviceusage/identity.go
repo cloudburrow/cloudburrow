@@ -48,9 +48,27 @@ var serviceAgents = map[string]string{
 	// key (docs.cloud.google.com/secret-manager/parameter-manager/docs/cmek).
 	"parametermanager.googleapis.com": "gcp-sa-pm.iam.gserviceaccount.com",
 	"dataform.googleapis.com":         "gcp-sa-dataform.iam.gserviceaccount.com",
+	// Dataproc Service Agent, service-NUMBER@dataproc-accounts (#2156;
+	// docs.cloud.google.com/iam/docs/service-agents, read 2026-11-22).
+	"dataproc.googleapis.com": "dataproc-accounts.iam.gserviceaccount.com",
 	// App Hub Service Account, the primary agent of apphub.googleapis.com
 	// (docs.cloud.google.com/iam/docs/service-agents, read 2026-11-21).
 	"apphub.googleapis.com": "gcp-sa-apphub.iam.gserviceaccount.com",
+	// Serverless VPC Access Service Agent (#2140).
+	"vpcaccess.googleapis.com": "gcp-sa-vpcaccess.iam.gserviceaccount.com",
+	// Certificate Manager's and Identity-Aware Proxy's primary agents
+	// (docs.cloud.google.com/iam/docs/service-agents, read 2026-11-22, #2160).
+	"certificatemanager.googleapis.com": "gcp-sa-certificatemanager.iam.gserviceaccount.com",
+	"iap.googleapis.com":                "gcp-sa-iap.iam.gserviceaccount.com",
+	// The Network Security Service Account, its primary agent (#2160).
+	"networksecurity.googleapis.com": "gcp-sa-networksecurity.iam.gserviceaccount.com",
+	// AlloyDB Service Agent, the primary agent of alloydb.googleapis.com,
+	// which uses a cluster's customer-managed key
+	// (docs.cloud.google.com/alloydb/docs/cmek, read 2026-11-23).
+	"alloydb.googleapis.com": "gcp-sa-alloydb.iam.gserviceaccount.com",
+	// Cloud Filestore Service Agent, the primary agent of file.googleapis.com
+	// (service-agents page, read 2026-11-23; #2192).
+	"file.googleapis.com": "cloud-filer.iam.gserviceaccount.com",
 	// Kubernetes Engine Service Agent, the primary agent of
 	// container.googleapis.com.
 	"container.googleapis.com": "container-engine-robot.iam.gserviceaccount.com",
@@ -118,6 +136,11 @@ var serviceAgents = map[string]string{
 // https://cloud.google.com/iam/docs/service-agents gives no primary
 // service agent, so generateServiceIdentity names none for them.
 var noPrimaryAgent = map[string]string{
+	// Network Services' four agents (Agent Gateway, Service Extensions'
+	// gcp-sa-dep, Network Actions, Secure Web Proxy's
+	// gcp-sa-securewebproxy) are none of them primary (read 2026-11-22,
+	// #2160).
+	"networkservices.googleapis.com": "Network Services API",
 	// The page lists no agent of the Telemetry API (#2118).
 	"telemetry.googleapis.com": "Telemetry API",
 	// The Inventory API's agent is the Cloud KMS organization service

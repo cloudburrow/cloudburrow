@@ -187,3 +187,17 @@ func TestStorageListPrefixesCountTowardMaxResults(t *testing.T) {
 		t.Errorf("a bad glob = %d", code)
 	}
 }
+
+// A name that is a prefix and an item of it (includeTrailingDelimiter)
+// on pages of one: the listing ends (#2162: it resumed where it began,
+// forever, under the Cloud Storage connector for Hadoop).
+func TestStorageListTrailingDelimiterPagesOfOne(t *testing.T) {
+	c, s := listServer(t, "lst1")
+	seed(t, s, "lst1", "out/_temporary/0/", "out/_temporary/0/x")
+	it := c.Bucket("lst1").Objects(context.Background(), &gcs.Query{Prefix: "out/_temporary/", Delimiter: "/", IncludeTrailingDelimiter: true})
+	it.PageInfo().MaxSize = 1
+	names, prefixes := listAll(t, it)
+	if strings.Join(names, ",") != "out/_temporary/0/" || strings.Join(prefixes, ",") != "out/_temporary/0/" {
+		t.Errorf("items %v prefixes %v", names, prefixes)
+	}
+}

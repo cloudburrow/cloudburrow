@@ -26,7 +26,7 @@ func TestPhysicalSyncJobAndSetup(t *testing.T) {
 	if m := physicalJob("cloudburrow", "w", "sqlxb-rep", spec, false); strings.Contains(m, "sqlinst-src-data") || strings.Contains(m, "name: CLOUDSQL_TAKE_BACKUP") {
 		t.Errorf("a job restoring an uploaded backup mounts the source:\n%s", m)
 	}
-	if sql := physicalInitSQL(`it's\x`); !strings.Contains(sql, `IDENTIFIED BY 'it''s\\x'`) || !strings.HasPrefix(sql, "SET sql_log_bin = 0;") {
+	if sql := physicalInitSQL("MYSQL_8_0", `it's\x`); !strings.Contains(sql, `IDENTIFIED BY 'it''s\\x'`) || !strings.HasPrefix(sql, "SET sql_log_bin = 0;") {
 		t.Errorf("init SQL:\n%s", sql)
 	}
 	if replicaSetup(spec) != mysqlPhysicalSetup {
@@ -68,8 +68,27 @@ func TestPhysicalSyncJobAndSetup(t *testing.T) {
 			t.Errorf("physicalWrapper has no %q", want)
 		}
 	}
+	// MySQL 5.7 (#1524): XtraBackup 2.4, which may lack 8.0's
+	// --no-server-version-check, and the server's open-files limit.
 	spec.DatabaseVersion = "MYSQL_5_7"
-	if why := p.PhysicalUnsupported(spec); !strings.Contains(why, "XtraBackup") {
+	if why := p.PhysicalUnsupported(spec); why != "" {
 		t.Errorf("MYSQL_5_7: %q", why)
+	}
+	if m := physicalJob("cloudburrow", "w", "sqlxb-rep", spec, true); !strings.Contains(m, components.XtraBackup24Image) {
+		t.Errorf("a MYSQL_5_7 job's image:\n%s", m)
+	}
+	for _, s := range []string{physicalScript, physicalStreamScript} {
+		if !strings.Contains(s, physicalVersionCheck) || strings.Contains(s, "--backup --no-server-version-check") {
+			t.Errorf("a backup script passes --no-server-version-check unconditionally:\n%s", s)
+		}
+	}
+	if st := physicalStart("MYSQL_5_7"); !strings.HasPrefix(st, "set -e\nulimit -n 1048576\n") || physicalStart("MYSQL_8_0") != physicalWrapper {
+		t.Errorf("physicalStart(MYSQL_5_7):\n%s", st)
+	}
+	for _, v := range []string{"MYSQL_5_6", "MYSQL_8_4"} {
+		spec.DatabaseVersion = v
+		if why := p.PhysicalUnsupported(spec); !strings.Contains(why, "XtraBackup") {
+			t.Errorf("%s: %q", v, why)
+		}
 	}
 }

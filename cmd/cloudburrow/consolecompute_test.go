@@ -76,8 +76,21 @@ func TestConsoleVPCNetworksAndSubnets(t *testing.T) {
 		t.Fatalf("overlap: %v", err)
 	}
 	d, err := p.Detail(ctx, project, []string{"vpc1"})
-	if err != nil || d.Unavailable != "" || len(d.Sections) != 3 || d.Edit == nil {
+	if err != nil || d.Unavailable != "" || d.Edit == nil {
 		t.Fatalf("Detail = %+v, %v", d, err)
+	}
+	var tabs []string
+	for _, sec := range d.Sections {
+		tabs = append(tabs, sec.ID)
+	}
+	// Google's network page tabs (#2140).
+	if got := strings.Join(tabs, ","); got != "subnets,static-internal,firewalls,routes,peering,psa" {
+		t.Fatalf("network tabs = %s", got)
+	}
+	for _, f := range d.Edit.Fields {
+		if f.Name == "mtu" {
+			t.Error("the network's Edit offers the MTU, which Google's console does not change")
+		}
 	}
 	subs := d.Sections[0].Listing
 	s2 := vpcRow(subs, "sub2")
@@ -85,19 +98,20 @@ func TestConsoleVPCNetworksAndSubnets(t *testing.T) {
 		t.Fatalf("subnets = %+v", subs)
 	}
 	sp := []string{"vpc1", "subnets", "us-central1", "sub2"}
-	if got := vpcActionIDs(p.DetailActions(ctx, project, sp)); got != "expand,secondary,privateaccess,delete" {
+	if got := vpcActionIDs(p.DetailActions(ctx, project, sp)); got != "delete" {
 		t.Errorf("subnet actions = %s", got)
 	}
-	if err := p.ActAt(ctx, project, sp, "expand", map[string]string{"ipCidrRange": "10.20.0.0/24"}); err == nil {
-		t.Error("expanding to the same range was accepted")
+	// The subnet's Edit (#2140): a narrower range is refused with the API's
+	// words; a wider one, the secondary ranges, Private Google Access and
+	// Flow logs are applied.
+	if sd, _ := p.Detail(ctx, project, sp); sd.Edit == nil {
+		t.Fatal("a subnet's page has no Edit")
 	}
-	if err := p.ActAt(ctx, project, sp, "expand", map[string]string{"ipCidrRange": "10.20.0.0/22"}); err != nil {
-		t.Fatal(err)
+	if err := p.Edit(ctx, project, sp, map[string]string{"ipCidrRange": "10.20.0.0/25"}); err == nil {
+		t.Error("narrowing the range was accepted")
 	}
-	if err := p.ActAt(ctx, project, sp, "secondary", map[string]string{"secondaryRanges": `[{"rangeName":"svc","ipCidrRange":"10.40.0.0/24"}]`}); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.ActAt(ctx, project, sp, "privateaccess", map[string]string{"privateIpGoogleAccess": "true"}); err != nil {
+	if err := p.Edit(ctx, project, sp, map[string]string{"ipCidrRange": "10.20.0.0/22",
+		"secondaryRanges": `[{"rangeName":"svc","ipCidrRange":"10.40.0.0/24"}]`, "privateGoogleAccess": "On", "flowLogs": "On"}); err != nil {
 		t.Fatal(err)
 	}
 	sd, _ := p.Detail(ctx, project, sp)
@@ -105,15 +119,19 @@ func TestConsoleVPCNetworksAndSubnets(t *testing.T) {
 	for _, pr := range sd.Summary {
 		props[pr.Label] = pr.Value
 	}
-	if props["Primary IPv4 range"] != "10.20.0.0/22" || props["Secondary IPv4 ranges"] != "svc: 10.40.0.0/24" || props["Private Google Access"] != "On" {
+	if props["Primary IPv4 range"] != "10.20.0.0/22" || props["Secondary IPv4 ranges"] != "svc: 10.40.0.0/24" || props["Private Google Access"] != "On" ||
+		props["Flow logs"] != "On" {
 		t.Fatalf("subnet page = %+v", props)
 	}
-	if err := p.Edit(ctx, project, []string{"vpc1"}, map[string]string{"mtu": "8896", "routingMode": "Regional"}); err != nil {
+	if err := p.Edit(ctx, project, []string{"vpc1"}, map[string]string{"mtu": "8896", "routingMode": "Regional", "bestPath": "Standard"}); err != nil {
 		t.Fatal(err)
 	}
 	l, _ = p.List(ctx, project)
 	if r := vpcRow(l, "vpc1"); r.Fields["MTU"] != "8896" || r.Fields["Dynamic routing mode"] != "Regional" {
 		t.Fatalf("after Edit: %+v", r)
+	}
+	if d, _ := p.Detail(ctx, project, []string{"vpc1"}); d.Summary[4].Label != "Best path selection mode" || d.Summary[4].Value != "Standard" {
+		t.Fatalf("after Edit the summary reads %+v", d.Summary)
 	}
 	// Deleting a network with subnets is refused; with none it goes.
 	if err := p.Delete(ctx, project, "vpc1"); err == nil || !strings.Contains(err.Error(), "already being used by") {
@@ -193,6 +211,30 @@ func TestConsoleVPCFirewallsRoutesAndAddresses(t *testing.T) {
 	if err := fw.Delete(ctx, project, "allow-web"); err != nil {
 		t.Fatal(err)
 	}
+	// Logs On with metadata excluded (#2180).
+	if _, err := fw.Create(ctx, project, map[string]string{"name": "logged", "network": "app", "direction": "Egress", "action": "Deny",
+		"destinationRanges": "10.9.0.0/16", "protocols": "udp:53", "logs": "On", "logsMetadata": fwExcludeMetadata}); err != nil {
+		t.Fatal(err)
+	}
+	l, _ = fw.List(ctx, project)
+	if r := vpcRow(l, "logged"); r == nil || r.Fields["Logs"] != "On" {
+		t.Fatalf("the logged rule's row: %+v", r)
+	}
+	d, _ := fw.Detail(ctx, project, []string{"logged"})
+	meta := ""
+	if d.Edit != nil {
+		for _, f := range d.Edit.Fields {
+			if f.Name == "logsMetadata" {
+				meta = f.Default
+			}
+		}
+	}
+	if meta != fwExcludeMetadata {
+		t.Errorf("the logged rule's Metadata: %q", meta)
+	}
+	if err := fw.Delete(ctx, project, "logged"); err != nil {
+		t.Fatal(err)
+	}
 
 	routes := computeRoutesProvider{screen}
 	if _, err := routes.Create(ctx, project, map[string]string{"name": "to-net", "network": "app", "destRange": "192.168.0.0/16",
@@ -227,10 +269,17 @@ func TestConsoleVPCFirewallsRoutesAndAddresses(t *testing.T) {
 		"subnetwork": "app-sub", "address": "10.1.0.10"}); err == nil {
 		t.Error("an address in use was reserved again")
 	}
-	l, err = addrs.List(ctx, project)
-	if err != nil || l.Total != 3 {
-		t.Fatalf("addresses = %+v, %v", l, err)
+	// External IP addresses and Internal IP addresses are tabs of their
+	// own (#2140).
+	ext1, err := addrs.List(ctx, project)
+	if err != nil || ext1.Total != 1 || vpcRow(ext1, "ext") == nil {
+		t.Fatalf("external addresses = %+v, %v", ext1, err)
 	}
+	l, err = computeInternalAddressesProvider{addrs}.List(ctx, project)
+	if err != nil || l.Total != 2 {
+		t.Fatalf("internal addresses = %+v, %v", l, err)
+	}
+	l.Items = append(l.Items, ext1.Items...)
 	if r := vpcRow(l, "int"); r.Fields["IP address"] != "10.1.0.10" || r.Fields["Access type"] != "Internal" || r.Fields["Subnetwork"] != "app-sub" {
 		t.Errorf("int row = %+v", r)
 	}
@@ -251,6 +300,9 @@ func TestConsoleVPCFirewallsRoutesAndAddresses(t *testing.T) {
 		}
 	}
 	if l, _ := addrs.List(ctx, project); l.Total != 0 {
-		t.Errorf("%d addresses after Release", l.Total)
+		t.Errorf("%d external addresses after Release", l.Total)
+	}
+	if l, _ := (computeInternalAddressesProvider{addrs}).List(ctx, project); l.Total != 0 {
+		t.Errorf("%d internal addresses after Release", l.Total)
 	}
 }

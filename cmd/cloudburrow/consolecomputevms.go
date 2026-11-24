@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,9 +25,10 @@ import (
 // operation, as Google's pages do; the list shows the instance's status
 // while it boots or stops.
 
-const vmNote = "Each VM runs as a systemd container in the instance's Kubernetes cluster. Its natIP is 127.0.0.1 and its port 22 is " +
-	"forwarded to the loopback port the Connect column names, so gcloud compute ssh takes --ssh-flag=\"-p PORT\". " +
-	"Firewall rules are not enforced between VMs."
+const vmNote = "Each VM runs as a systemd container in the instance's Kubernetes cluster. Its external IP (natIP) is an address of its own from 192.0.2.0/24, " +
+	"a documentation range nothing routes; its port 22 is forwarded to the 127.0.0.1 port the Connect column names, so gcloud compute ssh takes " +
+	"--ssh-flag=\"-p PORT\" --ssh-flag=\"-o HostName=127.0.0.1\". " +
+	"VMs reach each other over their VPC network, its firewall rules enforced on each."
 
 const defaultZone = "us-central1-a"
 
@@ -66,6 +68,31 @@ func machineTypeNames() []string {
 		out = append(out, m.Name)
 	}
 	return out
+}
+
+// machineSeries is a machine type's series as Google's Series field
+// names it (compute/docs/general-purpose-machines): f1-micro and g1-small
+// are N1's shared-core types.
+func machineSeries(name string) string {
+	fam, _, _ := strings.Cut(name, "-")
+	switch fam {
+	case "f1", "g1":
+		return "N1"
+	}
+	return strings.ToUpper(fam)
+}
+
+// seriesTypes are the machine types of each series, in their order.
+func seriesTypes() (series []string, types map[string][]string) {
+	types = map[string][]string{}
+	for _, m := range compute.MachineTypes {
+		sr := machineSeries(m.Name)
+		if _, ok := types[sr]; !ok {
+			series = append(series, sr)
+		}
+		types[sr] = append(types[sr], m.Name)
+	}
+	return series, types
 }
 
 func diskTypeNames() []string {
@@ -213,7 +240,10 @@ func (p computeInstancesProvider) instances(project string) ([]map[string]any, e
 }
 
 func (p computeInstancesProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	listing := console.Listing{Columns: []string{"Zone", "Machine type", "Internal IP", "External IP", "Connect"},
+	// Google's VM instances columns (compute/docs/instances/view-vm-details,
+	// read 2026-11-22): Zone, Machine type, the provisioning model, In use
+	// by (the instance group), the IP addresses and Connect.
+	listing := console.Listing{Columns: []string{"Zone", "Machine type", "Provisioning model", "In use by", "Internal IP", "External IP", "Connect"},
 		Noun: "VM instances", Note: vmNote, AlwaysStatus: true, PermissionsButton: true}
 	if p.api() == nil {
 		return listing, errors.New(computeNotStarted)
@@ -226,22 +256,114 @@ func (p computeInstancesProvider) List(ctx context.Context, project string) (con
 	if err != nil {
 		return listing, err
 	}
+	groups := p.unmanagedGroupsOf(project)
 	for _, o := range l {
 		zone := zoneOf(vpcStr(o, "zone"))
 		target := []string{zone, vpcStr(o, "name")}
+		if g := groups[zone+"/"+vpcStr(o, "name")]; g != "" && vmInUseBy(o) == "" {
+			o["cloudburrowInstanceGroup"] = g
+		}
 		connect := "—"
 		if port := vmSSHPort(o); port != "" {
 			connect = "SSH (port " + port + ")"
 		}
 		ext := vmExternalIP(o)
 		listing.Items = append(listing.Items, console.Resource{Name: vpcStr(o, "name"), Status: vpcStr(o, "status"),
-			Opens: target, Target: target, Actions: p.instanceActions(o, false), Info: computePermissionsTab(),
+			Opens: target, Target: target, Actions: p.instanceActions(o, false), Info: computePermissionsTab(), Selectable: true,
 			Fields: map[string]string{"Zone": zone, "Machine type": vpcLast(vpcStr(o, "machineType")),
+				"Provisioning model": provisioningModelText(o), "In use by": vpcDash(vmInUseBy(o)),
 				"Internal IP": vpcDash(vmInternalIP(o)), "External IP": vpcDash(ext), "Connect": connect}})
 	}
 	listing.Total = len(listing.Items)
 	return listing, nil
 }
+
+// provisioningModelText is the instance's provisioning model as Google's
+// list writes it: Standard or Spot.
+func provisioningModelText(o map[string]any) string {
+	if vpcStr(vmMap(o, "scheduling"), "provisioningModel") == "SPOT" {
+		return "Spot"
+	}
+	return "Standard"
+}
+
+// vmInUseBy is the instance group the VM belongs to: a managed group's
+// created-by metadata, or the unmanaged groups that list it.
+func vmInUseBy(o map[string]any) string {
+	for _, m := range vmMetadata(o) {
+		if m["key"] == "created-by" {
+			return vpcLast(m["value"])
+		}
+	}
+	return vpcStr(o, "cloudburrowInstanceGroup")
+}
+
+// unmanagedGroupsOf are the unmanaged instance groups' VMs, as
+// ZONE/NAME to the group's name.
+func (p computeInstancesProvider) unmanagedGroupsOf(project string) map[string]string {
+	out := map[string]string{}
+	m, err := p.call("GET", project, "aggregated/instanceGroups", nil, nil)
+	if err != nil {
+		return out
+	}
+	for _, g := range aggregatedItems(m, "instanceGroups") {
+		zone := zoneOf(vpcStr(g, "zone"))
+		if zone == "" || vpcStr(g, "region") != "" {
+			// A regional group is a manager's: its VMs name it in their
+			// created-by metadata.
+			continue
+		}
+		l, err := p.call("POST", project, "zones/"+zone+"/instanceGroups/"+vpcStr(g, "name")+"/listInstances", nil, map[string]any{})
+		if err != nil {
+			continue
+		}
+		for _, it := range vmMaps(l, "items") {
+			out[zone+"/"+vpcLast(vpcStr(it, "instance"))] = vpcStr(g, "name")
+		}
+	}
+	return out
+}
+
+// skipGraceful is the Stop and Delete dialogs' checkbox
+// (compute/docs/instances/stop-start-instance, deleting-instance, read
+// 2026-11-22: "Optional: To skip graceful shutdown, select the Skip
+// graceful shutdown (if applicable) checkbox").
+func skipGraceful() console.Field {
+	return console.Field{Name: "noGracefulShutdown", Label: "Skip graceful shutdown (if applicable)", Type: "checkbox",
+		Help: "The guest gets no shutdown time: its container is stopped at once."}
+}
+
+// gracefulAction is Google's one Stop or Delete dialog for a VM: "Stop
+// NAME?" with what it does, the Skip graceful shutdown checkbox, Cancel
+// and the action's button, nothing typed.
+func gracefulAction(id, label, title, consequence string) console.Action {
+	f := skipGraceful()
+	f.Help = consequence + " " + f.Help
+	return console.Action{ID: id, Label: label, Title: title, Submit: label, Fields: []console.Field{f}}
+}
+
+// instanceSelectField carries the checked instances, one ZONE/NAME... per
+// line as the rows' names.
+const instanceSelectField = "instances"
+
+// ListSelectActions are the actions Google offers over the checked VMs
+// (stop-start-instance: "Select one or more VMs ... click Stop").
+func (p computeInstancesProvider) ListSelectActions(ctx context.Context, project string) []console.Action {
+	sel := console.Field{Name: instanceSelectField, Type: "hidden"}
+	act := func(id, label, confirm string, extra ...console.Field) console.Action {
+		return console.Action{ID: id, Label: label, SelectionField: instanceSelectField, ConfirmStyle: console.DeleteConfirmClick,
+			Confirm: confirm, Fields: append([]console.Field{sel}, extra...), Destructive: id == "delete"}
+	}
+	return []console.Action{
+		act("start", "Start / Resume", "Start or resume the selected VM instances?"),
+		act("stop", "Stop", "Stop the selected VM instances? Their processes end; their disks keep what they hold.", skipGraceful()),
+		act("suspend", "Suspend", "Suspend the selected VM instances?"),
+		act("reset", "Reset", "Reset the selected VM instances? They restart at once, without shutting down cleanly."),
+		act("delete", "Delete", "Delete the selected VM instances? Their boot disks are deleted with them when auto-delete is on.", skipGraceful()),
+	}
+}
+
+var _ console.SelectionLister = computeInstancesProvider{}
 
 // instanceActions are what Google offers an instance in its status: SSH
 // and Stop, Suspend and Reset while it runs, Start / Resume when it is
@@ -264,7 +386,7 @@ func (p computeInstancesProvider) instanceActions(o map[string]any, onPage bool)
 		acts = append(acts, console.Action{ID: "start", Label: "Start / Resume", ConfirmStyle: console.DeleteConfirmClick, Confirm: "Start or resume " + name + "?"})
 	}
 	if status == "RUNNING" || status == "SUSPENDED" {
-		acts = append(acts, console.Action{ID: "stop", Label: "Stop", ConfirmStyle: console.DeleteConfirmClick, Confirm: "Stop " + name + "? Its processes end; its disks keep what they hold."})
+		acts = append(acts, gracefulAction("stop", "Stop", "Stop "+name+"?", "Its processes end; its disks keep what they hold."))
 	}
 	if status == "RUNNING" {
 		acts = append(acts,
@@ -274,8 +396,12 @@ func (p computeInstancesProvider) instanceActions(o map[string]any, onPage bool)
 	if onPage {
 		acts = append(acts, p.diskActions(o)...)
 	}
-	return append(acts, console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: onPage, ConfirmStyle: console.DeleteConfirmClick,
-		Confirm: "Delete VM instance " + name + "? Its boot disk is deleted with it when auto-delete is on."})
+	del := gracefulAction("delete", "Delete", "Delete "+name+"?", "Its boot disk is deleted with it when auto-delete is on.")
+	del.Destructive, del.Leaves = true, onPage
+	if o["deletionProtection"] == true {
+		del = console.Action{ID: "delete", Label: "Delete", Destructive: true, Unavailable: "Deletion protection is on: turn it off in Edit first."}
+	}
+	return append(acts, del)
 }
 
 func (p computeInstancesProvider) diskActions(o map[string]any) []console.Action {
@@ -292,6 +418,7 @@ func (p computeInstancesProvider) diskActions(o map[string]any) []console.Action
 			}
 		}
 	}
+	free = append(free, p.freeRegionalDisks(project, zone)...)
 	var acts []console.Action
 	attach := console.Action{ID: "attachdisk", Label: "Attach existing disk", Submit: "Save", Fields: []console.Field{
 		{Name: "disk", Label: "Disk", Type: "select", Required: true, Options: free},
@@ -321,38 +448,119 @@ func (computeInstancesProvider) CreateOnPage() bool   { return true }
 func (computeInstancesProvider) CreateTitle() string  { return "Create an instance" }
 func (computeInstancesProvider) CreateLayout() string { return console.CreateLayoutPage }
 
+// CreateForm is Google's Create an instance, its panes in Google's order
+// (compute/docs/instances/create-start-instance, create-use-spot,
+// create-vm-specific-subnet, preventing-accidental-vm-deletion, read
+// 2026-11-22): Machine configuration, OS and storage, Data protection,
+// Networking, Observability, Security and Advanced.
 func (p computeInstancesProvider) CreateForm() (string, []console.Field) {
+	return "Create instance", p.createFields(nil, nil)
+}
+
+// CreateFormFor fills the project's snapshot schedules and networks in.
+func (p computeInstancesProvider) CreateFormFor(ctx context.Context, project string) []console.Field {
+	if p.api() == nil || project == "" {
+		_, f := p.CreateForm()
+		return f
+	}
+	return p.withSharedVPC(project, p.withStaticExternal(project, p.createFields(p.snapshotScheduleNames(project), p.networkNames(ctx, project))))
+}
+
+func (p computeInstancesProvider) createFields(schedules, networks []string) []console.Field {
 	external := map[string]string{"externalIP": "Ephemeral"}
-	return "Create instance", []console.Field{
-		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp},
-		vmLabelsField(nil, ""),
-		{Name: "region", Label: "Region", Type: "select", Required: true, Default: "us-central1", Options: compute.Regions()},
-		vmZoneField("zone"),
-		{Name: "machineType", Label: "Machine type", Type: "select", Section: "Machine configuration", Required: true, Default: "e2-medium",
-			Options: machineTypeNames(), Help: "The VM's container gets the type's vCPUs and memory as its limits."},
-		{Name: "image", Label: "Image", Type: "select", Section: "Boot disk", Required: true, Default: "debian-cloud/debian-12",
+	spot := map[string]string{"provisioningModel": "Spot"}
+	series, types := seriesTypes()
+	mc, os, dp, nw, ob, sec, adv := "Machine configuration", "OS and storage", "Data protection", "Networking", "Observability", "Security", "Advanced"
+	netField := console.Field{Name: "network", Label: "Network", Type: "select", Section: nw, Required: true, Default: "default", Options: networks}
+	if len(networks) == 0 {
+		netField.Type = "text"
+	}
+	backup := console.Field{Name: "snapshotSchedule", Label: "Back up your data", Type: "select", Section: dp, Default: noBackups,
+		Options: append([]string{noBackups}, schedules...),
+		Help:    "A snapshot schedule of the region takes the boot disk's snapshots; create one on the Snapshots page's Snapshot schedules tab."}
+	return withShieldedVM(sec, []console.Field{
+		{Name: "name", Label: "Name", Type: "text", Section: mc, Required: true, Pattern: computeNamePattern, Help: computeNameHelp},
+		vmLabelsField(nil, mc),
+		{Name: "region", Label: "Region", Type: "select", Section: mc, Required: true, Default: "us-central1", Options: compute.Regions()},
+		withSection(vmZoneField("zone"), mc),
+		{Name: "series", Label: "Series", Type: "select", Section: mc, Required: true, Default: "E2", Options: series},
+		{Name: "machineType", Label: "Machine type", Type: "select", Section: mc, Required: true, Default: "e2-medium",
+			Options: machineTypeNames(), OptionsBy: "series", OptionsFor: types,
+			Help: "The VM's container gets the type's vCPUs and memory as its limits."},
+		{Name: "provisioningModel", Label: "VM provisioning model", Type: "select", Section: mc, Default: "Standard", Options: []string{"Standard", "Spot"},
+			Help: "Spot VMs cost less and can be preempted; locally nothing preempts them."},
+		{Name: "terminationAction", Label: "On VM termination", Type: "select", Section: mc, Default: "Stop", Options: []string{"Stop", "Delete"},
+			VisibleWhen: spot, Help: "What happens to the VM when it is preempted."},
+		{Name: "image", Label: "Image", Type: "select", Section: os, Required: true, Default: "debian-cloud/debian-12",
 			Options: imageFamilies(), OptionLabels: imageFamilyLabels(),
 			Help: "Container-Optimized OS, Windows and licensed images are not served: see the Images page."},
-		{Name: "bootDiskType", Label: "Boot disk type", Type: "select", Section: "Boot disk", Default: "pd-balanced", Options: diskTypeNames()},
-		{Name: "bootDiskSize", Label: "Size (GB)", Type: "text", Section: "Boot disk", Default: "10", Pattern: `^[0-9]{1,5}$`},
-		{Name: "network", Label: "Network", Type: "text", Section: "Networking", Required: true, Default: "default"},
-		{Name: "subnetwork", Label: "Subnetwork", Type: "text", Section: "Networking",
+		{Name: "bootDiskType", Label: "Boot disk type", Type: "select", Section: os, Default: "pd-balanced", Options: diskTypeNames()},
+		{Name: "bootDiskSize", Label: "Size (GB)", Type: "text", Section: os, Default: "10", Pattern: `^[0-9]{1,5}$`},
+		backup,
+		{Name: "allowHttp", Label: "Allow HTTP traffic", Type: "checkbox", Section: nw,
+			Help: "Tags the VM http-server and adds the network's allow-http rule (tcp:80 from 0.0.0.0/0) when it has none."},
+		{Name: "allowHttps", Label: "Allow HTTPS traffic", Type: "checkbox", Section: nw,
+			Help: "Tags the VM https-server and adds the network's allow-https rule (tcp:443 from 0.0.0.0/0) when it has none."},
+		{Name: "networkTags", Label: "Network tags", Type: "text", Section: nw, Help: "Comma-separated, for example web, backend."},
+		netField,
+		{Name: "subnetwork", Label: "Subnetwork", Type: "text", Section: nw,
 			Help: "Optional: a subnet of the network in the instance's region; empty uses the network's subnet there."},
-		{Name: "externalIP", Label: "External IPv4 address", Type: "select", Section: "Networking", Default: "Ephemeral", Options: []string{"Ephemeral", "None"},
-			Help: "Ephemeral gives the instance the natIP 127.0.0.1, with its port 22 forwarded to a loopback port."},
-		{Name: "networkTags", Label: "Network tags", Type: "text", Section: "Networking", VisibleWhen: external, Help: "Comma-separated, for example http-server, https-server."},
-		{Name: "serviceAccount", Label: "Service account", Type: "select", Section: "Identity and API access", Default: "Compute Engine default service account",
+		vmStackTypeField(nw),
+		{Name: "internalIP", Label: "Primary internal IPv4 address", Type: "text", Section: nw, Pattern: `^$|^[0-9.]+$`, ShowWhen: "stackType=IPV4_ONLY|IPV4_IPV6",
+			Help: "Optional: Ephemeral (Automatic) when empty, or an address of the subnet, a reserved static internal one among them."},
+		{Name: "externalIP", Label: "External IPv4 address", Type: "select", Section: nw, Default: "Ephemeral", Options: []string{"Ephemeral", "None"}, ShowWhen: "stackType=IPV4_ONLY|IPV4_IPV6",
+			Help: "Ephemeral gives the instance an external IP of its own from 192.0.2.0/24 (promote it to static on the IP addresses page); its port 22 is forwarded to a port on 127.0.0.1."},
+		{Name: "networkTier", Label: "Network Service Tier", Type: "radio", Section: nw, Default: "Premium", Options: []string{"Premium", "Standard"}, VisibleWhen: external},
+		{Name: "opsAgent", Label: "Install Ops Agent for Monitoring and Logging", Type: "checkbox", Section: ob, Default: "true",
+			Help: "Google's Ops Agent is installed in every image here (#2139): the VM's syslog reaches Cloud Logging and its metrics Cloud Monitoring while they are served, whether or not this is checked."},
+		{Name: "serviceAccount", Label: "Service account", Type: "select", Section: sec, Default: "Compute Engine default service account",
 			Options: []string{"Compute Engine default service account", "No service account"}},
-		{Name: "scopes", Label: "Access scopes", Type: "radio", Section: "Identity and API access", Default: "Allow default access",
+		{Name: "scopes", Label: "Access scopes", Type: "radio", Section: sec, Default: "Allow default access",
 			Options: []string{"Allow default access", "Allow full access to all Cloud APIs"}},
-		{Name: "startupScript", Label: "Startup script", Type: "textarea", Section: "Management",
+		{Name: "deletionProtection", Label: "Enable deletion protection", Type: "checkbox", Section: adv},
+		{Name: "startupScript", Label: "Startup script", Type: "textarea", Section: adv,
 			Help: "Runs as root at every boot (the startup-script metadata key); its output is on the serial port."},
-		{Name: "metadata", Label: "Metadata", Type: console.GroupFieldType, Section: "Management", AddLabel: "Add item", Group: []console.Field{
+		{Name: "metadata", Label: "Metadata", Type: console.GroupFieldType, Section: adv, AddLabel: "Add item", Group: []console.Field{
 			{Name: "key", Label: "Key", Type: "text", Required: true},
 			{Name: "value", Label: "Value", Type: "textarea"},
 		}},
-		{Name: "deletionProtection", Label: "Enable deletion protection", Type: "checkbox", Section: "Management"},
+	})
+}
+
+// noBackups is Data protection's choice of no snapshot schedule
+// (compute/docs/disks/default-backup).
+const noBackups = "Don't use automatically scheduled backups"
+
+// snapshotScheduleNames are the project's snapshot schedules as
+// REGION/NAME.
+func (c computeScreen) snapshotScheduleNames(project string) []string {
+	m, err := c.call("GET", project, "aggregated/resourcePolicies", nil, nil)
+	if err != nil {
+		return nil
 	}
+	var out []string
+	for _, o := range aggregatedItems(m, "resourcePolicies") {
+		if o["snapshotSchedulePolicy"] != nil {
+			out = append(out, vpcLast(vpcStr(o, "region"))+"/"+vpcStr(o, "name"))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// allowWebRule makes sure the network has Google's allow rule for a web
+// port: default-allow-http on default, NETWORK-allow-http on another (the
+// console's name for another network is UNVERIFIED, re-read 2026-11-22:
+// https://docs.cloud.google.com/compute/docs/create-windows-server-vm-instance).
+func (p computeInstancesProvider) allowWebRule(project, network, tag, port string) error {
+	name := network + "-allow-" + strings.TrimSuffix(tag, "-server")
+	if _, err := p.call("GET", project, "global/firewalls/"+name, nil, nil); err == nil {
+		return nil
+	}
+	_, err := p.call("POST", project, "global/firewalls", nil, map[string]any{"name": name, "network": "global/networks/" + network,
+		"direction": "INGRESS", "priority": 1000.0, "sourceRanges": []any{"0.0.0.0/0"}, "targetTags": []any{tag},
+		"allowed": []any{map[string]any{"IPProtocol": "tcp", "ports": []any{port}}}})
+	return err
 }
 
 var defaultScopes = []any{
@@ -362,26 +570,63 @@ var defaultScopes = []any{
 }
 
 func (p computeInstancesProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
+	body, err := p.createBody(project, values)
+	if err != nil {
+		return "", err
+	}
+	zone := strings.TrimSpace(vpcOr(values["zone"], defaultZone))
+	if _, err := p.call("POST", project, "zones/"+zone+"/instances", nil, body); err != nil {
+		return "", err
+	}
+	return vpcStr(body, "name"), nil
+}
+
+// createBody is Create an instance's instances.insert body; the network's
+// allow-http and allow-https rules it asks for are made on the way.
+func (p computeInstancesProvider) createBody(project string, values map[string]string) (map[string]any, error) {
 	name := strings.TrimSpace(values["name"])
 	zone := strings.TrimSpace(vpcOr(values["zone"], defaultZone))
 	if !compute.IsZone(zone) {
-		return "", fmt.Errorf("zone: %q is not a zone", zone)
+		return nil, fmt.Errorf("zone: %q is not a zone", zone)
 	}
 	size, err := strconv.Atoi(strings.TrimSpace(vpcOr(values["bootDiskSize"], "10")))
 	if err != nil {
-		return "", fmt.Errorf("boot disk size: %q is not a number", values["bootDiskSize"])
+		return nil, fmt.Errorf("boot disk size: %q is not a number", values["bootDiskSize"])
 	}
 	img := strings.TrimSpace(vpcOr(values["image"], "debian-cloud/debian-12"))
 	proj, fam, ok := strings.Cut(img, "/")
 	if !ok {
-		return "", fmt.Errorf("image: %q is not project/family", img)
+		return nil, fmt.Errorf("image: %q is not project/family", img)
 	}
 	nic := map[string]any{"network": "global/networks/" + strings.TrimSpace(vpcOr(values["network"], "default"))}
 	if s := strings.TrimSpace(values["subnetwork"]); s != "" {
 		nic["subnetwork"] = "regions/" + zone[:strings.LastIndex(zone, "-")] + "/subnetworks/" + s
 	}
-	if values["externalIP"] != "None" {
-		nic["accessConfigs"] = []any{map[string]any{"name": "External NAT", "type": "ONE_TO_ONE_NAT", "networkTier": "PREMIUM"}}
+	if values["networkSource"] == vmNetShared {
+		// Shared VPC (#2140): the host's network and subnet.
+		shared, err := p.sharedNIC(project, zone, values)
+		if err != nil {
+			return nil, err
+		}
+		nic = shared
+	}
+	if ac, err := p.createAccessConfig(project, values); err != nil {
+		return nil, err
+	} else if ac != nil {
+		nic["accessConfigs"] = []any{ac}
+	}
+	if ip := strings.TrimSpace(values["internalIP"]); ip != "" {
+		nic["networkIP"] = ip
+	}
+	switch values["stackType"] {
+	case "IPV4_IPV6":
+		nic["stackType"] = "IPV4_IPV6"
+	case "IPV6_ONLY":
+		// No IPv4 at all: no internal IPv4 address, no external IPv4
+		// access config (compute/docs/ip-addresses/configure-ipv6-address).
+		nic["stackType"] = "IPV6_ONLY"
+		delete(nic, "networkIP")
+		delete(nic, "accessConfigs")
 	}
 	body := map[string]any{"name": name, "machineType": "zones/" + zone + "/machineTypes/" + strings.TrimSpace(vpcOr(values["machineType"], "e2-medium")),
 		"disks": []any{map[string]any{"boot": true, "autoDelete": true, "deviceName": name, "initializeParams": map[string]any{
@@ -390,7 +635,7 @@ func (p computeInstancesProvider) Create(ctx context.Context, project string, va
 		"networkInterfaces": []any{nic}, "deletionProtection": values["deletionProtection"] == "true"}
 	labels, err := console.ParseMap(values["labels"])
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if len(labels) > 0 {
 		l := map[string]any{}
@@ -399,8 +644,40 @@ func (p computeInstancesProvider) Create(ctx context.Context, project string, va
 		}
 		body["labels"] = l
 	}
-	if tags := vpcList(values["networkTags"]); len(tags) > 0 {
-		body["tags"] = map[string]any{"items": tags}
+	var tags []string
+	for _, t := range vpcList(values["networkTags"]) {
+		tags = append(tags, t.(string))
+	}
+	network := strings.TrimSpace(vpcOr(values["network"], "default"))
+	for _, web := range []struct{ field, tag, port string }{{"allowHttp", "http-server", "80"}, {"allowHttps", "https-server", "443"}} {
+		if values[web.field] != "true" {
+			continue
+		}
+		if !slices.Contains(tags, web.tag) {
+			tags = append(tags, web.tag)
+		}
+		if err := p.allowWebRule(project, network, web.tag, web.port); err != nil {
+			return nil, err
+		}
+	}
+	if len(tags) > 0 {
+		items := make([]any, len(tags))
+		for i, t := range tags {
+			items[i] = t
+		}
+		body["tags"] = map[string]any{"items": items}
+	}
+	if values["provisioningModel"] == "Spot" {
+		body["scheduling"] = map[string]any{"provisioningModel": "SPOT", "instanceTerminationAction": strings.ToUpper(vpcOr(values["terminationAction"], "Stop")),
+			"automaticRestart": false, "onHostMaintenance": "TERMINATE"}
+	}
+	if sch := values["snapshotSchedule"]; sch != "" && sch != noBackups {
+		region, pol, ok := strings.Cut(sch, "/")
+		if !ok || region != zone[:strings.LastIndex(zone, "-")] {
+			return nil, fmt.Errorf("back up your data: the schedule %q is not in the instance's region", sch)
+		}
+		disks := body["disks"].([]any)
+		disks[0].(map[string]any)["initializeParams"].(map[string]any)["resourcePolicies"] = []any{"regions/" + region + "/resourcePolicies/" + pol}
 	}
 	if values["serviceAccount"] != "No service account" {
 		scopes := defaultScopes
@@ -409,17 +686,17 @@ func (p computeInstancesProvider) Create(ctx context.Context, project string, va
 		}
 		body["serviceAccounts"] = []any{map[string]any{"email": "default", "scopes": scopes}}
 	}
+	if sh := shieldedCreateBody(values); sh != nil {
+		body["shieldedInstanceConfig"] = sh
+	}
 	items, err := metadataBody(values["metadata"], values["startupScript"])
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if len(items) > 0 {
 		body["metadata"] = map[string]any{"items": items}
 	}
-	if _, err := p.call("POST", project, "zones/"+zone+"/instances", nil, body); err != nil {
-		return "", err
-	}
-	return name, nil
+	return body, nil
 }
 
 // metadataBody is a metadata group field's rows as the API's items, with
@@ -494,7 +771,9 @@ func (p computeInstancesProvider) Detail(ctx context.Context, project string, pa
 			{Label: "Network tags", Value: vpcDash(strings.Join(vpcStrs(vmMap(o, "tags"), "items"), ", "))},
 			{Label: "SSH address", Value: vpcDash(vpcStr(o, "cloudburrowSshAddress")), Copy: vpcStr(o, "cloudburrowSshAddress")},
 		}},
+		availabilityGroup(o),
 		{Heading: "Metadata", Properties: mdProps},
+		shieldedGroup(o),
 		{Heading: "API and identity management", Properties: []console.Property{
 			{Label: "Service account", Value: sa}, {Label: "Cloud API access scopes", Value: scopes}}},
 		{Heading: "Connect", Properties: []console.Property{
@@ -526,14 +805,16 @@ func (p computeInstancesProvider) Detail(ctx context.Context, project string, pa
 			"Type": kind, "Size": vpcDash(size), "Mode": mode, "When deleting instance": del}})
 	}
 	disks.Total = len(disks.Items)
-	nics := console.Listing{Columns: []string{"Network", "Subnetwork", "Primary internal IP", "External IP", "Network tier"}, Noun: "network interfaces"}
+	nics := console.Listing{Columns: []string{"Network", "Subnetwork", "IP stack type", "Primary internal IP", "Internal IPv6", "External IP", "External IPv6", "Network tier"},
+		Noun: "network interfaces"}
 	for _, n := range vmMaps(o, "networkInterfaces") {
 		tier, ext := "—", "None"
 		for _, ac := range vmMaps(n, "accessConfigs") {
 			tier, ext = vpcStr(ac, "networkTier"), vpcDash(vpcStr(ac, "natIP"))
 		}
 		nics.Items = append(nics.Items, console.Resource{Name: vpcStr(n, "name"), Fields: map[string]string{"Network": vpcLast(vpcStr(n, "network")),
-			"Subnetwork": vpcLast(vpcStr(n, "subnetwork")), "Primary internal IP": vpcStr(n, "networkIP"), "External IP": ext, "Network tier": tier}})
+			"Subnetwork": vpcLast(vpcStr(n, "subnetwork")), "Primary internal IP": vpcStr(n, "networkIP"), "External IP": ext, "Network tier": tier,
+			"IP stack type": stackTypeText(vpcStr(n, "stackType")), "Internal IPv6": vpcDash(vpcStr(n, "ipv6Address")), "External IPv6": vpcDash(nicExternalIPv6(n))}})
 	}
 	nics.Total = len(nics.Items)
 	serial := console.Section{ID: "serial", Label: "Serial port 1 (console)", Kind: console.KindText}
@@ -558,16 +839,18 @@ func (p computeInstancesProvider) Detail(ctx context.Context, project string, pa
 			{ID: "storage", Label: "Storage", Listing: disks},
 			{ID: "networking", Label: "Networking", Listing: nics},
 			serial},
-		Edit: &console.EditForm{Label: "Edit", Note: "The machine type changes only while the instance is stopped.", Fields: []console.Field{
+		Edit: &console.EditForm{Label: "Edit", Note: "The machine type, the VM provisioning model and the Shielded VM settings change only while the instance is stopped.", Fields: append([]console.Field{
 			vmLabelsField(vmLabels(o), ""),
 			{Name: "networkTags", Label: "Network tags", Type: "text", Default: tags},
 			{Name: "machineType", Label: "Machine type", Type: "select", Default: vpcLast(vpcStr(o, "machineType")), Options: machineTypeNames()},
+			provisioningModelEditField(o),
+			terminationActionEditField(o),
 			{Name: "deletionProtection", Label: "Enable deletion protection", Type: "checkbox", Default: strconv.FormatBool(o["deletionProtection"] == true)},
 			{Name: "metadata", Label: "Metadata", Type: console.GroupFieldType, AddLabel: "Add item", Default: console.FormatGroup(md), Group: []console.Field{
 				{Name: "key", Label: "Key", Type: "text", Required: true},
 				{Name: "value", Label: "Value", Type: "textarea"},
 			}},
-		}},
+		}, shieldedEditFields(o)...)},
 	}, nil
 }
 
@@ -580,12 +863,14 @@ func sshCommands(project, zone, name string, o map[string]any) (sshCmd, gcloudCm
 	}
 	host, _, _ := net.SplitHostPort(vpcStr(o, "cloudburrowSshAddress"))
 	return "ssh -p " + port + " -i ~/.ssh/google_compute_engine USER@" + host,
-		"gcloud compute ssh " + name + " --zone " + zone + " --project " + project + " --ssh-flag=\"-p " + port + "\""
+		"gcloud compute ssh " + name + " --zone " + zone + " --project " + project + " --ssh-flag=\"-p " + port + "\" --ssh-flag=\"-o HostName=" + host + "\""
 }
 
 // Edit is the instance page's Edit: labels (setLabels), network tags
 // (setTags), the machine type (setMachineType, stopped only), deletion
-// protection and metadata (setMetadata), each sent only when it changed.
+// protection, metadata (setMetadata) and the Shielded VM settings
+// (updateShieldedInstanceConfig, stopped only, #2181), each sent only when
+// it changed.
 func (p computeInstancesProvider) Edit(ctx context.Context, project string, path []string, values map[string]string) error {
 	o, err := p.instance(project, path)
 	if err != nil {
@@ -619,6 +904,14 @@ func (p computeInstancesProvider) Edit(ctx context.Context, project string, path
 	}
 	if mt := strings.TrimSpace(values["machineType"]); mt != "" && mt != vpcLast(vpcStr(o, "machineType")) {
 		if _, err := p.call("POST", project, base+"/setMachineType", nil, map[string]any{"machineType": "zones/" + path[0] + "/machineTypes/" + mt}); err != nil {
+			return err
+		}
+	}
+	if err := p.editProvisioningModel(project, base, o, values); err != nil {
+		return err
+	}
+	if sh := shieldedEditBody(o, values); sh != nil {
+		if _, err := p.call("PATCH", project, base+"/updateShieldedInstanceConfig", nil, sh); err != nil {
 			return err
 		}
 	}
@@ -659,6 +952,9 @@ func (p computeInstancesProvider) ActAt(ctx context.Context, project string, pat
 // ActAtResult performs an instance's action; SSH answers with the
 // commands that reach the guest.
 func (p computeInstancesProvider) ActAtResult(ctx context.Context, project string, path []string, action string, values map[string]string) (*console.Listing, error) {
+	if len(path) == 0 && values[instanceSelectField] != "" {
+		return nil, p.actOnSelection(project, action, values)
+	}
 	if len(path) != 2 {
 		return nil, fmt.Errorf("%s is not available here", action)
 	}
@@ -688,13 +984,20 @@ func (p computeInstancesProvider) ActAtResult(ctx context.Context, project strin
 			verb = "resume"
 		}
 		_, err = p.call("POST", project, base+"/"+verb, nil, nil)
-	case "stop", "suspend", "reset":
+	case "stop":
+		_, err = p.call("POST", project, base+"/stop", gracefulQuery(values), nil)
+	case "suspend", "reset":
 		_, err = p.call("POST", project, base+"/"+action, nil, nil)
 	case "delete":
-		_, err = p.call("DELETE", project, base, nil, nil)
+		_, err = p.call("DELETE", project, base, gracefulQuery(values), nil)
 	case "attachdisk":
 		d := strings.TrimSpace(values["disk"])
-		b := map[string]any{"source": "zones/" + path[0] + "/disks/" + d, "deviceName": vpcOr(strings.TrimSpace(values["deviceName"]), d)}
+		src := "zones/" + path[0] + "/disks/" + d
+		if region, name, ok := strings.Cut(d, "/"); ok {
+			// A regional disk, REGION/NAME (consolecomputea1.go).
+			src, d = "regions/"+region+"/disks/"+name, name
+		}
+		b := map[string]any{"source": src, "deviceName": vpcOr(strings.TrimSpace(values["deviceName"]), d)}
 		if values["mode"] == "Read only" {
 			b["mode"] = "READ_ONLY"
 		}
@@ -705,6 +1008,54 @@ func (p computeInstancesProvider) ActAtResult(ctx context.Context, project strin
 		err = fmt.Errorf("%s is not available on this resource", action)
 	}
 	return nil, err
+}
+
+func gracefulQuery(values map[string]string) url.Values {
+	if values["noGracefulShutdown"] == "true" {
+		return url.Values{"noGracefulShutdown": {"true"}}
+	}
+	return nil
+}
+
+// actOnSelection performs a selection action on each checked instance,
+// found by name across the project's zones; an instance whose status the
+// action does not apply to is skipped, as Google's console skips it.
+func (p computeInstancesProvider) actOnSelection(project, action string, values map[string]string) error {
+	all, err := p.instances(project)
+	if err != nil {
+		return err
+	}
+	var errs []string
+	for _, name := range strings.Split(values[instanceSelectField], "\n") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		found := false
+		for _, o := range all {
+			if vpcStr(o, "name") != name {
+				continue
+			}
+			found = true
+			ok := false
+			for _, a := range p.instanceActions(o, false) {
+				ok = ok || (a.ID == action && a.Unavailable == "")
+			}
+			if !ok {
+				continue
+			}
+			if _, err := p.ActAtResult(context.Background(), project, []string{zoneOf(vpcStr(o, "zone")), name}, action, values); err != nil {
+				errs = append(errs, name+": "+err.Error())
+			}
+		}
+		if !found {
+			errs = append(errs, name+": no such instance")
+		}
+	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // --- Disks --------------------------------------------------------------------
@@ -733,8 +1084,8 @@ func (p computeDisksProvider) List(ctx context.Context, project string) (console
 		return listing, err
 	}
 	for _, d := range aggregatedItems(m, "disks") {
-		zone := zoneOf(vpcStr(d, "zone"))
-		target := []string{zone, vpcStr(d, "name")}
+		zone := diskZoneText(d)
+		target := []string{diskLoc(d), vpcStr(d, "name")}
 		var users []string
 		for _, u := range vpcStrs(d, "users") {
 			users = append(users, vpcLast(u))
@@ -758,7 +1109,23 @@ func (p computeDisksProvider) diskActions(d map[string]any, onPage bool) []conso
 			{Name: "sizeGb", Label: "Size (GB)", Type: "text", Required: true, Default: vpcStr(d, "sizeGb"), Pattern: `^[0-9]{1,5}$`,
 				Help: "A disk can be made larger, never smaller."}}},
 	}
-	acts = append(acts, labelsAction(d))
+	acts = append(acts, labelsAction(d),
+		console.Action{ID: "clone", Label: "Clone disk", Submit: "Create", Fields: []console.Field{
+			{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Default: name + "-clone", Help: computeNameHelp},
+			{Name: "description", Label: "Description", Type: "text"}}},
+		console.Action{ID: "image", Label: "Create image", Submit: "Create", Fields: []console.Field{
+			{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp},
+			{Name: "family", Label: "Family", Type: "text", Pattern: `^$|` + computeNamePattern},
+			{Name: "description", Label: "Description", Type: "text"},
+			{Name: "force", Label: "Keep instance running (not recommended)", Type: "checkbox",
+				Help: "An image of a disk a running VM writes to may catch its files half-written."}}})
+	var schedules []string
+	for _, r := range vpcStrs(d, "resourcePolicies") {
+		schedules = append(schedules, vpcLast(r))
+	}
+	acts = append(acts, console.Action{ID: "schedule", Label: "Edit snapshot schedule", Submit: "Save", Fields: []console.Field{
+		{Name: "schedule", Label: "Snapshot schedule", Type: "text", Default: strings.Join(schedules, ","),
+			Help: "The name of a snapshot schedule of the disk's region, or empty for none."}}})
 	del := console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: onPage, Confirm: "Delete disk " + name + "?"}
 	if users := vpcStrs(d, "users"); len(users) > 0 {
 		del.Unavailable = "The disk is attached to " + vpcLast(users[0]) + ": detach it first."
@@ -770,19 +1137,49 @@ func (computeDisksProvider) CreateOnPage() bool   { return true }
 func (computeDisksProvider) CreateTitle() string  { return "Create a disk" }
 func (computeDisksProvider) CreateLayout() string { return console.CreateLayoutPage }
 
+// CreateForm is Google's Create a disk (compute/docs/disks/add-persistent-disk,
+// regional-persistent-disk, create-disk-from-source, read 2026-11-22):
+// Name, Description, Location (Single zone, or Regional with its Replica
+// zone), Region and Zone, Source (Blank disk, Image, Snapshot or another Disk),
+// Disk type and Size, Snapshot schedule, Labels.
 func (p computeDisksProvider) CreateForm() (string, []console.Field) {
-	return "Create disk", []console.Field{
+	return "Create disk", p.diskFields(nil, nil, nil, nil)
+}
+
+func (p computeDisksProvider) CreateFormFor(ctx context.Context, project string) []console.Field {
+	if p.api() == nil || project == "" {
+		_, f := p.CreateForm()
+		return f
+	}
+	return p.diskFields(p.snapshotNames(project), p.diskNames(project), p.customImageNames(project), p.snapshotScheduleNames(project))
+}
+
+func (p computeDisksProvider) diskFields(snapshots, disks, images, schedules []string) []console.Field {
+	imgs := append(imageFamilies(), images...)
+	labels := imageFamilyLabels()
+	for _, i := range images {
+		labels[i] = i + " (custom image)"
+	}
+	return []console.Field{
 		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp},
 		{Name: "description", Label: "Description", Type: "textarea"},
-		vmZoneField("zone"),
-		{Name: "source", Label: "Disk source type", Type: "radio", Section: "Disk settings", Default: "Blank disk", Options: []string{"Blank disk", "Image", "Snapshot"}},
-		{Name: "image", Label: "Source image", Type: "select", Section: "Disk settings", Default: "debian-cloud/debian-12", Options: imageFamilies(),
-			OptionLabels: imageFamilyLabels(), VisibleWhen: map[string]string{"source": "Image"}},
-		{Name: "snapshot", Label: "Source snapshot", Type: "text", Section: "Disk settings", VisibleWhen: map[string]string{"source": "Snapshot"},
-			Help: "The name of a snapshot on the Snapshots page."},
+		{Name: "location", Label: "Location", Type: "radio", Section: "Location", Default: "Single zone", Options: []string{"Single zone", "Regional"},
+			Help: "Regional replicates the disk's data synchronously in two zones of the region."},
+		{Name: "region", Label: "Region", Type: "select", Section: "Location", Default: "us-central1", Options: compute.Regions()},
+		withSection(vmZoneField("zone"), "Location"),
+		replicaZoneField(),
+		{Name: "source", Label: "Disk source type", Type: "radio", Section: "Source", Default: "Blank disk", Options: []string{"Blank disk", "Image", "Snapshot", "Disk"}},
+		{Name: "image", Label: "Source image", Type: "select", Section: "Source", Default: "debian-cloud/debian-12", Options: imgs,
+			OptionLabels: labels, VisibleWhen: map[string]string{"source": "Image"}},
+		selectOrText(console.Field{Name: "snapshot", Label: "Source snapshot", Section: "Source", VisibleWhen: map[string]string{"source": "Snapshot"}},
+			snapshots, "The name of a snapshot: none exists yet."),
+		selectOrText(console.Field{Name: "sourceDisk", Label: "Source disk", Section: "Source", VisibleWhen: map[string]string{"source": "Disk"}},
+			disks, "ZONE/NAME of a disk of the zone: none exists yet."),
 		{Name: "type", Label: "Disk type", Type: "select", Section: "Disk settings", Default: "pd-balanced", Options: diskTypeNames()},
 		{Name: "sizeGb", Label: "Size (GB)", Type: "text", Section: "Disk settings", Default: "10", Pattern: `^[0-9]{1,5}$`},
-		vmLabelsField(nil, "Disk settings"),
+		{Name: "snapshotSchedule", Label: "Snapshot schedule", Type: "select", Section: "Snapshot schedule", Default: noBackups,
+			Options: append([]string{noBackups}, schedules...), Help: "A schedule of the disk's region, as REGION/NAME."},
+		vmLabelsField(nil, "Labels"),
 	}
 }
 
@@ -793,6 +1190,14 @@ func (p computeDisksProvider) Create(ctx context.Context, project string, values
 		return "", fmt.Errorf("zone: %q is not a zone", zone)
 	}
 	b := map[string]any{"name": name, "type": "zones/" + zone + "/diskTypes/" + vpcOr(values["type"], "pd-balanced")}
+	coll := "zones/" + zone + "/disks"
+	if values["location"] == "Regional" {
+		region := regionOfZoneName(zone)
+		replica := strings.TrimSpace(values["replicaZone"])
+		b["type"] = "regions/" + region + "/diskTypes/" + vpcOr(values["type"], "pd-balanced")
+		b["replicaZones"] = []any{"zones/" + zone, "zones/" + replica}
+		coll = "regions/" + region + "/disks"
+	}
 	if s := strings.TrimSpace(values["sizeGb"]); s != "" {
 		b["sizeGb"] = s
 	}
@@ -800,11 +1205,34 @@ func (p computeDisksProvider) Create(ctx context.Context, project string, values
 		b["description"] = d
 	}
 	switch values["source"] {
+	case "Cloud Storage file":
+		src := strings.TrimSpace(values["rawSource"])
+		if src == "" {
+			return "", fmt.Errorf("Cloud Storage file: name the gs://BUCKET/FILE.tar.gz to import")
+		}
+		b["rawDisk"] = map[string]any{"source": src}
 	case "Image":
-		proj, fam, _ := strings.Cut(values["image"], "/")
-		b["sourceImage"] = "projects/" + proj + "/global/images/family/" + fam
+		img := strings.TrimSpace(values["image"])
+		if proj, fam, ok := strings.Cut(img, "/"); ok {
+			b["sourceImage"] = "projects/" + proj + "/global/images/family/" + fam
+		} else {
+			b["sourceImage"] = "global/images/" + img
+		}
 	case "Snapshot":
 		b["sourceSnapshot"] = "global/snapshots/" + strings.TrimSpace(values["snapshot"])
+	case "Disk":
+		dz, dn, err := splitZoneName(values["sourceDisk"], "source disk")
+		if err != nil {
+			return "", err
+		}
+		b["sourceDisk"] = diskPath(dz, dn)
+	}
+	if sch := values["snapshotSchedule"]; sch != "" && sch != noBackups {
+		region, pol, ok := strings.Cut(sch, "/")
+		if !ok {
+			return "", fmt.Errorf("snapshot schedule: %q is not REGION/NAME", sch)
+		}
+		b["resourcePolicies"] = []any{"regions/" + region + "/resourcePolicies/" + pol}
 	}
 	labels, err := console.ParseMap(values["labels"])
 	if err != nil {
@@ -817,7 +1245,7 @@ func (p computeDisksProvider) Create(ctx context.Context, project string, values
 		}
 		b["labels"] = l
 	}
-	if _, err := p.call("POST", project, "zones/"+zone+"/disks", nil, b); err != nil {
+	if _, err := p.call("POST", project, coll, nil, b); err != nil {
 		return "", err
 	}
 	return name, nil
@@ -830,7 +1258,7 @@ func (p computeDisksProvider) Detail(ctx context.Context, project string, path [
 	if len(path) != 2 {
 		return console.DeeperThan(2, path), nil
 	}
-	d, err := p.call("GET", project, "zones/"+path[0]+"/disks/"+path[1], nil, nil)
+	d, err := p.call("GET", project, diskPath(path[0], path[1]), nil, nil)
 	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
@@ -842,11 +1270,21 @@ func (p computeDisksProvider) Detail(ctx context.Context, project string, path [
 	if s := vpcStr(d, "sourceSnapshot"); s != "" {
 		src = "Snapshot " + vpcLast(s)
 	}
+	if s := vpcStr(d, "sourceDisk"); s != "" {
+		src = "Disk " + vpcLast(s)
+	}
 	return console.Detail{Title: path[1],
 		Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: []console.Property{
 			{Label: "Status", Value: vpcStr(d, "status")}, {Label: "Type", Value: vpcLast(vpcStr(d, "type"))},
-			{Label: "Size", Value: vpcStr(d, "sizeGb") + " GB"}, {Label: "Zone", Value: path[0]},
+			{Label: "Size", Value: vpcStr(d, "sizeGb") + " GB"}, diskLocationProperty(d),
 			{Label: "In use by", Value: vpcDash(strings.Join(users, ", "))}, {Label: "Source", Value: vpcDash(src)},
+			{Label: "Snapshot schedule", Value: vpcDash(strings.Join(func() []string {
+				var out []string
+				for _, r := range vpcStrs(d, "resourcePolicies") {
+					out = append(out, vpcLast(r))
+				}
+				return out
+			}(), ", "))},
 			{Label: "Labels", Value: vpcDash(vmLabelsText(d))}, {Label: "Description", Value: vpcDash(vpcStr(d, "description"))},
 			{Label: "Creation time", Value: vpcStr(d, "creationTimestamp")},
 		}}}}},
@@ -857,7 +1295,7 @@ func (p computeDisksProvider) DetailActions(ctx context.Context, project string,
 	if p.api() == nil || len(path) != 2 {
 		return nil
 	}
-	d, err := p.call("GET", project, "zones/"+path[0]+"/disks/"+path[1], nil, nil)
+	d, err := p.call("GET", project, diskPath(path[0], path[1]), nil, nil)
 	if err != nil {
 		return nil
 	}
@@ -868,7 +1306,7 @@ func (p computeDisksProvider) ActAt(ctx context.Context, project string, path []
 	if len(path) != 2 {
 		return fmt.Errorf("%s is not available here", action)
 	}
-	base := "zones/" + path[0] + "/disks/" + path[1]
+	base := diskPath(path[0], path[1])
 	var err error
 	switch action {
 	case "snapshot":
@@ -883,8 +1321,56 @@ func (p computeDisksProvider) ActAt(ctx context.Context, project string, path []
 		err = p.setLabels(project, base, values)
 	case "delete":
 		_, err = p.call("DELETE", project, base, nil, nil)
+	case "clone":
+		b := map[string]any{"name": strings.TrimSpace(values["name"]), "sourceDisk": base}
+		if d := strings.TrimSpace(values["description"]); d != "" {
+			b["description"] = d
+		}
+		err = p.cloneDisk(project, path, b)
+	case "image":
+		b := map[string]any{"name": strings.TrimSpace(values["name"]), "sourceDisk": base, "forceCreate": values["force"] == "true"}
+		for _, k := range []string{"family", "description"} {
+			if v := strings.TrimSpace(values[k]); v != "" {
+				b[k] = v
+			}
+		}
+		_, err = p.call("POST", project, "global/images", nil, b)
+	case "schedule":
+		err = p.setSchedule(project, path, strings.TrimSpace(values["schedule"]))
 	default:
 		err = fmt.Errorf("%s is not available on this resource", action)
+	}
+	return err
+}
+
+// setSchedule replaces a disk's snapshot schedule.
+func (p computeDisksProvider) setSchedule(project string, path []string, want string) error {
+	base := diskPath(path[0], path[1])
+	d, err := p.call("GET", project, base, nil, nil)
+	if err != nil {
+		return err
+	}
+	region := regionOfZoneName(path[0])
+	if compute.IsRegion(path[0]) {
+		region = path[0]
+	}
+	wantRel := ""
+	if want != "" {
+		wantRel = "regions/" + region + "/resourcePolicies/" + want
+	}
+	var drop []any
+	for _, r := range vpcStrs(d, "resourcePolicies") {
+		if !strings.HasSuffix(r, "/resourcePolicies/"+want) || want == "" {
+			drop = append(drop, r)
+		}
+	}
+	if len(drop) > 0 {
+		if _, err := p.call("POST", project, base+"/removeResourcePolicies", nil, map[string]any{"resourcePolicies": drop}); err != nil {
+			return err
+		}
+	}
+	if wantRel != "" && len(drop) == len(vpcStrs(d, "resourcePolicies")) {
+		_, err = p.call("POST", project, base+"/addResourcePolicies", nil, map[string]any{"resourcePolicies": []any{wantRel}})
 	}
 	return err
 }
@@ -900,7 +1386,7 @@ func (computeSnapshotsProvider) ID() string    { return "compute-snapshots" }
 func (computeSnapshotsProvider) Title() string { return "Snapshots" }
 
 func (p computeSnapshotsProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	listing := console.Listing{Columns: []string{"Location", "Snapshot size", "Disk size", "Source disk", "Creation time"}, Noun: "snapshots", AlwaysStatus: true,
+	listing := console.Listing{Columns: []string{"Location", "Snapshot size", "Disk size", "Source disk", "Type", "Creation time"}, Noun: "snapshots", AlwaysStatus: true,
 		InfoOnSelect: true,
 		Note:         "A snapshot is a full copy of its disk's volume, taken while the disk is detached or its instance runs."}
 	if p.api() == nil {
@@ -919,7 +1405,8 @@ func (p computeSnapshotsProvider) List(ctx context.Context, project string) (con
 			Actions: diskSnapshotActions(s), Info: computePermissionsTab(),
 			Fields: map[string]string{"Location": vpcDash(strings.Join(vpcStrs(s, "storageLocations"), ", ")),
 				"Snapshot size": bytesText(vpcStr(s, "storageBytes")), "Disk size": vpcStr(s, "diskSizeGb") + " GB",
-				"Source disk": vpcLast(vpcStr(s, "sourceDisk")), "Creation time": vpcStr(s, "creationTimestamp")}})
+				"Source disk": vpcLast(vpcStr(s, "sourceDisk")), "Creation time": vpcStr(s, "creationTimestamp"),
+				"Type": map[bool]string{true: "Archive snapshot", false: map[bool]string{true: "Scheduled snapshot", false: "Snapshot"}[s["autoCreated"] == true]}[vpcStr(s, "snapshotType") == "ARCHIVE"]}})
 	}
 	listing.Total = len(listing.Items)
 	return listing, nil
@@ -974,12 +1461,32 @@ func diskSnapshotActions(s map[string]any) []console.Action {
 		{Name: "type", Label: "Disk type", Type: "select", Default: "pd-balanced", Options: diskTypeNames()}}}}
 }
 
-func (computeSnapshotsProvider) CreateForm() (string, []console.Field) {
-	return "Create snapshot", []console.Field{
+// CreateForm is Google's Create a snapshot (compute/docs/disks/create-snapshots,
+// read 2026-11-22): Name, Description, Source disk, Location
+// (Multi-regional or Regional), Snapshot type (Snapshot or Archive
+// snapshot) and Labels.
+func (p computeSnapshotsProvider) CreateForm() (string, []console.Field) {
+	return "Create snapshot", p.snapshotFields(nil)
+}
+
+func (p computeSnapshotsProvider) CreateFormFor(ctx context.Context, project string) []console.Field {
+	if p.api() == nil || project == "" {
+		return p.snapshotFields(nil)
+	}
+	return p.snapshotFields(p.diskNames(project))
+}
+
+func (computeSnapshotsProvider) CreateTitle() string { return "Create a snapshot" }
+
+func (p computeSnapshotsProvider) snapshotFields(disks []string) []console.Field {
+	return []console.Field{
 		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp},
 		{Name: "description", Label: "Description", Type: "textarea"},
-		vmZoneField("zone"),
-		{Name: "disk", Label: "Source disk", Type: "text", Required: true, Help: "The name of a disk in the zone."},
+		selectOrText(console.Field{Name: "disk", Label: "Source disk", Required: true}, disks, "ZONE/NAME of a disk: none exists yet."),
+		{Name: "location", Label: "Location", Type: "radio", Default: "Multi-regional", Options: []string{"Multi-regional", "Regional"},
+			Help: "Where the snapshot is kept: the disk's multi-region (us, eu, asia) or its region."},
+		{Name: "snapshotType", Label: "Snapshot type", Type: "radio", Default: "Snapshot", Options: []string{"Snapshot", "Archive snapshot"}},
+		vmLabelsField(nil, ""),
 	}
 }
 
@@ -989,8 +1496,34 @@ func (p computeSnapshotsProvider) Create(ctx context.Context, project string, va
 	if d := strings.TrimSpace(values["description"]); d != "" {
 		b["description"] = d
 	}
-	zone := strings.TrimSpace(vpcOr(values["zone"], defaultZone))
-	b["sourceDisk"] = "zones/" + zone + "/disks/" + strings.TrimSpace(values["disk"])
+	src := strings.TrimSpace(values["disk"])
+	zone, disk, ok := strings.Cut(src, "/")
+	if !ok {
+		// A disk's name alone, in the zone the form names (the older form).
+		zone, disk = strings.TrimSpace(vpcOr(values["zone"], defaultZone)), src
+	}
+	b["sourceDisk"] = diskPath(zone, disk)
+	region := regionOfZoneName(zone)
+	if compute.IsRegion(zone) {
+		region = zone
+	}
+	if values["location"] == "Regional" {
+		b["storageLocations"] = []any{region}
+	} else if values["location"] != "" {
+		b["storageLocations"] = []any{strings.SplitN(region, "-", 2)[0]}
+	}
+	if values["snapshotType"] == "Archive snapshot" {
+		b["snapshotType"] = "ARCHIVE"
+	}
+	if labels, err := console.ParseMap(values["labels"]); err != nil {
+		return "", err
+	} else if len(labels) > 0 {
+		l := map[string]any{}
+		for k, v := range labels {
+			l[k] = v
+		}
+		b["labels"] = l
+	}
 	if _, err := p.call("POST", project, "global/snapshots", nil, b); err != nil {
 		return "", err
 	}
@@ -1035,12 +1568,31 @@ type computeImagesProvider struct{ computeScreen }
 func (computeImagesProvider) ID() string    { return "compute-images" }
 func (computeImagesProvider) Title() string { return "Images" }
 
+// List is Google's Images (compute/docs/images, read 2026-11-22): the
+// project's own images beside the public ones, with Location, Family, Disk
+// size, Created by and Creation time; a custom image's Create instance,
+// Deprecate and Delete.
 func (p computeImagesProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	listing := console.Listing{Columns: []string{"Family", "Project", "Disk size", "Description"}, Noun: "images", AlwaysStatus: true,
-		Note: "These are the public images served, each a systemd container image of the distribution built locally at first use. " +
-			"Not served: " + refusedImagesText() + ". Custom images (images.insert) are not served."}
+	listing := console.Listing{Columns: []string{"Location", "Family", "Disk size", "Created by", "Creation time"}, Noun: "images", AlwaysStatus: true,
+		Note: "The public images served are systemd container images of the distribution, built locally at first use. " +
+			"Not served: " + refusedImagesText() + ". A custom image is a copy of its source disk; one imported from a Cloud Storage file holds its disk.raw's root file system."}
 	if p.api() == nil {
 		return listing, errors.New(computeNotStarted)
+	}
+	if project != "" {
+		l, err := p.list(project, "global/images")
+		if err != nil {
+			return listing, err
+		}
+		for _, im := range l {
+			status := vpcStr(im, "status")
+			if dep := vpcStr(vmMap(im, "deprecated"), "state"); dep != "" {
+				status = dep
+			}
+			listing.Items = append(listing.Items, console.Resource{Name: vpcStr(im, "name"), Status: status, Actions: customImageActions(im),
+				Fields: map[string]string{"Location": strings.Join(vpcStrs(im, "storageLocations"), ", "), "Family": vpcDash(vpcStr(im, "family")),
+					"Disk size": vpcStr(im, "diskSizeGb") + " GB", "Created by": project, "Creation time": vpcStr(im, "creationTimestamp")}})
+		}
 	}
 	seen := map[string]bool{}
 	for _, pi := range compute.PublicImages {
@@ -1054,12 +1606,152 @@ func (p computeImagesProvider) List(ctx context.Context, project string) (consol
 		}
 		for _, im := range computeItems(l) {
 			listing.Items = append(listing.Items, console.Resource{Name: vpcStr(im, "name"), Status: vpcStr(im, "status"),
-				Fields: map[string]string{"Family": vpcStr(im, "family"), "Project": pi.Project, "Disk size": vpcStr(im, "diskSizeGb") + " GB",
-					"Description": vpcStr(im, "description")}})
+				Fields: map[string]string{"Location": strings.Join(vpcStrs(im, "storageLocations"), ", "), "Family": vpcStr(im, "family"),
+					"Disk size": vpcStr(im, "diskSizeGb") + " GB", "Created by": pi.Project, "Creation time": vpcStr(im, "creationTimestamp")}})
 		}
 	}
 	listing.Total = len(listing.Items)
 	return listing, nil
+}
+
+// customImageActions are a custom image's: Edit labels
+// (labeling-resources: an image's labels change after it is made, under its
+// labelFingerprint), Deprecate (images/deprecate-custom: "Deprecate ...
+// select the state ... the replacement image") and Delete.
+func customImageActions(im map[string]any) []console.Action {
+	return []console.Action{labelsAction(im),
+		{ID: "deprecate", Label: "Deprecate", Submit: "Deprecate", Fields: []console.Field{
+			{Name: "state", Label: "State", Type: "select", Default: "Deprecated", Options: []string{"Active", "Deprecated", "Obsolete", "Deleted"},
+				Help: "Deprecated still makes disks, with a warning; Obsolete and Deleted refuse new disks."},
+			{Name: "replacement", Label: "Replacement image", Type: "text", Help: "Optional: the image to use instead."}}},
+		{ID: "delete", Label: "Delete", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, Confirm: "Delete image " + vpcStr(im, "name") + "?"},
+	}
+}
+
+func (computeImagesProvider) CreateOnPage() bool   { return true }
+func (computeImagesProvider) CreateTitle() string  { return "Create an image" }
+func (computeImagesProvider) CreateLayout() string { return console.CreateLayoutPage }
+
+// CreateForm is Google's Create an image (images/create-custom, read
+// 2026-11-22): Name, Source (Disk, Snapshot, Image or Cloud Storage file),
+// the source,
+// Location, Family, Description and Labels.
+func (p computeImagesProvider) CreateForm() (string, []console.Field) {
+	return "Create image", p.imageFields(nil, nil, nil)
+}
+
+func (p computeImagesProvider) CreateFormFor(ctx context.Context, project string) []console.Field {
+	if p.api() == nil || project == "" {
+		return p.imageFields(nil, nil, nil)
+	}
+	return p.imageFields(p.diskNames(project), p.snapshotNames(project), p.customImageNames(project))
+}
+
+func (p computeImagesProvider) imageFields(disks, snapshots, images []string) []console.Field {
+	imgs := append(imageFamilies(), images...)
+	return []console.Field{
+		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp},
+		{Name: "source", Label: "Source", Type: "select", Default: "Disk", Options: []string{"Disk", "Snapshot", "Image", "Cloud Storage file", "Virtual disk (VMDK, VHD)"},
+			DisabledOptions: []string{"Virtual disk (VMDK, VHD)"},
+			Help:            "Importing a virtual disk (VMDK, VHD) needs Google's image import tools, which convert it on a Compute Engine VM: convert it to disk.raw and import it as a Cloud Storage file."},
+		{Name: "rawSource", Label: "Cloud Storage file", Type: "text", Required: true, Pattern: `^gs://[^\/]+/.+\.tar\.gz$`, Browse: "storage",
+			VisibleWhen: map[string]string{"source": "Cloud Storage file"},
+			Help:        "gs://BUCKET/FILE.tar.gz in this instance's Cloud Storage: a gzip-compressed tar archive of a single file named disk.raw."},
+		selectOrText(console.Field{Name: "disk", Label: "Source disk", Required: true, VisibleWhen: map[string]string{"source": "Disk"}}, disks, "ZONE/NAME of a disk: none exists yet."),
+		{Name: "force", Label: "Keep instance running (not recommended)", Type: "checkbox", VisibleWhen: map[string]string{"source": "Disk"}},
+		selectOrText(console.Field{Name: "snapshot", Label: "Source snapshot", Required: true, VisibleWhen: map[string]string{"source": "Snapshot"}}, snapshots, "A snapshot's name: none exists yet."),
+		{Name: "image", Label: "Source image", Type: "select", Default: "debian-cloud/debian-12", Options: imgs, VisibleWhen: map[string]string{"source": "Image"}},
+		{Name: "location", Label: "Location", Type: "radio", Default: "Multi-regional", Options: []string{"Multi-regional", "Regional"}},
+		{Name: "locationName", Label: "Select location", Type: "select", Default: "us", Options: append([]string{"us", "eu", "asia"}, compute.Regions()...)},
+		{Name: "family", Label: "Family", Type: "text", Pattern: `^$|` + computeNamePattern, Help: "Optional: Create an instance can take the family's newest image."},
+		{Name: "description", Label: "Description", Type: "textarea"},
+		vmLabelsField(nil, ""),
+	}
+}
+
+func (p computeImagesProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
+	name := strings.TrimSpace(values["name"])
+	b := map[string]any{"name": name}
+	switch values["source"] {
+	case "", "Disk":
+		zone, disk, err := splitZoneName(values["disk"], "source disk")
+		if err != nil {
+			return "", err
+		}
+		b["sourceDisk"] = diskPath(zone, disk)
+		b["forceCreate"] = values["force"] == "true"
+	case "Snapshot":
+		b["sourceSnapshot"] = "global/snapshots/" + strings.TrimSpace(values["snapshot"])
+	case "Cloud Storage file":
+		src := strings.TrimSpace(values["rawSource"])
+		if src == "" {
+			return "", fmt.Errorf("Cloud Storage file: name the gs://BUCKET/FILE.tar.gz to import")
+		}
+		b["rawDisk"] = map[string]any{"source": src}
+	case "Image":
+		img := strings.TrimSpace(values["image"])
+		if proj, fam, ok := strings.Cut(img, "/"); ok {
+			b["sourceImage"] = "projects/" + proj + "/global/images/family/" + fam
+		} else {
+			b["sourceImage"] = "global/images/" + img
+		}
+	default:
+		return "", fmt.Errorf("source: %s is not served", values["source"])
+	}
+	if loc := strings.TrimSpace(values["locationName"]); loc != "" {
+		b["storageLocations"] = []any{loc}
+	}
+	for _, k := range []string{"family", "description"} {
+		if v := strings.TrimSpace(values[k]); v != "" {
+			b[k] = v
+		}
+	}
+	if labels, err := console.ParseMap(values["labels"]); err != nil {
+		return "", err
+	} else if len(labels) > 0 {
+		l := map[string]any{}
+		for k, v := range labels {
+			l[k] = v
+		}
+		b["labels"] = l
+	}
+	if _, err := p.call("POST", project, "global/images", nil, b); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func (p computeImagesProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	if len(path) != 1 || p.api() == nil {
+		return nil
+	}
+	im, err := p.call("GET", project, "global/images/"+path[0], nil, nil)
+	if err != nil {
+		return nil
+	}
+	return customImageActions(im)
+}
+
+func (p computeImagesProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if len(path) != 1 {
+		return fmt.Errorf("%s is not available here", action)
+	}
+	base := "global/images/" + path[0]
+	switch action {
+	case "labels":
+		return p.setLabels(project, base, values)
+	case "delete":
+		_, err := p.call("DELETE", project, base, nil, nil)
+		return err
+	case "deprecate":
+		b := map[string]any{"state": strings.ToUpper(vpcOr(values["state"], "Deprecated"))}
+		if r := strings.TrimSpace(values["replacement"]); r != "" {
+			b["replacement"] = "global/images/" + r
+		}
+		_, err := p.call("POST", project, base+"/deprecate", nil, b)
+		return err
+	}
+	return fmt.Errorf("%s is not available here", action)
 }
 
 func refusedImagesText() string {

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -20,8 +21,11 @@ import (
 
 // TestCloudSQLExternalMySQLPhysical (#1570): through the official Go
 // client, startExternalSync with migrationType PHYSICAL, as Google
-// documents a MySQL migration from a Percona XtraBackup physical backup.
-// The source is a CloudBurrow MySQL instance with GTIDs on. Verification
+// documents a MySQL migration from a Percona XtraBackup physical backup
+// (docs.cloud.google.com/sql/docs/mysql/migrate-xtrabackup-physical-file).
+// The source is a CloudBurrow MySQL 8.0 instance with GTIDs on. A MYSQL_8_4
+// replica is refused, at verification (UNSUPPORTED_MIGRATION_TYPE) and at
+// startExternalSync (400): "MySQL 5.6 and 8.4 are not supported". Verification
 // with migrationType PHYSICAL refuses what a physical copy cannot carry (a
 // MyISAM table), the privileges XtraBackup needs that the replication user
 // lacks, and a dumpFilePath folder holding no backup. Then two replicas are
@@ -35,11 +39,29 @@ import (
 // data across the restart the restore makes.
 // covers: sql.instances.insert, sql.instances.get, sql.instances.delete, sql.projects.instances.verifyExternalSyncSettings, sql.projects.instances.startExternalSync, sql.operations.get, sql.connect.get, sql.connect.generateEphemeral
 func TestCloudSQLExternalMySQLPhysical(t *testing.T) {
+	testMySQLPhysical(t, "MYSQL_8_0", components.XtraBackup80Image)
+}
+
+// TestCloudSQLExternalMySQL57Physical (#1524): the same physical sync of
+// a MYSQL_5_7 replica from a MySQL 5.7 source, with Percona XtraBackup
+// 2.4, as Google's guide names it for MySQL 5.7. Both XtraBackup 2.4's
+// image and mysql:5.7 are linux/amd64 only, so it runs where the cluster's
+// node runs linux/amd64 binaries (natively, or through Rosetta or
+// qemu-x86_64 in binfmt_misc) and skips where the source's insert is 501.
+// The replication user needs XtraBackup 2.4's RELOAD, LOCK TABLES and
+// PROCESS (5.7 has no BACKUP_ADMIN) for the sync to take the backup.
+// covers: sql.instances.insert, sql.instances.get, sql.instances.delete, sql.projects.instances.verifyExternalSyncSettings, sql.projects.instances.startExternalSync, sql.operations.get, sql.connect.get, sql.connect.generateEphemeral
+func TestCloudSQLExternalMySQL57Physical(t *testing.T) {
+	testMySQLPhysical(t, "MYSQL_5_7", components.XtraBackup24Image)
+}
+
+func testMySQLPhysical(t *testing.T, version, xbImage string) {
 	h := New(t)
 	svc := sqlAdminService(t, h)
 	if os.Getenv(EnvMySQL) == "" {
 		t.Skip("needs --services cloudsql-mysql")
 	}
+	legacy := version == "MYSQL_5_7"
 	bh := sqlTransferBucket(t, h, "physical")
 	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
 	if kubeconfig == "" {
@@ -49,23 +71,50 @@ func TestCloudSQLExternalMySQLPhysical(t *testing.T) {
 	e := sqlEngine{mysql: true}
 	n := time.Now().UnixNano() % 1e6
 	srcName := fmt.Sprintf("phy-src-%d", n)
-	src := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: srcName, DatabaseVersion: "MYSQL_8_4",
-		RootPassword: "Src-root1", Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}})
+	srcIn := &sqladmin.DatabaseInstance{Name: srcName, DatabaseVersion: version,
+		RootPassword: "Src-root1", Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}}
+	var src *sqladmin.DatabaseInstance
+	if legacy {
+		// mysql:5.7 is linux/amd64 only: 501 where the node cannot run it.
+		op, err := svc.Instances.Insert(project, srcIn).Do()
+		if err != nil {
+			wantHTTP(t, "insert "+version, err, http.StatusNotImplemented)
+			t.Skipf("this cluster's node does not run linux/amd64 images: %v", err)
+		}
+		t.Cleanup(func() {
+			if d, err := svc.Instances.Delete(project, srcName).Do(); err == nil {
+				waitSQLOpDone(t, svc, project, d)
+			}
+		})
+		if op = waitSQLOpDone(t, svc, project, op); op.Error != nil {
+			t.Fatalf("create %s: %+v", srcName, op.Error.Errors[0])
+		}
+		if src, err = svc.Instances.Get(project, srcName).Do(); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		src = createSQLInstance(t, svc, project, srcIn)
+	}
 	db := e.open(t, h, src.ConnectionName, "root", "Src-root1", "mysql")
-	for _, q := range []string{"SET PERSIST enforce_gtid_consistency = ON", "SET PERSIST gtid_mode = OFF_PERMISSIVE",
-		"SET PERSIST gtid_mode = ON_PERMISSIVE", "SET PERSIST gtid_mode = ON",
+	setup := []string{"SET PERSIST enforce_gtid_consistency = ON", "SET PERSIST gtid_mode = OFF_PERMISSIVE",
+		"SET PERSIST gtid_mode = ON_PERMISSIVE", "SET PERSIST gtid_mode = ON"}
+	if legacy {
+		// A MySQL 5.7 server here runs with GTIDs from its start.
+		setup = nil
+	}
+	for _, q := range append(setup,
 		"CREATE DATABASE shop", "CREATE TABLE shop.orders (id int primary key, item varchar(20))",
 		"INSERT INTO shop.orders VALUES (1, 'before')",
 		"CREATE TABLE shop.legacy (id int primary key) ENGINE=MyISAM",
 		"CREATE USER 'migrator'@'%' IDENTIFIED BY 'Repl-pass1'",
-		"GRANT REPLICATION SLAVE, REPLICATION CLIENT, SELECT ON *.* TO 'migrator'@'%'"} {
+		"GRANT REPLICATION SLAVE, REPLICATION CLIENT, SELECT ON *.* TO 'migrator'@'%'") {
 		q := q
 		eventually(t, q, func() error { _, err := db.Exec(q); return err })
 	}
 
-	source := func(name, dump string) {
+	source := func(name, dump string, version string) {
 		t.Helper()
-		op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "MYSQL_8_4",
+		op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: version,
 			InstanceType: "ON_PREMISES_INSTANCE", Region: "us-central1",
 			OnPremisesConfiguration: &sqladmin.OnPremisesConfiguration{HostPort: "sqlinst-" + srcName + ":3306",
 				Username: "migrator", Password: "Repl-pass1", DumpFilePath: dump}}).Do()
@@ -144,20 +193,25 @@ func TestCloudSQLExternalMySQLPhysical(t *testing.T) {
 	// 1. The sync takes the backup: the replication user needs
 	// XtraBackup's privileges, and the MyISAM table cannot be copied.
 	takeRep, takeName := fmt.Sprintf("phy-rep-%d", n), fmt.Sprintf("phy-take-%d", n)
-	source(takeRep, "")
+	source(takeRep, "", version)
 	take := replica(takeName, takeRep)
 	v := verify(takeName)
 	for _, want := range []string{"UNSUPPORTED_STORAGE_ENGINE", "INSUFFICIENT_PRIVILEGE"} {
 		if !hasSyncError(v, want) {
-			t.Errorf("verification PHYSICAL of a source with a MyISAM table and a user without BACKUP_ADMIN: no %s in %s", want, syncErrors(v))
+			t.Errorf("verification PHYSICAL of a source with a MyISAM table and a user without XtraBackup's privileges: no %s in %s", want, syncErrors(v))
 		}
 	}
 	_, err := svc.Projects.Instances.StartExternalSync(project, takeName,
 		&sqladmin.SqlInstancesStartExternalSyncRequest{SyncMode: "ONLINE", MigrationType: "PHYSICAL"}).Do()
 	wantHTTP(t, "startExternalSync PHYSICAL from a source that fails verification", err, 400)
-	for _, q := range []string{"ALTER TABLE shop.legacy ENGINE=InnoDB",
+	grants := []string{"ALTER TABLE shop.legacy ENGINE=InnoDB",
 		"GRANT RELOAD, PROCESS, BACKUP_ADMIN ON *.* TO 'migrator'@'%'",
-		"GRANT SELECT ON performance_schema.log_status TO 'migrator'@'%'"} {
+		"GRANT SELECT ON performance_schema.log_status TO 'migrator'@'%'"}
+	if legacy {
+		// XtraBackup 2.4's privileges on MySQL 5.7.
+		grants = []string{"ALTER TABLE shop.legacy ENGINE=InnoDB", "GRANT RELOAD, LOCK TABLES, PROCESS ON *.* TO 'migrator'@'%'"}
+	}
+	for _, q := range grants {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
@@ -170,7 +224,7 @@ func TestCloudSQLExternalMySQLPhysical(t *testing.T) {
 	// xtrabackup_info, no xtrabackup_binlog_info) is refused.
 	emptyRep, emptyName := fmt.Sprintf("phy-none-%d", n), fmt.Sprintf("phy-nrep-%d", n)
 	sqlWriteObject(t, h, bh, "nothing/xtrabackup_checkpoints", "backup_type = full-backuped\n")
-	source(emptyRep, "gs://"+bh.BucketName()+"/nothing")
+	source(emptyRep, "gs://"+bh.BucketName()+"/nothing", version)
 	replica(emptyName, emptyRep)
 	if v := verify(emptyName); !hasSyncError(v, "INVALID_FILE_INFO") {
 		t.Errorf("verification PHYSICAL of a folder with no backup: %s", syncErrors(v))
@@ -179,9 +233,9 @@ func TestCloudSQLExternalMySQLPhysical(t *testing.T) {
 	// 3. A real XtraBackup backup of the source, taken in the cluster with
 	// the source's volume mounted, as one is taken on a server's host, and
 	// uploaded to Cloud Storage.
-	uploadXtraBackup(t, h, kubeconfig, bh, "sqlinst-"+srcName, fmt.Sprintf("xb-take-%d", n), "backup")
+	uploadXtraBackup(t, h, kubeconfig, bh, xbImage, "sqlinst-"+srcName, fmt.Sprintf("xb-take-%d", n), "backup")
 	gcsRep, gcsName := fmt.Sprintf("phy-gcs-%d", n), fmt.Sprintf("phy-grep-%d", n)
-	source(gcsRep, "gs://"+bh.BucketName()+"/backup")
+	source(gcsRep, "gs://"+bh.BucketName()+"/backup", version)
 	gcs := replica(gcsName, gcsRep)
 
 	start(takeName)
@@ -202,6 +256,20 @@ func TestCloudSQLExternalMySQLPhysical(t *testing.T) {
 	if v, err := svc.Projects.Instances.VerifyExternalSyncSettings(project, takeName, physical).Do(); err != nil || !hasSyncError(v, "REPLICA_ALREADY_SETUP") {
 		t.Errorf("verification after the sync: %+v %v", v, err)
 	}
+	if legacy {
+		return
+	}
+
+	// 4. A MYSQL_8_4 replica: "MySQL 5.6 and 8.4 are not supported".
+	newRep, newName := fmt.Sprintf("phy-84-%d", n), fmt.Sprintf("phy-84r-%d", n)
+	source(newRep, "", "MYSQL_8_4")
+	replica(newName, newRep)
+	if v := verify(newName); !hasSyncError(v, "UNSUPPORTED_MIGRATION_TYPE") || !strings.Contains(syncErrors(v), "8.4 are not supported") {
+		t.Errorf("verification PHYSICAL of a MYSQL_8_4 replica: %s", syncErrors(v))
+	}
+	_, err = svc.Projects.Instances.StartExternalSync(project, newName,
+		&sqladmin.SqlInstancesStartExternalSyncRequest{SyncMode: "ONLINE", MigrationType: "PHYSICAL"}).Do()
+	wantHTTP(t, "startExternalSync PHYSICAL of a MYSQL_8_4 replica", err, 400)
 }
 
 // uploadXtraBackup runs XtraBackup beside the source's server, as
@@ -210,7 +278,7 @@ func TestCloudSQLExternalMySQLPhysical(t *testing.T) {
 // in a pod with deployment's volume mounted; on an ephemeral one, whose
 // server has no volume, in an ephemeral container added to the server's
 // pod, reading its data files through its mysqld's /proc/PID/root.
-func uploadXtraBackup(t *testing.T, h *Harness, kubeconfig string, bh *storage.BucketHandle, deployment, pod, folder string) {
+func uploadXtraBackup(t *testing.T, h *Harness, kubeconfig string, bh *storage.BucketHandle, image, deployment, pod, folder string) {
 	t.Helper()
 	kubectl := func(stdin string, args ...string) ([]byte, error) {
 		cmd := exec.Command("kubectl", append([]string{"--kubeconfig", kubeconfig, "-n", "cloudburrow"}, args...)...)
@@ -225,8 +293,9 @@ func uploadXtraBackup(t *testing.T, h *Harness, kubeconfig string, bh *storage.B
 		}
 		return out, nil
 	}
-	const backup = "xtrabackup --backup --no-server-version-check --datadir=/var/lib/mysql/data --target-dir=/backup --port=3306 " +
-		"--user=migrator --password=Repl-pass1"
+	// XtraBackup 2.4 (MySQL 5.7's) may lack 8.0's version-check switch.
+	const backup = "nsvc=; if xtrabackup --help 2>/dev/null | grep -q -- --no-server-version-check; then nsvc=--no-server-version-check; fi; " +
+		"xtrabackup --backup $nsvc --datadir=/var/lib/mysql/data --target-dir=/backup --port=3306 --user=migrator --password=Repl-pass1"
 	in := []string{pod}
 	if _, err := kubectl("", "get", "pvc", deployment+"-data"); err == nil {
 		manifest := fmt.Sprintf(`apiVersion: v1
@@ -249,7 +318,7 @@ spec:
       persistentVolumeClaim: {claimName: %s-data, readOnly: true}
     - name: backup
       emptyDir: {}
-`, pod, components.XtraBackup84Image, backup, deployment, deployment)
+`, pod, image, backup, deployment, deployment)
 		if _, err := kubectl(manifest, "apply", "-f", "-"); err != nil {
 			t.Fatal(err)
 		}
@@ -266,11 +335,12 @@ spec:
 			// The data directory's tablespaces, read through another
 			// container's root, are listed as external (realpath does not
 			// resolve there); on a server's host they are its own.
-			`sed -i -E 's#\{"file_name":"/var/lib/mysql/data/[^"]*","tablespace_name":"[^"]*","tablespace_type":"[^"]*"\},?##g; s#,\]#]#g' /backup/xtrabackup_tablespaces && ` +
+			// XtraBackup 2.4 writes no such list.
+			`{ [ ! -f /backup/xtrabackup_tablespaces ] || sed -i -E 's#\{"file_name":"/var/lib/mysql/data/[^"]*","tablespace_name":"[^"]*","tablespace_type":"[^"]*"\},?##g; s#,\]#]#g' /backup/xtrabackup_tablespaces; } && ` +
 			`touch /done || touch /failed; sleep 3600`
 		patch := fmt.Sprintf(`{"spec":{"ephemeralContainers":[{"name":%q,"image":%q,"targetContainerName":%q,"command":["bash","-c",%q],`+
 			`"securityContext":{"runAsUser":0,"capabilities":{"add":["SYS_PTRACE","DAC_READ_SEARCH"]}}}]}}`,
-			pod, components.XtraBackup84Image, f[1], script)
+			pod, image, f[1], script)
 		if _, err := kubectl("", "patch", "pod", f[0], "--subresource=ephemeralcontainers", "--type=strategic", "-p", patch); err != nil {
 			t.Fatal(err)
 		}

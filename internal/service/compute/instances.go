@@ -28,6 +28,7 @@ func (s *Server) vmSpecLocked(o obj) VMSpec {
 	if h := str(o, "hostname"); h != "" {
 		sp.Hostname = h
 	}
+	sp.VTPM = vtpmOn(o)
 	if nics, _ := o["networkInterfaces"].([]any); len(nics) > 0 {
 		nic, _ := nics[0].(map[string]any)
 		sp.InternalIP = str(nic, "networkIP")
@@ -100,7 +101,9 @@ func (s *Server) attachedDiskLocked(project, zone, instance string, e map[string
 		if d, ok = s.res[rel]; !ok {
 			return nil, nil, notFound(rel)
 		}
-		if lastSeg(str(d, "zone")) != zone {
+		if !diskInZone(d, zone) {
+			// A regional disk attaches in either of its replica zones
+			// (regiondisks.go).
 			return nil, nil, invalid("Invalid value for field '%s.source': '%s'. Disk must be in the same zone as the instance.", field, rel)
 		}
 		if str(d, "status") != "READY" {
@@ -120,8 +123,9 @@ func (s *Server) attachedDiskLocked(project, zone, instance string, e map[string
 			}
 		}
 		b := obj{"name": name, "sourceImage": str(ip, "sourceImage"), "sourceSnapshot": str(ip, "sourceSnapshot"),
-			"type": str(ip, "diskType"), "sizeGb": ip["diskSizeGb"], "labels": ip["labels"], "description": str(ip, "description")}
-		if boot && str(ip, "sourceImage") == "" && str(ip, "sourceSnapshot") == "" {
+			"type": str(ip, "diskType"), "sizeGb": ip["diskSizeGb"], "labels": ip["labels"], "description": str(ip, "description"),
+			"resourcePolicies": ip["resourcePolicies"], "_seedKey": ip["_seedKey"], "_seedImage": ip["_seedImage"]}
+		if boot && str(ip, "sourceImage") == "" && str(ip, "sourceSnapshot") == "" && str(ip, "_seedKey") == "" {
 			return nil, nil, required(field + ".initializeParams.sourceImage")
 		}
 		if d, err = s.newDiskLocked(project, zone, b, field+".initializeParams"); err != nil {
@@ -176,7 +180,12 @@ func (s *Server) nicLocked(project, zone string, e map[string]any, i int) (obj, 
 		if a, _ := no["autoCreateSubnetworks"].(bool); !a {
 			return nil, invalid("Invalid value for field '%s.subnetwork': ''. Subnetwork should be specified for custom subnetmode network", field)
 		}
-		sub = subnetRel(project, region, lastSeg(rel))
+		// The auto subnet of the network's own project, a Shared VPC
+		// host's for a service project's VM (#2140).
+		sub = subnetRel(strings.Split(rel, "/")[1], region, lastSeg(rel))
+	}
+	if str(e, "stackType") == "IPV6_ONLY" {
+		return s.nicV6OnlyLocked(project, region, sub, e, i, field)
 	}
 	tmp := obj{}
 	if err := s.regionalInternal(project, region, obj{"subnetwork": sub}, tmp, "", str(e, "networkIP")); err != nil {
@@ -185,24 +194,28 @@ func (s *Server) nicLocked(project, zone string, e map[string]any, i int) (obj, 
 	nic := obj{"kind": "compute#networkInterface", "name": "nic" + strconv.Itoa(i), "network": tmp["network"],
 		"subnetwork": tmp["subnetwork"], "networkIP": tmp["address"], "stackType": "IPV4_ONLY",
 		"fingerprint": newFingerprint()}
+	if st, ok := tmp["_static"]; ok {
+		nic["_static"] = st
+	}
+	if err := s.nicV6Locked(e, nic, s.res[str(tmp, "subnetwork")], field); err != nil {
+		return nil, err
+	}
 	if acs, _ := e["accessConfigs"].([]any); len(acs) > 0 {
-		var out []any
-		for _, a := range acs {
-			ac, _ := a.(map[string]any)
-			name := str(ac, "name")
-			if name == "" {
-				name = "External NAT"
-			}
-			tier := str(ac, "networkTier")
-			if tier == "" {
-				tier = "PREMIUM"
-			}
-			// The instance's external address is this machine's loopback:
-			// its SSH port is forwarded to a port on it (#1963).
-			out = append(out, obj{"kind": "compute#accessConfig", "type": "ONE_TO_ONE_NAT", "name": name,
-				"natIP": "127.0.0.1", "networkTier": tier})
+		if len(acs) > 1 {
+			return nil, invalid("Invalid value for field '%s.accessConfigs': ''. At most one access config currently supported.", field)
 		}
-		nic["accessConfigs"] = out
+		// An ephemeral external address of the instance's own, or a
+		// reserved static one (natip.go); SSH reaches the guest through the
+		// forwarded port cloudburrowSshAddress names, not this address.
+		ac, _ := acs[0].(map[string]any)
+		out, static, err := s.accessConfigLocked(project, region, ac, field+".accessConfigs[0]")
+		if err != nil {
+			return nil, err
+		}
+		nic["accessConfigs"] = []any{out}
+		if static != "" {
+			nic["_staticNat"] = static
+		}
 	}
 	return nic, nil
 }
@@ -245,6 +258,14 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		return s.deleteInstance(c.project, scope, rel, o)
 	case get && verb == "serialPort":
 		return s.serialPort(c, rel, o)
+	case get && verb == "getGuestAttributes":
+		return s.getGuestAttributes(c, rel, o)
+	case get && verb == "getShieldedInstanceIdentity":
+		return s.getShieldedInstanceIdentity(rel, o)
+	case (post || c.method == http.MethodPatch) && verb == "setShieldedInstanceIntegrityPolicy":
+		return s.setIntegrityPolicy(c, scope, rel, o)
+	case c.method == http.MethodPatch && verb == "updateShieldedInstanceConfig":
+		return s.updateShieldedConfig(c, scope, rel, o, status)
 	case post && verb == "start":
 		if status == stRunning {
 			return s.done(c.project, scope, "start", rel, o["id"])
@@ -252,8 +273,11 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		if status != stTerminated {
 			return nil, notReady(rel, status)
 		}
+		if err := s.rotateMDSRootLocked(o); err != nil {
+			return nil, err
+		}
 		return s.transition(c.project, scope, "start", rel, o, stProvisioning, stRunning, stTerminated, func(ctx context.Context, vm VMSpec) error {
-			return s.opts.VMs.Start(ctx, vm)
+			return s.startVM(ctx, rel, vm)
 		})
 	case post && verb == "stop":
 		if status == stTerminated {
@@ -269,11 +293,14 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		if status != stRunning {
 			return nil, notReady(rel, status)
 		}
+		if err := s.rotateMDSRootLocked(o); err != nil {
+			return nil, err
+		}
 		return s.transition(c.project, scope, "reset", rel, o, stRunning, stRunning, stRunning, func(ctx context.Context, vm VMSpec) error {
 			if err := s.opts.VMs.Stop(ctx, vm); err != nil {
 				return err
 			}
-			return s.opts.VMs.Start(ctx, vm)
+			return s.startVM(ctx, rel, vm)
 		})
 	case post && verb == "suspend":
 		if status != stRunning {
@@ -332,14 +359,79 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		return s.attachDisk(c, scope, rel, o)
 	case post && verb == "detachDisk":
 		return s.detachDisk(c, scope, rel, o)
+	case post && verb == "addAccessConfig":
+		return s.addAccessConfig(c, scope, rel, o)
+	case post && verb == "deleteAccessConfig":
+		return s.deleteAccessConfig(c, scope, rel, o)
+	case post && (verb == "addResourcePolicies" || verb == "removeResourcePolicies"):
+		return s.attachPolicies(c.project, scope, rel, o, c.body, verb == "addResourcePolicies", "instanceSchedulePolicy")
+	case post && verb == "setScheduling":
+		sched, _ := o["scheduling"].(obj)
+		if status != stTerminated && str(c.body, "provisioningModel") != "" && str(c.body, "provisioningModel") != str(sched, "provisioningModel") {
+			return nil, notReady(rel, status)
+		}
+		next, err := checkScheduling(c.body, sched)
+		if err != nil {
+			return nil, err
+		}
+		o["scheduling"] = next
+		return s.done(c.project, scope, "setScheduling", rel, o["id"])
 	}
 	return nil, unimplemented("%s on instances/%s is not served (#1963)", c.method, strings.Join(p[3:], "/"))
 }
 
 // servedInstanceVerbs are the instance methods served under instances/NAME/.
-var servedInstanceVerbs = map[string]bool{"serialPort": true, "start": true, "stop": true, "reset": true, "suspend": true,
+var servedInstanceVerbs = map[string]bool{"serialPort": true, "getGuestAttributes": true, "start": true, "stop": true, "reset": true, "suspend": true,
 	"resume": true, "setMetadata": true, "setLabels": true, "setTags": true, "setDeletionProtection": true,
-	"setMachineType": true, "attachDisk": true, "detachDisk": true}
+	"setMachineType": true, "attachDisk": true, "detachDisk": true, "addResourcePolicies": true, "removeResourcePolicies": true,
+	"setScheduling": true, "addAccessConfig": true, "deleteAccessConfig": true,
+	"getShieldedInstanceIdentity": true, "setShieldedInstanceIntegrityPolicy": true, "updateShieldedInstanceConfig": true}
+
+// checkScheduling merges a scheduling update into cur as Google validates
+// it (compute/docs/instances/create-use-spot, read 2026-11-22): a Spot VM
+// cannot restart automatically or live-migrate, and takes an
+// instanceTerminationAction of STOP (the default) or DELETE.
+func checkScheduling(in map[string]any, cur obj) (obj, error) {
+	next := obj{}
+	for k, v := range cur {
+		next[k] = v
+	}
+	for k, v := range in {
+		next[k] = v
+	}
+	pm := vpcOrStr(str(next, "provisioningModel"), "STANDARD")
+	if pm != "STANDARD" && pm != "SPOT" {
+		return nil, invalid("Invalid value for field 'resource.scheduling.provisioningModel': '%s'. Must be STANDARD or SPOT.", pm)
+	}
+	next["provisioningModel"] = pm
+	if pm == "SPOT" || next["preemptible"] == true {
+		if _, set := in["automaticRestart"]; !set {
+			next["automaticRestart"] = false
+		}
+		if _, set := in["onHostMaintenance"]; !set {
+			next["onHostMaintenance"] = "TERMINATE"
+		}
+		if next["automaticRestart"] == true {
+			return nil, invalid("Invalid value for field 'resource.scheduling.automaticRestart': 'true'. Spot and preemptible instances cannot be restarted automatically.")
+		}
+		if str(next, "onHostMaintenance") != "TERMINATE" {
+			return nil, invalid("Invalid value for field 'resource.scheduling.onHostMaintenance': '%s'. Spot and preemptible instances must terminate on host maintenance.", str(next, "onHostMaintenance"))
+		}
+	}
+	if pm == "SPOT" {
+		ta := vpcOrStr(str(next, "instanceTerminationAction"), "STOP")
+		if ta != "STOP" && ta != "DELETE" {
+			return nil, invalid("Invalid value for field 'resource.scheduling.instanceTerminationAction': '%s'. Must be STOP or DELETE.", ta)
+		}
+		next["instanceTerminationAction"] = ta
+	} else {
+		if ta := str(in, "instanceTerminationAction"); ta != "" {
+			return nil, invalid("Invalid value for field 'resource.scheduling.instanceTerminationAction': '%s'. Only Spot VMs take a termination action.", ta)
+		}
+		delete(next, "instanceTerminationAction")
+	}
+	return next, nil
+}
 
 func notReady(rel, status string) error {
 	return errf(http.StatusBadRequest, "resourceNotReady", "The resource '%s' is not ready (it is %s)", rel, status)
@@ -375,9 +467,9 @@ func (s *Server) transition(project, scope, opType, rel string, o obj, during, a
 }
 
 func (s *Server) insertInstance(c call, zone string) (obj, error) {
-	b := c.body
-	if first(c.query, "sourceInstanceTemplate") != "" || str(b, "sourceMachineImage") != "" {
-		return nil, unimplemented("instances made from instance templates or machine images are not served (#1963)")
+	b, srcKind, srcRel, err := s.fromSourceLocked(c, zone)
+	if err != nil {
+		return nil, err
 	}
 	name := str(b, "name")
 	if err := checkName("resource.name", name); err != nil {
@@ -454,12 +546,21 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 			return nil, err
 		}
 		nics = append(nics, nic)
+		if str(nic, "stackType") == "IPV6_ONLY" && !s.debianOrUbuntuLocked(disks[0].(obj), newDisks) {
+			// "IPv6-only instances are supported with only Ubuntu and
+			// Debian OS images" (compute/docs/ip-addresses/configure-ipv6-address).
+			return nil, invalid("Invalid value for field 'resource.networkInterfaces[%d].stackType': 'IPV6_ONLY'. IPv6-only instances are supported with only Ubuntu and Debian OS images.", i)
+		}
 	}
 	md, err := checkMetadata("resource.metadata", b["metadata"])
 	if err != nil {
 		return nil, err
 	}
-	o := obj{"kind": "compute#instance", "id": newID(), "name": name, "zone": "projects/" + c.project + "/zones/" + zone,
+	shielded, err := checkShieldedConfig("resource.shieldedInstanceConfig", objOf(b["shieldedInstanceConfig"]), nil)
+	if err != nil {
+		return nil, err
+	}
+	o := obj{"shieldedInstanceConfig": shielded, "shieldedInstanceIntegrityPolicy": obj{"updateAutoLearnPolicy": true}, "kind": "compute#instance", "id": newID(), "name": name, "zone": "projects/" + c.project + "/zones/" + zone,
 		"machineType": zoneRel(c.project, zone, "machineTypes", mt), "status": stProvisioning, "selfLink": rel,
 		"creationTimestamp": s.stamp(), "disks": disks, "networkInterfaces": nics, "metadata": md,
 		"fingerprint": newFingerprint(), "labelFingerprint": labelFingerprint(nil), "canIpForward": b["canIpForward"] == true,
@@ -472,6 +573,9 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 			o[k] = v
 		}
 	}
+	if srcKind != "" {
+		o[srcKind] = srcRel
+	}
 	if l, ok := b["labels"].(map[string]any); ok && len(l) > 0 {
 		o["labels"], o["labelFingerprint"] = l, labelFingerprint(l)
 	}
@@ -479,10 +583,18 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 		o["tags"] = obj{"items": t["items"], "fingerprint": newFingerprint()}
 	}
 	if sc, ok := b["scheduling"].(map[string]any); ok {
-		sched := o["scheduling"].(obj)
-		for k, v := range sc {
-			sched[k] = v
+		next, err := checkScheduling(sc, o["scheduling"].(obj))
+		if err != nil {
+			return nil, err
 		}
+		o["scheduling"] = next
+	}
+	if pols := strsAny(b["resourcePolicies"]); len(pols) > 0 {
+		rels, err := s.checkPoliciesLocked(c.project, regionOfZone(zone), pols, "resource.resourcePolicies", "instanceSchedulePolicy")
+		if err != nil {
+			return nil, err
+		}
+		o["resourcePolicies"] = toAny(rels)
 	}
 	if sas, ok := b["serviceAccounts"].([]any); ok {
 		var out []any
@@ -512,6 +624,24 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 			d["lastAttachTimestamp"] = s.stamp()
 		}
 	}
+	// A reserved static internal address the instance took is IN_USE by
+	// it (#2140).
+	for _, e := range nics {
+		if st := str(e.(obj), "_static"); st != "" {
+			if a, ok := s.res[st]; ok {
+				a["status"], a["users"] = "IN_USE", []any{rel}
+			}
+		}
+		if st := str(e.(obj), "_staticNat"); st != "" {
+			s.takeAddressLocked(st, rel)
+		}
+		if st := str(e.(obj), "_staticV6"); st != "" {
+			s.takeAddressLocked(st, rel)
+		}
+	}
+	if err := s.rotateMDSRootLocked(o); err != nil {
+		return nil, err
+	}
 	s.res[rel] = norm(o)
 	vm := s.vmSpecLocked(s.res[rel])
 	var specs []DiskSpec
@@ -527,8 +657,12 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 				return err
 			}
 		}
-		if err := s.opts.VMs.Start(ctx, vm); err != nil {
+		err := s.startVM(ctx, rel, vm)
+		if err != nil {
 			_ = s.opts.VMs.Stop(context.Background(), vm)
+			if t, ok := s.opts.VMs.(VMTPM); ok && vm.VTPM {
+				_ = t.DeleteTPM(context.Background(), vm)
+			}
 			for _, m := range specs {
 				_ = s.opts.VMs.DeleteDisk(context.Background(), m)
 			}
@@ -542,6 +676,7 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 				delete(s.res, d)
 			}
 			s.releaseDisksLocked(rel)
+			s.releaseAddressesLocked(rel)
 			return
 		}
 		if cur, ok := s.res[rel]; ok {
@@ -565,6 +700,18 @@ func toAny(l []string) []any {
 		out[i] = v
 	}
 	return out
+}
+
+// releaseAddressesLocked returns every static address instance used to
+// RESERVED, as deleting an instance releases its static addresses
+// (#2140).
+func (s *Server) releaseAddressesLocked(instance string) {
+	for k, a := range s.res {
+		if strings.Contains(k, "/addresses/") && hasStr(strs(a, "users"), instance) {
+			a["status"] = "RESERVED"
+			delete(a, "users")
+		}
+	}
 }
 
 // releaseDisksLocked removes instance from every disk's users.
@@ -615,6 +762,11 @@ func (s *Server) deleteInstance(project, scope, rel string, o obj) (obj, error) 
 		if err := s.opts.VMs.Stop(ctx, vm); err != nil {
 			return err
 		}
+		if t, ok := s.opts.VMs.(VMTPM); ok {
+			if err := t.DeleteTPM(ctx, vm); err != nil {
+				return err
+			}
+		}
 		for _, d := range specs {
 			if err := s.opts.VMs.DeleteDisk(ctx, d); err != nil {
 				return err
@@ -630,6 +782,7 @@ func (s *Server) deleteInstance(project, scope, rel string, o obj) (obj, error) 
 		}
 		delete(s.res, rel)
 		s.releaseDisksLocked(rel)
+		s.releaseAddressesLocked(rel)
 		for _, d := range autoDel {
 			delete(s.res, d)
 		}
@@ -773,4 +926,52 @@ func (s *Server) decorateList(list obj) {
 	for i, it := range items {
 		items[i] = s.decorate(it)
 	}
+}
+
+// nicV6OnlyLocked resolves an IPV6_ONLY networkInterfaces[] entry (#2140,
+// compute/docs/instances/create-ipv6-instance#create-vm-ipv6-only): its
+// subnet, IPv6-only or dual-stack, and its IPv6 address; it has no IPv4
+// address, internal or external.
+func (s *Server) nicV6OnlyLocked(project, region, sub string, e map[string]any, i int, field string) (obj, error) {
+	sub = Rel(sub, project)
+	if !strings.Contains(sub, "/") {
+		sub = subnetRel(project, region, sub)
+	}
+	so, ok := s.res[sub]
+	if !ok {
+		return nil, notFound(sub)
+	}
+	if err := s.checkSharedSubnetLocked(project, sub, field+".subnetwork"); err != nil {
+		return nil, err
+	}
+	if lastSeg(str(so, "region")) != region {
+		return nil, invalid("Invalid value for field '%s.subnetwork': '%s'. The subnetwork must be in region '%s'.", field, sub, region)
+	}
+	if ip := str(e, "networkIP"); ip != "" {
+		return nil, invalid("Invalid value for field '%s.networkIP': '%s'. An IPv6-only network interface has no IPv4 address.", field, ip)
+	}
+	if acs, _ := e["accessConfigs"].([]any); len(acs) > 0 {
+		return nil, invalid("Invalid value for field '%s.accessConfigs': an IPv6-only network interface has no external IPv4 address; use ipv6AccessConfigs.", field)
+	}
+	nic := obj{"kind": "compute#networkInterface", "name": "nic" + strconv.Itoa(i), "network": str(so, "network"),
+		"subnetwork": sub, "fingerprint": newFingerprint()}
+	if err := s.nicV6Locked(e, nic, so, field); err != nil {
+		return nil, err
+	}
+	return nic, nil
+}
+
+// debianOrUbuntuLocked is whether the boot disk ad (one of newDisks, or an
+// existing disk) is of a Debian or Ubuntu image, by its source image or
+// licenses.
+func (s *Server) debianOrUbuntuLocked(ad obj, newDisks []obj) bool {
+	src := str(ad, "source")
+	d := s.res[src]
+	for _, nd := range newDisks {
+		if str(nd, "selfLink") == src {
+			d = nd
+		}
+	}
+	text := str(d, "sourceImage") + " " + str(d, "_sourceImage") + " " + strings.Join(strs(d, "licenses"), " ")
+	return strings.Contains(text, "debian") || strings.Contains(text, "ubuntu")
 }

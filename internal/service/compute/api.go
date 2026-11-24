@@ -31,6 +31,31 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveGuest(w, r)
 		return
 	}
+	if r.URL.Path == LBCAPath {
+		// The certificate authority of Google-managed certificates (#2153).
+		s.serveLBCA(w, r)
+		return
+	}
+	if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+		// The xDS API of proxyless gRPC (#2160).
+		s.XDSHandler().ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == XDSBootstrapPath {
+		// A bootstrap file naming this port (#2160), for ?project=P&network=N.
+		s.serveXDSBootstrap(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, IAPRedirectPrefix) {
+		// IAP's OAuth redirect URI, as on iap.googleapis.com (#2160).
+		s.ServeIAPRedirect(w, r)
+		return
+	}
+	if r.URL.Path == IAPKeysPath {
+		// The keys of IAP's signed headers (#2160).
+		s.serveIAPKeys(w, r)
+		return
+	}
 	if !strings.HasPrefix(r.URL.Path, Prefix) {
 		writeError(w, unimplemented("CloudBurrow's Compute Engine API serves %s only (%s %s).", Prefix, r.Method, r.URL.Path))
 		return
@@ -199,6 +224,10 @@ func (s *Server) doLocked(c call) (obj, error) {
 	if rel := iamTarget(c); rel != "" {
 		return s.iamCall(c, rel)
 	}
+	if out, err, ok := s.lbRoute(c); ok {
+		// Cloud Load Balancing (#2153, lb.go).
+		return out, err
+	}
 	p := c.parts
 	get, post, del := c.method == http.MethodGet, c.method == http.MethodPost, c.method == http.MethodDelete
 	patch, put := c.method == http.MethodPatch, c.method == http.MethodPut
@@ -208,6 +237,12 @@ func (s *Server) doLocked(c call) (obj, error) {
 		return s.project(c)
 	case n == 1 && post && p[0] == "setCommonInstanceMetadata":
 		return s.setCommonInstanceMetadata(c)
+	case n == 1 && post && p[0] == "setCloudArmorTier":
+		// Cloud Armor Enterprise (#2160, lbaddressgroups.go).
+		return s.setCloudArmorTier(c)
+	case n == 1 && xpnMethod(p[0]):
+		// Shared VPC (#2140, xpn.go).
+		return s.xpn(c)
 	case n >= 2 && p[0] == "global":
 		coll := p[1]
 		rel := "projects/" + c.project + "/global/" + coll
@@ -226,6 +261,12 @@ func (s *Server) doLocked(c call) (obj, error) {
 				return s.patchNetwork(c.project, p[2], c.body)
 			case n == 4 && post && p[3] == "switchToCustomMode":
 				return s.switchToCustomMode(c.project, p[2])
+			case n == 4 && post && p[3] == "addPeering":
+				return s.addPeering(c.project, p[2], c.body)
+			case n == 4 && post && p[3] == "removePeering":
+				return s.removePeering(c.project, p[2], c.body)
+			case n == 4 && patch && p[3] == "updatePeering":
+				return s.updatePeering(c.project, p[2], c.body)
 			}
 		case "firewalls":
 			switch {
@@ -264,10 +305,17 @@ func (s *Server) doLocked(c call) (obj, error) {
 			case n == 4 && post && p[3] == "setLabels":
 				return s.setLabels(c.project, "global", rel+"/"+p[2], c.body)
 			}
+		case "forwardingRules":
+			// Private Service Connect endpoints for Google APIs (#2140).
+			return s.forwardingRules(c, "")
 		case "operations":
 			return s.operation(c, rel)
 		case "snapshots":
 			return s.snapshots(c)
+		case "instanceTemplates":
+			return s.instanceTemplates(c, "global")
+		case "machineImages":
+			return s.machineImages(c)
 		}
 	case n >= 1 && p[0] == "regions":
 		if n == 1 && get {
@@ -316,8 +364,36 @@ func (s *Server) doLocked(c call) (obj, error) {
 			case n == 5 && post && p[4] == "setLabels":
 				return s.setLabels(c.project, scope, rel+"/"+p[3], c.body)
 			}
+		case "routers":
+			// Cloud Router and Cloud NAT (#2140, routers.go).
+			return s.routers(c, region)
 		case "forwardingRules":
-			return s.forwardingRulesLocked(c, region, p, get, post, del)
+			// Private Service Connect endpoints (#2140, psc.go).
+			return s.forwardingRules(c, region)
+		case "serviceAttachments":
+			return s.serviceAttachments(c, region)
+		case "resourcePolicies":
+			return s.resourcePolicies(c, region)
+		case "disks":
+			return s.regionDisks(c, region)
+		case "diskTypes":
+			return s.regionDiskTypes(c, region)
+		case "instanceTemplates":
+			return s.instanceTemplates(c, "regions/"+region)
+		case "instanceGroupManagers", "instanceGroups", "autoscalers":
+			// Regional managed instance groups and their autoscalers
+			// (#2139): their VMs are zonal instances.
+			if s.opts.VMs == nil {
+				return nil, noVMs()
+			}
+			l := regionLoc(c.project, region)
+			switch p[2] {
+			case "instanceGroupManagers":
+				return s.instanceGroupManagers(c, l)
+			case "instanceGroups":
+				return s.instanceGroups(c, l)
+			}
+			return s.autoscalers(c, l)
 		case "operations":
 			return s.operation(c, rel)
 		}
@@ -342,6 +418,8 @@ func (s *Server) doLocked(c call) (obj, error) {
 		if n >= 3 {
 			return s.zonal(c, zone)
 		}
+	case n == 3 && p[0] == "aggregated" && p[1] == "subnetworks" && p[2] == "listUsable" && get:
+		return s.listUsable(c)
 	case n == 2 && p[0] == "aggregated" && get:
 		return s.aggregated(c, p[1])
 	}
@@ -446,6 +524,20 @@ func (s *Server) aggregated(c call, coll string) (obj, error) {
 		m, kind = s.res, "compute#instanceAggregatedList"
 	case "disks":
 		m, kind = s.res, "compute#diskAggregatedList"
+	case "routers":
+		m, kind = s.res, "compute#routerAggregatedList"
+	case "resourcePolicies":
+		m, kind = s.res, "compute#resourcePolicyAggregatedList"
+	case "instanceTemplates":
+		m, kind = s.res, "compute#instanceTemplateAggregatedList"
+	case "instanceGroups":
+		m, kind = s.res, "compute#instanceGroupAggregatedList"
+	case "instanceGroupManagers":
+		m, kind = s.res, "compute#instanceGroupManagerAggregatedList"
+	case "autoscalers":
+		m, kind = s.res, "compute#autoscalerAggregatedList"
+	case "serviceAttachments":
+		m, kind = s.res, "compute#serviceAttachmentAggregatedList"
 	default:
 		return nil, unimplemented("aggregated/%s is not served", coll)
 	}
@@ -480,6 +572,12 @@ func (s *Server) aggregated(c call, coll string) (obj, error) {
 				// As instances.get: with the SSH address a running
 				// instance's port 22 is forwarded to.
 				o = s.decorate(o)
+			}
+			switch coll {
+			case "instanceGroupManagers":
+				s.refreshManagerLocked(o)
+			case "autoscalers":
+				s.refreshAutoscalerLocked(o)
 			}
 			scopes[scope] = append(scopes[scope], o)
 		}

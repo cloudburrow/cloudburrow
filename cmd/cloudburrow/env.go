@@ -604,6 +604,27 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 	}
 	// App Hub (#2110): gcloud apphub, the Go client, and Terraform's
 	// google_apphub_* through apphub_custom_endpoint.
+	// AlloyDB for PostgreSQL (#2191): gcloud alloydb, the Go client, the
+	// connectors' WithAdminAPIEndpoint, and Terraform's google_alloydb_*
+	// through alloydb_custom_endpoint.
+	if alloyDBEnabled(cfg) && cfg.Endpoints.AlloyDB != 0 {
+		ad := addr(cfg.Endpoints.AlloyDB)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_ALLOYDB", "http://" + ad + "/", "read by gcloud; gcloud alloydb"},
+			envVar{cliEndpointVar("alloydb"), ad,
+				"AlloyDB v1, v1beta and v1alpha, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint, or http://" + ad + " to alloydbconn.WithAdminAPIEndpoint"})
+		if a := recordedAlloyDBTLS(cfg); a != "" {
+			vars = append(vars,
+				envVar{"CLOUDBURROW_ALLOYDB_TLS_ENDPOINT", a,
+					"AlloyDB's admin API over TLS (gRPC and JSON), for the Java and Python connectors, which open only TLS channels; trust CLOUDBURROW_ALLOYDB_CA_FILE"},
+				envVar{"CLOUDBURROW_ALLOYDB_CA_FILE", alloyDBCAFile(cfg),
+					"the certificate authority of AlloyDB's TLS endpoint and of its clusters: gRPC's GRPC_DEFAULT_SSL_ROOTS_FILE_PATH, or a JVM trust store"})
+		}
+		if c := recordedAlloyDBConnector(cfg); c != "" {
+			vars = append(vars, envVar{"CLOUDBURROW_ALLOYDB_CONNECTOR_ENDPOINT", c,
+				"the AlloyDB connectors' TLS listener, moved off port 5433 (another instance holds it); the connectors dial 5433 at the address GetConnectionInfo reports, so only a dialer that redirects reads this"})
+		}
+	}
 	if appHubEnabled(cfg) && cfg.Endpoints.AppHub != 0 {
 		ah := addr(cfg.Endpoints.AppHub)
 		vars = append(vars,
@@ -619,6 +640,14 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{cliEndpointVar("dataform"), addr(cfg.Endpoints.Dataform),
 				"Dataform v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
+	// The Dataproc API's serverless surface (#2156): the Go client's
+	// batch, session and session template controllers, and Spark Connect
+	// clients of its sessions, on one port.
+	if dataprocEnabled(cfg) && cfg.Endpoints.Dataproc != 0 {
+		vars = append(vars,
+			envVar{cliEndpointVar("dataproc"), addr(cfg.Endpoints.Dataproc),
+				"Dataproc v1 batches, sessions and session templates (Serverless for Apache Spark), gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
 	// Cloud Trace (#2118): the Cloud Trace API v1 and v2 for the Go client
 	// and gcloud, and the Telemetry API's OTLP trace ingestion on the same
 	// port, for OpenTelemetry's OTLP exporters (OTLP/gRPC at the root,
@@ -631,6 +660,15 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"Cloud Trace API v1 and v2, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"},
 			envVar{"CLOUDBURROW_TELEMETRY_ENDPOINT", "http://" + tr,
 				"the Telemetry API's OTLP trace ingestion (telemetry.googleapis.com); set OTEL_EXPORTER_OTLP_ENDPOINT to it, with OTEL_EXPORTER_OTLP_INSECURE=true for gRPC"})
+	}
+
+	// Filestore (#2192): the Go client and gcloud filestore (file).
+	if filestoreEnabled(cfg) && cfg.Endpoints.Filestore != 0 {
+		fs := addr(cfg.Endpoints.Filestore)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_FILE", "http://" + fs + "/", "read by gcloud; gcloud filestore"},
+			envVar{cliEndpointVar("filestore"), fs,
+				"Filestore v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
 	}
 
 	// The Kubernetes Engine API (#1913): gcloud container clusters and
@@ -880,7 +918,10 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"workflows":              &e.Workflows,
 		"parametermanager":       &e.ParameterManager,
 		"dataform":               &e.Dataform,
+		"dataproc":               &e.Dataproc,
 		"apphub":                 &e.AppHub,
+		"alloydb":                &e.AlloyDB,
+		"filestore":              &e.Filestore,
 		"trace":                  &e.Trace,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
 		// and Endpoints (#1940) to gcloud-setup and terraform, and Document

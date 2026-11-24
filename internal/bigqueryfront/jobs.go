@@ -73,6 +73,8 @@ type jobBody struct {
 			WriteDisposition string    `json:"writeDisposition"` // #1067
 			// SchemaUpdateOptions, for a WRITE_TRUNCATE_DATA (#1083).
 			SchemaUpdateOptions []string `json:"schemaUpdateOptions"`
+			// Continuous, a continuous query (#2094, continuousjob.go).
+			Continuous bool `json:"continuous"`
 		} `json:"query"`
 		Copy    *copyConfig    `json:"copy"`
 		Extract *extractConfig `json:"extract"`
@@ -119,6 +121,9 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 	project := job.JobReference.ProjectID
 	if project == "" {
 		project = projectOf(f.base)
+	}
+	if f.continuous(w, r, project, job, created) { // #2094, #2193, continuousjob.go
+		return
 	}
 	if f.duplicateJob(w, r, project, given) { // #1622
 		return
@@ -503,6 +508,7 @@ func (f front) query(w http.ResponseWriter, r *http.Request) {
 		writeError(answer, http.StatusBadRequest, e.Reason, e.Message)
 	} else {
 		noRetry(answer, rec, qf)
+		f.optionalJobCreation(r, raw, answer) // #2094, optionaljob.go
 	}
 	f.recordFailedQuery(r, raw, answer.status, answer.body.Bytes(), created) // #1397, failedjobs.go
 	f.records.timed(w, answer, created, projectOf(f.base), "", false)

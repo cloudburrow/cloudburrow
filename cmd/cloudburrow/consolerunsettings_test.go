@@ -19,7 +19,7 @@ func TestRunSettingsFieldsRoundTrip(t *testing.T) {
 	}
 	if tmpl.ExecutionEnvironment != runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_GEN2 ||
 		tmpl.VpcAccess.GetConnector() != "projects/p/locations/us-central1/connectors/c" ||
-		tmpl.VpcAccess.GetEgress() != runpb.VpcAccess_ALL_TRAFFIC || len(tmpl.VpcAccess.GetNetworkInterfaces()) != 1 ||
+		tmpl.VpcAccess.GetEgress() != runpb.VpcAccess_ALL_TRAFFIC || len(tmpl.VpcAccess.GetNetworkInterfaces()) != 0 ||
 		tmpl.EncryptionKey != "k" || !tmpl.SessionAffinity {
 		t.Fatalf("applied = %v", tmpl)
 	}
@@ -27,6 +27,30 @@ func TestRunSettingsFieldsRoundTrip(t *testing.T) {
 	if d["executionEnvironment"] != "Second generation" || d["vpcEgress"] != "All traffic" ||
 		d["vpcConnector"] != tmpl.VpcAccess.Connector || d["encryptionKey"] != "k" || d["sessionAffinity"] != "true" {
 		t.Errorf("defaults = %v", d)
+	}
+	if d["vpcMode"] != "connector" {
+		t.Errorf("vpcMode = %q, want connector", d["vpcMode"])
+	}
+	// Send traffic directly to a VPC (#2140): the connector gives way to
+	// a network interface, since Cloud Run refuses the two together.
+	direct := &runpb.RevisionTemplate{VpcAccess: &runpb.VpcAccess{Connector: "old"}}
+	ds := runSettings{&direct.ExecutionEnvironment, &direct.VpcAccess, &direct.EncryptionKey, nil}
+	if err := applyRunSettings(ds, map[string]string{"vpcMode": "direct", "vpcNetwork": "default", "vpcSubnet": "sub",
+		"vpcTags": "a, b", "vpcEgress": "All traffic"}); err != nil {
+		t.Fatal(err)
+	}
+	if v := direct.VpcAccess; v.GetConnector() != "" || len(v.GetNetworkInterfaces()) != 1 || v.GetNetworkInterfaces()[0].GetSubnetwork() != "sub" ||
+		len(v.GetNetworkInterfaces()[0].GetTags()) != 2 || v.GetEgress() != runpb.VpcAccess_ALL_TRAFFIC {
+		t.Errorf("direct = %v", v)
+	}
+	if d := runSettingsDefaults(0, direct.VpcAccess, "", false); d["vpcMode"] != "direct" || d["vpcNetwork"] != "default" || d["vpcTags"] != "a, b" {
+		t.Errorf("direct defaults = %v", d)
+	}
+	if err := applyRunSettings(ds, map[string]string{"vpcMode": "direct"}); err == nil {
+		t.Error("direct with no network was accepted")
+	}
+	if err := applyRunSettings(ds, map[string]string{"vpcMode": "none"}); err != nil || direct.VpcAccess != nil {
+		t.Errorf("none = %v (%v)", direct.VpcAccess, err)
 	}
 	// Nothing sent: nothing changes.
 	if err := applyRunSettings(s, map[string]string{}); err != nil || tmpl.EncryptionKey != "k" || tmpl.VpcAccess == nil {

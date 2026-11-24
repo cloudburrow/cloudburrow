@@ -3,6 +3,33 @@
 # internal IP Compute Engine reserved for the guest in its subnet is on
 # vpc0, which cloudburrow-vpc.service keeps (#1968).
 set -u
+# The metadata server's addresses (#2177): 169.254.169.254 and, where the
+# guest has IPv6, fd20:ce::254, on lo, and their port 80 carried to
+# metadata-server on 127.0.0.1:8169 and [::1]:8169 (a DNAT of the guest's own
+# connections), so the guest's port 80 stays its own, as on Compute Engine;
+# their port 443, the HTTPS metadata server of a Shielded VM (#2179), to
+# metadata-server's 127.0.0.1:8170 and [::1]:8170.
+ip addr replace 169.254.169.254/32 dev lo
+v6=""
+if [ -e /proc/sys/net/ipv6/conf/lo/disable_ipv6 ]; then
+  echo 0 > /proc/sys/net/ipv6/conf/lo/disable_ipv6 2>/dev/null
+  ip -6 addr replace fd20:ce::254/128 dev lo nodad 2>/dev/null && v6=1
+fi
+{
+  echo "table inet cloudburrow_metadata"
+  echo "delete table inet cloudburrow_metadata"
+  echo "table inet cloudburrow_metadata {"
+  echo "  chain output {"
+  echo "    type nat hook output priority -100; policy accept;"
+  echo "    ip daddr 169.254.169.254 tcp dport 80 dnat ip to 127.0.0.1:8169"
+  echo "    ip daddr 169.254.169.254 tcp dport 443 dnat ip to 127.0.0.1:8170"
+  [ -n "$v6" ] && echo "    ip6 daddr fd20:ce::254 tcp dport 80 dnat ip6 to [::1]:8169"
+  [ -n "$v6" ] && echo "    ip6 daddr fd20:ce::254 tcp dport 443 dnat ip6 to [::1]:8170"
+  echo "  }"
+  echo "}"
+} > /run/cloudburrow-metadata.nft
+nft -f /run/cloudburrow-metadata.nft || echo "CloudBurrow guest: cannot route the metadata server's address" | /usr/lib/cloudburrow/console cloudburrow-network
+grep -q '[[:space:]]metadata\.google\.internal' /etc/hosts 2>/dev/null || echo '169.254.169.254 metadata.google.internal metadata' >> /etc/hosts
 {
   [ -n "${GCE_METADATA_HOST:-}" ] && echo "GCE_METADATA_HOST=${GCE_METADATA_HOST}"
   [ -n "${GOOGLE_CLOUD_PROJECT:-}" ] && echo "GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}"

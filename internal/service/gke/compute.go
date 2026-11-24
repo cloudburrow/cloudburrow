@@ -147,6 +147,14 @@ func (s *Server) ServeInstanceGroupManagers(w http.ResponseWriter, r *http.Reque
 	return false
 }
 
+// InstanceGroupManagers are a zone's node-pool groups, by name, for the
+// Compute Engine API to list beside its own (#2139).
+func (s *Server) InstanceGroupManagers(project, zone string) map[string]map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.zoneIGMsLocked(project, zone)
+}
+
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	_ = json.NewEncoder(w).Encode(v)

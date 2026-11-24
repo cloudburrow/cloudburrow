@@ -186,6 +186,7 @@ type rawFlags struct {
 	cloudsqlConn     string
 	allowRemote      bool
 	cbHostSteps      bool
+	allowUnconfined  bool
 	acceptMSSQLEULA  bool
 	appEngineURL     string
 	emulatorHeapMiB  int
@@ -218,7 +219,10 @@ type rawFlags struct {
 	workflows        int
 	parameterManager int
 	dataform         int
+	dataproc         int
 	appHub           int
+	alloyDB          int
+	filestore        int
 	onnx             int
 	tfconvert        int
 	spark            int
@@ -316,7 +320,10 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.workflows, "port-workflows", 0, "Workflows and Workflow Executions API host port (0 = OS-assigned; default 9038)")
 	fs.IntVar(&r.parameterManager, "port-parametermanager", 0, "Parameter Manager API host port (0 = OS-assigned; default 9047)")
 	fs.IntVar(&r.dataform, "port-dataform", 0, "Dataform API host port (0 = OS-assigned; default 9058)")
+	fs.IntVar(&r.dataproc, "port-dataproc", 0, "Dataproc API (Serverless for Apache Spark) host port (0 = OS-assigned; default 9066)")
 	fs.IntVar(&r.appHub, "port-apphub", 0, "App Hub API host port (0 = OS-assigned; default 9048)")
+	fs.IntVar(&r.alloyDB, "port-alloydb", 0, "AlloyDB for PostgreSQL API host port (0 = OS-assigned; default 9063)")
+	fs.IntVar(&r.filestore, "port-filestore", 0, "Filestore API host port (0 = OS-assigned; default 9071)")
 	fs.IntVar(&r.onnx, "port-onnx", 0, "ONNX runner host port, for BigQuery ML's imported ONNX models in the onnx build (0 = OS-assigned; default 9025)")
 	fs.IntVar(&r.spark, "port-spark", 0, "Spark procedure runner host port, for BigQuery's stored procedures for Apache Spark (0 = OS-assigned; default 9049)")
 	fs.IntVar(&r.tfconvert, "port-tfconvert", 0, "TensorFlow SavedModel converter host port, for BigQuery ML's imported TENSORFLOW models (0 = OS-assigned; default 9027)")
@@ -362,6 +369,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.iamEnforcement, "iam-enforcement", "", "IAM enforcement: off (policies are stored, never checked) or on (mapped API methods check the caller's permissions, as on Google) (default off)")
 	fs.BoolVar(&r.acceptMSSQLEULA, "accept-mssql-eula", false, "accept Microsoft's End-User Licensing Agreement for SQL Server ("+MSSQLEULAURL+") yourself, for the Cloud SQL for SQL Server instances this instance creates: their servers run Microsoft's SQL Server image, which starts only once it is accepted; who accepted and when is recorded on each instance (also CLOUDBURROW_ACCEPT_MSSQL_EULA=Y)")
 	fs.BoolVar(&r.cbHostSteps, "cloudbuild-host-steps", false, "let Cloud Build run steps other than docker build, docker push and pack, for builds submitted from this machine's loopback only; each runs as a container with the host's Docker socket, which gives it control of the host (unsafe)")
+	fs.BoolVar(&r.allowUnconfined, "allow-unconfined-containers", false, "let the Dataproc DOCKER optional component run each node's Docker daemon with seccomp, AppArmor and the /proc and /sys masks unconfined, which weakens the isolation between those containers and this machine (unsafe; also CLOUDBURROW_ALLOW_UNCONFINED_CONTAINERS=true)")
 	fs.StringVar(&r.appEngineURL, "appengine-url", "", "base URL of a local HTTP server standing in for the App Engine app, such as http://localhost:8080: Cloud Tasks and Cloud Scheduler deliver App Engine targets there (default: none, and every App Engine attempt fails 404)")
 	fs.IntVar(&r.emulatorHeapMiB, "emulator-heap-mib", 0, fmt.Sprintf("maximum Java heap, in MiB, of the Pub/Sub, Firestore and Datastore emulators, which also sizes their containers' memory limit; 0 = unbounded (default %d)", DefaultEmulatorHeapMiB))
 	fs.IntVar(&r.bigQueryHeapMiB, "bigquery-heap-mib", 0, fmt.Sprintf("GOMEMLIMIT, in MiB, of the BigQuery emulator, which also sizes its container's memory request; a soft limit, past which it collects more often; 0 = none (default %d)", DefaultBigQueryHeapMiB))
@@ -468,6 +476,11 @@ func refuseFileExposure(cfg *Config, path string, explicit bool, keys map[string
 			"a discovered file cannot let builds run containers with the host's Docker socket (#1382): pass "+
 			"--cloudbuild-host-steps (or %sCLOUDBUILD_HOST_STEPS=true, or name the file with --config), and remove the key", path, EnvPrefix)
 	}
+	if !explicit && cfg.AllowUnconfinedContainers {
+		return fmt.Errorf("config file %s, found in the working directory, sets allowUnconfinedContainers; "+
+			"a discovered file cannot let containers run with seccomp, AppArmor and the /proc and /sys masks unconfined (#2162): pass "+
+			"--allow-unconfined-containers (or %sALLOW_UNCONFINED_CONTAINERS=true, or name the file with --config), and remove the key", path, EnvPrefix)
+	}
 	if _, ok := keys["bindAddress"]; ok && !explicit {
 		if ip := net.ParseIP(cfg.BindAddress); ip != nil && !ip.IsLoopback() {
 			return fmt.Errorf("config file %s, found in the working directory, sets bindAddress %q, a non-loopback address; "+
@@ -540,7 +553,10 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_WORKFLOWS", &cfg.Endpoints.Workflows},
 		{"PORT_PARAMETERMANAGER", &cfg.Endpoints.ParameterManager},
 		{"PORT_DATAFORM", &cfg.Endpoints.Dataform},
+		{"PORT_DATAPROC", &cfg.Endpoints.Dataproc},
 		{"PORT_APPHUB", &cfg.Endpoints.AppHub},
+		{"PORT_ALLOYDB", &cfg.Endpoints.AlloyDB},
+		{"PORT_FILESTORE", &cfg.Endpoints.Filestore},
 		{"PORT_ONNX", &cfg.Endpoints.ONNX},
 		{"PORT_TFCONVERT", &cfg.Endpoints.TFConvert},
 		{"PORT_SPARK", &cfg.Endpoints.Spark},
@@ -650,6 +666,13 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		}
 		cfg.CloudBuildHostSteps = b
 	}
+	if v := getenv(EnvPrefix + "ALLOW_UNCONFINED_CONTAINERS"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("%sALLOW_UNCONFINED_CONTAINERS: must be a boolean (got %q)", EnvPrefix, v)
+		}
+		cfg.AllowUnconfinedContainers = b
+	}
 	if v := getenv(EnvPrefix + "CORS_ALLOW_ORIGIN"); v != "" {
 		cfg.Storage.CORSAllowOrigins = splitList(v)
 	}
@@ -703,7 +726,10 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-workflows", raw.workflows, &cfg.Endpoints.Workflows},
 		{"port-parametermanager", raw.parameterManager, &cfg.Endpoints.ParameterManager},
 		{"port-dataform", raw.dataform, &cfg.Endpoints.Dataform},
+		{"port-dataproc", raw.dataproc, &cfg.Endpoints.Dataproc},
 		{"port-apphub", raw.appHub, &cfg.Endpoints.AppHub},
+		{"port-alloydb", raw.alloyDB, &cfg.Endpoints.AlloyDB},
+		{"port-filestore", raw.filestore, &cfg.Endpoints.Filestore},
 		{"port-onnx", raw.onnx, &cfg.Endpoints.ONNX},
 		{"port-tfconvert", raw.tfconvert, &cfg.Endpoints.TFConvert},
 		{"port-spark", raw.spark, &cfg.Endpoints.Spark},
@@ -798,6 +824,9 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["cloudbuild-host-steps"] {
 		cfg.CloudBuildHostSteps = raw.cbHostSteps
+	}
+	if set["allow-unconfined-containers"] {
+		cfg.AllowUnconfinedContainers = raw.allowUnconfined
 	}
 	if set["accept-mssql-eula"] {
 		cfg.AcceptMSSQLEULA = raw.acceptMSSQLEULA

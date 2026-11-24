@@ -70,6 +70,16 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"bigquery-sharing": unverified,
 	// More actions > Delete, then enter delete to confirm (docs read 2026-11-21).
 	"bigquery-clean-rooms": {Style: DeleteConfirmWord, Source: "https://docs.cloud.google.com/bigquery/docs/data-clean-rooms", Verified: true},
+	// Capacity management and BI Engine (#2193): Google's reservations,
+	// commitments and BI Engine guides say "click Delete" and describe no
+	// dialog (UNVERIFIED (re-read 2026-11-23:
+	// https://docs.cloud.google.com/bigquery/docs/reservations-tasks,
+	// https://docs.cloud.google.com/bigquery/docs/reservations-commitments,
+	// https://docs.cloud.google.com/bigquery/docs/bi-engine-reserve-capacity)).
+	"bigquery-capacity":           unverified,
+	"bigquery-commitments":        unverified,
+	"bigquery-reservation-groups": unverified,
+	"bigquery-bi-engine":          unverified,
 	// UNVERIFIED: "Select the checkbox for the roles ... click Delete." No dialog described (docs re-read 2026-11-19).
 	"iam-roles": unverified,
 	// "Confirm that you want to delete the group by clicking Confirm in the confirmation dialog."
@@ -126,6 +136,8 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"cloud-build-worker-pools": unverified,
 	// UNVERIFIED: gcloud steps only (docs re-read 2026-11-19)
 	"secure-source-manager": unverified,
+	// UNVERIFIED: "From the More menu, select Delete." No dialog described (docs re-read 2026-11-22).
+	"developer-connect-account-connectors": unverified,
 	// UNVERIFIED: "select the repository to delete. Click Delete." No dialog described (docs re-read 2026-11-19).
 	"artifact-registry": unverified,
 	// UNVERIFIED: no console steps for deleting a function (docs re-read 2026-11-19)
@@ -214,6 +226,36 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// described (docs re-read 2026-11-19:
 	// https://docs.cloud.google.com/vertex-ai/docs/predictions/undeploy-model).
 	"vertex-endpoints": unverified,
+	// Colab Enterprise runtimes (#2105): "select the runtime ... click
+	// Delete ... click Confirm" (https://docs.cloud.google.com/colab/docs/manage-runtimes).
+	"colab-runtimes": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/colab/docs/manage-runtimes", Verified: true},
+	// Colab Enterprise executions (#2105): "Select the notebook run that you
+	// want to delete the result for. Click Delete. To confirm the deletion,
+	// click Confirm." (https://docs.cloud.google.com/colab/docs/schedule-notebook-run).
+	"colab-executions": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/colab/docs/schedule-notebook-run", Verified: true},
+	// UNVERIFIED (re-read 2026-11-22): "Click Pause, Resume, or Delete." for a
+	// schedule, no dialog described
+	// (https://docs.cloud.google.com/colab/docs/schedule-notebook-run).
+	"colab-schedules": unverified,
+	// Vertex AI Pipelines' schedules (#2173): "click Delete, then click
+	// Delete again to confirm" from the row's options menu
+	// (https://docs.cloud.google.com/vertex-ai/docs/pipelines/schedule-pipeline-run).
+	"vertex-pipeline-schedules": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/vertex-ai/docs/pipelines/schedule-pipeline-run", Verified: true},
+	// UNVERIFIED (re-read 2026-11-22): deleting a pipeline run from the
+	// console is not described (run-pipeline, schedule-pipeline-run).
+	"vertex-pipeline-runs": unverified,
+	// Vertex AI Workbench instances (#2173): "click Delete ... To confirm,
+	// click Confirm"
+	// (https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart).
+	"workbench-instances": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart", Verified: true},
+	// My notebooks (#2105): "click the Actions menu, and then select Delete
+	// notebook. In the Delete notebook dialog, click Confirm."
+	// (https://docs.cloud.google.com/colab/docs/create-console-quickstart).
+	"colab-notebooks": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/colab/docs/create-console-quickstart", Verified: true},
+	// UNVERIFIED (re-read 2026-11-22): Google's console documents no Delete
+	// for a runtime template, which the API has
+	// (https://docs.cloud.google.com/colab/docs/create-runtime-template).
+	"colab-templates": unverified,
 	// UNVERIFIED: Metrics management documents deleting exclusion rules
 	// only, not a metric (docs re-read 2026-11-19:
 	// https://docs.cloud.google.com/monitoring/metrics-management).
@@ -241,10 +283,6 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"vpc-firewalls": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/firewall/docs/using-firewalls", Verified: true},
 	// "Click Delete again to confirm."
 	"vpc-routes": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/vpc/docs/using-routes", Verified: true},
-	// Private Service Connect endpoints (#2141). UNVERIFIED: the dialog is
-	// not described (docs re-read 2026-11-22:
-	// https://docs.cloud.google.com/vpc/docs/configure-private-service-connect-services).
-	"vpc-psc": unverified,
 	// Service connection policies (#2141). UNVERIFIED: the dialog is not
 	// described (docs re-read 2026-11-22:
 	// https://docs.cloud.google.com/vpc/docs/configure-service-connection-policies).
@@ -254,6 +292,11 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// click Delete." No dialog described (docs re-read 2026-11-20:
 	// https://docs.cloud.google.com/compute/docs/disks/manage-snapshots).
 	"compute-snapshots": unverified,
+	// Compute Engine machine images (#2139). UNVERIFIED: "Select the
+	// machine images you want to delete, then click Delete." No dialog
+	// described (docs re-read 2026-11-22:
+	// https://docs.cloud.google.com/compute/docs/machine-images/manage-machine-images).
+	"compute-machine-images": unverified,
 }
 
 // deleteConfirmOf is p's confirmation style, empty for the default.

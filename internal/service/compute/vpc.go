@@ -1,6 +1,7 @@
 package compute
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"hash/fnv"
 	"net"
@@ -39,6 +40,12 @@ const podFresh = 30 * time.Second
 // metadata server.
 var ClusterCIDRs = []string{"10.244.0.0/16", "10.96.0.0/12"}
 
+// PrivateRanges are the addresses a VM with neither an external IP nor a
+// Cloud NAT gateway still reaches over its pod interface: RFC 1918's and
+// the shared address space, where this machine's Docker networks and
+// CloudBurrow's endpoints are. Every other address is the internet's.
+var PrivateRanges = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"}
+
 type podSeen struct {
 	ip   string
 	seen time.Time
@@ -69,8 +76,19 @@ func macOf(ip string) string {
 type vmNet struct {
 	rel, name, zone, project string
 	network, ip, sa          string
+	ip6                      string // the interface's IPv6 address, if dual-stack (ipv6.go)
+	gateway                  bool   // a Cloud Run gateway (gateways.go), not a VM
+	speaker                  bool   // a Cloud Router interface's BGP speaker (bgpspeakers.go)
 	tags                     []string
 	running                  bool
+	// noInternet is a VM whose primary interface has no external IP and
+	// that no Cloud NAT gateway translates (#2140): it has no route to the
+	// internet, as on Google.
+	noInternet bool
+	// relay6 are the IPv6 internal forwarding rule addresses the VM
+	// reaches through its relay (vpcservices.go), which its egress
+	// firewall rules apply to on lo.
+	relay6 []string
 }
 
 func vmNetOf(rel string, o obj) (vmNet, bool) {
@@ -80,7 +98,12 @@ func vmNetOf(rel string, o obj) (vmNet, bool) {
 	}
 	nic, _ := nics[0].(map[string]any)
 	v := vmNet{rel: rel, name: str(o, "name"), zone: lastSeg(str(o, "zone")), project: strings.Split(rel, "/")[1],
-		network: str(nic, "network"), ip: str(nic, "networkIP"), running: str(o, "status") == stRunning}
+		network: str(nic, "network"), ip: str(nic, "networkIP"), running: str(o, "status") == stRunning, ip6: str(nic, "ipv6Address")}
+	for _, a := range listOf(nic["ipv6AccessConfigs"]) {
+		if ac, ok := a.(map[string]any); ok && v.ip6 == "" {
+			v.ip6 = str(ac, "externalIpv6")
+		}
+	}
 	if t, ok := o["tags"].(map[string]any); ok {
 		v.tags = strsAny(t["items"])
 	}
@@ -92,6 +115,33 @@ func vmNetOf(rel string, o obj) (vmNet, bool) {
 }
 
 func (v vmNet) fqdn() string { return v.name + "." + v.zone + ".c." + v.project + ".internal" }
+
+// vmNetAny is vmNetOf, also for an IPv6-only interface (ipv6.go), which
+// has an IPv6 address and no IPv4 one.
+func vmNetAny(rel string, o obj) (vmNet, bool) {
+	v, _ := vmNetOf(rel, o)
+	return v, v.network != "" && (v.ip != "" || v.ip6 != "")
+}
+
+// mac is the MAC address v's vpc0 takes: of its IPv4 address (macOf), or,
+// IPv6-only, 42:02 and four bytes of a hash of its IPv6 address, apart
+// from every IPv4-derived one.
+func (v vmNet) mac() string {
+	if v.ip != "" {
+		return macOf(v.ip)
+	}
+	h := sha256.Sum256([]byte(v.ip6))
+	return fmt.Sprintf("42:02:%02x:%02x:%02x:%02x", h[0], h[1], h[2], h[3])
+}
+
+// dnsIP is the address v's internal DNS name resolves to on its network:
+// its IPv4 address, or its IPv6 one when it has none.
+func (v vmNet) dnsIP() string {
+	if v.ip != "" {
+		return v.ip
+	}
+	return v.ip6
+}
 
 // serveVPC answers a guest's poll for its network configuration.
 func (s *Server) serveVPC(w http.ResponseWriter, r *http.Request, inst obj) {
@@ -111,9 +161,13 @@ func (s *Server) serveVPC(w http.ResponseWriter, r *http.Request, inst obj) {
 // reported pod IP.
 func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 	rel := str(inst, "selfLink")
-	self, ok := vmNetOf(rel, inst)
+	self, ok := vmNetAny(rel, inst)
 	if !ok {
 		return "", false
+	}
+	if nics := sliceOf(inst["networkInterfaces"]); len(nics) > 0 {
+		nic, _ := nics[0].(map[string]any)
+		self.noInternet = len(sliceOf(nic["accessConfigs"])) == 0 && !s.natInternetLocked(inst)
 	}
 	if s.pods == nil {
 		s.pods = map[string]podSeen{}
@@ -125,56 +179,250 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	var members []vmNet
+	// An ACTIVE peering (#2140) puts the peer network's VMs and subnet
+	// ranges beside the network's own: its subnet routes are exchanged, as
+	// Google always exchanges them, and every network of a peering group
+	// shares one VXLAN segment. Peering is not transitive: only directly
+	// peered networks' VMs get forwarding entries and routes, so a third
+	// network peered with the peer stays unreachable. The network's own
+	// firewall rules still decide, and their source tags and service
+	// accounts select its own VMs only, as Google's do across a peering.
+	peered := s.peeredNetworksLocked(self.network)
+	reach := map[string]bool{self.network: true}
+	for _, n := range peered {
+		reach[n] = true
+	}
+	var members, reachable []vmNet
 	for k, o := range s.res {
 		if !strings.Contains(k, "/instances/") {
 			continue
 		}
-		if v, ok := vmNetOf(k, o); ok && v.network == self.network {
-			members = append(members, v)
-		}
-	}
-	sort.Slice(members, func(i, j int) bool { return members[i].rel < members[j].rel })
-	var subnets []string
-	for k, o := range s.res {
-		if strings.Contains(k, "/subnetworks/") && str(o, "network") == self.network {
-			if c := str(o, "ipCidrRange"); c != "" {
-				subnets = append(subnets, c)
+		if v, ok := vmNetAny(k, o); ok && reach[v.network] {
+			reachable = append(reachable, v)
+			if v.network == self.network {
+				members = append(members, v)
 			}
 		}
 	}
+	// Cloud Run's gateways (gateways.go) are members too.
+	for _, v := range s.gatewayVMNetsLocked() {
+		if reach[v.network] {
+			reachable = append(reachable, v)
+			if v.network == self.network {
+				members = append(members, v)
+			}
+		}
+	}
+	// So are Cloud Router's BGP speakers (bgpspeakers.go).
+	for _, v := range s.speakerVMNetsLocked() {
+		if reach[v.network] {
+			reachable = append(reachable, v)
+			if v.network == self.network {
+				members = append(members, v)
+			}
+		}
+	}
+	// And Cloud NAT gateways' pods (natgateways.go), of their own network.
+	for _, v := range s.natVMNetsLocked() {
+		if v.network == self.network {
+			reachable = append(reachable, v)
+			members = append(members, v)
+		}
+	}
+	_, isGateway := inst["_gateway"].(string)
+	natKey, isNAT := inst["_natGateway"].(string)
+	self.gateway = isGateway || isNAT
+	_, self.speaker = inst["_speaker"].(string)
+	sort.Slice(members, func(i, j int) bool { return members[i].rel < members[j].rel })
+	sort.Slice(reachable, func(i, j int) bool { return reachable[i].rel < reachable[j].rel })
+	var subnets, subnets6 []string
+	for k, o := range s.res {
+		if strings.Contains(k, "/subnetworks/") && reach[str(o, "network")] {
+			if c := str(o, "ipCidrRange"); c != "" {
+				subnets = append(subnets, c)
+			}
+			if c := str(o, "ipv6CidrRange"); c != "" && (str(o, "network") == self.network || s.dualStackPeeringLocked(self.network, str(o, "network"))) {
+				// A peer network's IPv6 ranges only over a dual-stack peering.
+				subnets6 = append(subnets6, c)
+			}
+		}
+	}
+	subnets = append(subnets, s.gatewayRangesLocked(reach)...)
 	sort.Strings(subnets)
+	sort.Strings(subnets6)
 	mtu := 1460
 	if v, ok := nw["mtu"].(float64); ok && v > 0 {
 		mtu = int(v)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "vni %d\nmtu %d\naddr %s\nmac %s\n", vniOf(str(nw, "id")), mtu, self.ip, macOf(self.ip))
-	for _, c := range subnets {
-		fmt.Fprintf(&b, "route %s\n", c)
+	fmt.Fprintf(&b, "vni %d\nmtu %d\n", vniOf(s.segmentIDLocked(self.network, str(nw, "id"))), mtu)
+	if self.ip != "" {
+		// An IPv6-only interface has no IPv4 address and no IPv4 route.
+		fmt.Fprintf(&b, "addr %s\n", self.ip)
+		for _, c := range subnets {
+			fmt.Fprintf(&b, "route %s\n", c)
+		}
+		// Dynamic routes Cloud Router learned (bgpspeakers.go).
+		b.WriteString(s.routeViaLocked(self))
+	}
+	fmt.Fprintf(&b, "mac %s\n", self.mac())
+	if self.ip6 != "" {
+		// IPv6 on the same segment (ipv6.go): the guest's address, the
+		// network's dual-stack /64s on-link, and each peer's address.
+		fmt.Fprintf(&b, "addr6 %s\n", self.ip6)
+		for _, c := range subnets6 {
+			fmt.Fprintf(&b, "route6 %s\n", c)
+		}
 	}
 	var peerPods []string
 	now := s.opts.Now()
-	for _, m := range members {
-		fmt.Fprintf(&b, "host %s %s %s\n", m.ip, m.fqdn(), m.name)
+	for _, m := range reachable {
+		if m.network == self.network && !m.gateway && !m.speaker {
+			// Internal DNS names are the network's own: a peer's are not
+			// shared without DNS peering, as on Google.
+			fmt.Fprintf(&b, "host %s %s %s\n", m.dnsIP(), m.fqdn(), m.name)
+		}
 		if m.rel == rel || !m.running {
 			continue
 		}
 		if p, ok := s.pods[m.rel]; ok && now.Sub(p.seen) < podFresh {
-			fmt.Fprintf(&b, "peer %s %s %s\n", m.ip, macOf(m.ip), p.ip)
+			// Each family only where both ends have it; peer6 carries the
+			// pod too, for an IPv6-only end's forwarding entry.
+			if m.ip != "" && self.ip != "" {
+				fmt.Fprintf(&b, "peer %s %s %s\n", m.ip, m.mac(), p.ip)
+			}
+			if m.ip6 != "" && self.ip6 != "" {
+				fmt.Fprintf(&b, "peer6 %s %s %s\n", m.ip6, m.mac(), p.ip)
+			}
 			peerPods = append(peerPods, p.ip)
 		}
 	}
-	b.WriteString("nft\n")
-	fw := firewallNFT(self, members, s.firewallsOfLocked(self.network), peerPods)
-	var eps []PrivateService
-	if s.opts.PrivateServices != nil {
-		eps = s.opts.PrivateServices(self.network)
+	relayText, relayChain := s.relayConfigLocked(self, str(inst, "_guestToken"), reach)
+	b.WriteString(relayText)
+	hook := "output"
+	var table string
+	if isNAT {
+		// A Cloud NAT gateway's pod translates (natgateways.go).
+		var lines string
+		lines, table = s.natPodConfigLocked(natKey, peerPods)
+		b.WriteString(lines)
+		hook = ""
+	} else if self.gateway {
+		// A gateway forwards (gateways.go): what it carries leaves for the
+		// internet only through Cloud NAT, as a VM without an external IP.
+		g := s.gateways[inst["_gateway"].(string)]
+		internet := g != nil && g.AllTraffic && s.natInternetLocked(obj{"zone": inst["zone"],
+			"networkInterfaces": []any{obj{"network": g.Network, "subnetwork": g.Subnetwork}}})
+		b.WriteString("forward\n")
+		table = gatewayNFT(self, peerPods, internet)
+		hook = "prerouting"
+	} else if self.speaker {
+		table = speakerNFT(peerPods)
+	} else {
+		// Cloud NAT's route to the internet (natgateways.go): until its
+		// gateway's pod runs, the VM has none, as without Cloud NAT.
+		natConf := s.natVMConfigLocked(inst, self)
+		if nics := sliceOf(inst["networkInterfaces"]); natConf == "" && len(nics) > 0 && len(sliceOf(objOf(nics[0])["accessConfigs"])) == 0 {
+			self.noInternet = true
+		}
+		// IPv6 internal load balancers (vpcservices.go): through relay6.
+		for _, v := range s.vpcServicesLocked(self, reach) {
+			if v.v6 && self.ip6 != "" {
+				fmt.Fprintf(&b, "relay6 %s %d %s\n", v.ip, v.port, v.to)
+				if !hasStr(self.relay6, v.ip) {
+					self.relay6 = append(self.relay6, v.ip)
+				}
+			}
+		}
+		table = firewallNFT(self, members, s.firewallsOfLocked(self.network), peerPods)
+		// Private services access and Cloud SQL's Private Service Connect
+		// endpoints (#2141).
+		var eps []PrivateService
+		if s.opts.PrivateServices != nil {
+			eps = s.opts.PrivateServices(self.network)
+		}
+		eps = append(eps, s.pscEndpointsLocked(self.network, regionOfZone(self.zone))...)
+		table = withPrivateServices(table, eps)
+		b.WriteString(natConf)
 	}
-	eps = append(eps, s.pscEndpointsLocked(self.network, regionOfZone(self.zone))...)
-	fw = withPrivateServices(fw, eps)
-	b.WriteString(fw)
+	b.WriteString("nft\n")
+	svcs := s.vpcServicesLocked(self, reach)
+	if relayChain != "" {
+		// The VM relay (#2160) carries the load balancers and endpoints it
+		// relays itself, with the VM's identity: those stay out of the
+		// DNAT chain, which keeps the rest.
+		relayed := map[string]bool{}
+		for _, v := range s.relayVIPsLocked(self, reach) {
+			if !v.udp {
+				relayed[v.dst.String()] = true
+			}
+		}
+		kept := svcs[:0]
+		for _, sv := range svcs {
+			if !relayed[net.JoinHostPort(sv.ip, strconv.Itoa(sv.port))] {
+				kept = append(kept, sv)
+			}
+		}
+		svcs = kept
+	}
+	if svc := servicesNFT(svcs, hook); hook != "" && svc != "" {
+		// Internal load balancers and endpoints (vpcservices.go), in the
+		// same table, before its closing brace.
+		table = strings.TrimSuffix(table, "}\n") + svc + "}\n"
+	}
+	if relayChain != "" && hook == "output" {
+		table = strings.TrimSuffix(table, "}\n") + relayChain + "}\n"
+	}
+	b.WriteString(table)
 	return b.String(), true
+}
+
+// peeredNetworksLocked are the networks network has an ACTIVE peering
+// with (#2140), sorted.
+func (s *Server) peeredNetworksLocked(network string) []string {
+	o, ok := s.res[network]
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, e := range s.peeringsLocked(o) {
+		if m, _ := e.(map[string]any); str(m, "state") == "ACTIVE" {
+			out = append(out, Rel(str(m, "network"), ""))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// segmentIDLocked is the ID the VXLAN segment of network's peering group
+// is numbered by: the network's own when it has no ACTIVE peering, else
+// that of the group's first network by name, so every network of the group
+// shares one segment.
+func (s *Server) segmentIDLocked(network, own string) string {
+	seen := map[string]bool{network: true}
+	queue := []string{network}
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		for _, p := range s.peeredNetworksLocked(n) {
+			if !seen[p] {
+				if _, ok := s.res[p]; ok {
+					seen[p] = true
+					queue = append(queue, p)
+				}
+			}
+		}
+	}
+	if len(seen) == 1 {
+		return own
+	}
+	first := ""
+	for n := range seen {
+		if first == "" || n < first {
+			first = n
+		}
+	}
+	return str(s.res[first], "id")
 }
 
 // firewallsOfLocked is the network's enabled firewall rules.
@@ -289,32 +537,76 @@ func firewallNFT(self vmNet, members []vmNet, rules []obj, peerPods []string) st
 		tags, sas := strsAny(r.o["sourceTags"]), strsAny(r.o["sourceServiceAccounts"])
 		for _, m := range members {
 			if (len(tags) > 0 && anyIn(m.tags, tags)) || (len(sas) > 0 && m.sa != "" && hasStr(sas, m.sa)) {
-				src = append(src, m.ip)
+				if m.ip != "" {
+					src = append(src, m.ip)
+				}
+				if m.ip6 != "" {
+					src = append(src, m.ip6)
+				}
 			}
 		}
 		if len(src) == 0 {
 			continue // source tags no instance has: matches nothing
 		}
-		match := "ip saddr " + nftSet(src)
-		if dst := strsAny(r.o["destinationRanges"]); len(dst) > 0 {
-			match += " ip daddr " + nftSet(dst)
+		// Each family's ranges match that family's packets only (ipv6.go).
+		dst := strsAny(r.o["destinationRanges"])
+		for _, fam := range []bool{false, true} {
+			fsrc, fdst := byFamily(src, fam), byFamily(dst, fam)
+			if len(fsrc) == 0 || (len(dst) > 0 && len(fdst) == 0) {
+				continue
+			}
+			kw := map[bool]string{false: "ip", true: "ip6"}[fam]
+			match := kw + " saddr " + nftSet(fsrc)
+			if len(fdst) > 0 {
+				match += " " + kw + " daddr " + nftSet(fdst)
+			}
+			writeEntries(&b, r, match)
 		}
-		writeEntries(&b, r, match)
 	}
 	b.WriteString("    counter drop comment \"implied deny ingress\"\n  }\n")
 	b.WriteString("  chain egress {\n    type filter hook output priority filter; policy accept;\n")
-	b.WriteString("    oifname \"lo\" accept\n    ct state established,related accept\n")
+	if len(self.relay6) > 0 {
+		// An IPv6 internal load balancer's address is on lo (relay6): the
+		// egress rules below apply to it as to any VPC destination.
+		// (An ip6 match never matches IPv4, which lo still accepts.)
+		b.WriteString("    oifname \"lo\" meta nfproto ipv4 accept\n")
+		b.WriteString("    oifname \"lo\" ip6 daddr != " + nftSet(self.relay6) + " accept\n")
+	} else {
+		b.WriteString("    oifname \"lo\" accept\n")
+	}
+	b.WriteString("    ct state established,related accept\n")
 	b.WriteString("    oifname != \"vpc0\" ip daddr " + nftSet(append([]string{"169.254.169.254"}, ClusterCIDRs...)) + " accept\n")
+	if self.noInternet {
+		// No external IP and no Cloud NAT (#2140): nothing but private
+		// addresses (this machine's own networks, where CloudBurrow's APIs
+		// are served) is reachable, whatever the egress rules allow.
+		b.WriteString("    oifname != \"vpc0\" ip daddr != " + nftSet(PrivateRanges) + " counter drop comment \"no external IP and no Cloud NAT\"\n")
+	}
 	for _, r := range eg {
 		dst := strsAny(r.o["destinationRanges"])
-		if len(dst) == 0 {
-			dst = []string{"0.0.0.0/0"}
+		src := strsAny(r.o["sourceRanges"])
+		for _, fam := range []bool{false, true} {
+			fdst, fsrc := byFamily(dst, fam), byFamily(src, fam)
+			kw := map[bool]string{false: "ip", true: "ip6"}[fam]
+			switch {
+			case len(dst) == 0 && fam && self.ip6 == "":
+				continue // no IPv6 here to send from
+			case len(dst) == 0:
+				fdst = []string{map[bool]string{false: "0.0.0.0/0", true: "::/0"}[fam]}
+			case len(fdst) == 0:
+				continue
+			}
+			if len(src) > 0 && len(fsrc) == 0 {
+				continue
+			}
+			// The original destination: an internal load balancer's or
+			// endpoint's address, before vpcservices.go's rewrite.
+			match := "ct original " + kw + " daddr " + nftSet(fdst)
+			if len(fsrc) > 0 {
+				match += " " + kw + " saddr " + nftSet(fsrc)
+			}
+			writeEntries(&b, r, match)
 		}
-		match := "ip daddr " + nftSet(dst)
-		if src := strsAny(r.o["sourceRanges"]); len(src) > 0 {
-			match += " ip saddr " + nftSet(src)
-		}
-		writeEntries(&b, r, match)
 	}
 	b.WriteString("    accept comment \"implied allow egress\"\n  }\n}\n")
 	return b.String()
@@ -332,6 +624,11 @@ func withPrivateServices(fw string, eps []PrivateService) string {
 			continue
 		}
 		lines = append(lines, fmt.Sprintf("    ip daddr %s tcp dport %d dnat ip to %s:%d comment %q\n", e.IP, e.Port, e.TargetIP, e.TargetPort, e.Name))
+		for _, x := range e.ExtraPorts {
+			if x > 0 {
+				lines = append(lines, fmt.Sprintf("    ip daddr %s tcp dport %d dnat ip to %s:%d comment %q\n", e.IP, x, e.TargetIP, x, e.Name))
+			}
+		}
 		targets[e.TargetIP] = true
 	}
 	if len(lines) == 0 {

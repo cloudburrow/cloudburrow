@@ -10,6 +10,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/cluster"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/sparkproc"
 	"github.com/cloudburrow/cloudburrow/internal/version"
 )
 
@@ -56,6 +57,7 @@ func runStop(args []string, stdout, stderr io.Writer) error {
 	if err := stopRunning(cfg, stdout); err != nil {
 		return err
 	}
+	removeWorkloadContainers(cfg.Name, stdout)
 	c, err := newCluster(cfg)
 	if err != nil {
 		return describeClusterError(err)
@@ -87,6 +89,7 @@ func runDelete(args []string, stdout, stderr io.Writer) error {
 	if err := stopRunning(cfg, stdout); err != nil {
 		return err
 	}
+	removeWorkloadContainers(cfg.Name, stdout)
 	c, err := newCluster(cfg)
 	if err != nil {
 		return describeClusterError(err)
@@ -98,6 +101,8 @@ func runDelete(args []string, stdout, stderr io.Writer) error {
 	if err := deleteGKEClusters(ctx, cfg, stdout); err != nil {
 		return err
 	}
+	// Filestore's NFS servers (#2192), which stop keeps, go with it too.
+	deleteFilestoreServers(ctx, cfg, stdout)
 	used := instanceNodeImages(ctx, cfg.Name)
 	if err := c.Delete(ctx); err != nil {
 		return describeClusterError(err)
@@ -176,4 +181,18 @@ var resetNamespace = func(cfg config.Config, stdout io.Writer) error {
 	}
 	fmt.Fprintln(stdout, "the cluster itself is untouched; run `cloudburrow up` to recreate components")
 	return nil
+}
+
+// removeWorkloadContainers removes the Docker containers and networks
+// the instance's Spark workloads, Dataproc clusters and notebook kernels
+// ran in (io.cloudburrow.instance=<name>), once its `up` has ended: one
+// whose own cleanup did not finish (a cancelled batch's relay, #2162)
+// would outlive the instance.
+func removeWorkloadContainers(instance string, stdout io.Writer) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	containers, networks := sparkproc.RemoveInstance(ctx, instance)
+	if len(containers)+len(networks) > 0 {
+		fmt.Fprintf(stdout, "removed %d workload container(s) and %d network(s) of instance %s\n", len(containers), len(networks), instance)
+	}
 }

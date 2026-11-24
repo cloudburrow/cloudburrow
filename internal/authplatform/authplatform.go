@@ -133,6 +133,8 @@ type Store struct {
 
 	mu    sync.Mutex
 	codes map[string]*grant
+	// managed are the Google-managed clients (managed.go).
+	managed map[string]managedClient
 }
 
 // NewStore keeps the apps in st; number names a project's number, which
@@ -572,8 +574,42 @@ func (s *Store) SetSecret(project, id, secretID, action string) (*Client, error)
 	return c, nil
 }
 
+// EnsureSystemClient keeps a client that a Google service owns, as
+// Developer Connect owns the OAuth client of its pre-configured Google
+// provider (#2105): project is a key no user project has, so no console
+// page lists it; b is its app and c the client, with its ID and redirect
+// URIs; secret is its one secret, which the service holds. The project's
+// refresh tokens are kept, so a service that restarts with a new secret
+// still refreshes the tokens it was granted. Nothing is written when the
+// client is already so.
+func (s *Store) EnsureSystemClient(project string, b Brand, c Client, secret string) error {
+	if len(secret) < 4 || c.ClientID == "" {
+		return errorf(400, "invalid_request", "a system client needs an ID and a secret")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.load(project)
+	if err != nil {
+		return err
+	}
+	if cur := st.Clients[c.ClientID]; cur != nil && cur.DeleteTime == nil && cur.Type == c.Type && cur.secretOK(secret) &&
+		slices.Equal(cur.RedirectURIs, c.RedirectURIs) && st.Brand != nil && st.Brand.AppName == b.AppName {
+		return nil
+	}
+	now := s.now().UTC()
+	c.Secrets = []Secret{{ID: "system", Hash: hash(secret), Last4: secret[len(secret)-4:], Enabled: true, CreateTime: now}}
+	c.CreateTime, c.DeleteTime = now, nil
+	b.CreateTime = now
+	st.Brand = &b
+	st.Clients[c.ClientID] = &c
+	return s.save(project, st)
+}
+
 // find is the live client with a client ID, in whichever project.
 func (s *Store) find(clientID string) (string, *state, *Client, error) {
+	if m := s.managedOf(clientID); m != nil {
+		return "", &state{Brand: m.b, Clients: map[string]*Client{clientID: m.c}, Refresh: map[string]*refresh{}}, m.c, nil
+	}
 	if s.st == nil || clientID == "" {
 		return "", nil, nil, nil
 	}

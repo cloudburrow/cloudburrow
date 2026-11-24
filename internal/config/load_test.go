@@ -576,6 +576,53 @@ func TestCloudBuildHostSteps(t *testing.T) {
 	}
 }
 
+// TestAllowUnconfinedContainers (#2162): off by default; on by the flag,
+// the variable or a file the developer named; a discovered
+// ./cloudburrow.json cannot turn it on.
+func TestAllowUnconfinedContainers(t *testing.T) {
+	t.Parallel()
+	named := writeFile(t, t.TempDir(), "u.json", `{"allowUnconfinedContainers":true}`)
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		env     map[string]string
+		file    string // discovered
+		want    bool
+		wantErr string
+	}{
+		{name: "default off"},
+		{name: "flag", args: []string{"--allow-unconfined-containers"}, want: true},
+		{name: "env", env: map[string]string{EnvPrefix + "ALLOW_UNCONFINED_CONTAINERS": "true"}, want: true},
+		{name: "flag beats env", args: []string{"--allow-unconfined-containers=false"},
+			env: map[string]string{EnvPrefix + "ALLOW_UNCONFINED_CONTAINERS": "true"}},
+		{name: "bad env", env: map[string]string{EnvPrefix + "ALLOW_UNCONFINED_CONTAINERS": "maybe"}, wantErr: "must be a boolean"},
+		{name: "named file", env: map[string]string{EnvPrefix + "CONFIG": named}, want: true},
+		{name: "discovered file", file: `{"allowUnconfinedContainers":true}`, wantErr: "cannot let containers run with seccomp, AppArmor"},
+		{name: "discovered false is harmless", file: `{"allowUnconfinedContainers":false}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if tc.file != "" {
+				writeFile(t, dir, DefaultFileName, tc.file)
+			}
+			cfg, err := Load(Options{Args: tc.args, Getenv: envMap(tc.env), WorkDir: dir})
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Load = %v; want an error containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.AllowUnconfinedContainers != tc.want {
+				t.Errorf("AllowUnconfinedContainers = %v, want %v", cfg.AllowUnconfinedContainers, tc.want)
+			}
+		})
+	}
+}
+
 // TestEmulatorHeap: the Java emulators' heap bound (#1603) defaults to
 // DefaultEmulatorHeapMiB, is set by flag, environment or file, 0 turns it
 // off, and a value the emulators cannot run in, or that bounds nothing, is

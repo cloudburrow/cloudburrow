@@ -35,6 +35,20 @@ func TestPhysicalVersions(t *testing.T) {
 			t.Errorf("versionPatch(%q) = %d, want %d", v, got, want)
 		}
 	}
+	// Google's guide: "Cloud SQL supports physical file-based migration
+	// for MySQL 5.7 and 8.0. MySQL 5.6 and 8.4 are not supported."
+	for v, want := range map[string]bool{"MYSQL_5_7": true, "MYSQL_8_0": true, "MYSQL_8_0_41": true,
+		"MYSQL_5_6": false, "MYSQL_8_4": false} {
+		if got := physicalVersionSupported(v); got != want {
+			t.Errorf("physicalVersionSupported(%s) = %v, want %v", v, got, want)
+		}
+	}
+	if err := physicalVersionErr("MYSQL_8_4"); !strings.Contains(errStatus(err), "400") || !strings.Contains(err.Error(), "8.4 are not supported") {
+		t.Errorf("a MYSQL_8_4 physical sync: %v", err)
+	}
+	if m := physicalInfoVersion.FindStringSubmatch("uuid = x\nserver_version = 5.7.44-log\n"); m == nil || versionMajor(m[1]) != "5.7" || versionPatch(m[1]) != 44 {
+		t.Errorf("XtraBackup 2.4's server_version: %v", m)
+	}
 	if m := physicalInfoVersion.FindStringSubmatch("uuid = x\nserver_version = 8.0.46\nend = y\n"); m == nil || m[1] != "8.0.46" {
 		t.Errorf("server_version of xtrabackup_info: %v", m)
 	}

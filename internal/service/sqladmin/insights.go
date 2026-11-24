@@ -341,6 +341,8 @@ type MetricInstance struct {
 	Cores     float64
 	RAM       int64
 	DiskBytes int64
+	// Pooling is whether it runs managed connection pooling (#2163).
+	Pooling bool
 }
 
 // MetricInstances are the instances created through the Admin API, in
@@ -364,7 +366,7 @@ func (s *Server) MetricInstances(project string) []MetricInstance {
 		cores, ram := TierShape(sp.Tier)
 		out = append(out, MetricInstance{Project: sp.Project, Name: sp.Name, Region: sp.region(), DatabaseVersion: sp.DatabaseVersion,
 			Tier: sp.Tier, Server: sp.ServerName(), State: c.state, Stopped: sp.Stopped(), Cores: cores, RAM: ram,
-			DiskBytes: diskSizeGB(sp) << 30})
+			DiskBytes: diskSizeGB(sp) << 30, Pooling: sp.PoolingEnabled()})
 	}
 	return out
 }

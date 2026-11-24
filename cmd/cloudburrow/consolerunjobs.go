@@ -432,7 +432,8 @@ func (p runJobsProvider) CreateForm() (string, []console.Field) {
 		runVolumeFields("Container")[0], runVolumeFields("Container")[1], runVolumeFields("Container")[2],
 		runVolumeFields("Container")[3], runVolumeFields("Container")[4], runVolumeFields("Container")[5],
 		runSettingsFields("Settings", false)[0], runSettingsFields("Settings", false)[1], runSettingsFields("Settings", false)[2],
-		runSettingsFields("Settings", false)[3],
+		runSettingsFields("Settings", false)[3], runSettingsFields("Settings", false)[4], runSettingsFields("Settings", false)[5],
+		runSettingsFields("Settings", false)[6], runSettingsFields("Settings", false)[7],
 		{
 			Name: "taskCount", Label: "Number of tasks", Type: "text", Default: "1",
 			Help:    "How many tasks each execution runs. Each task gets its own CLOUD_RUN_TASK_INDEX.",

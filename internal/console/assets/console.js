@@ -88,11 +88,37 @@ function agentPlatformRoutes() {
     page(AP_PATHS.endpoints, "Endpoints", "Models", { service: "vertex-endpoints", screen: "ap-endpoints", listedWhenOff: true }),
     absent(`${AP}/batch-predictions`, "Batch inference", "Models", "projects.locations.batchPredictionJobs",
       "Batch prediction jobs over Cloud Storage or BigQuery input", AP_DOCS + "models"),
+    // Colab Enterprise (#2105): its runtimes and runtime templates, whose
+    // runtimes are the instance's notebook runtimes; the off state is the
+    // not-served page.
+    page(`${AP}/colab/notebooks`, "My notebooks", "Colab Enterprise", { service: "colab-notebooks", listedWhenOff: true,
+      api: "Dataform single-file notebook repositories", about: "Your notebooks, each with Notebook actions > Schedule",
+      docs: "https://docs.cloud.google.com/colab/docs/schedule-notebook-run",
+      instead: "Start CloudBurrow with --services including run, dataform and bigquery: a notebook is kept in Dataform and runs on the local Vertex AI endpoint's runtimes." }),
+    page(`${AP}/colab/runtimes`, "Runtimes", "Colab Enterprise", { service: "colab-runtimes", listedWhenOff: true,
+      api: "projects.locations.notebookRuntimes", about: "Runtimes your notebooks run on, made from runtime templates",
+      docs: "https://docs.cloud.google.com/colab/docs/create-runtime",
+      instead: "Start CloudBurrow with --services including run and bigquery: run starts the local Vertex AI endpoint, and a runtime queries BigQuery." }),
+    page(`${AP}/colab/runtime-templates`, "Runtime templates", "Colab Enterprise", { service: "colab-templates", listedWhenOff: true,
+      api: "projects.locations.notebookRuntimeTemplates", about: "The machine, disk, idle shutdown, environment and network a runtime is made with",
+      docs: "https://docs.cloud.google.com/colab/docs/create-runtime-template",
+      instead: "Start CloudBurrow with --services including run, which starts the local Vertex AI endpoint." }),
+    page(`${AP}/colab/executions`, "Executions", "Colab Enterprise", { service: "colab-executions", listedWhenOff: true,
+      api: "projects.locations.notebookExecutionJobs", about: "Runs of a notebook on a runtime, with View result for the executed notebook",
+      docs: "https://docs.cloud.google.com/colab/docs/schedule-notebook-run",
+      instead: "Start CloudBurrow with --services including run, storage and bigquery: an execution writes its executed notebook to Cloud Storage." }),
+    page(`${AP}/colab/schedules`, "Schedules", "Colab Enterprise", { service: "colab-schedules", listedWhenOff: true,
+      api: "projects.locations.schedules", about: "Recurring notebook executions, with Pause, Resume and Delete",
+      docs: "https://docs.cloud.google.com/colab/docs/schedule-notebook-run",
+      instead: "Start CloudBurrow with --services including run, storage and bigquery." }),
     // Notebooks.
-    absent(`${AP}/colab/notebooks`, "Colab Enterprise", "Notebooks", "the Colab Enterprise API (notebookRuntimes)",
-      "Managed notebooks and their runtimes", "https://docs.cloud.google.com/gemini-enterprise-agent-platform/notebooks/overview"),
-    absent(`${AP}/workbench/instances`, "Workbench", "Notebooks", "notebooks.googleapis.com (Workbench instances)",
-      "JupyterLab instances", "https://docs.cloud.google.com/gemini-enterprise-agent-platform/notebooks/overview"),
+    // Vertex AI Workbench instances (#2173): "Go to the Instances page"
+    // (https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart,
+    // read 2026-11-22), each a notebook runtime of the instance.
+    page(`${AP}/workbench/instances`, "Workbench", "Notebooks", { service: "workbench-instances", listedWhenOff: true, kind: "Instance",
+      api: "notebooks.googleapis.com v2 (projects.locations.instances)", about: "Notebook instances, each with Open JupyterLab, Start, Stop and Reset",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart",
+      instead: "Start CloudBurrow with --services including run and bigquery: run starts the local Vertex AI endpoint, and an instance's kernel queries BigQuery." }),
     // Model development.
     absent(`${AP}/datasets`, "Datasets", "Model development", "projects.locations.datasets",
       "Managed datasets for training", AP_DOCS + "machine-learning"),
@@ -100,8 +126,21 @@ function agentPlatformRoutes() {
       "Feature groups and online stores", AP_DOCS + "machine-learning"),
     absent(`${AP}/training`, "Training", "Model development", "projects.locations.customJobs and trainingPipelines",
       "Managed Training jobs and pipelines", AP_DOCS + "machine-learning"),
-    absent(`${AP}/pipelines`, "Pipelines", "Model development", "projects.locations.pipelineJobs",
-      "Kubeflow and TFX pipeline runs, schedules and templates", AP_DOCS + "machine-learning"),
+    // Vertex AI Pipelines (#2173): the Pipelines page's Runs and Schedules
+    // tabs ("Go to the Schedules tab on the Pipelines page":
+    // https://docs.cloud.google.com/vertex-ai/docs/pipelines/schedule-pipeline-run,
+    // read 2026-11-22). The Runs tab's name is CloudBurrow's (UNVERIFIED,
+    // re-read 2026-11-22: the same page and run-pipeline).
+    page(`${AP}/pipelines`, "Pipelines", "Model development", { service: "vertex-pipeline-runs", listedWhenOff: true, tabTitle: "Runs",
+      pageTabs: [`${AP}/pipelines`, `${AP}/pipelines/schedules`], kind: "Run",
+      api: "projects.locations.pipelineJobs", about: "Kubeflow pipeline runs, each task a container, and their schedules",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/pipelines/run-pipeline",
+      instead: "Start CloudBurrow with --services including run and storage: a run's tasks run on Docker and write their artifacts to Cloud Storage." }),
+    page(`${AP}/pipelines/schedules`, "Pipelines", "Model development", { service: "vertex-pipeline-schedules", listedWhenOff: true, tabTitle: "Schedules",
+      navHidden: true, navAs: `${AP}/pipelines`, pageTabs: [`${AP}/pipelines`, `${AP}/pipelines/schedules`], kind: "Schedule",
+      api: "projects.locations.schedules", about: "Recurring pipeline runs, with Pause, Resume and Delete",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/pipelines/schedule-pipeline-run",
+      instead: "Start CloudBurrow with --services including run and storage." }),
     absent(`${AP}/experiments`, "Experiments", "Model development", "projects.locations.metadataStores (experiments)",
       "Experiment runs and their parameters and metrics", AP_DOCS + "machine-learning"),
     absent(`${AP}/metadata`, "Metadata", "Model development", "projects.locations.metadataStores",
@@ -125,9 +164,37 @@ const SECRET_TABS = ["/secrets", "/secrets-regional"];
 // Certificate Authority Service's tabs (#2144).
 const ALERTING_TABS = ["/monitoring/alerting", "/monitoring/alerting/incidents", "/monitoring/snoozes"];
 const CAS_TABS = ["/security/cas", "/security/cas/certificateAuthorities", "/security/cas/certificates", "/security/cas/templates"];
-// Private Service Connect's tabs (#2141): Connected endpoints and
-// Connection Policies, as Google's page has them.
-const PSC_TABS = ["/net-services/psc/list/consumers", "/net-services/psc/list/policies"];
+const COMPUTE_INSTANCE_TABS = ["/compute/instances", "/compute/instanceSchedules"];
+const COMPUTE_SNAPSHOT_TABS = ["/compute/snapshots", "/compute/snapshotSchedules"];
+// Identity-Aware Proxy's tabs (#2160).
+const IAP_TABS = ["/security/iap", "/security/iap/tcp"];
+const COMPUTE_METADATA_TABS = ["/compute/metadata", "/compute/metadata/sshKeys"];
+const VPC_NETWORK_TABS = ["/networking/networks/list", "/networking/subnets/list"];
+const VPC_ROUTE_TABS = ["/networking/routes/effective", "/networking/routes/list"];
+const VPC_ADDRESS_TABS = ["/networking/addresses/list", "/networking/addresses/internal"];
+// Private Service Connect's tabs (#2140): Connected endpoints and
+// Published services (vpc/docs/configure-private-service-connect-apis,
+// configure-private-service-connect-producer, read 2026-11-22).
+// Connection Policies (#2141) is its third; Connected endpoints is at
+// Google's path, /net-services/psc/list/consumers.
+const PSC_TABS = ["/net-services/psc/list/consumers", "/net-services/psc/published", "/net-services/psc/list/policies"];
+// Load balancing's tabs (#2153): Load balancers, Backends and Frontends.
+const LB_TABS = ["/net-services/loadbalancing/list/loadBalancers", "/net-services/loadbalancing/list/backends", "/net-services/loadbalancing/list/frontends"];
+// Certificate Manager's tabs (#2160): Certificates, Certificate Maps, DNS
+// Authorizations, Issuance Configs and Classic Certificates (#2153).
+const CCM_TABS = ["/security/ccm/list/certificates", "/security/ccm/list/certificateMaps", "/security/ccm/list/dnsAuthorizations",
+  "/security/ccm/list/issuanceConfigs", "/security/ccm/list/trustConfigs", "/security/ccm/list/lbCertificates"];
+// Cloud Armor's tabs (#2160): the policies, network edge security
+// services and the preconfigured WAF rule sets. The docs give gcloud only
+// for the last two: their tabs are UNVERIFIED (re-read 2026-11-22:
+// armor/docs/advanced-network-ddos, waf-rules).
+const ARMOR_TABS = ["/net-security/securitypolicies/list", "/net-security/securitypolicies/networkEdgeSecurityServices", "/net-security/securitypolicies/wafRules"];
+// Network Security's Authentication Configuration tabs (#2160).
+// Secure Web Proxy (#2160): Web Proxies and SWP Policies (the quickstart's
+// console links), URL lists and TLS inspection policies (UNVERIFIED
+// (re-read 2026-11-22: secure-web-proxy/docs/url-list-syntax-reference) paths).
+const SWP_TABS = ["/net-security/swp/web-proxies/list", "/net-security/swp/policies/list", "/net-security/swp/urllists/list", "/net-security/swp/tls-inspection/list"];
+const NETSEC_AUTH_TABS = ["/net-security/authconfig", "/net-security/authconfig/backendAuthentication", "/net-security/authconfig/clientTlsPolicies", "/net-security/authconfig/authorizationPolicies"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -139,6 +206,9 @@ const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // 2026-11-22), never from a menu item of their own. The tabs' names are
 // CloudBurrow's (UNVERIFIED, re-read 2026-11-22: the same page).
 const SHARING_TABS = ["/bigquery-sharing", "/bigquery-clean-rooms"];
+// BigQuery's Capacity management (#2193): its Slot reservations and Slot
+// commitments tabs.
+const CAPACITY_TABS = ["/bigquery-capacity", "/bigquery-commitments", "/bigquery-reservation-groups"];
 const LOGGING_SETTINGS = ["/logs/settings", "/logs/log-scopes", "/logs/trace-scopes", "/logs/observability-settings", "/logs/observability-buckets"];
 
 
@@ -182,6 +252,9 @@ const ROUTES = [
   // Secure Source Manager's instances and repositories (#1527).
   { path: "/secure-source-manager", service: "secure-source-manager", title: "Instances", kind: "Instance", section: "CI/CD",
     product: "secure-source-manager", productTitle: "Secure Source Manager" },
+  // Developer Connect's Account connectors (#2105).
+  { path: "/developer-connect/account-connectors", service: "developer-connect-account-connectors", title: "Account connectors",
+    kind: "Account connector", section: "CI/CD", product: "developer-connect", productTitle: "Developer Connect" },
   { path: "/artifact-registry", service: "artifact-registry", title: "Repositories", kind: "Repository", section: "CI/CD",
     product: "artifact-registry", productTitle: "Artifact Registry" },
   // Eventarc's Triggers page (#1877), served on the Run port over Pub/Sub.
@@ -281,6 +354,15 @@ const ROUTES = [
     navTitle: "Soft-deleted buckets", navHidden: true, redirect: "/storage/browser?view=softdeleted",
     product: "storage", productTitle: "Cloud Storage" },
 
+  // Filestore (#2192), Google's menu in its order: Instances, Backups,
+  // Snapshots.
+  { path: "/filestore/instances", service: "filestore", icon: "filestore", title: "Instances", kind: "Instance",
+    section: "Storage", product: "filestore", productTitle: "Filestore" },
+  { path: "/filestore/backups", service: "filestore-backups", icon: "filestore", title: "Backups", kind: "Backup",
+    section: "Storage", product: "filestore", productTitle: "Filestore" },
+  { path: "/filestore/snapshots", service: "filestore-snapshots", icon: "filestore", title: "Snapshots", kind: "Snapshot",
+    section: "Storage", product: "filestore", productTitle: "Filestore" },
+
   // Storage Transfer Service (#1957), Google's Data Transfer pages: Transfer
   // jobs, with each job's run history, and Agent pools for POSIX file
   // systems, whose agent is CloudBurrow's own.
@@ -337,6 +419,13 @@ const ROUTES = [
   // Cloud SQL Studio, opened from the instance `up` runs for each, and
   // keep their addresses. MySQL's page is not under /cloudsql/, where it
   // would shadow a PostgreSQL database named "mysql".
+  // AlloyDB for PostgreSQL (#2191): Clusters (a cluster's page has its
+  // Overview with the instances, Backups, Users and Databases) and
+  // Backups, at Google's addresses.
+  { path: "/alloydb/clusters", service: "alloydb", title: "Clusters", kind: "Cluster", section: "Databases",
+    product: "alloydb", productTitle: "AlloyDB", icon: "alloydb" },
+  { path: "/alloydb/backups", service: "alloydb-backups", title: "Backups", kind: "Backup", section: "Databases",
+    product: "alloydb", productTitle: "AlloyDB", icon: "alloydb" },
   { path: "/cloudsql-instances", service: "cloudsql-instances", title: "Instances", kind: "Instance", section: "Databases",
     product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql", logs: true },
   { path: "/cloudsql-backups", service: "cloudsql-backups", title: "Backups", section: "Databases",
@@ -408,6 +497,10 @@ const ROUTES = [
     product: "bigquery", productTitle: "BigQuery", icon: "bigquery" },
   { path: "/bigquery-transfers", service: "bigquery-transfers", icon: "bigquery", title: "Data transfers", kind: "Transfer",
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  // Scheduling (#2105): every schedule of the project, Dataform's and the
+  // Data Transfer Service's scheduled queries, in one list.
+  { path: "/bigquery-scheduling", service: null, requires: "bigquery", screen: "bigquery-scheduling", icon: "bigquery", title: "Scheduling",
+    section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-scheduled-queries", service: "bigquery-scheduled-queries", icon: "bigquery", title: "Scheduled queries",
     kind: "Scheduled query", section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   // BigQuery sharing (Analytics Hub, #1960): exchanges, their listings
@@ -427,9 +520,41 @@ const ROUTES = [
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-dataform-settings", service: "dataform-settings", icon: "bigquery", title: "Dataform settings", kind: "Configuration",
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  // Dataproc on Compute Engine (#2162): clusters, jobs, workflow templates
+  // and autoscaling policies, above Serverless as Google's Dataproc menu
+  // has them.
+  { path: "/dataproc/clusters", service: "dataproc-clusters", icon: "dataproc", title: "Clusters", kind: "Cluster",
+    section: "Databases", product: "dataproc", productTitle: "Dataproc" },
+  { path: "/dataproc/jobs", service: "dataproc-jobs", icon: "dataproc", title: "Jobs", kind: "Job",
+    section: "Databases", product: "dataproc", productTitle: "Dataproc" },
+  { path: "/dataproc/workflows/templates", service: "dataproc-workflows", icon: "dataproc", title: "Workflows", kind: "Workflow template",
+    section: "Databases", product: "dataproc", productTitle: "Dataproc" },
+  { path: "/dataproc/autoscalingPolicies", service: "dataproc-autoscaling", icon: "dataproc", title: "Autoscaling policies", kind: "Autoscaling policy",
+    section: "Databases", product: "dataproc", productTitle: "Dataproc" },
+  // Serverless for Apache Spark (#2156), the Dataproc API's batches,
+  // interactive Spark Connect sessions and session templates, under
+  // Dataproc's Serverless menu as Google's console has them.
+  { path: "/dataproc/batches", service: "dataproc-batches", icon: "dataproc", title: "Batches", kind: "Batch",
+    section: "Databases", product: "dataproc", productTitle: "Dataproc" },
+  { path: "/dataproc/interactive", service: "dataproc-sessions", icon: "dataproc", title: "Interactive sessions", kind: "Session",
+    section: "Databases", product: "dataproc", productTitle: "Dataproc" },
+  { path: "/dataproc/session-templates", service: "dataproc-templates", icon: "dataproc", title: "Session templates", kind: "Session template",
+    section: "Databases", product: "dataproc", productTitle: "Dataproc" },
   { path: "/bigquery-partner-center", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Partner Center",
     section: "Databases", product: "bigquery", productTitle: "BigQuery",
     unavailable: "Partner Center lists Google Cloud partners' solutions, which a local instance does not hold." },
+  // Capacity management (#2193), with BI Engine in Google's Administration
+  // part of the menu, above Settings: slot reservations with their
+  // assignments (CONTINUOUS for continuous queries), and slot commitments.
+  { path: "/bigquery-capacity", service: "bigquery-capacity", icon: "bigquery", title: "Capacity management", tabTitle: "Slot reservations",
+    kind: "Reservation", pageTabs: CAPACITY_TABS, section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  { path: "/bigquery-commitments", service: "bigquery-commitments", icon: "bigquery", title: "Capacity management", tabTitle: "Slot commitments",
+    kind: "Commitment", navHidden: true, navAs: "/bigquery-capacity", pageTabs: CAPACITY_TABS, section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  { path: "/bigquery-reservation-groups", service: "bigquery-reservation-groups", icon: "bigquery", title: "Capacity management", tabTitle: "Reservation groups",
+    kind: "Reservation group", navHidden: true, navAs: "/bigquery-capacity", pageTabs: CAPACITY_TABS, section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  // BI Engine (#2193): its BI reservations, one a location.
+  { path: "/bigquery-bi-engine", service: "bigquery-bi-engine", icon: "bigquery", title: "BI Engine",
+    kind: "BI Engine reservation", section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-settings", service: null, requires: "bigquery", screen: "unavailable", icon: "bigquery", title: "Settings",
     section: "Databases", product: "bigquery", productTitle: "BigQuery",
     unavailable: "BigQuery's Settings (the project's default location and other configuration settings, set with ALTER PROJECT) are not served locally. A query's location and dialect are set in Studio, under Edit, Query settings." },
@@ -496,43 +621,184 @@ const ROUTES = [
     section: "AI and machine learning", product: "speech", productTitle: "Speech-to-Text" },
   // Compute Engine (#1965): Google's menu, at Google's paths: VM
   // instances (an instance's page has its Details, Storage, Networking and
-  // Serial port tabs), Disks, Snapshots, Images, and Machine types, over the
-  // Compute Engine API in process.
-  { path: "/compute/instances", service: "compute-instances", icon: "compute", title: "VM instances", kind: "Instance",
+  // Serial port tabs), Instance templates, Instance groups, Disks,
+  // Snapshots, Images, Machine images and Machine types, over the Compute
+  // Engine API in process. The VM instances, Snapshots and Metadata pages'
+  // tabs (#2139): Instances and Instance schedules
+  // (compute/docs/instances/schedule-instance-start-stop), Snapshots and
+  // Snapshot schedules (disks/scheduled-snapshots), Metadata and SSH keys
+  // (connect/add-ssh-keys).
+  { path: "/compute/instances", service: "compute-instances", icon: "compute", title: "VM instances", tabTitle: "Instances", kind: "Instance",
+    pageTabs: COMPUTE_INSTANCE_TABS, section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/instanceSchedules", service: "compute-instance-schedules", icon: "compute", title: "VM instances", tabTitle: "Instance schedules",
+    kind: "Instance schedule", navHidden: true, navAs: "/compute/instances", pageTabs: COMPUTE_INSTANCE_TABS,
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/instanceTemplates", service: "compute-instance-templates", icon: "compute", title: "Instance templates", kind: "Instance template",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/instanceGroups", service: "compute-instance-groups", icon: "compute", title: "Instance groups", kind: "Instance group",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  // Health checks and Network endpoint groups (#2153), Compute Engine's
+  // pages for load balancing's backends.
+  { path: "/compute/healthChecks", service: "compute-healthchecks", icon: "compute", title: "Health checks", kind: "Health check",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/networkendpointgroups/list", service: "compute-negs", icon: "compute", title: "Network endpoint groups", kind: "Network endpoint group",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/disks", service: "compute-disks", icon: "compute", title: "Disks", kind: "Disk",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
-  { path: "/compute/snapshots", service: "compute-snapshots", icon: "compute", title: "Snapshots", kind: "Snapshot",
+  { path: "/compute/snapshots", service: "compute-snapshots", icon: "compute", title: "Snapshots", tabTitle: "Snapshots", kind: "Snapshot",
+    pageTabs: COMPUTE_SNAPSHOT_TABS, section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/snapshotSchedules", service: "compute-snapshot-schedules", icon: "compute", title: "Snapshots", tabTitle: "Snapshot schedules",
+    kind: "Snapshot schedule", navHidden: true, navAs: "/compute/snapshots", pageTabs: COMPUTE_SNAPSHOT_TABS,
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/images", service: "compute-images", icon: "compute", title: "Images", kind: "Image",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/machineImages", service: "compute-machine-images", icon: "compute", title: "Machine images", kind: "Machine image",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/machineTypes", service: "compute-machinetypes", icon: "compute", title: "Machine types", kind: "Machine type",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
-  { path: "/compute/metadata", service: "compute-metadata", icon: "compute", title: "Metadata", kind: "Metadata item",
-    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/metadata", service: "compute-metadata", icon: "compute", title: "Metadata", tabTitle: "Metadata", kind: "Metadata item",
+    pageTabs: COMPUTE_METADATA_TABS, section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/metadata/sshKeys", service: "compute-ssh-keys", icon: "compute", title: "Metadata", tabTitle: "SSH keys", kind: "SSH key",
+    navHidden: true, navAs: "/compute/metadata", pageTabs: COMPUTE_METADATA_TABS, section: "Compute", product: "compute", productTitle: "Compute Engine" },
 
   // VPC network (#1936): Google's menu, at Google's paths: VPC networks
   // (a network's page has its subnets, firewall rules and routes),
   // Firewall, Routes and IP addresses, over the Compute Engine API's VPC
   // networking in process.
-  { path: "/networking/networks/list", service: "vpc-networks", icon: "vpc", title: "VPC networks", kind: "VPC network",
+  // The VPC networks page's tabs (#2140): the networks, and "Subnets in
+  // current project" (vpc/docs/create-modify-vpc-networks, read
+  // 2026-11-22); the first tab's name is not in the docs (UNVERIFIED,
+  // re-read 2026-11-22: https://docs.cloud.google.com/vpc/docs/create-modify-vpc-networks).
+  { path: "/networking/networks/list", service: "vpc-networks", icon: "vpc", title: "VPC networks", tabTitle: "Networks in current project", kind: "VPC network",
+    pageTabs: VPC_NETWORK_TABS, section: "Networking", product: "vpc", productTitle: "VPC network" },
+  { path: "/networking/subnets/list", service: "vpc-subnets", icon: "vpc", title: "VPC networks", tabTitle: "Subnets in current project", kind: "Subnet",
+    navHidden: true, navAs: "/networking/networks/list", pageTabs: VPC_NETWORK_TABS, section: "Networking", product: "vpc", productTitle: "VPC network" },
+  { path: "/networking/firewalls/list", service: "vpc-firewalls", icon: "vpc", title: "Firewall policies", kind: "Firewall rule",
     section: "Networking", product: "vpc", productTitle: "VPC network" },
-  { path: "/networking/firewalls/list", service: "vpc-firewalls", icon: "vpc", title: "Firewall", kind: "Firewall rule",
+  // Routes' tabs (#2140, vpc/docs/using-routes): Effective routes and Route
+  // management.
+  { path: "/networking/routes/effective", service: "vpc-routes-effective", icon: "vpc", title: "Routes", tabTitle: "Effective routes", kind: "Route",
+    navHidden: true, navAs: "/networking/routes/list", pageTabs: VPC_ROUTE_TABS, section: "Networking", product: "vpc", productTitle: "VPC network" },
+  { path: "/networking/routes/list", service: "vpc-routes", icon: "vpc", title: "Routes", tabTitle: "Route management", kind: "Route",
+    pageTabs: VPC_ROUTE_TABS, section: "Networking", product: "vpc", productTitle: "VPC network" },
+  // IP addresses' tabs (#2140): External IP addresses and Internal IP
+  // addresses (vpc/docs/reserve-static-external-ip-address,
+  // reserve-static-internal-ip-address, read 2026-11-22).
+  { path: "/networking/addresses/list", service: "vpc-addresses", icon: "vpc", title: "IP addresses", tabTitle: "External IP addresses", kind: "IP address",
+    pageTabs: VPC_ADDRESS_TABS, section: "Networking", product: "vpc", productTitle: "VPC network" },
+  { path: "/networking/addresses/internal", service: "vpc-addresses-internal", icon: "vpc", title: "IP addresses", tabTitle: "Internal IP addresses", kind: "IP address",
+    navHidden: true, navAs: "/networking/addresses/list", pageTabs: VPC_ADDRESS_TABS, section: "Networking", product: "vpc", productTitle: "VPC network" },
+  // VPC network peering (#2140, vpc/docs/using-vpc-peering).
+  { path: "/networking/peering/list", service: "vpc-peering", icon: "vpc", title: "VPC network peering", kind: "Peering connection",
     section: "Networking", product: "vpc", productTitle: "VPC network" },
-  { path: "/networking/routes/list", service: "vpc-routes", icon: "vpc", title: "Routes", kind: "Route",
+  // Shared VPC (#2140, vpc/docs/provisioning-shared-vpc).
+  { path: "/networking/xpn", service: "vpc-sharedvpc", icon: "vpc", title: "Shared VPC", kind: "Attached project",
     section: "Networking", product: "vpc", productTitle: "VPC network" },
-  { path: "/networking/addresses/list", service: "vpc-addresses", icon: "vpc", title: "IP addresses", kind: "IP address",
+  // Serverless VPC access (#2140, vpc/docs/configure-serverless-vpc-access).
+  { path: "/networking/connectors/list", service: "vpc-connectors", icon: "vpc", title: "Serverless VPC access", kind: "Connector",
     section: "Networking", product: "vpc", productTitle: "VPC network" },
-  // Network services' Private Service Connect (#2141), at Google's path:
-  // its Connected endpoints, Connect endpoint.
-  { path: "/net-services/psc/list/consumers", service: "vpc-psc", icon: "vpc", title: "Private Service Connect", tabTitle: "Connected endpoints", kind: "Endpoint",
-    pageTabs: PSC_TABS, section: "Networking", product: "network-services", productTitle: "Network services" },
-  // Its Connection Policies tab (#2141): the Network Connectivity API's
+  // Private Service Connect's Connection Policies tab (#2141): the Network Connectivity API's
   // service connection policies ("Private Service Connect > Connection
   // Policies > Create connection policy", configure-private-service-connect).
   // The tab's path is UNVERIFIED (re-read 2026-11-22: configure-service-connection-policies).
   { path: "/net-services/psc/list/policies", service: "psc-policies", icon: "vpc", title: "Private Service Connect", tabTitle: "Connection Policies", kind: "Connection policy",
-    navHidden: true, navAs: "/net-services/psc/list/consumers", pageTabs: PSC_TABS, section: "Networking", product: "network-services", productTitle: "Network services" },
+    navHidden: true, navAs: "/net-services/psc/list/consumers", pageTabs: PSC_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
+
+  // Cloud Router (#2140, network-connectivity/docs/router): Network
+  // Connectivity's Cloud Routers page.
+  { path: "/hybrid/routers/list", service: "hybrid-routers", icon: "vpc", title: "Cloud Routers", kind: "Cloud Router",
+    section: "Networking", product: "hybrid", productTitle: "Network Connectivity" },
+  // Cloud NAT (#2140, nat/docs/set-up-manage-network-address-translation):
+  // Network services' Cloud NAT page.
+  { path: "/net-services/nat/list", service: "netservices-nat", icon: "vpc", title: "Cloud NAT", kind: "Cloud NAT gateway",
+    section: "Networking", product: "netservices", productTitle: "Network services" },
+  // Private Service Connect (#2140).
+  { path: "/net-services/psc/list/consumers", service: "netservices-psc-endpoints", icon: "vpc", title: "Private Service Connect", tabTitle: "Connected endpoints", kind: "Endpoint",
+    pageTabs: PSC_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
+  { path: "/net-services/psc/published", service: "netservices-psc-published", icon: "vpc", title: "Private Service Connect", tabTitle: "Published services", kind: "Published service",
+    navHidden: true, navAs: "/net-services/psc/list/consumers", pageTabs: PSC_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
+
+  // Cloud Load Balancing (#2153): Network services' Load balancing page
+  // and its tabs.
+  { path: "/net-services/loadbalancing/list/loadBalancers", service: "netservices-lb", icon: "vpc", title: "Load balancing", tabTitle: "Load balancers", kind: "Load balancer",
+    pageTabs: LB_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
+  { path: "/net-services/loadbalancing/list/backends", service: "netservices-lb-backends", icon: "vpc", title: "Load balancing", tabTitle: "Backends", kind: "Backend",
+    navHidden: true, navAs: "/net-services/loadbalancing/list/loadBalancers", pageTabs: LB_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
+  { path: "/net-services/loadbalancing/list/frontends", service: "netservices-lb-frontends", icon: "vpc", title: "Load balancing", tabTitle: "Frontends", kind: "Frontend",
+    navHidden: true, navAs: "/net-services/loadbalancing/list/loadBalancers", pageTabs: LB_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
+  // Certificate Manager's Classic Certificates (#2153): Compute Engine SSL
+  // certificates.
+  { path: "/security/ccm/list/certificates", service: "ccm-certificates", icon: "vpc", title: "Certificate Manager", tabTitle: "Certificates", kind: "Certificate",
+    pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  { path: "/security/ccm/list/certificateMaps", service: "ccm-maps", icon: "vpc", title: "Certificate Manager", tabTitle: "Certificate Maps", kind: "Certificate map",
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  { path: "/security/ccm/list/dnsAuthorizations", service: "ccm-dnsauth", icon: "vpc", title: "Certificate Manager", tabTitle: "DNS Authorizations", kind: "DNS authorization",
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  { path: "/security/ccm/list/issuanceConfigs", service: "ccm-issuance", icon: "vpc", title: "Certificate Manager", tabTitle: "Issuance Configs", kind: "Certificate issuance config",
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  // Trust configs (#2160): "the Trust configs tab on the Certificate
+  // Manager page" (certificate-manager/docs/trust-configs).
+  { path: "/security/ccm/list/trustConfigs", service: "ccm-trustconfigs", icon: "vpc", title: "Certificate Manager", tabTitle: "Trust Configs", kind: "Trust config",
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  { path: "/security/ccm/list/lbCertificates", service: "netservices-lb-certs", icon: "vpc", title: "Certificate Manager", tabTitle: "Classic Certificates", kind: "Certificate",
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  // Identity-Aware Proxy (#2160): its HTTPS resources, and its SSH and TCP
+  // resources (IAP TCP forwarding's instances and destination groups).
+  { path: "/security/iap", service: "security-iap", icon: "vpc", title: "Identity-Aware Proxy", tabTitle: "HTTPS resources", kind: "HTTPS resource",
+    pageTabs: IAP_TABS, section: "Security and identity", product: "iap", productTitle: "Identity-Aware Proxy" },
+  { path: "/security/iap/tcp", service: "security-iap-tcp", icon: "vpc", title: "Identity-Aware Proxy", tabTitle: "SSH and TCP resources", kind: "Destination group",
+    navHidden: true, navAs: "/security/iap", pageTabs: IAP_TABS, section: "Security and identity", product: "iap", productTitle: "Identity-Aware Proxy" },
+  // Cloud Armor (#2160): Network Security's Cloud Armor policies.
+  { path: "/net-security/securitypolicies/list", service: "netsecurity-armor", icon: "vpc", title: "Cloud Armor policies", tabTitle: "Security policies", kind: "Security policy",
+    pageTabs: ARMOR_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/securitypolicies/networkEdgeSecurityServices", service: "netsecurity-armor-edge", icon: "vpc", title: "Cloud Armor policies", tabTitle: "Network edge security services",
+    kind: "Network edge security service", navHidden: true, navAs: "/net-security/securitypolicies/list", pageTabs: ARMOR_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/securitypolicies/wafRules", service: "netsecurity-armor-waf", icon: "vpc", title: "Cloud Armor policies", tabTitle: "Preconfigured WAF rules",
+    kind: "Rule set", navHidden: true, navAs: "/net-security/securitypolicies/list", pageTabs: ARMOR_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Cloud Service Mesh's Routing rule maps (#2160): the target gRPC
+  // proxies of proxyless gRPC (and target HTTP proxies of Envoy), each
+  // with its INTERNAL_SELF_MANAGED forwarding rule and URL map. The path
+  // and columns are UNVERIFIED (re-read 2026-11-22: route-rule-map-concepts).
+  { path: "/net-services/trafficdirector/routingRuleMaps", service: "servicemesh-routing", icon: "vpc", title: "Routing rule maps", kind: "Routing rule map",
+    section: "Networking", product: "servicemesh", productTitle: "Cloud Service Mesh" },
+  // Client Authentication (#2160): Network Security's Authentication
+  // Configuration page, its Client Authentication tab (server TLS
+  // policies), as load-balancing/docs/https/setting-up-mtls-ccm has it.
+  { path: "/net-security/authconfig", service: "netsecurity-clientauth", icon: "vpc", title: "Authentication Configuration", tabTitle: "Client Authentication",
+    kind: "Client Authentication", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Client TLS policies and service mesh authorization policies (#2160):
+  // the page's other tabs. The tabs are UNVERIFIED (re-read 2026-11-22: service-mesh/docs/security) (docs re-read
+  // 2026-11-22 give gcloud import steps only).
+  // Backend Authentication (#2160): the page's tab of backend
+  // authentication configs, as load-balancing/docs/backend-authenticated-tls-setup
+  // has it ("On the Backend Authentication tab, click Create").
+  { path: "/net-security/authconfig/backendAuthentication", service: "netsecurity-backendauth", icon: "vpc", title: "Authentication Configuration", tabTitle: "Backend Authentication",
+    kind: "Backend Authentication", navHidden: true, navAs: "/net-security/authconfig", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Address groups (#2160), as firewall/docs/use-address-groups-firewall-policies
+  // names the page ("Go to the Address groups page").
+  { path: "/net-security/addressgroups", service: "netsecurity-addressgroups", icon: "vpc", title: "Address groups", kind: "Address group",
+    section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/authconfig/clientTlsPolicies", service: "netsecurity-clienttls", icon: "vpc", title: "Authentication Configuration", tabTitle: "Client TLS policies",
+    kind: "Client TLS policy", navHidden: true, navAs: "/net-security/authconfig", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/authconfig/authorizationPolicies", service: "netsecurity-meshauthz", icon: "vpc", title: "Authentication Configuration", tabTitle: "Service mesh authorization policies",
+    kind: "Service mesh authorization policy", navHidden: true, navAs: "/net-security/authconfig", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Authorization policies (#2160): the Application Load Balancers'
+  // authzPolicies (load-balancing/docs/auth-policy). UNVERIFIED (re-read 2026-11-22: load-balancing/docs/auth-policy) path.
+  { path: "/net-security/authzpolicies", service: "netsecurity-authz", icon: "vpc", title: "Authorization policies", kind: "Authorization policy",
+    section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Secure Web Proxy (#2160): Web Proxies, SWP Policies (with their
+  // rules), URL lists and TLS inspection policies, one nav entry.
+  { path: "/net-security/swp/web-proxies/list", service: "netsecurity-swp-proxies", icon: "vpc", title: "Secure Web Proxy", tabTitle: "Web proxies",
+    kind: "Web proxy", pageTabs: SWP_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/swp/policies/list", service: "netsecurity-swp-policies", icon: "vpc", title: "Secure Web Proxy", tabTitle: "Policies",
+    kind: "Policy", navHidden: true, navAs: "/net-security/swp/web-proxies/list", pageTabs: SWP_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/swp/urllists/list", service: "netsecurity-swp-urllists", icon: "vpc", title: "Secure Web Proxy", tabTitle: "URL lists",
+    kind: "URL list", navHidden: true, navAs: "/net-security/swp/web-proxies/list", pageTabs: SWP_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/swp/tls-inspection/list", service: "netsecurity-swp-tls", icon: "vpc", title: "Secure Web Proxy", tabTitle: "TLS inspection policies",
+    kind: "TLS inspection policy", navHidden: true, navAs: "/net-security/swp/web-proxies/list", pageTabs: SWP_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Cloud CDN (#2160): Network services' Cloud CDN origins.
+  { path: "/net-services/cdn/list", service: "netservices-cdn", icon: "vpc", title: "Cloud CDN", kind: "Origin",
+    section: "Networking", product: "netservices", productTitle: "Network services" },
 
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.
@@ -920,6 +1186,8 @@ const pagesOf = (key) => {
 // assets/icons/PROVENANCE.md. A screen with no drawing of its own gets the
 // dashboard mark rather than a broken image.
 const ICONS = {
+  // Filestore: a file folder over a server's drive.
+  filestore: '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v4H3z"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 17h2"/>',
   // App Hub: three components grouped in one application.
   apphub: '<rect x="3" y="3" width="18" height="18" rx="3"/><rect x="6" y="6" width="5" height="5" rx="1"/><rect x="13" y="6" width="5" height="5" rx="1"/><rect x="6" y="13" width="12" height="5" rx="1"/>',
   // Cloud Run: a container with a run triangle.
@@ -940,6 +1208,8 @@ const ICONS = {
   "cloud-build-worker-pools": '<rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/>',
   // Secure Source Manager: a branch.
   "secure-source-manager": '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/>',
+  // Developer Connect's account connectors: a person linked to a plug.
+  "developer-connect-account-connectors": '<circle cx="7" cy="7" r="3"/><path d="M2 20c0-3 2-6 5-6s5 3 5 6"/><path d="M14 12h3M17 9v6M17 12h5"/>',
   // Cloud Functions: braces around a bolt.
   functions: '<path d="M8 4c-2 0-3 1-3 3v2l-2 3 2 3v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2l2 3-2 3v2c0 2-1 3-3 3"/><path d="M13 7l-3 5h4l-3 5"/>',
   // Artifact Registry: stacked boxes.
@@ -963,6 +1233,7 @@ const ICONS = {
   vpc: '<circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M11 7.2L6.2 15.8M13 7.2l4.8 8.6M7.5 18h9"/>',
   privateca: '<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M7 8h10M7 11h6"/><circle cx="17" cy="16" r="3"/><path d="M15.5 18.5L15 22l2-1 2 1-.5-3.5"/>',
   // BigQuery: a magnifier over a bar chart.
+  dataproc:  '<path d="M12 3l1.8 5.4H19l-4.3 3.2 1.7 5.4L12 13.8 7.6 17l1.7-5.4L5 8.4h5.2z"/>',
   bigquery:  '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.2 15.2L21 21"/><path d="M8 12.5v-2M10.5 12.5v-4M13 12.5v-3"/>',
   // Cloud Scheduler: a clock.
   scheduler: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -1003,6 +1274,7 @@ const ICONS = {
   // Memorystore: a memory module, for an in-memory store.
   memorystore: '<rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 17v3M12 17v3M17 17v3M7 11h2M11 11h2M15 11h2"/>',
   // Cloud SQL: a database cylinder with a query line.
+  alloydb:  '<ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13"/><path d="M8.5 15.5l3.5-7 3.5 7M9.8 13h4.4"/>',
   cloudsql:  '<ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13"/><path d="M9 12h6M9 16h4"/>',
   monitoring:'<path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/>',
   requests:  '<path d="M4 7h13M13 3l4 4-4 4"/><path d="M20 17H7M11 13l-4 4 4 4"/>',
@@ -5435,7 +5707,7 @@ function listActionButtons(route, data, onDone) {
     type: "button", class: "secondary", id: `list-action-${a.id}`, text: a.label,
     // One that is a link opens its page: the Datastore page's Indexes
     // (#1846).
-    onclick: () => (a.href ? navigate(a.href)
+    onclick: () => (a.href ? openHref(a.href)
       : a.panel ? openActionPanel(route, [], a, onDone, a.label)
       : openActionForm(route, [], a, onDone, data.noun || route.title)),
   }));
@@ -6555,11 +6827,14 @@ function renderEditPage(view, route, segments, data, crumb) {
   const primary = el("button", { type: "submit", class: "primary", id: "edit-page-save", text: spec.submit || "Save" });
   const cancel = el("a", { class: "button secondary", href: here, text: "Cancel" });
   let submitting = false;
+  const initial = fields.values();
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
     if (submitting) return;
     if (!fields.validate()) { steps.revealInvalid(); return; }
+    // A load balancer's Review and finalize, then Update (EditForm.Review, #2160).
+    if (spec.review && !(await reviewChanges(spec, initial, fields.values()))) return;
     submitting = true;
     setBusy(primary, true);
     const op = recordOperation(`Update ${name}`);
@@ -7875,7 +8150,10 @@ function buildCreateForm(spec) {
           // An empty option (an optional choice left unset) is named, so
           // it is not read as a blank item (#1604); optionLabels name an
           // option as Google's console does (#1852, #1860).
-          ...(f.options || []).map((o) => el("option", { value: o, text: (f.optionLabels || {})[o] || o || "None" })))
+          // A disabled option is one Google offers that this instance
+          // cannot serve, drawn but not choosable (#2140).
+          ...(f.options || []).map((o) => el("option", { value: o, text: (f.optionLabels || {})[o] || o || "None",
+                                                         disabled: (f.disabledOptions || []).includes(o) })))
       : el("input", {
           // A zoned date and time (#1850) is the browser's datetime-local
           // picker; plain datetime-local fields stay UTC wall-clock times.
@@ -8191,6 +8469,24 @@ function buildCreateForm(spec) {
     relist();
   }
 
+  // A radio whose option labels follow another field (labelsBy, #2140):
+  // a firewall rule's Protocols and ports reads Allow all or Deny all as its
+  // Action on match is Allow or Deny, as Google's Create firewall rule does.
+  for (const entry of entries) {
+    const by = entry.field.labelsBy;
+    const other = by && byName.get(by);
+    if (!other || !entry.isRadio) continue;
+    const labels = [...entry.node.querySelectorAll(".check-line > label")];
+    const relabel = () => {
+      const m = (entry.field.labelsFor || {})[valueText(other)] || {};
+      (entry.field.options || []).forEach((o, i) => {
+        if (labels[i]) labels[i].textContent = m[o] || (entry.field.optionLabels || {})[o] || o;
+      });
+    };
+    other.control.addEventListener("change", relabel);
+    relabel();
+  }
+
   // A checkbox checked and held while another field holds a value
   // (checkedWhen, #1862): Memorystore's Security choice of IAM Auth or Token
   // Auth checks and locks Enable In-Transit Encryption (TLS), as Google's
@@ -8467,7 +8763,23 @@ function uploadIntoTextarea(f, control) {
 // Variables & Secrets, Volumes, Networking and Security (#1852). Every field
 // stays in the form whichever tab shows, so Create submits them all.
 function formTabs(section, entries) {
-  const plain = entries.filter((e) => !e.field.tab).map((e) => e.slot || (e.slot === undefined ? e.node : null)).filter(Boolean);
+  // Consecutive fields of one subsection are a titled fieldset (#2181):
+  // Create an instance's Security pane has Shielded VM over its checkboxes.
+  const plain = [];
+  let sub = null;
+  for (const e of entries.filter((x) => !x.field.tab)) {
+    const node = e.slot || (e.slot === undefined ? e.node : null);
+    if (!node) continue;
+    const name = e.field.subsection || "";
+    if (!name) { sub = null; plain.push(node); continue; }
+    if (!sub || sub.dataset.subsection !== name) {
+      sub = el("fieldset", { class: "form-subsection", "data-subsection": name },
+        el("legend", { class: "form-subsection-title", text: name }),
+        e.field.subsectionNote ? el("p", { class: "form-help form-subsection-note", text: e.field.subsectionNote }) : null);
+      plain.push(sub);
+    }
+    sub.append(node);
+  }
   const tabs = [];
   for (const e of entries.filter((x) => x.field.tab)) {
     let t = tabs.find((x) => x.name === e.field.tab);
@@ -10446,6 +10758,21 @@ function startCreate(route, create, onDone) {
   // Create project is the New project page, as the picker's New project is.
   if (create.href) return navigate(create.href + scopeSearch());
   if (create.page) return navigate(`${route.path}/create`);
+  // A dialog whose choices are the selected project's (#2105: Colab
+  // Enterprise's Runtime template menu) reads them first, as the create
+  // page does, with the list's scope.
+  const project = currentProject();
+  if (create.perProject && project && route.service) {
+    const q = new URLSearchParams(location.search);
+    q.set("project", project);
+    api(`/api/createform/${route.service}?${q}`)
+      .then((data) => openCreateForm(route, { ...create, fields: data.fields || create.fields }, onDone))
+      .catch((err) => {
+        notify(`The form's choices could not be read for ${project}: ${err.message}`, "error");
+        openCreateForm(route, create, onDone);
+      });
+    return;
+  }
   openCreateForm(route, create, onDone);
 }
 
@@ -10521,7 +10848,7 @@ function openCreateForm(route, spec, onDone) {
   };
 
   dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
-    el("h2", { id: "create-title", text: spec.label }),
+    el("h2", { id: "create-title", text: spec.title || spec.label }),
     error,
     ...fields.nodes,
     discard,
@@ -10948,7 +11275,9 @@ function currentProject() {
 // does not work at the folder's or organization's level drops the choice,
 // so the toolbar always names what the page reads.
 const RESOURCE_SCOPE_KEYS = ["folder", "organizationId"];
-const RESOURCE_SCOPED_PATHS = ["/iam-admin/iam", "/iam-admin/orgpolicies", "/iam-admin/tags", "/tags", "/iam-admin/quotas"];
+// Network Security's Address groups list the organization's groups when
+// it is chosen (firewall/docs/use-address-groups-firewall-policies, #2160).
+const RESOURCE_SCOPED_PATHS = ["/iam-admin/iam", "/iam-admin/orgpolicies", "/iam-admin/tags", "/tags", "/iam-admin/quotas", "/net-security/addressgroups"];
 const resourceScopedPath = (pathname) => RESOURCE_SCOPED_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
 // RESOURCE_NAMES are the folders' and the organization's display names, as
 // the picker last read them: "folder:N" and "organization:N".
@@ -11209,6 +11538,8 @@ const DELETE_DETAIL = {
   "run-jobs": "Every execution of the job is deleted with it, a running one included, " +
               "and its tasks are stopped.",
   "run-instances": "The instance's container is stopped and its configuration deleted.",
+  "developer-connect-account-connectors": "Every user who connected an account through it is deleted with it, " +
+              "and their access tokens stop being refreshed.",
   "run-worker-pools": "Every revision of the worker pool is deleted with it, and its instances are stopped.",
   "pubsub-subscriptions": "Messages waiting on this subscription are discarded with it. " +
             "The topic, and its other subscriptions, are not affected.",
@@ -11243,8 +11574,10 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
   // says: its ID typed back, then Shut down (#1865).
   const shutDown = route.service === "projects";
   await confirmDestructive({
-    title: shutDown ? `Shut down ${name}?` : `Delete ${name}?`,
-    detail: DELETE_DETAIL[route.service],
+    title: shutDown ? `Shut down ${name}?` : capabilityOf(route.service).deleteTitle || `Delete ${name}?`,
+    // A dialog Google titles by the kind ("Delete notebook") names the
+    // resource in its body.
+    detail: [capabilityOf(route.service).deleteTitle ? name : "", DELETE_DETAIL[route.service]].filter(Boolean).join("\n\n") || undefined,
     confirmWord: name,
     confirmLabel: capabilityOf(route.service).deleteSubmit || "Delete",
     ...(shutDown ? { confirmLabel: "Shut down", consequence: "" } : {}),
@@ -11301,7 +11634,7 @@ function showActionResult(title, result, at = null) {
 async function runAction(route, target, action, onDone, row = NO_ROW, title = null) {
   // An action that is a link opens its page (#1847): a topic row's Create
   // subscription.
-  if (action.href) return navigate(action.href);
+  if (action.href) return openHref(action.href);
   // Run in Cloud Shell (#2049): the command, in the terminal's active tab.
   if (action.terminal) return runInTerminal(action.terminal);
   const path = Array.isArray(target) ? target : null;
@@ -11810,7 +12143,8 @@ function dispatch(view) {
     }
     return resourcePath.length ? renderDetail(view, match, resourcePath) : renderList(view, match);
   }
-  if (match.service === "vertex-models" && !SERVICES.some((sv) => sv.id === "vertex-models")) {
+  if ((match.service === "vertex-models" || match.service === "colab-runtimes" || match.service === "colab-templates") &&
+    !SERVICES.some((sv) => sv.id === match.service)) {
     return renderNotServed(view, { ...match, api: null });
   }
   if (match.screen === "agent-garden") return renderAgentGarden(view);
@@ -11833,6 +12167,7 @@ function dispatch(view) {
   if (match.screen === "iam-troubleshooter") return renderIAMTroubleshooter(view);
   if (match.screen === "iam-analyzer") return renderIAMAnalyzer(view);
   if (match.screen === "bigquery-studio") return renderBigQueryStudio(view);
+  if (match.screen === "bigquery-scheduling") return renderBigQueryScheduling(view);
   if (match.screen === "new-project") return renderNewProject(view);
   if (!match.service) return renderDashboard(view);
   if (match.screen === "apis-dashboard" && !resourcePath.length) return renderAPIsDashboard(view);
@@ -12425,12 +12760,30 @@ function drawProductNav() {
 //
 // The same thing a link click does, for the places where the control is a
 // button because it is an action rather than a destination.
+// openHref follows an action's link: a console route in the console, and
+// another origin's page in a new window, as Developer Connect's Connect your
+// account opens the provider's consent page (#2105).
+function openHref(href) {
+  const url = new URL(href, location.origin);
+  if (url.origin !== location.origin) return void window.open(url.href, "_blank", "noopener");
+  return navigate(href);
+}
+
 function navigate(path) {
   const url = new URL(path, location.origin);
   const project = currentProject();
   if (project) url.searchParams.set("project", project);
   const scoped = scopeServiceOfPath(url.pathname);
   if (scoped && scopeServiceOfPath(location.pathname) === scoped) carryScope(url, scoped);
+  // The folder or organization chosen in the toolbar stays chosen from one
+  // page that works at its level to another (#2160: an organization address
+  // group's Create returns to the organization's list).
+  if (resourceScopedPath(location.pathname) && resourceScopedPath(url.pathname)) {
+    const here = new URLSearchParams(location.search);
+    for (const k of RESOURCE_SCOPE_KEYS) {
+      if (here.get(k) && !url.searchParams.has(k)) url.searchParams.set(k, here.get(k));
+    }
+  }
   history.pushState({}, "", url);
   // Focus lands on the main region first and the screen is drawn after, so a
   // screen that wants focus somewhere specific — a form's first field — is
@@ -21021,8 +21374,6 @@ const BQ_STUDIO_TABS = "cloudburrow.bigquery.tabs";
 const BQ_STUDIO_RECENT = "cloudburrow.bigquery.recent";
 const BQ_SAVED_NOTE = "CloudBurrow-only: Google keeps a saved query as a Dataform code asset, which Studio does not yet keep in CloudBurrow's Dataform (#2105). " +
   "This one is kept in the instance's state directory, listed under Queries in the Explorer, and reachable by no API.";
-const BQ_UNAVAILABLE_SCHEDULE = "Not available locally: a scheduled query is a BigQuery Data Transfer Service transfer, " +
-  "which CloudBurrow does not run.";
 const BQ_UNAVAILABLE_PERMISSIONS = "Not available locally: a saved query's permissions (Code Owner, Code Editor, Code Viewer) " +
   "are Dataform's IAM, which Studio does not yet reach. Copy link shares it with anyone using this instance.";
 
@@ -21088,13 +21439,62 @@ function bqMenu(label, items) {
     "aria-haspopup": "menu", "aria-expanded": "false",
     html: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>',
   });
-  const close = () => { menu.hidden = true; button.setAttribute("aria-expanded", "false"); };
+  const close = () => {
+    menu.hidden = true; button.setAttribute("aria-expanded", "false");
+    menu.querySelectorAll(".bq-submenu").forEach((m) => { m.hidden = true; });
+    menu.querySelectorAll("[aria-haspopup=menu]").forEach((b) => b.setAttribute("aria-expanded", "false"));
+  };
+  // An item with checked (a function) is a checkbox item, as Tools >
+  // Parser-based auto-completion and Edit > Query mode's modes are: its
+  // check mark is drawn from checked() each time the menu opens.
+  const checks = [];
+  const itemButton = (it) => {
+    const b = el("button", {
+      type: "button", role: it.checked ? "menuitemcheckbox" : "menuitem", class: "bq-menu-item" + (it.danger ? " danger" : "") + (it.checked ? " bq-menu-check" : ""),
+      text: it.label, disabled: it.disabled || null, title: it.title || null,
+      onclick: (e) => { e.stopPropagation(); close(); it.run(); },
+    });
+    if (it.checked) {
+      const mark = el("span", { class: "bq-menu-mark", "aria-hidden": "true" });
+      b.prepend(mark);
+      const sync = () => { const on = !!it.checked(); b.setAttribute("aria-checked", on ? "true" : "false"); mark.textContent = on ? "✓" : ""; };
+      sync();
+      checks.push(sync);
+    }
+    return b;
+  };
   for (const item of items) {
-    menu.append(el("button", {
-      type: "button", role: "menuitem", class: "bq-menu-item" + (item.danger ? " danger" : ""),
-      text: item.label, disabled: item.disabled || null, title: item.title || null,
-      onclick: (e) => { e.stopPropagation(); close(); item.run(); },
-    }));
+    if (!item.items) {
+      menu.append(itemButton(item));
+      continue;
+    }
+    // An item with items is a submenu (File > Schedule > Update scheduled
+    // query): Enter, a click or Right opens it beside the item, with focus
+    // on its first item; Left or Escape closes it back to the item.
+    const sub = el("div", { class: "bq-menu bq-submenu", role: "menu", "aria-label": item.label, hidden: true });
+    const parent = el("button", {
+      type: "button", role: "menuitem", class: "bq-menu-item bq-menu-parent", "aria-haspopup": "menu", "aria-expanded": "false",
+      text: item.label + " ▸", "aria-label": item.label, disabled: item.disabled || null, title: item.title || null,
+    });
+    const openSub = () => {
+      sub.hidden = false; parent.setAttribute("aria-expanded", "true");
+      const first = sub.querySelector("button:not([disabled])");
+      if (first) first.focus();
+    };
+    const closeSub = () => { sub.hidden = true; parent.setAttribute("aria-expanded", "false"); parent.focus(); };
+    parent.addEventListener("click", (e) => { e.stopPropagation(); if (sub.hidden) openSub(); else closeSub(); });
+    parent.addEventListener("keydown", (e) => { if (e.key === "ArrowRight") { e.preventDefault(); e.stopPropagation(); openSub(); } });
+    for (const it of item.items) sub.append(itemButton(it));
+    sub.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" || e.key === "ArrowLeft") { e.preventDefault(); e.stopPropagation(); closeSub(); return; }
+      const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+      if (!step) return;
+      e.preventDefault(); e.stopPropagation();
+      const all = [...sub.querySelectorAll("button:not([disabled])")];
+      const i = all.indexOf(document.activeElement);
+      if (all.length) all[(i + step + all.length) % all.length].focus();
+    });
+    menu.append(el("div", { class: "bq-submenu-wrap", role: "none" }, parent, sub));
   }
   button.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -21102,6 +21502,7 @@ function bqMenu(label, items) {
     document.querySelectorAll(".bq-menu").forEach((m) => { m.hidden = true; });
     menu.hidden = !open;
     button.setAttribute("aria-expanded", open ? "true" : "false");
+    checks.forEach((sync) => sync());
     if (open) {
       const first = menu.querySelector("button:not([disabled])");
       if (first) first.focus();
@@ -21113,7 +21514,7 @@ function bqMenu(label, items) {
     const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
     if (!step) return;
     e.preventDefault();
-    const all = [...menu.querySelectorAll("button:not([disabled])")];
+    const all = [...menu.querySelectorAll(":scope > button:not([disabled]), :scope > .bq-submenu-wrap > button:not([disabled])")];
     const i = all.indexOf(document.activeElement);
     if (all.length) all[(i + step + all.length) % all.length].focus();
   });
@@ -21339,15 +21740,15 @@ function renderBigQueryStudio(view) {
     const open = tabs.find((t) => t.savedId === sq.id);
     if (open) return select(open);
     try { await bqLoadAsset(sq); } catch (err) { notify(err.message, "error"); return; }
-    const kind = sq.kind === "notebook" ? "notebook" : sq.kind === "data_canvas" ? "canvas" : "query";
+    const kind = BQ_TAB_KIND[sq.kind] || "query";
     select(newTab(sq.query, sq.name, { savedId: sq.id, kind }));
   };
-  // openAsset opens a new notebook or data canvas tab (a template, or a
-  // version opened from Version history).
+  // openAsset opens a new notebook, data canvas, pipeline or data
+  // preparation tab (a template, or a version opened from Version history).
   const openAsset = (kind, content = "", title = null) => {
-    const k = kind === "notebook" ? "notebook" : "canvas";
+    const k = BQ_TAB_KIND[kind] || "canvas";
     const n = tabs.filter((t) => t.kind === k && !t.savedId).length + 1;
-    const base = k === "notebook" ? "Untitled notebook" : "Untitled data canvas";
+    const base = `Untitled ${BQ_ASSET_KIND[kind] || "data canvas"}`;
     select(newTab(content, title || (n === 1 ? base : `${base} ${n}`), { kind: k }));
   };
   // openRepoFile opens a workspace file from Source control.
@@ -21470,6 +21871,8 @@ function renderBigQueryStudio(view) {
     };
     const notebooksNode = assetNode("notebook", "Notebooks", "No notebooks. Create one from Home, Create new.");
     const canvasesNode = assetNode("data_canvas", "Data canvases", "No data canvases. Create one from Home, Create new.");
+    const pipelinesNode = assetNode("pipeline", "Pipelines", "No pipelines. Create one from Home, Create new.");
+    const prepsNode = assetNode("data_preparation", "Data preparations", "No data preparations. Create one from Home, Create new.");
     // The Data pane lists the data hierarchy only: "Code assets aren't
     // listed in the Data pane" (bigquery-web-ui).
     const queriesNode = pane === "data" ? null : (!q && !onlyStarred) || queryKids.length
@@ -21518,7 +21921,7 @@ function renderBigQueryStudio(view) {
       { label: "Create dataset", run: () => bqCreateDataset(() => loadExplorer()) },
       { label: "Refresh contents", run: () => loadExplorer() },
       { label: "Copy ID", run: () => bqCopy(proj, "ID") },
-    ], [queriesNode, notebooksNode, canvasesNode, ...dsNodes].filter(Boolean), "/bigquery");
+    ], [queriesNode, notebooksNode, canvasesNode, pipelinesNode, prepsNode, ...dsNodes].filter(Boolean), "/bigquery");
     setChildren(explorerBody,
       el("ul", { class: "bq-tree", role: "tree", "aria-label": pane === "data" ? "Data" : "Explorer" }, projectNode),
       tree.datasets.length ? null
@@ -21533,7 +21936,7 @@ function renderBigQueryStudio(view) {
     const proj = tree ? tree.project : project;
     if (bqDataformOn()) return drawDataformFiles(proj);
     setChildren(explorerBody,
-      el("p", { class: "unavailable bq-files-note", text: BQ_SAVED_NOTE + " Folders, notebooks and data canvases are Dataform's, which this instance does not serve." }),
+      el("p", { class: "unavailable bq-files-note", text: BQ_SAVED_NOTE + " Folders, notebooks, data canvases, pipelines and data preparations are Dataform's, which this instance does not serve." }),
       saved.length
         ? el("ul", { class: "bq-files", "aria-label": "Saved queries" }, ...saved.map((sq) => el("li", { class: "bq-node-row" },
             el("a", { class: "bq-node-name", href: "/bigquery-studio?" + new URLSearchParams({ project: proj, savedQuery: sq.id }),
@@ -21626,7 +22029,7 @@ function renderBigQueryStudio(view) {
         el("li", { role: "treeitem", "aria-level": "1", "aria-expanded": "true", class: "bq-node" },
           el("div", { class: "bq-node-row" }, el("span", { class: "bq-node-name", text: proj })),
           roots.length ? el("ul", { role: "group" }, ...roots.map((e) => row(e, 2)))
-            : el("p", { class: "unavailable", text: "No folders or code assets yet. Save a query, notebook or data canvas." }))));
+            : el("p", { class: "unavailable", text: "No folders or code assets yet. Save a query, notebook, data canvas, pipeline or data preparation." }))));
   };
 
   // drawSource is Source control: the project's Dataform repositories,
@@ -21847,10 +22250,11 @@ function renderBigQueryStudio(view) {
     } else if (kind === "jobs") {
       setChildren(panel, history);
       drawHistory();
-    } else if (kind === "notebook" || kind === "canvas") {
+    } else if (kind === "notebook" || kind === "canvas" || kind === "pipeline" || kind === "dataprep") {
       const assetCtx = { save: () => bqWriteTabs(tabs), tree: () => tree, openAsset,
         onSaved: async () => { await loadSaved(); if (pane === "files") drawFiles(); else drawTree(); drawTabs(); } };
-      setChildren(panel, kind === "notebook" ? bqNotebookTab(current, assetCtx) : bqCanvasTab(current, assetCtx));
+      const draw = { notebook: bqNotebookTab, canvas: bqCanvasTab, pipeline: bqPipelineTab, dataprep: bqDataPrepTab }[kind];
+      setChildren(panel, draw(current, assetCtx));
     } else if (kind === "repofile") {
       setChildren(panel, bqRepoFileTab(current));
     } else if (kind === "resource") {
@@ -21916,7 +22320,16 @@ function renderBigQueryStudio(view) {
         splitHost)));
   drawPane();
   drawTabs();
-  loadExplorer().then(() => {
+  loadExplorer().then(async () => {
+    // A scheduled query's Edit (its Scheduled query details page) opens its
+    // query in a tab whose File > Schedule > Update scheduled query saves it back.
+    const linkedScheduled = params.get("scheduledQuery");
+    if (linkedScheduled) {
+      try {
+        const sq = await send(`/api/studio/bigquery-scheduled-queries?call=get&project=${encodeURIComponent(project)}`, "POST", { name: linkedScheduled });
+        select(newTab(sq.query, sq.displayName, { scheduledQuery: sq.name }));
+      } catch (err) { notify(err.message, "error"); }
+    }
     // A link to a saved query (Copy link) opens it once the list is read.
     if (linkedSaved) {
       const asset = BQ_FILES.find((e) => e.name === linkedSaved && BQ_ASSET_KIND[e.kind]);
@@ -21955,7 +22368,10 @@ function bqHomeTab(ctx) {
     title: why, "aria-description": why, onclick: why ? null : run,
   });
   const notebook = bqDataformOn() ? null : BQ_NO_DATAFORM;
-  const spark = "Not available locally: an Apache Spark notebook's session is a Spark Connect session of Serverless for Apache Spark, which CloudBurrow does not serve.";
+  // An Apache Spark notebook (#2156): its runtime's DataprocSparkSession
+  // makes a Spark Connect session of the instance's Serverless for Apache
+  // Spark, so the Dataproc API must be served beside Dataform.
+  const spark = notebook || (bqSparkOn() ? null : BQ_NO_SPARK);
   // A dataset chooser for Create new's Table and Add your own data's
   // Load from a file, which act on a dataset.
   // The datasets arrive with the Explorer, after the tab is drawn: refresh
@@ -21992,10 +22408,10 @@ function bqHomeTab(ctx) {
       el("div", { class: "bq-home-actions" },
         action("SQL query", () => ctx.openQuery("")),
         action("Notebook", () => ctx.openAsset("notebook", bqNotebookDoc([])), notebook),
-        action("Apache Spark notebook", null, spark),
+        action("Apache Spark notebook", () => ctx.openAsset("notebook", bqNotebookDoc(BQ_SPARK_NOTEBOOK)), spark),
         action("Data canvas", () => ctx.openAsset("data_canvas", ""), notebook),
-        action("Data preparation", null, "Not available locally: a data preparation is a Dataform action, which CloudBurrow's Dataform does not run (#2105)."),
-        action("Pipeline", null, "Not available locally: a pipeline's tasks are a Dataform repository's definitions/actions.yaml, which CloudBurrow's Dataform does not compile (#2105)."),
+        action("Data preparation", () => ctx.openAsset("data_preparation", JSON.stringify(bqDataPrepDoc())), notebook),
+        action("Pipeline", () => ctx.openAsset("pipeline", JSON.stringify(bqPipelineDoc())), notebook),
         tableButton),
       dsLabel),
     card("Recent",
@@ -22041,12 +22457,29 @@ function bqHomeTab(ctx) {
 
 const BQ_DATAFORM_NOTE = "Kept in this instance's Dataform as a code asset: a repository labelled single-file-asset-type, as Google keeps it, " +
   "with its Version history and permissions.";
-const BQ_NO_DATAFORM = "Saving notebooks and data canvases needs the Dataform API, which this instance does not serve " +
+const BQ_NO_DATAFORM = "Saving notebooks, data canvases, pipelines and data preparations needs the Dataform API, which this instance does not serve " +
   "(start it with --services including dataform).";
-const BQ_ASSET_KIND = { sql: "saved query", notebook: "notebook", data_canvas: "data canvas" };
+const BQ_ASSET_KIND = { sql: "saved query", notebook: "notebook", data_canvas: "data canvas", pipeline: "pipeline", data_preparation: "data preparation" };
+// BQ_TAB_KIND is the tab each code asset opens in.
+const BQ_TAB_KIND = { notebook: "notebook", data_canvas: "canvas", pipeline: "pipeline", data_preparation: "dataprep" };
 const BQ_STUDIO_CLOSED = "cloudburrow.bigquery.closed";
 
 const bqDataformOn = () => !!capabilityOf("dataform").id;
+// Serverless for Apache Spark (#2156), whose Spark Connect sessions an
+// Apache Spark notebook runs on.
+const bqSparkOn = () => !!capabilityOf("dataproc-sessions").id;
+const BQ_NO_SPARK = "An Apache Spark notebook runs on a Spark Connect session of Serverless for Apache Spark, which this instance does not serve " +
+  "(start it with --services including dataproc).";
+// The Apache Spark notebook's starter cells, as Google's: a
+// DataprocSparkSession (google-cloud-dataproc-spark-connect) made from a
+// Session config, then Spark reading BigQuery through the connector.
+const BQ_SPARK_NOTEBOOK = [
+  ["markdown", "# Apache Spark notebook\nConnect, then run the cells: the first creates a Spark Connect session of Serverless for Apache Spark (runtime 3.0) and the others run Spark on it, reading BigQuery through the Spark BigQuery connector."],
+  ["code", "from google.cloud.dataproc_spark_connect import DataprocSparkSession\nfrom google.cloud.dataproc_v1 import Session\n\nsession = Session()\nspark = DataprocSparkSession.builder.dataprocSessionConfig(session).getOrCreate()"],
+  ["code", "spark.sql(\"SELECT id, id * id AS square FROM range(5)\").show()"],
+  ["code", "# Replace with a table of this project: PROJECT.DATASET.TABLE\ndf = spark.read.format(\"bigquery\").load(\"PROJECT.DATASET.TABLE\")\ndf.printSchema()"],
+  ["code", "spark.stop()"],
+];
 const bqSavedNote = () => (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_SAVED_NOTE);
 const bqDfCall = (call, body = {}) =>
   send(`/api/studio/dataform?call=${encodeURIComponent(call)}&project=${encodeURIComponent(currentProject())}`, "POST", body);
@@ -22218,6 +22651,1553 @@ async function bqSaveAsset(tab, kind, content, onSaved) {
   }
 }
 
+// --- Scheduled notebooks, pipelines and data preparations (#2105) ---------
+//
+// In Google's layout (https://docs.cloud.google.com/bigquery/docs/orchestrate-notebooks,
+// create-pipelines, schedule-pipelines, data-prep-introduction; read
+// 2026-11-22): a notebook's Schedule opens Schedule notebook (Schedule
+// name, Authentication, Notebook options' Runtime template and Cloud
+// Storage bucket, Schedule frequency's Repeats, At time and Timezone, then
+// Create schedule); its schedules list each with Run, Enable or Disable,
+// Delete and Past executions, and an execution shows its tasks' states
+// and the executed notebook, read from Cloud Storage
+// (gs://BUCKET/JOB_ID/content.ipynb). A pipeline's editor adds tasks
+// (Query, Notebook, Data preparation), each with Run after, and has
+// Run > Run all tasks, Schedule, Executions and Settings. A data
+// preparation's editor has its Steps (Source, then Filter, Transformation,
+// Join, Aggregation, Deduplicate, Delete columns, then Destination with its
+// write mode), More > Error table, and Data, Graph, Schema and SQLX views.
+// All of it is Dataform's (POST /api/studio/dataform, the calls in
+// cmd/cloudburrow/consolebigqueryorchestration.go): Dataform runs the
+// schedules. Gemini's step suggestions are the local model's (bqPrepSuggest).
+
+const BQ_REPEATS = [["hourly", "Hourly"], ["daily", "Daily"], ["weekly", "Weekly"], ["monthly", "Monthly"], ["custom", "Custom"]];
+const BQ_WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+// Google's step types (data-prep-introduction, data-prep-get-suggestions,
+// read 2026-11-22): a validation is a filter whose failing rows go to the
+// error table; Flatten and Unnest open from a RECORD, JSON or ARRAY column.
+const BQ_PREP_STEPS = [["filter", "Filter"], ["validation", "Validation"], ["transform", "Transformation"], ["join", "Join"], ["aggregate", "Aggregation"],
+  ["deduplicate", "Deduplicate"], ["delete", "Delete columns"], ["flatten", "Flatten"], ["unnest", "Unnest"]];
+// Write modes: Incremental is MAXIMUM for a numeric or datetime column and
+// UNIQUE for a categorical one; Upsert merges on its merge keys (MERGE).
+const BQ_WRITE_MODES = [["REPLACE", "Full refresh"], ["APPEND", "Append"], ["INCREMENTAL", "Incremental"], ["MERGE", "Upsert"]];
+const BQ_MAXIMUM_TYPES = ["INTEGER", "INT64", "FLOAT", "FLOAT64", "NUMERIC", "BIGNUMERIC", "DATE", "DATETIME", "TIMESTAMP", "TIME"];
+const bqWriteMode = (m) => (m === "MAXIMUM" || m === "UNIQUE" ? "INCREMENTAL" : m || "REPLACE");
+const BQ_TASK_TYPES = { sql: "Query", notebook: "Notebook", data_preparation: "Data preparation", table: "Table", view: "View",
+  declaration: "Declare source", assertion: "Data quality test", unit_test: "Unit test", spark_notebook: "Apache Spark notebook" };
+
+const bqTimeZones = () => {
+  try { return Intl.supportedValuesOf("timeZone"); } catch { return ["UTC", "America/New_York", "America/Los_Angeles", "Europe/London", "Europe/Paris", "Asia/Tokyo"]; }
+};
+const bqLocalZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { return "UTC"; } };
+
+// bqCron is a Repeats choice as a cron schedule.
+function bqCron(repeats, at, day, custom) {
+  const [h, m] = (at || "00:00").split(":").map((x) => parseInt(x, 10) || 0);
+  if (repeats === "hourly") return `${m} * * * *`;
+  if (repeats === "daily") return `${m} ${h} * * *`;
+  if (repeats === "weekly") return `${m} ${h} * * ${day}`;
+  if (repeats === "monthly") return `${m} ${h} ${day} * *`;
+  return (custom || "").trim();
+}
+
+// bqField is a labelled control with its help.
+const bqField = (id, label, control, help = null) => el("div", { class: "form-field" },
+  el("label", { for: id, text: label }), control, help ? el("p", { class: "form-help", id: `${id}-help`, text: help }) : null);
+
+// bqAuthFields is Authentication: the user's credentials or a service
+// account.
+function bqAuthFields(prefix, value = "") {
+  const sa = el("input", { type: "text", id: `${prefix}-sa`, value, placeholder: "name@project.iam.gserviceaccount.com" });
+  const radio = (v, text) => el("label", { class: "radio" },
+    el("input", { type: "radio", name: `${prefix}-auth`, value: v, checked: (v === "sa") === !!value ? true : null,
+      onchange: () => { saWrap.hidden = v !== "sa"; } }), el("span", { text: " " + text }));
+  const saWrap = bqField(`${prefix}-sa`, "Service account", sa, "The schedule's runs act as this service account.");
+  saWrap.hidden = !value;
+  const group = el("fieldset", { class: "bq-auth" }, el("legend", { text: "Authentication" }),
+    radio("user", "Execute with my user credentials"), radio("sa", "Execute with selected service account"), saWrap);
+  return { group, value: () => (group.querySelector(`input[name="${prefix}-auth"]:checked`)?.value === "sa" ? sa.value.trim() : "") };
+}
+
+// colabTemplateChoices offers the project's Colab Enterprise runtime
+// templates (#2105) as input's choices, by resource name, as Google's
+// Runtime template menu lists them; typing a name stays possible.
+const COLAB_REGIONS = ["us-central1", "us-east1", "us-east4", "us-west1", "europe-west1", "europe-west4", "asia-east1", "asia-northeast1"];
+function colabTemplateChoices(input, listID) {
+  if (!SERVICES.some((sv) => sv.id === "colab-templates")) return;
+  const project = currentProject();
+  if (!project) return;
+  document.getElementById(listID)?.remove();
+  const list = el("datalist", { id: listID });
+  document.body.append(list);
+  input.setAttribute("list", listID);
+  for (const region of COLAB_REGIONS) {
+    api(`/api/resources/colab-templates?project=${encodeURIComponent(project)}&region=${encodeURIComponent(region)}`).then((data) => {
+      for (const it of data.items || []) {
+        list.append(el("option", { value: `projects/${project}/locations/${region}/notebookRuntimeTemplates/${it.name}`,
+          label: `${(it.fields || {})["Display name"] || it.name} (${region})` }));
+      }
+    }).catch(() => {});
+  }
+}
+
+// bqNotebookOptionFields is Notebook options: Runtime template and Cloud
+// Storage bucket, with Browse.
+function bqNotebookOptionFields(prefix, { template = "", bucket = "" } = {}) {
+  const tpl = el("input", { type: "text", id: `${prefix}-template`, value: template, placeholder: "Default runtime specifications" });
+  colabTemplateChoices(tpl, `${prefix}-template-list`);
+  const gcs = el("input", { type: "text", id: `${prefix}-bucket`, value: bucket, placeholder: "gs://bucket" });
+  const browse = el("button", { type: "button", class: "secondary", text: "Browse", "aria-label": "Browse Cloud Storage for the Cloud Storage bucket",
+    onclick: () => browseBuckets(gcs, "storage-bucket") });
+  const group = el("fieldset", { class: "bq-nb-options" }, el("legend", { text: "Notebook options" }),
+    bqField(`${prefix}-template`, "Runtime template", tpl, "A Colab Enterprise runtime template in the notebook's region, or the default runtime specifications."),
+    el("div", { class: "form-field" }, el("label", { for: `${prefix}-bucket`, text: "Cloud Storage bucket" }),
+      el("div", { class: "input-with-button" }, gcs, browse),
+      el("p", { class: "form-help", text: "The executed notebook is written here, in a folder named after each run's job." })));
+  const bucketValue = () => { const v = gcs.value.trim(); return !v ? "" : v.startsWith("gs://") ? v : `gs://${v}`; };
+  return { group, template: () => tpl.value.trim(), bucket: bucketValue };
+}
+
+// bqScheduleDialog is Schedule notebook (or Schedule pipeline): it creates
+// the schedule and settles with it, or null.
+function bqScheduleDialog(asset, { notebook = true, title = "Schedule notebook", defaults = {} } = {}) {
+  return new Promise((settle) => {
+    let result = null;
+    const { dialog, close } = openModal({ labelledBy: "bq-sched-title" });
+    const name = el("input", { type: "text", id: "bq-sched-name", required: true, maxlength: "63" });
+    const auth = bqAuthFields("bq-sched", defaults.serviceAccount || "");
+    const nb = bqNotebookOptionFields("bq-sched", defaults);
+    const repeats = el("select", { id: "bq-sched-repeats" }, ...BQ_REPEATS.map(([v, t]) => el("option", { value: v, text: t })));
+    repeats.value = "daily";
+    const at = el("input", { type: "time", id: "bq-sched-at", value: "09:00" });
+    const day = el("select", { id: "bq-sched-day" });
+    const custom = el("input", { type: "text", id: "bq-sched-cron", placeholder: "0 9 * * 1-5", class: "mono" });
+    const zone = el("select", { id: "bq-sched-zone" }, ...bqTimeZones().map((z) => el("option", { value: z, text: z })));
+    zone.value = bqLocalZone();
+    const atWrap = bqField("bq-sched-at", "At time", at);
+    const dayWrap = bqField("bq-sched-day", "On", day);
+    const cronWrap = bqField("bq-sched-cron", "Custom frequency (cron)", custom, "Unix cron: minute, hour, day of month, month, day of week.");
+    const syncRepeats = () => {
+      const r = repeats.value;
+      const days = r === "weekly" ? BQ_WEEKDAYS.map((d, i) => [String(i), d]) : Array.from({ length: 31 }, (_, i) => [String(i + 1), `Day ${i + 1}`]);
+      if (r === "weekly" || r === "monthly") setChildren(day, ...days.map(([v, t]) => el("option", { value: v, text: t })));
+      dayWrap.hidden = r !== "weekly" && r !== "monthly";
+      cronWrap.hidden = r !== "custom";
+      atWrap.hidden = r === "custom";
+      setChildren(atWrap.querySelector("label"), document.createTextNode(r === "hourly" ? "At minute (the hour is ignored)" : "At time"));
+    };
+    repeats.addEventListener("change", syncRepeats);
+    syncRepeats();
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const create = el("button", { type: "submit", class: "primary", text: "Create schedule" });
+    // Execute as interactive job with high priority (default) and Limit
+    // concurrent actions, as Google's schedule form has them (not for a
+    // notebook, which runs no BigQuery actions of its own).
+    const interactive = el("input", { type: "checkbox", id: "bq-sched-interactive", checked: true });
+    const maxN = el("input", { type: "number", id: "bq-sched-max", min: "1", max: "5000", step: "1" });
+    const maxWrap = bqField("bq-sched-max", "Maximum concurrent actions", maxN, "A whole number from 1 to 5000.");
+    maxWrap.hidden = true;
+    const limit = el("input", { type: "checkbox", id: "bq-sched-limit", onchange: () => { maxWrap.hidden = !limit.checked; } });
+    const execOptions = notebook && asset.kind === "notebook" ? null : el("fieldset", { class: "bq-sched-exec" }, el("legend", { text: "Execution options" }),
+      el("label", { class: "checkbox" }, interactive, el("span", { text: " Execute as interactive job with high priority (default)" })),
+      el("label", { class: "checkbox" }, limit, el("span", { text: " Limit concurrent actions" })), maxWrap);
+    dialog.append(el("form", { class: "modal-body is-wide", novalidate: true, onsubmit: async (e) => {
+      e.preventDefault();
+      error.hidden = true;
+      const cron = bqCron(repeats.value, at.value, day.value, custom.value);
+      let maxConcurrent = 0;
+      if (execOptions && limit.checked) {
+        maxConcurrent = Number(maxN.value);
+        if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 5000) { error.textContent = "Maximum concurrent actions is a whole number from 1 to 5000."; error.hidden = false; return; }
+      }
+      const fail = (m) => { error.textContent = m; error.hidden = false; };
+      if (!name.value.trim()) return fail("A schedule name is required.");
+      if (!cron) return fail("Write the custom frequency as a cron schedule.");
+      if (notebook && !nb.bucket()) return fail("A Cloud Storage bucket is required: each run writes its executed notebook there.");
+      setBusy(create, true);
+      try {
+        result = await bqDfCall("createschedule", { name: asset.id, displayName: name.value.trim(), cron, timeZone: zone.value,
+          serviceAccount: auth.value(), bucket: nb.bucket(), runtimeTemplate: nb.template(), batch: execOptions ? !interactive.checked : false, maxConcurrent });
+        if (result.warning) notify(result.warning, "error"); else notify(`Created schedule ${name.value.trim()}`);
+        close();
+      } catch (err) { fail(err.message); } finally { setBusy(create, false); }
+    } },
+      el("h2", { id: "bq-sched-title", text: title }), error,
+      el("p", { class: "unavailable", text: `${BQ_ASSET_KIND[asset.kind] || "Asset"}: ${asset.name} · Region ${asset.location || "us-central1"} (a schedule runs in its asset's region).` }),
+      bqField("bq-sched-name", "Schedule name", name),
+      auth.group,
+      notebook ? nb.group : null,
+      el("fieldset", { class: "bq-frequency" }, el("legend", { text: "Configuration Type: Schedule (time-based recurrence)" }),
+        bqField("bq-sched-repeats", "Repeats", repeats), dayWrap, atWrap, cronWrap, bqField("bq-sched-zone", "Timezone", zone)),
+      execOptions,
+      el("div", { class: "modal-actions" }, el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }), create)));
+    dialog.addEventListener("cb-closed", () => settle(result));
+    name.focus();
+  });
+}
+
+// bqStateCell is a state with its icon.
+const bqStateCell = (state) => el("td", {}, statusIcon(state), el("span", { text: " " + state }));
+
+// bqExecutionDetail draws an execution: its state, each task's state and
+// failure reason, and a notebook task's executed notebook from Cloud
+// Storage. It re-reads while the execution runs.
+async function bqExecutionDetail(host, name, onBack) {
+  let timer = null;
+  const draw = async () => {
+    let d;
+    try { d = await bqDfCall("execution", { invocation: name }); } catch (err) {
+      setChildren(host, el("p", { class: "form-error", role: "alert", text: err.message }));
+      return;
+    }
+    const outputs = el("div", { class: "bq-exec-outputs" });
+    setChildren(host,
+      el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Execution actions" },
+        onBack ? el("button", { type: "button", class: "secondary", text: "Back to executions", onclick: () => { clearTimeout(timer); onBack(); } }) : null,
+        el("button", { type: "button", class: "secondary", text: "Refresh", onclick: () => { clearTimeout(timer); draw(); } }),
+        !d.done ? el("button", { type: "button", class: "secondary", text: "Cancel execution", onclick: async () => {
+          try { await bqDfCall("cancelexecution", { invocation: name }); draw(); } catch (err) { notify(err.message, "error"); }
+        } }) : null),
+      el("h3", { text: `Execution ${d.id}` }),
+      el("dl", { class: "bq-exec-summary" },
+        el("dt", { text: "State" }), el("dd", {}, statusIcon(d.state), el("span", { class: "bq-exec-state", text: " " + d.state })),
+        el("dt", { text: "Schedule" }), el("dd", { text: d.schedule || "Manual run" }),
+        el("dt", { text: "Start time" }), el("dd", { text: d.start || "—" }),
+        el("dt", { text: "End time" }), el("dd", { text: d.end || "—" })),
+      el("table", { class: "bq-history-table bq-exec-tasks" },
+        el("caption", { class: "sr-only", text: "Tasks" }),
+        el("thead", {}, el("tr", {}, ...["Task", "Type", "State", "Failure reason", "Job ID", ""].map((h) => el("th", { scope: "col", text: h })))),
+        el("tbody", {}, ...d.tasks.map((t) => el("tr", {},
+          el("td", { class: "mono", text: t.target }), el("td", { text: BQ_TASK_TYPES[t.kind] || t.kind }), bqStateCell(t.state),
+          el("td", { text: t.failure || "" }), el("td", { class: "mono", text: t.jobId || "" }),
+          el("td", {}, t.outputObject ? el("button", { type: "button", class: "secondary", text: "View output notebook",
+            "aria-label": `View the output notebook of ${t.target}`, onclick: () => bqShowOutputNotebook(outputs, t) }) : null,
+          t.sql ? el("details", {}, el("summary", { text: "SQL" }), el("pre", { class: "mono", text: t.sql })) : null))))),
+      d.tasks.length ? null : el("p", { class: "unavailable", text: "No tasks yet." }),
+      outputs);
+    if (!d.done && host.isConnected) timer = setTimeout(draw, 2000);
+    else if (d.done) announce(`Execution ${d.state.toLowerCase()}`);
+  };
+  setChildren(host, spinner("Loading the execution"));
+  await draw();
+}
+
+// bqShowOutputNotebook reads the executed notebook (gs://BUCKET/JOB_ID/
+// FILE) through the instance's Cloud Storage and draws its cells and
+// outputs; the folder opens in Cloud Storage.
+async function bqShowOutputNotebook(host, t) {
+  const m = /^gs:\/\/([^/]+)\/(.+)$/.exec(t.outputObject);
+  if (!m) return;
+  const folder = /^gs:\/\/([^/]+)\/(.+)$/.exec(t.outputFolder || "");
+  setChildren(host, spinner("Reading the output notebook"));
+  const link = folder ? el("a", { href: `/storage/browser/${encodeURIComponent(folder[1])}/${folder[2].split("/").filter(Boolean).map(encodeURIComponent).join("/")}${scopeSearch()}`,
+    text: `Open ${t.outputFolder} in Cloud Storage` }) : null;
+  try {
+    const q = new URLSearchParams({ project: currentProject() });
+    q.append("name", m[1]);
+    q.append("name", m[2]);
+    const res = await fetch(`/api/objects/storage/download?${q}`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error(res.status === 404 ? `${t.outputObject} is not written yet` : `Cloud Storage answered ${res.status}`);
+    const doc = JSON.parse(await res.text());
+    const text = (v) => (Array.isArray(v) ? v.join("") : String(v || ""));
+    setChildren(host,
+      el("h3", { text: `Output notebook: ${t.target}` }),
+      el("p", { class: "unavailable mono", text: t.outputObject }), link,
+      el("ol", { class: "bq-nb-cells", "aria-label": "Output notebook cells" }, ...(doc.cells || []).map((c, i) => el("li", { class: "bq-nb-cell bq-nb-" + c.cell_type },
+        el("div", { class: "bq-nb-cell-bar" }, el("span", { class: "mono bq-nb-count", text: c.cell_type === "code" ? `[${c.execution_count == null ? " " : c.execution_count}]` : "" }),
+          el("span", { class: "unavailable", text: `Cell ${i + 1}` })),
+        el("pre", { class: "mono bq-nb-source-view", text: text(c.source) }),
+        el("div", { class: "bq-nb-output" }, ...(c.cell_type === "code" ? bqNotebookOutputs(c.outputs) : []))))));
+  } catch (err) {
+    setChildren(host, el("p", { class: "form-error", role: "alert", text: `The output notebook cannot be read: ${err.message}` }), link);
+  }
+}
+
+// bqExecutionsList draws an asset's executions (one schedule's when
+// schedule is set), each opening its details.
+async function bqExecutionsList(host, asset, schedule = "") {
+  const draw = async () => {
+    setChildren(host, spinner("Loading executions"));
+    try {
+      const { executions } = await bqDfCall("executions", { name: asset.id, schedule });
+      setChildren(host,
+        el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Executions actions" },
+          el("h3", { text: schedule ? `Past executions: ${schedule.split("/").pop()}` : "Executions" }),
+          el("button", { type: "button", class: "secondary", text: "Refresh", onclick: () => draw() })),
+        executions.length ? el("table", { class: "bq-history-table bq-executions" },
+          el("thead", {}, el("tr", {}, ...["Execution", "State", "Schedule", "Start time", "End time"].map((h) => el("th", { scope: "col", text: h })))),
+          el("tbody", {}, ...executions.map((x) => el("tr", {},
+            el("td", { class: "mono" }, el("button", { type: "button", class: "link-button", text: x.id, "aria-label": `View execution ${x.id}`,
+              onclick: () => bqExecutionDetail(host, x.name, draw) })),
+            bqStateCell(x.state), el("td", { text: x.schedule || "Manual run" }), el("td", { text: x.start || "—" }), el("td", { text: x.end || "—" })))))
+          : el("p", { class: "unavailable", text: "No executions yet." }));
+    } catch (err) {
+      setChildren(host, el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
+  };
+  await draw();
+}
+
+// bqSchedulesDialog lists an asset's schedules, each with Run, Enable or
+// Disable, Delete and View past executions.
+async function bqSchedulesDialog(asset, { notebook = true } = {}) {
+  const { dialog, close } = openModal({ labelledBy: "bq-scheds-title" });
+  const list = el("div", { class: "bq-sched-list" });
+  const runs = el("div", { class: "bq-sched-runs" });
+  const draw = async () => {
+    setChildren(list, spinner("Loading schedules"));
+    try {
+      const { schedules } = await bqDfCall("schedules", { name: asset.id });
+      setChildren(list, schedules.length ? el("table", { class: "bq-history-table bq-schedules" },
+        el("thead", {}, el("tr", {}, ...["Schedule name", "Frequency", "Timezone", "Service account", "Cloud Storage bucket", "Schedule state", "Actions"].map((h) => el("th", { scope: "col", text: h })))),
+        el("tbody", {}, ...schedules.map((s) => el("tr", { "data-schedule": s.id },
+          el("td", { text: s.id }), el("td", { class: "mono", text: s.cron }), el("td", { text: s.timeZone || "UTC" }),
+          el("td", { text: s.serviceAccount || "My user credentials" }), el("td", { class: "mono", text: s.bucket || "—" }),
+          el("td", { text: s.disabled ? "Schedule is disabled" : "Schedule is enabled" }),
+          el("td", {}, bqMenu(`View actions for schedule ${s.id}`, [
+            { label: "Run", run: async () => {
+              try {
+                const r = await bqDfCall("runschedule", { schedule: s.name });
+                notify(`Started a run of ${s.id}`);
+                bqExecutionDetail(runs, r.invocation, () => bqExecutionsList(runs, asset, s.name));
+              } catch (err) { notify(err.message, "error"); }
+            } },
+            { label: "View past executions", run: () => bqExecutionsList(runs, asset, s.name) },
+            { label: s.disabled ? "Enable" : "Disable", run: async () => {
+              try { await bqDfCall("toggleschedule", { schedule: s.name, disabled: !s.disabled }); draw(); } catch (err) { notify(err.message, "error"); }
+            } },
+            { label: "Delete", danger: true, run: async () => {
+              await confirmDestructive({ title: "Delete schedule?", detail: s.id, confirmWord: s.id,
+                onConfirm: () => bqDfCall("deleteschedule", { schedule: s.name }) });
+              draw();
+            } },
+          ]))))))
+        : el("p", { class: "unavailable", text: "No schedules yet." }));
+    } catch (err) {
+      setChildren(list, el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
+  };
+  dialog.append(el("div", { class: "modal-body is-wide" },
+    el("h2", { id: "bq-scheds-title", text: `Schedules: ${asset.name}` }),
+    el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Schedule actions" },
+      el("button", { type: "button", class: "primary", text: "Create schedule", onclick: async () => {
+        close();
+        const out = await bqScheduleDialog(asset, { notebook, title: asset.kind === "notebook" ? "Schedule notebook" : `Schedule ${BQ_ASSET_KIND[asset.kind]}` });
+        if (out) bqSchedulesDialog(asset, { notebook });
+      } }),
+      el("button", { type: "button", class: "secondary", text: "Refresh", onclick: () => draw() })),
+    list, runs,
+    el("p", { class: "unavailable", text: "Dataform runs each schedule: a release configuration of the asset's main branch and a workflow configuration with its frequency." }),
+    el("div", { class: "modal-actions" }, el("button", { type: "button", class: "secondary", text: "Close", onclick: () => close() }))));
+  await draw();
+  // Focus moves into the dialog, on its first control.
+  dialog.querySelector("button, input, select, textarea, a[href]")?.focus();
+  bqExecutionsList(runs, asset);
+}
+
+// bqScheduleButton is a saved asset's Schedule menu: Create schedule and
+// View schedules (with their past executions).
+// opts.notebook says whether it runs a notebook (and so asks for
+// Notebook options), opts.defaults the dialog's defaults; either may be a
+// function, read when the dialog opens.
+function bqScheduleButton(tab, kind, opts = {}) {
+  const asset = () => ({ id: tab.savedId, name: tab.title, kind, location: (BQ_FILES.find((e) => e.name === tab.savedId) || {}).location });
+  const now = (v, dflt) => (typeof v === "function" ? v() : v === undefined ? dflt : v);
+  const whyNow = () => (!bqDataformOn() ? BQ_NO_DATAFORM : tab.savedId ? null : `Save the ${BQ_ASSET_KIND[kind]} first: a schedule runs its saved version.`);
+  const why = whyNow();
+  const m = bqMenu("Schedule", [
+    { label: "Create schedule", disabled: !!why, title: why, run: () => bqScheduleDialog(asset(), { notebook: now(opts.notebook, true), defaults: now(opts.defaults, {}),
+      title: kind === "notebook" ? "Schedule notebook" : `Schedule ${BQ_ASSET_KIND[kind]}` }) },
+    { label: "View schedules", disabled: !!why, title: why, run: () => bqSchedulesDialog(asset(), { notebook: now(opts.notebook, true) }) },
+  ]);
+  bqMenuButton(m, "Schedule", why || "Schedule: create a schedule or view the schedules and their past executions");
+  // A save after the toolbar was drawn enables the items: they are
+  // re-read each time the menu opens.
+  m.addEventListener("click", () => {
+    const w = whyNow();
+    m.querySelectorAll(".bq-menu-item").forEach((b) => { b.disabled = !!w; b.title = w || ""; });
+    m.querySelector(".bq-menu-button").title = w || "Schedule: create a schedule or view the schedules and their past executions";
+  }, true);
+  return m;
+}
+
+// bqAssetToolbarTail is Save, Version history and Share for a pipeline or
+// data preparation tab.
+function bqAssetToolbarTail(tab, kind, ctx, contentOf) {
+  return [
+    el("button", { type: "button", class: "secondary", text: "Save", onclick: () => bqSaveAsset(tab, kind, contentOf(), ctx.onSaved) }),
+    el("button", { type: "button", class: "secondary", text: "Version history", disabled: tab.savedId ? null : true,
+      title: tab.savedId ? null : `Save the ${BQ_ASSET_KIND[kind]} first`,
+      onclick: () => bqVersionHistory({ id: tab.savedId, name: tab.title, kind }, (content, title) => ctx.openAsset(kind, content, title)) }),
+    tab.savedId ? el("button", { type: "button", class: "secondary", text: "Share", onclick: () => bqManagePermissions({ id: tab.savedId, name: tab.title }) }) : null,
+  ];
+}
+
+// bqRunAsset saves the asset (a run compiles its saved version), then
+// runs it and shows the execution in the tab's Executions section (the
+// one drawn again after the save, found by its data-runs).
+async function bqRunAsset(tab, kind, content, ctx, host, opts = {}) {
+  if (!bqDataformOn()) { notify(BQ_NO_DATAFORM, "error"); return; }
+  const saved = await bqSaveAsset(tab, kind, content, ctx.onSaved);
+  if (!saved) return;
+  host = document.querySelector(`[data-runs="${tab.id}"]`) || host;
+  try {
+    const r = await bqDfCall("run", { name: tab.savedId, serviceAccount: opts.serviceAccount || "", bucket: opts.bucket || "", runtimeTemplate: opts.runtimeTemplate || "" });
+    announce("Run started");
+    await bqExecutionDetail(host, r.invocation, () => bqExecutionsList(host, { id: tab.savedId, name: tab.title, kind }));
+  } catch (err) {
+    setChildren(host, el("p", { class: "form-error", role: "alert", text: `Run failed: ${err.message}` }));
+  }
+}
+
+// Gemini's data preparation suggestions (https://docs.cloud.google.com/bigquery/docs/data-prep-get-suggestions,
+// read 2026-11-22): "Gemini generates suggestions based on your data",
+// shown as cards in the Steps list, each with Preview, Edit and Apply; a
+// column's header gives "suggestions specific to that column"; a
+// Transformation, Filter or Aggregation step takes a Description, "a
+// prompt to generate a SQL expression". Here the local model (LiteRT-LM,
+// /api/ai/playground; no network) is given the table's schema and a
+// sample of its rows. Without one installed, the editor says so, as
+// Google's shows no suggestions while Gemini in BigQuery is off.
+const BQ_PREP_NO_MODEL = "Gemini suggestions are off: this instance has no local model installed. " +
+  "Download and load one on Agent Platform > Local models; data preparation suggestions are generated by it, with no network.";
+const bqPrepModelOn = () => !!capabilityOf("playground").id;
+const BQ_PREP_SUGGESTED = ["filter", "transform", "aggregate", "deduplicate", "delete"];
+
+// bqPrepPrompt asks for step suggestions for a sample (its schema and up to
+// 10 rows), all columns or one.
+function bqPrepPrompt(source, schema, rows, column) {
+  const cols = (schema || []).map((f) => `${f.name} ${f.mode === "REPEATED" ? "ARRAY<" + f.type + ">" : f.type}`).join(", ");
+  const sample = (rows || []).slice(0, 10).map((r) => JSON.stringify(r)).join("\n");
+  return "You suggest data preparation steps for a BigQuery table, as Gemini in BigQuery's data preparation does: " +
+    "cleaning, filtering, standardizing and enriching the data.\n" +
+    `Table: ${source}\nColumns: ${cols}\nSample rows (JSON):\n${sample}\n` +
+    (column ? `Suggest only steps about the column ${column}.\n` : "") +
+    "Answer with a JSON array only, at most 5 items, each an object with: " +
+    "\"type\" (one of filter, transform, aggregate, deduplicate, delete), \"description\" (one short sentence), " +
+    "\"expression\" (GoogleSQL: a WHERE condition for filter, a column expression for transform, aggregate expressions for aggregate), " +
+    "\"column\" (the target column for transform), \"replace\" (true to replace that column's values), " +
+    "\"keys\" (grouping columns for aggregate), \"columns\" (comma-separated columns for delete).";
+}
+
+// bqPrepSuggestionsOf reads a model's answer as steps: the JSON array (in a
+// fence or not), each item kept only when it is a step the editor can
+// apply. A non-JSON answer is no suggestions.
+function bqPrepSuggestionsOf(text, schema) {
+  const m = /```(?:json)?\s*([\s\S]*?)```/i.exec(text || "");
+  let body = (m ? m[1] : text || "").trim();
+  const a = body.indexOf("["), b = body.lastIndexOf("]");
+  if (a >= 0 && b > a) body = body.slice(a, b + 1);
+  let items;
+  try { items = JSON.parse(body); } catch { return []; }
+  if (!Array.isArray(items)) return [];
+  const names = new Set((schema || []).map((f) => f.name));
+  const str = (v) => (typeof v === "string" ? v.trim() : "");
+  const out = [];
+  for (const it of items) {
+    if (!it || typeof it !== "object") continue;
+    const type = str(it.type).toLowerCase().replace(/ation$/, "").replace(/^transform.*/, "transform");
+    if (!BQ_PREP_SUGGESTED.includes(type)) continue;
+    const step = { type };
+    if (type === "filter") step.expression = str(it.expression);
+    if (type === "transform") { step.column = str(it.column); step.expression = str(it.expression); step.replace = it.replace === true || names.has(step.column); }
+    if (type === "aggregate") { step.keys = Array.isArray(it.keys) ? it.keys.join(", ") : str(it.keys); step.expression = str(it.expression); }
+    if (type === "delete") step.columns = Array.isArray(it.columns) ? it.columns.join(", ") : str(it.columns);
+    if ((type === "filter" || type === "aggregate") && !step.expression) continue;
+    if (type === "transform" && (!step.column || !step.expression)) continue;
+    if (type === "delete" && !step.columns) continue;
+    out.push({ description: str(it.description) || type, step });
+    if (out.length === 5) break;
+  }
+  return out;
+}
+
+// bqDataPrepDoc is a new data preparation's model.
+const bqDataPrepDoc = (source = "") => ({ source, steps: [], destination: "", loadMode: "REPLACE", loadColumn: "", errorTable: "", errorRetentionDays: 30 });
+
+// bqDataPrepEditor is the data preparation editor: Steps on the left
+// (Source, the applied steps, Destination), the chosen step's form, and
+// the Data, Graph, Schema and SQLX views. onChange is told of each edit.
+function bqDataPrepEditor(doc, onChange, ctx, { idPrefix = "bq-dp" } = {}) {
+  if (!Array.isArray(doc.steps)) doc.steps = [];
+  let selected = "source";
+  let view = "data";
+  // The last sample's schema: Incremental picks MAXIMUM or UNIQUE from its
+  // column's type, and Flatten and Unnest offer its columns.
+  let lastSchema = [];
+  // Gemini's suggestions: the cards for the last sample (or one column),
+  // and the sample they were made for.
+  let suggestions = null;
+  let suggestFor = "";
+  let lastRows = [];
+  let suggestKey = "";
+  const suggestHost = el("section", { class: "bq-dp-suggestions", "aria-label": "Suggestions" });
+  const tables = () => ((ctx.tree() || {}).datasets || []).flatMap((d) => (d.tables || []).map((t) => `${d.id}.${t.id}`));
+  const listId = `${idPrefix}-tables`;
+  const datalist = el("datalist", { id: listId });
+  const stepsHost = el("ol", { class: "bq-dp-steps", "aria-label": "Applied steps" });
+  const formHost = el("div", { class: "bq-dp-form" });
+  const viewHost = el("div", { class: "bq-dp-view", role: "tabpanel", id: `${idPrefix}-view` });
+  const yamlHost = el("div", { class: "bq-dp-yaml" });
+  const changed = () => { onChange(doc); drawSteps(); drawYaml(); };
+  const stepTitle = (s) => s.type === "filter" && s.validation ? "Validation" : (BQ_PREP_STEPS.find(([v]) => v === s.type) || [s.type, s.type])[1];
+  const stepLabel = (s) => {
+    const what = s.type === "filter" ? s.expression : s.type === "transform" ? `${s.column} = ${s.expression || ""}` : s.type === "join" ? `${s.joinType || "INNER"} ${s.table || ""}`
+      : s.type === "aggregate" ? `${s.expression || ""}${s.keys ? " by " + s.keys : ""}` : s.type === "delete" ? s.columns
+        : s.type === "flatten" || s.type === "unnest" ? s.column : "distinct rows";
+    return `${stepTitle(s)}: ${what || "…"}`;
+  };
+  const modeText = () => {
+    const m = (BQ_WRITE_MODES.find(([v]) => v === bqWriteMode(doc.loadMode)) || BQ_WRITE_MODES[0])[1];
+    return doc.loadMode === "MAXIMUM" ? `${m}, Maximum` : doc.loadMode === "UNIQUE" ? `${m}, Unique` : m;
+  };
+  const drawSteps = () => {
+    const item = (key, text) => el("li", {}, el("button", { type: "button", class: "bq-dp-step" + (selected === key ? " is-selected" : ""),
+      "aria-pressed": selected === key ? "true" : "false", text,
+      // The steps are redrawn: focus stays on the chosen one.
+      onclick: () => { selected = key; drawSteps(); drawForm(); stepsHost.querySelector(".bq-dp-step.is-selected")?.focus(); } }));
+    setChildren(stepsHost, item("source", `Source: ${doc.source || "choose a table"}`),
+      ...doc.steps.map((s, i) => item(String(i), stepLabel(s))),
+      item("destination", `Destination: ${doc.destination || "not set"} (${modeText()})`));
+  };
+  // drawSuggestions is the Suggestions list: Gemini's cards (Preview, Edit,
+  // Apply), the state of a request, or why there are none.
+  const drawSuggestions = () => {
+    const head = el("h3", { text: "Suggestions" });
+    if (!bqPrepModelOn()) return setChildren(suggestHost, head, el("p", { class: "unavailable bq-dp-no-model", role: "status", text: BQ_PREP_NO_MODEL }));
+    if (doc.yaml) return setChildren(suggestHost, head, el("p", { class: "unavailable", text: "Migrate the YAML data preparation to SQLX to apply suggestions." }));
+    if (!doc.source) return setChildren(suggestHost, head, el("p", { class: "unavailable", text: "Choose the source table: Gemini suggests steps from its data." }));
+    if (suggestions === null) return setChildren(suggestHost, head, el("p", { class: "unavailable", role: "status", text: "Load a sample (Data) to get suggestions." }));
+    if (suggestions === "loading") return setChildren(suggestHost, head, spinner("Generating suggestions"));
+    if (typeof suggestions === "string") return setChildren(suggestHost, head, el("p", { class: "form-error", role: "alert", text: suggestions }));
+    const again = el("button", { type: "button", class: "secondary", text: "Refresh suggestions", onclick: () => suggest(suggestFor.startsWith("column:") ? suggestFor.slice(7) : "") });
+    if (!suggestions.length) return setChildren(suggestHost, head, el("p", { class: "unavailable", role: "status", text: "The local model has no suggestions for this sample." }), again);
+    const col = suggestFor.startsWith("column:") ? suggestFor.slice(7) : "";
+    setChildren(suggestHost, head, col ? el("p", { class: "form-help", text: `Suggestions for the column ${col}.` }) : null,
+      el("ul", { class: "bq-dp-cards", "aria-label": "Suggested steps" }, ...suggestions.map((sg, k) => el("li", { class: "bq-dp-card", "data-step": JSON.stringify(sg.step) },
+        el("p", { class: "bq-dp-card-title", text: sg.description }),
+        el("p", { class: "mono bq-dp-card-step", text: stepLabel(sg.step) }),
+        el("div", { class: "bq-toolbar" },
+          el("button", { type: "button", class: "secondary", text: "Preview", "aria-label": `Preview: ${sg.description}`, onclick: () => previewStep(sg.step) }),
+          el("button", { type: "button", class: "secondary", text: "Edit", "aria-label": `Edit: ${sg.description}`, onclick: () => applySuggestion(k, true) }),
+          el("button", { type: "button", class: "primary", text: "Apply", "aria-label": `Apply: ${sg.description}`, onclick: () => applySuggestion(k, false) }))))),
+      again);
+  };
+  const applySuggestion = (k, edit) => {
+    const sg = suggestions[k];
+    doc.steps.push({ ...sg.step });
+    suggestions = suggestions.filter((_, j) => j !== k);
+    selected = edit ? String(doc.steps.length - 1) : selected;
+    changed(); drawForm(); drawSuggestions(); drawView();
+    announce(edit ? "Suggestion added; edit the step" : "Suggestion applied");
+    if (edit) formHost.querySelector("input, select, textarea")?.focus();
+    else (suggestHost.querySelector(".bq-dp-card button") || stepsHost.querySelector(".bq-dp-step"))?.focus();
+  };
+  // suggest asks the local model for steps for the last sample (or one
+  // column of it).
+  const suggest = async (column = "") => {
+    if (!bqPrepModelOn() || !doc.source || !lastSchema.length) { drawSuggestions(); return; }
+    const key = (column ? "column:" + column : "table") + "|" + doc.source + "|" + doc.steps.length;
+    suggestKey = key;
+    suggestFor = column ? "column:" + column : "";
+    suggestions = "loading"; drawSuggestions();
+    let got;
+    try {
+      got = bqPrepSuggestionsOf(await bqLocalModel(bqPrepPrompt(doc.source, lastSchema, lastRows, column)), lastSchema);
+      // Only a step valid for the table is a suggestion (#2173): each is
+      // compiled after the applied steps and dry-run, and one BigQuery
+      // refuses (a function GoogleSQL lacks, a column the table lacks) is
+      // dropped, as Gemini's suggestions are steps the table can take.
+      const valid = await Promise.all(got.map(async (sg) => {
+        try {
+          const gen = await bqDfCall("dataprepsql", { content: JSON.stringify({ ...doc, yaml: undefined, steps: [...doc.steps, sg.step], destination: "" }) });
+          await bqStudioCall("query", { query: gen.sql, dryRun: true, legacySql: false });
+          return true;
+        } catch { return false; }
+      }));
+      got = got.filter((_, k) => valid[k]);
+    } catch (e) { got = e.message; }
+    // A later request (another column, or the steps changed) wins.
+    if (suggestKey !== key) return;
+    suggestions = got;
+    drawSuggestions();
+  };
+  // A Description prompt for a step: the local model's expression.
+  const describe = (s, i) => {
+    if (!["filter", "transform", "aggregate"].includes(s.type)) return [];
+    const did = `${idPrefix}-describe`;
+    const box = el("input", { type: "text", id: did, placeholder: s.type === "filter" ? "keep the orders over 100 dollars" : s.type === "transform" ? "the name in upper case" : "revenue by region" });
+    const note = el("p", { class: "form-help", role: "status" });
+    const go = el("button", { type: "button", class: "secondary", text: "Generate", disabled: bqPrepModelOn() ? null : true, onclick: async () => {
+      if (!box.value.trim()) { note.textContent = "Describe the step first."; return; }
+      note.textContent = "Generating…"; go.disabled = true;
+      try {
+        const kind = s.type === "filter" ? "a WHERE condition" : s.type === "transform" ? `a column expression${s.column ? " for the column " + s.column : ""}` : "aggregate expressions (with AS names)";
+        const cols = lastSchema.map((f) => `${f.name} ${f.type}`).join(", ");
+        const text = await bqLocalModel(`BigQuery table ${doc.source} has columns: ${cols}. Write ${kind} in GoogleSQL for: ${box.value.trim()}. Answer with the expression only.`);
+        s.expression = bqSqlOf(text).replace(/^WHERE\s+/i, "").replace(/;\s*$/, "");
+        changed(); drawForm(); announce("Expression generated");
+        formHost.querySelector(`#${idPrefix}-expr`)?.focus();
+      } catch (e) { note.textContent = e.message; go.disabled = false; }
+    } });
+    return [bqField(did, "Description", box, "A prompt to generate the SQL expression with Gemini (the local model)."), go,
+      bqPrepModelOn() ? note : el("p", { class: "unavailable", text: "Generate is off: no local model is installed (see Suggestions)." })];
+  };
+  // previewStep shows the sample with a suggested step applied after the
+  // others.
+  const previewStep = async (step) => {
+    view = "data"; drawViewTabs();
+    const mine = ++drawn;
+    setChildren(viewHost, spinner("Loading the preview"));
+    try {
+      const gen = await bqDfCall("dataprepsql", { content: JSON.stringify({ ...doc, yaml: undefined, steps: [...doc.steps, step], destination: "" }) });
+      const res = await bqStudioCall("query", { query: gen.sql + "\n|> LIMIT 100", legacySql: false, priority: "INTERACTIVE" });
+      if (mine !== drawn) return;
+      const cols = (res.schema || []).map((f) => f.name);
+      setChildren(viewHost, el("p", { class: "unavailable", role: "status", text: `Preview: ${stepLabel(step)}. Apply it to keep it.` }),
+        el("div", { class: "table-scroll", tabindex: "0", role: "region", "aria-label": "Preview rows" }, el("table", { class: "bq-nb-table" },
+          el("thead", {}, el("tr", {}, ...cols.map((h) => el("th", { scope: "col", text: h })))),
+          el("tbody", {}, ...(res.rows || []).map((r) => el("tr", {}, ...cols.map((c) => el("td", { text: cellText(r[c]) }))))))));
+    } catch (err) {
+      if (mine !== drawn) return;
+      setChildren(viewHost, el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
+  };
+  // A YAML data preparation (More > Open YAML) keeps its file; Migrate to
+  // SQLX makes it an editable SQLX one, as Google migrates them.
+  const drawYaml = () => setChildren(yamlHost, doc.yaml ? el("div", { class: "bq-hint", role: "status" },
+    el("p", { text: "A YAML data preparation: its source, destination and error table are edited here and saved back to its YAML. Migrate it to SQLX to add steps." }),
+    el("button", { type: "button", class: "secondary", text: "Migrate to SQLX",
+      // The button goes with the banner: focus moves to the selected step
+      // rather than falling back to the page.
+      onclick: () => { delete doc.yaml; changed(); drawForm(); drawView();
+        (stepsHost.querySelector(".bq-dp-step.is-selected") || stepsHost.querySelector(".bq-dp-step"))?.focus(); } })) : null);
+  const input = (id, label, value, set, { help = null, ...attrs } = {}) => {
+    const c = el("input", { type: "text", id, value: value || "", ...attrs, oninput: () => { set(c.value); changed(); } });
+    return bqField(id, label, c, help);
+  };
+  const check = (id, label, value, set) => el("label", { class: "checkbox" },
+    el("input", { type: "checkbox", id, checked: value ? true : null, onchange: (e) => { set(e.target.checked); changed(); } }), el("span", { text: " " + label }));
+  // incrementalMode is MAXIMUM for a numeric or datetime column, UNIQUE
+  // otherwise ("It picks Maximum values for numeric and datetime data
+  // types and Unique for categorical data").
+  const incrementalMode = (col) => {
+    const f = lastSchema.find((x) => x.name === String(col || "").trim());
+    return f && BQ_MAXIMUM_TYPES.includes(String(f.type).toUpperCase()) ? "MAXIMUM" : f ? "UNIQUE" : (doc.loadMode === "UNIQUE" ? "UNIQUE" : "MAXIMUM");
+  };
+  // sampleBefore is the rows step i reads: the steps before it, sampled.
+  const sampleBefore = async (i) => {
+    const gen = await bqDfCall("dataprepsql", { content: JSON.stringify({ ...doc, yaml: undefined, steps: doc.steps.slice(0, i), destination: "" }) });
+    return bqStudioCall("query", { query: gen.sql + "\n|> LIMIT 100", legacySql: false, priority: "INTERACTIVE" });
+  };
+  const q = (n) => "`" + String(n).replace(/`/g, "") + "`";
+  // flattenExpr is Google's Flatten suggestion: a RECORD's nested columns
+  // as PARENT_FIELD, up to 10 levels; a JSON column's top-level keys in
+  // the sampled rows, a repeated name ending _<i> and an empty key f<i>_.
+  const flattenExpr = (field, rows, taken) => {
+    const used = new Set(taken);
+    const name = (n) => {
+      let out = n.replace(/[^A-Za-z0-9_]/g, "_");
+      if (/^[0-9]/.test(out)) out = "_" + out;
+      if (!used.has(out)) { used.add(out); return out; }
+      for (let i = 1; ; i++) if (!used.has(`${out}_${i}`)) { used.add(`${out}_${i}`); return `${out}_${i}`; }
+    };
+    if (String(field.type).toUpperCase() === "JSON") {
+      const keys = [];
+      for (const r of rows || []) {
+        let v = r[field.name];
+        if (typeof v === "string") { try { v = JSON.parse(v); } catch { v = null; } }
+        if (v && typeof v === "object" && !Array.isArray(v)) for (const k of Object.keys(v)) if (!keys.includes(k)) keys.push(k);
+      }
+      return keys.map((k, i) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? `${q(field.name)}.${q(k)}` : `JSON_QUERY(${q(field.name)}, ${JSON.stringify('$."' + k.replace(/"/g, '\\"') + '"')})`) +
+        " AS " + q(k === "" ? `f${i}_` : name(k))).join(", ");
+    }
+    const out = [];
+    const walk = (f, path, depth) => {
+      for (const sub of f.fields || []) {
+        const p = [...path, sub.name];
+        if (String(sub.type).toUpperCase().match(/RECORD|STRUCT/) && sub.mode !== "REPEATED" && depth < 10) walk(sub, p, depth + 1);
+        else out.push(p.map(q).join(".") + " AS " + q(name(p.join("_"))));
+      }
+    };
+    walk(field, [field.name], 1);
+    return out.join(", ");
+  };
+  const drawForm = () => {
+    const id = (s) => `${idPrefix}-${s}`;
+    if (selected === "yaml") {
+      const text = el("textarea", { id: id("yaml-text"), class: "mono", rows: "10", placeholder: "configuration:\n  errorTable: …\nnodes:\n- id: …" });
+      const file = el("input", { type: "file", id: id("yaml-file"), accept: ".yaml,.yml", onchange: async () => { const f = file.files[0]; if (f) text.value = await f.text(); } });
+      const err = el("p", { class: "form-error", role: "alert", hidden: true });
+      return setChildren(formHost, el("h3", { text: "Open YAML" }),
+        el("p", { class: "form-help", text: "A data preparation kept as YAML (a .dp.yaml file). Google migrates these to SQLX; open one here to edit its source, destination and error table, or to migrate it." }),
+        bqField(id("yaml-file"), "YAML file", file), bqField(id("yaml-text"), "Data preparation YAML", text), err,
+        el("div", { class: "bq-toolbar" }, el("button", { type: "button", class: "primary", text: "Open", onclick: async () => {
+          try {
+            const m = await bqDfCall("dataprepyaml", { content: text.value });
+            for (const k of Object.keys(doc)) delete doc[k];
+            Object.assign(doc, bqDataPrepDoc(), m, { steps: [] });
+            selected = "source"; changed(); drawForm(); drawView();
+          } catch (e) { err.hidden = false; err.textContent = e.message; }
+        } }), el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => { selected = "source"; drawSteps(); drawForm(); } })));
+    }
+    if (selected === "source") {
+      return setChildren(formHost, el("h3", { text: "Source" }),
+        input(id("source"), "Source table", doc.source, (v) => { doc.source = v; }, { list: listId, placeholder: "dataset.table", help: "A table of this project (dataset.table) or another's (project.dataset.table)." }));
+    }
+    if (selected === "destination") {
+      const showFields = () => {
+        const m = bqWriteMode(doc.loadMode);
+        colWrap.hidden = m !== "INCREMENTAL";
+        keysWrap.hidden = m !== "MERGE";
+      };
+      const modeSel = el("select", { id: id("mode"), disabled: doc.yaml ? true : null, onchange: () => {
+        doc.loadMode = modeSel.value === "INCREMENTAL" ? incrementalMode(doc.loadColumn) : modeSel.value; showFields(); changed(); } },
+      ...BQ_WRITE_MODES.map(([v, t]) => el("option", { value: v, text: t })));
+      modeSel.value = bqWriteMode(doc.loadMode);
+      const colWrap = input(id("mode-col"), "Incremental column", doc.loadColumn, (v) => { doc.loadColumn = v; doc.loadMode = incrementalMode(v); },
+        { help: "Maximum (a numeric or datetime column) inserts the rows past the destination's maximum; Unique (a categorical column) the rows whose value it does not hold yet." });
+      const keysWrap = input(id("merge-keys"), "Merge keys", doc.mergeKeys, (v) => { doc.mergeKeys = v; },
+        { placeholder: "id, region", help: "A row matching these keys in the destination table is updated; otherwise a new row is inserted." });
+      showFields();
+      return setChildren(formHost, el("h3", { text: "Destination" }),
+        input(id("dest"), "Destination table", doc.destination, (v) => { doc.destination = v; }, { list: listId, placeholder: "dataset.table" }),
+        bqField(id("mode"), "Write mode", modeSel), colWrap, keysWrap,
+        el("h3", { text: "Error table" }),
+        input(id("errors"), "Error table", doc.errorTable, (v) => { doc.errorTable = v; }, { placeholder: "dataset.table (empty: no error table)", help: "Rows that fail a validation go here." }),
+        input(id("retention"), "Retention (days)", String(doc.errorRetentionDays || 30), (v) => { doc.errorRetentionDays = parseInt(v, 10) || 30; }, { inputmode: "numeric" }));
+    }
+    const i = Number(selected);
+    const s = doc.steps[i];
+    if (!s) { selected = "source"; return drawForm(); }
+    const fields = [];
+    if (s.type === "filter") {
+      fields.push(input(id("expr"), "SQL expression", s.expression, (v) => { s.expression = v; }, { class: "mono", placeholder: "amount > 0", help: "In the form of a WHERE clause." }),
+        check(id("validation"), "Failed validation rows go to error table", s.validation, (v) => { s.validation = v; drawForm(); }));
+      if (s.validation && !doc.errorTable) fields.push(el("p", { class: "form-help", text: "No error table is set (More > Error table): a row failing the validation fails the run." }));
+    }
+    if (s.type === "transform") {
+      fields.push(input(id("col"), "Target column", s.column, (v) => { s.column = v; }), input(id("expr"), "Expression", s.expression, (v) => { s.expression = v; }, { class: "mono", placeholder: "UPPER(name)" }),
+        check(id("replace"), "Replace the column's values (otherwise a calculated column is added)", s.replace, (v) => { s.replace = v; }));
+    }
+    if (s.type === "join") {
+      const jt = el("select", { id: id("jt"), onchange: () => { s.joinType = jt.value; changed(); } }, ...["INNER", "LEFT", "RIGHT", "FULL", "CROSS"].map((v) => el("option", { value: v, text: v })));
+      jt.value = s.joinType || "INNER";
+      fields.push(input(id("table"), "Table", s.table, (v) => { s.table = v; }, { list: listId, placeholder: "dataset.table" }), bqField(id("jt"), "Join type", jt),
+        input(id("expr"), "Join conditions", s.expression, (v) => { s.expression = v; }, { class: "mono", placeholder: "orders.id = customers.order_id" }));
+    }
+    if (s.type === "aggregate") {
+      fields.push(input(id("keys"), "Grouping keys", s.keys, (v) => { s.keys = v; }, { placeholder: "region, product" }),
+        input(id("expr"), "Aggregation expressions", s.expression, (v) => { s.expression = v; }, { class: "mono", placeholder: "SUM(amount) AS revenue" }));
+    }
+    if (s.type === "delete") fields.push(input(id("cols"), "Columns", s.columns, (v) => { s.columns = v; }, { placeholder: "a, b" }));
+    if (s.type === "deduplicate") fields.push(el("p", { class: "unavailable", text: "Keeps distinct rows (Record choosing: Distinct)." }));
+    if (s.type === "flatten" || s.type === "unnest") {
+      const status = el("p", { class: "form-help", role: "status" });
+      const colSel = el("select", { id: id("col") }, el("option", { value: s.column || "", text: s.column || "Loading the columns…" }));
+      const expr = s.type === "flatten" ? el("textarea", { id: id("expr"), class: "mono", rows: "4", oninput: () => { s.expression = expr.value; changed(); } }) : null;
+      if (expr) expr.value = s.expression || "";
+      let sample = null;
+      const generate = () => {
+        const f = (sample?.schema || []).find((x) => x.name === colSel.value);
+        if (!f || !expr) return;
+        s.expression = flattenExpr(f, sample.rows, (sample.schema || []).map((x) => x.name));
+        s.keep = String(f.type).toUpperCase() === "JSON";
+        expr.value = s.expression;
+        keep.querySelector("input").checked = !!s.keep;
+        changed();
+      };
+      colSel.onchange = () => {
+        s.column = colSel.value;
+        if (s.type === "unnest") s.json = String(((sample?.schema || []).find((x) => x.name === colSel.value) || {}).type).toUpperCase() === "JSON";
+        changed(); generate();
+      };
+      const keep = check(id("keep"), "Keep the original column", s.keep, (v) => { s.keep = v; });
+      sampleBefore(i).then((res) => {
+        sample = res;
+        const want = s.type === "unnest" ? (f) => f.mode === "REPEATED" || String(f.type).toUpperCase() === "JSON"
+          : (f) => f.mode !== "REPEATED" && /RECORD|STRUCT|JSON/.test(String(f.type).toUpperCase());
+        const cols = (res.schema || []).filter(want);
+        setChildren(colSel, el("option", { value: "", text: "Choose a column" }), ...cols.map((f) => el("option", { value: f.name, text: `${f.name} (${f.mode === "REPEATED" ? "ARRAY" : f.type})` })));
+        colSel.value = s.column || "";
+        status.textContent = cols.length ? "" : (s.type === "unnest" ? "The rows have no ARRAY column." : "The rows have no RECORD or JSON column.");
+      }).catch((e) => { status.textContent = e.message; });
+      fields.push(bqField(id("col"), s.type === "unnest" ? "Array column" : "Column", colSel), status);
+      if (expr) {
+        fields.push(bqField(id("expr"), "SQL expression", expr, "The generated columns; edit them before applying."), keep,
+          el("p", { class: "form-help", text: "A RECORD's nested columns become PARENT_FIELD columns, up to 10 levels; a JSON column's top-level keys become columns." }));
+      } else {
+        fields.push(el("p", { class: "form-help", text: "Each element of the array becomes its own row, the other columns repeated; the array column is replaced by its elements." }));
+      }
+    }
+    setChildren(formHost, el("h3", { text: `Step ${i + 1}: ${stepTitle(s)}` }), ...describe(s, i), ...fields,
+      el("div", { class: "bq-toolbar" },
+        el("button", { type: "button", class: "secondary", text: "Move up", disabled: i === 0 ? true : null, onclick: () => { doc.steps.splice(i - 1, 0, doc.steps.splice(i, 1)[0]); selected = String(i - 1); changed(); drawForm(); } }),
+        el("button", { type: "button", class: "secondary", text: "Delete step", "aria-label": `Delete step ${i + 1}`, onclick: () => { doc.steps.splice(i, 1); selected = "source"; changed(); drawForm(); } })));
+  };
+  const addStep = (type) => {
+    if (doc.yaml) { selected = "source"; drawForm(); formHost.prepend(el("p", { class: "form-error", role: "alert", text: "Migrate the YAML data preparation to SQLX to add steps." })); return; }
+    doc.steps.push(type === "validation" ? { type: "filter", validation: true } : { type }); selected = String(doc.steps.length - 1); changed(); drawForm(); formHost.querySelector("input, select")?.focus();
+  };
+  const addMenu = bqMenu("Add step", BQ_PREP_STEPS.map(([v, t]) => ({ label: t, run: () => addStep(v) })));
+  bqMenuButton(addMenu, "Add step", "Add step: a filter, validation, transformation, join, aggregation, deduplication, column deletion, flatten or unnest");
+  const viewTabs = el("div", { class: "tab-strip", role: "tablist", "aria-label": "Data preparation views" });
+  const drawViewTabs = () => setChildren(viewTabs, ...[["data", "Data"], ["graph", "Graph"], ["schema", "Schema"], ["sqlx", "SQLX"]].map(([v, t]) => el("button", {
+    type: "button", role: "tab", class: "tab" + (view === v ? " is-selected" : ""), "aria-selected": view === v ? "true" : "false",
+    "aria-controls": `${idPrefix}-view`, tabindex: view === v ? "0" : "-1", text: t, onclick: () => { view = v; drawViewTabs(); drawView(); } })));
+  viewTabs.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    const tabs = [...viewTabs.querySelectorAll("[role=tab]")];
+    const at = tabs.indexOf(document.activeElement);
+    const next = tabs[(at + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+    if (next) { next.click(); viewTabs.querySelector(`[role=tab]:nth-child(${tabs.indexOf(next) + 1})`)?.focus(); }
+  });
+  let drawn = 0;
+  const drawView = async () => {
+    // A later draw (another view chosen while a sample loads) wins.
+    const mine = ++drawn;
+    if (view === "graph") {
+      const nodes = [`Source: ${doc.source || "?"}`, ...doc.steps.map(stepLabel), `Destination: ${doc.destination || "?"}`];
+      return setChildren(viewHost, el("ol", { class: "bq-dp-graph", "aria-label": "Graph" }, ...nodes.map((n, i) => el("li", { class: "bq-dp-node" },
+        el("span", { text: n }), i < nodes.length - 1 ? el("span", { class: "bq-dp-edge", "aria-hidden": "true", text: "↓" }) : null))));
+    }
+    if (!doc.source) return setChildren(viewHost, el("p", { class: "unavailable", text: "Choose the source table first." }));
+    setChildren(viewHost, spinner(view === "sqlx" ? "Generating the SQLX" : "Loading a sample"));
+    try {
+      const gen = await bqDfCall("dataprepsql", { content: JSON.stringify(doc) });
+      if (mine !== drawn) return;
+      if (view === "sqlx") {
+        if (doc.yaml) {
+          return setChildren(viewHost, el("pre", { class: "mono bq-dp-sqlx", text: gen.yaml || doc.yaml }),
+            gen.yamlError ? el("p", { class: "form-error", text: gen.yamlError }) : null,
+            el("p", { class: "unavailable", text: "Kept as YAML (a .dp.yaml file Dataform runs). Migrate to SQLX to edit it as SQLX." }));
+        }
+        return setChildren(viewHost, el("pre", { class: "mono bq-dp-sqlx", text: gen.sqlx || gen.sql }),
+          gen.sqlxError ? el("p", { class: "form-error", text: gen.sqlxError }) : null,
+          el("p", { class: "unavailable", text: "Kept as a Dataform data preparation (SQLX, Dataform core 3.1.6), as Google keeps one." }));
+      }
+      const res = await bqStudioCall("query", { query: gen.sql + "\n|> LIMIT 100", legacySql: false, priority: "INTERACTIVE" });
+      if (mine !== drawn) return;
+      lastSchema = res.schema || [];
+      lastRows = res.rows || [];
+      // New suggestions for a new source or new steps; a column's stay.
+      if (bqPrepModelOn() && lastSchema.length && !suggestKey.endsWith("|" + doc.source + "|" + doc.steps.length) && !doc.yaml) suggest("");
+      if (["MAXIMUM", "UNIQUE"].includes(doc.loadMode) && doc.loadColumn) {
+        const m = incrementalMode(doc.loadColumn);
+        if (m !== doc.loadMode) { doc.loadMode = m; changed(); }
+      }
+      const cols = (res.schema || []).map((f) => f.name);
+      if (!cols.length) return setChildren(viewHost, el("p", { class: "unavailable", text: "The sample has no columns yet." }));
+      if (view === "schema") {
+        return setChildren(viewHost, el("table", { class: "bq-history-table" },
+          el("thead", {}, el("tr", {}, ...["Field name", "Type", "Mode"].map((h) => el("th", { scope: "col", text: h })))),
+          el("tbody", {}, ...(res.schema || []).map((f) => el("tr", {}, el("td", { text: f.name }), el("td", { text: f.type }), el("td", { text: f.mode || "NULLABLE" }))))));
+      }
+      setChildren(viewHost, el("p", { class: "unavailable", text: `A sample of ${Math.min(100, Number(res.totalRows) || 0)} rows after the applied steps.` }),
+        el("div", { class: "table-scroll", tabindex: "0", role: "region", "aria-label": "Sample rows" }, el("table", { class: "bq-nb-table" },
+          el("thead", {}, el("tr", {}, ...cols.map((h) => el("th", { scope: "col" }, el("button", { type: "button", class: "link bq-dp-col",
+            text: h, title: `Suggestions for ${h}`, "aria-label": `${h}: suggestions for this column`,
+            onclick: () => { if (!bqPrepModelOn()) { drawSuggestions(); suggestHost.querySelector("p")?.focus(); return; } suggest(h); } }))))),
+          el("tbody", {}, ...(res.rows || []).map((r) => el("tr", {}, ...cols.map((k) => el("td", { text: cellText(r[k]) }))))))));
+    } catch (err) {
+      if (mine !== drawn) return;
+      setChildren(viewHost, el("p", { class: "form-error", role: "alert", text: err.message }));
+    }
+  };
+  const refreshSample = el("button", { type: "button", class: "secondary", text: "Refresh sample", onclick: () => drawView() });
+  const more = bqMenu("More", [
+    { label: "Error table", run: () => { selected = "destination"; drawSteps(); drawForm(); formHost.querySelector(`#${idPrefix}-errors`)?.focus(); } },
+    { label: "Write mode", run: () => { selected = "destination"; drawSteps(); drawForm(); formHost.querySelector(`#${idPrefix}-mode`)?.focus(); } },
+    { label: "Open YAML", run: () => { selected = "yaml"; drawSteps(); drawForm(); formHost.querySelector(`#${idPrefix}-yaml-text`)?.focus(); } },
+    { label: "Refresh sample", run: () => drawView() },
+  ]);
+  bqMenuButton(more, "More", "More: Error table, Write mode, Open YAML, Refresh sample");
+  setChildren(datalist, ...tables().map((t) => el("option", { value: t })));
+  drawSteps();
+  drawYaml();
+  drawForm();
+  drawSuggestions();
+  drawViewTabs();
+  drawView();
+  return el("div", { class: "bq-dataprep" }, datalist,
+    el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Steps actions" }, addMenu,
+      el("button", { type: "button", class: "secondary", text: "Destination", onclick: () => { selected = "destination"; drawSteps(); drawForm(); } }), more, refreshSample),
+    yamlHost,
+    el("div", { class: "bq-dp-layout" },
+      el("section", { class: "bq-dp-side", "aria-label": "Steps" }, el("h3", { text: "Steps" }), stepsHost, suggestHost, formHost),
+      el("section", { class: "bq-dp-main", "aria-label": "Data preparation views" }, viewTabs, viewHost)));
+}
+
+// bqDataPrepTab is a data preparation's tab: the editor, Run, Schedule,
+// Executions, Save, Version history and Share.
+function bqDataPrepTab(tab, ctx) {
+  let doc;
+  try { doc = JSON.parse(tab.query || ""); } catch { doc = null; }
+  if (!doc || typeof doc !== "object") doc = bqDataPrepDoc();
+  const keep = () => { tab.query = JSON.stringify(doc); ctx.save(); };
+  const runs = el("section", { class: "bq-dp-runs", "aria-label": "Executions", "data-runs": String(tab.id) });
+  const contentOf = () => JSON.stringify(doc);
+  const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Data preparation actions" },
+    el("button", { type: "button", class: "primary", text: "Run", onclick: () => bqRunAsset(tab, "data_preparation", contentOf(), ctx, runs) }),
+    bqScheduleButton(tab, "data_preparation", { notebook: false }),
+    el("button", { type: "button", class: "secondary", text: "Executions", disabled: tab.savedId ? null : true, title: tab.savedId ? null : "Save the data preparation first",
+      onclick: () => bqExecutionsList(runs, { id: tab.savedId, name: tab.title, kind: "data_preparation" }) }),
+    ...bqAssetToolbarTail(tab, "data_preparation", ctx, contentOf));
+  return el("div", { class: "bq-dataprep-tab" }, toolbar,
+    el("p", { class: "unavailable bq-hint", text: "Run saves the data preparation and runs it through Dataform into its destination with its write mode. " +
+      (bqPrepModelOn() ? "Gemini's suggestions are made by this instance's local model. " : BQ_PREP_NO_MODEL + " ") + (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
+    bqDataPrepEditor(doc, keep, ctx), runs);
+}
+
+// bqPipelineDoc is a new pipeline's model.
+const bqPipelineDoc = () => ({ settings: { serviceAccount: "", location: "US", defaultProject: "", defaultDataset: "dataform", bucket: "", runtimeTemplate: "" }, tasks: [] });
+
+// bqPipelineTab is the pipeline editor: the Pipeline Viewer's tasks (Add
+// task: Query, Notebook, Data preparation; each with Run after), the
+// chosen task's details, Settings, Run > Run all tasks, Schedule and
+// Executions.
+function bqPipelineTab(tab, ctx) {
+  let doc;
+  try { doc = JSON.parse(tab.query || ""); } catch { doc = null; }
+  if (!doc || !Array.isArray(doc.tasks)) doc = bqPipelineDoc();
+  doc.settings = { ...bqPipelineDoc().settings, ...(doc.settings || {}) };
+  const keep = () => { tab.query = JSON.stringify(doc); ctx.save(); };
+  let selected = doc.tasks.length ? 0 : -1;
+  let view = "viewer";
+  const graph = el("ol", { class: "bq-pl-tasks", "aria-label": "Tasks" });
+  const details = el("section", { class: "bq-pl-details", "aria-label": "Task details" });
+  const body = el("div", { class: "bq-pl-body" });
+  const runs = el("section", { class: "bq-pl-runs", "aria-label": "Executions", "data-runs": String(tab.id) });
+  const contentOf = () => JSON.stringify(doc);
+  // level orders the tasks as the graph runs them.
+  const level = (t, seen = new Set()) => {
+    if (seen.has(t.name)) return 0;
+    seen.add(t.name);
+    return Math.max(0, ...(t.runAfter || []).map((d) => { const p = doc.tasks.find((x) => x.name === d); return p ? level(p, seen) + 1 : 0; }));
+  };
+  const drawGraph = () => {
+    const order = doc.tasks.map((t, i) => [t, i, level(t)]).sort((a, b) => a[2] - b[2] || a[1] - b[1]);
+    setChildren(graph, ...order.map(([t, i, lv]) => el("li", { class: "bq-pl-node", style: `margin-left:${lv * 24}px` },
+      el("button", { type: "button", class: "bq-pl-task" + (selected === i ? " is-selected" : ""), "aria-pressed": selected === i ? "true" : "false",
+        "aria-label": `${t.name}, ${BQ_TASK_TYPES[t.type]}${(t.runAfter || []).length ? ", runs after " + t.runAfter.join(", ") : ""}`,
+        // The graph is redrawn: focus stays on the chosen task.
+        onclick: () => { selected = i; drawGraph(); drawDetails(); graph.querySelector(".bq-pl-task.is-selected")?.focus(); } },
+        el("strong", { text: t.name }), el("span", { class: "unavailable", text: ` ${BQ_TASK_TYPES[t.type]}` }),
+        (t.runAfter || []).length ? el("span", { class: "unavailable", text: ` · after ${t.runAfter.join(", ")}` }) : null))));
+    if (!doc.tasks.length) graph.append(el("li", { class: "unavailable", text: "No tasks yet. Add task: Query, Notebook, Data preparation, Table, View, Declare source, Data quality test or Unit test." }));
+  };
+  const drawDetails = () => {
+    const t = doc.tasks[selected];
+    if (!t) return setChildren(details, el("p", { class: "unavailable", text: "Choose a task to see its details." }));
+    const name = el("input", { type: "text", id: "bq-pl-name", value: t.name, pattern: "[A-Za-z0-9_\\-]+",
+      onchange: () => {
+        const old = t.name;
+        const v = name.value.trim();
+        if (!/^[A-Za-z0-9_-]{1,63}$/.test(v)) { notify("A task name has only letters, numbers, underscores and hyphens.", "error"); name.value = old; return; }
+        if (doc.tasks.some((x) => x !== t && x.name === v)) { notify(`A task is already named ${v}`, "error"); name.value = old; return; }
+        t.name = v;
+        for (const x of doc.tasks) x.runAfter = (x.runAfter || []).map((d) => (d === old ? v : d));
+        keep(); drawGraph();
+      } });
+    const others = doc.tasks.filter((x) => x !== t);
+    const after = el("fieldset", { class: "bq-pl-after" }, el("legend", { text: "Run after" }),
+      ...(others.length ? others.map((x) => el("label", { class: "checkbox" },
+        el("input", { type: "checkbox", value: x.name, checked: (t.runAfter || []).includes(x.name) ? true : null, onchange: (e) => {
+          t.runAfter = (t.runAfter || []).filter((d) => d !== x.name);
+          if (e.target.checked) t.runAfter.push(x.name);
+          keep(); drawGraph();
+        } }), el("span", { text: " " + x.name }))) : [el("p", { class: "unavailable", text: "No other task." })]));
+    let editor;
+    if (t.type === "sql") {
+      const area = el("textarea", { id: "bq-pl-sql", class: "query-editor mono", rows: "8", spellcheck: "false", oninput: () => { t.sql = area.value; keep(); } });
+      area.value = t.sql || "";
+      editor = bqField("bq-pl-sql", "Query", area, "GoogleSQL. Runs as a Dataform operation.");
+    } else if (t.type === "notebook" || t.type === "spark_notebook") {
+      const pick = el("select", { id: "bq-pl-nb" }, el("option", { value: "", text: "Choose a notebook to copy in" }),
+        ...BQ_FILES.filter((e) => e.kind === "notebook").map((e) => el("option", { value: e.name, text: e.displayName })));
+      pick.addEventListener("change", async () => {
+        if (!pick.value) return;
+        try { t.notebook = (await bqDfCall("read", { name: pick.value })).content; keep(); drawDetails(); announce("Notebook copied into the task"); } catch (err) { notify(err.message, "error"); }
+      });
+      let cells = [];
+      try { cells = JSON.parse(t.notebook || "{}").cells || []; } catch { cells = []; }
+      const code = el("textarea", { id: "bq-pl-code", class: "query-editor mono", rows: "6", spellcheck: "false",
+        oninput: () => { t.notebook = bqNotebookDoc(code.value ? [["code", code.value]] : []); keep(); } });
+      code.value = cells.length === 1 && cells[0].cell_type === "code" ? (Array.isArray(cells[0].source) ? cells[0].source.join("") : cells[0].source || "") : "";
+      editor = el("div", {}, bqField("bq-pl-nb", "Notebook", pick, `${cells.length} cells in this task's notebook.`),
+        cells.length > 1 ? null : bqField("bq-pl-code", "Or write its code (one Python cell)", code));
+    } else if (t.type === "data_preparation") {
+      if (!t.dataPreparation) t.dataPreparation = bqDataPrepDoc();
+      editor = bqDataPrepEditor(t.dataPreparation, keep, ctx, { idPrefix: "bq-pl-dp" });
+    } else {
+      editor = bqPipelineTaskEditor(t, doc, keep, ctx);
+    }
+    const tags = el("input", { type: "text", id: "bq-pl-tags", value: (t.tags || []).join(", "), placeholder: "daily, finance",
+      onchange: () => { t.tags = tags.value.split(",").map((x) => x.trim()).filter(Boolean); keep(); } });
+    const noDeps = t.type === "declaration" || t.type === "unit_test";
+    setChildren(details, el("h3", { text: `${BQ_TASK_TYPES[t.type]} task` }), bqField("bq-pl-name", "Task name", name), noDeps ? null : after, editor,
+      t.type === "declaration" ? null : bqField("bq-pl-tags", "Tags", tags, "Comma-separated. Run > Select tags to run runs the tasks with a tag."),
+      el("div", { class: "bq-toolbar" }, el("button", { type: "button", class: "secondary", text: "Delete task", "aria-label": `Delete task ${t.name}`, onclick: () => {
+        doc.tasks.splice(selected, 1);
+        for (const x of doc.tasks) x.runAfter = (x.runAfter || []).filter((d) => d !== t.name);
+        selected = doc.tasks.length ? 0 : -1;
+        keep(); drawGraph(); drawDetails();
+      } })));
+  };
+  const addTask = (type) => {
+    let n = doc.tasks.length + 1;
+    const base = { sql: "query", data_preparation: "data_preparation", assertion: "data_quality_test", declaration: "source" }[type] || type;
+    while (doc.tasks.some((x) => x.name === `${base}_${n}`)) n += 1;
+    const prev = doc.tasks[doc.tasks.length - 1];
+    const t = { name: `${base}_${n}`, type, runAfter: prev ? [prev.name] : [] };
+    if (type === "sql") t.sql = "SELECT 1";
+    if (type === "notebook") t.notebook = bqNotebookDoc([["code", "print('Hello from the pipeline')"]]);
+    if (type === "data_preparation") t.dataPreparation = bqDataPrepDoc();
+    if (type === "spark_notebook") t.notebook = bqNotebookDoc(BQ_SPARK_NOTEBOOK);
+    if (type === "table" || type === "view") { t.tableType = type; t.sql = "SELECT 1 AS id"; t.dataset = doc.settings.defaultDataset || "dataform"; }
+    if (type === "assertion") { t.sql = "SELECT * FROM ${ref(\"table_name\")} WHERE id IS NULL"; t.dataset = "dataform_assertions"; }
+    if (type === "declaration") { t.runAfter = []; t.dataset = ""; t.table = ""; }
+    if (type === "unit_test") {
+      t.runAfter = [];
+      const tested = doc.tasks.find((x) => x.type === "table" || x.type === "view");
+      t.testedTask = tested ? (tested.table || tested.name) : "";
+      t.inputs = [];
+      t.sql = "SELECT 1 AS id";
+    }
+    doc.tasks.push(t);
+    selected = doc.tasks.length - 1;
+    keep(); view = "viewer"; drawBody();
+    details.querySelector("#bq-pl-name")?.focus();
+  };
+  const drawSettings = () => {
+    const s = doc.settings;
+    const auth = bqAuthFields("bq-pl-set", s.serviceAccount);
+    const nb = bqNotebookOptionFields("bq-pl-set", { template: s.runtimeTemplate, bucket: s.bucket });
+    const loc = el("select", { id: "bq-pl-loc" }, ...BQ_LOCATIONS.map((l) => el("option", { value: l, text: l })));
+    loc.value = s.location || "US";
+    const proj = el("input", { type: "text", id: "bq-pl-proj", value: s.defaultProject, placeholder: currentProject() });
+    const ds = el("input", { type: "text", id: "bq-pl-ds", value: s.defaultDataset });
+    const save = () => { s.serviceAccount = auth.value(); s.runtimeTemplate = nb.template(); s.bucket = nb.bucket(); s.location = loc.value; s.defaultProject = proj.value.trim(); s.defaultDataset = ds.value.trim() || "dataform"; keep(); };
+    const form = el("form", { class: "bq-pl-settings", novalidate: true, oninput: save, onchange: save, onsubmit: (e) => { e.preventDefault(); save(); announce("Settings kept"); } },
+      el("h3", { text: "Settings" }), auth.group,
+      el("fieldset", {}, el("legend", { text: "Processing location" }), bqField("bq-pl-loc", "Region or multi-region", loc)),
+      el("fieldset", {}, el("legend", { text: "SQLX options" }), bqField("bq-pl-proj", "Default project", proj), bqField("bq-pl-ds", "Default dataset", ds)),
+      nb.group);
+    setChildren(body, form);
+  };
+  const viewTabs = el("div", { class: "tab-strip", role: "tablist", "aria-label": "Pipeline views" });
+  const drawBody = () => {
+    setChildren(viewTabs, ...[["viewer", "Pipeline Viewer"], ["settings", "Settings"]].map(([v, t]) => el("button", {
+      type: "button", role: "tab", class: "tab" + (view === v ? " is-selected" : ""), "aria-selected": view === v ? "true" : "false", text: t,
+      onclick: () => { view = v; drawBody(); } })));
+    if (view === "settings") return drawSettings();
+    setChildren(body, el("div", { class: "bq-pl-layout" }, el("section", { class: "bq-pl-graph", "aria-label": "Pipeline graph" }, graph), details));
+    drawGraph();
+    drawDetails();
+  };
+  // Add task lists Google's eight task types, then the Apache Spark
+  // notebook (a notebook task on Serverless for Apache Spark, #2156).
+  const addMenu = bqMenu("Add task", ["sql", "notebook", "data_preparation", "table", "view", "declaration", "assertion", "unit_test", "spark_notebook"].map((k) => ({
+    label: BQ_TASK_TYPES[k], disabled: k === "spark_notebook" && !bqSparkOn() ? true : null, title: k === "spark_notebook" && !bqSparkOn() ? BQ_NO_SPARK : null,
+    run: () => addTask(k) })));
+  bqMenuButton(addMenu, "Add task", "Add task: Query, Notebook, Data preparation, Table, View, Declare source, Data quality test, Unit test or Apache Spark notebook");
+  const hasNotebook = () => doc.tasks.some((t) => t.type === "notebook" || t.type === "spark_notebook");
+  const ready = () => {
+    if (!doc.tasks.length) { notify("Add a task first", "error"); return false; }
+    if (hasNotebook() && !doc.settings.bucket) { notify("A pipeline with a notebook task needs a Cloud Storage bucket: set it in Settings, Notebook options.", "error"); view = "settings"; drawBody(); return false; }
+    return true;
+  };
+  const runMenu = bqMenu("Run", [
+    { label: "Run all tasks", run: () => { if (ready()) bqRunAsset(tab, "pipeline", contentOf(), ctx, runs, doc.settings); } },
+    { label: "Select tasks to run", run: () => { if (ready()) bqRunSelectDialog(tab, doc, contentOf, ctx, runs, "tasks"); } },
+    { label: "Select tags to run", run: () => { if (ready()) bqRunSelectDialog(tab, doc, contentOf, ctx, runs, "tags"); } },
+    { label: "Run unit tests", run: () => {
+      if (!doc.tasks.some((t) => t.type === "unit_test")) { notify("Add a Unit test task first", "error"); return; }
+      bqRunSelectDialog(tab, doc, contentOf, ctx, runs, "unit");
+    } },
+  ]);
+  bqMenuButton(runMenu, "Run", "Run: Run all tasks, Select tasks to run, Select tags to run or Run unit tests");
+  const trigger = el("button", { type: "button", class: "secondary", text: "Trigger", onclick: () => {
+    if (!bqDataformOn()) { notify(BQ_NO_DATAFORM, "error"); return; }
+    if (!tab.savedId) { notify("Save the pipeline first: a trigger runs its saved version.", "error"); return; }
+    bqTriggerDialog({ id: tab.savedId, name: tab.title, kind: "pipeline", location: (BQ_FILES.find((e) => e.name === tab.savedId) || {}).location }, ctx,
+      { notebook: hasNotebook(), defaults: { serviceAccount: doc.settings.serviceAccount, bucket: doc.settings.bucket, template: doc.settings.runtimeTemplate } });
+  } });
+  const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Pipeline actions" },
+    addMenu, runMenu,
+    bqScheduleButton(tab, "pipeline", { notebook: hasNotebook,
+      defaults: () => ({ serviceAccount: doc.settings.serviceAccount, bucket: doc.settings.bucket, template: doc.settings.runtimeTemplate }) }),
+    trigger,
+    el("button", { type: "button", class: "secondary", text: "Executions", disabled: tab.savedId ? null : true, title: tab.savedId ? null : "Save the pipeline first",
+      onclick: () => bqExecutionsList(runs, { id: tab.savedId, name: tab.title, kind: "pipeline" }) }),
+    ...bqAssetToolbarTail(tab, "pipeline", ctx, contentOf));
+  drawBody();
+  return el("div", { class: "bq-pipeline" }, toolbar,
+    el("p", { class: "unavailable bq-hint", text: "Each task is a Dataform action: notebooks in definitions/actions.yaml, the other tasks as SQLX. " +
+      "Run saves the pipeline and runs its tasks in Run after order. " + (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
+    viewTabs, body, runs);
+}
+
+// bqPipelineTaskEditor is a Table, View, Declare source, Data quality test
+// or Unit test task's form, as Google's create-pipelines draws each:
+// Create new (Table or Incremental table; View or Materialized view) with
+// the target's project, dataset and name, the task's SQL, and a unit
+// test's Action to test, its inputs and its expected output.
+function bqPipelineTaskEditor(t, doc, keep, ctx) {
+  const text = (id, label, key, opts = {}) => {
+    const input = el("input", { type: "text", id, value: t[key] || "", placeholder: opts.placeholder || "", required: opts.required ? true : null,
+      oninput: () => { t[key] = input.value.trim(); keep(); } });
+    return bqField(id, label, input, opts.help || null);
+  };
+  const sqlArea = (label, help) => {
+    const area = el("textarea", { id: "bq-pl-sql", class: "query-editor mono", rows: "8", spellcheck: "false", oninput: () => { t.sql = area.value; keep(); } });
+    area.value = t.sql || "";
+    return bqField("bq-pl-sql", label, area, help);
+  };
+  const kindRadios = (legend, choices) => el("fieldset", { class: "bq-pl-kind" }, el("legend", { text: legend }),
+    ...choices.map(([v, label]) => el("label", { class: "radio" },
+      el("input", { type: "radio", name: "bq-pl-kind", value: v, checked: (t.tableType || choices[0][0]) === v ? true : null,
+        onchange: () => { t.tableType = v; keep(); drawKind(); } }), el("span", { text: " " + label }))));
+  const proj = text("bq-pl-tproj", "Project", "project", { placeholder: doc.settings.defaultProject || currentProject() });
+  const kindHost = el("div", {});
+  const drawKind = () => {
+    setChildren(kindHost, t.type === "table" && t.tableType === "incremental"
+      ? text("bq-pl-ukey", "Unique key (optional)", "uniqueKey", { help: "Comma-separated columns: new rows that match an existing row's key replace it (a MERGE)." }) : null);
+  };
+  if (t.type === "table" || t.type === "view") {
+    drawKind();
+    const kinds = t.type === "table" ? [["table", "Table"], ["incremental", "Incremental table"]] : [["view", "View"], ["materialized", "Materialized view"]];
+    return el("div", { class: "bq-pl-task-form" },
+      kindRadios("Create new", kinds), proj,
+      text("bq-pl-tds", "Dataset", "dataset", { required: true, placeholder: doc.settings.defaultDataset || "dataform" }),
+      text("bq-pl-ttable", t.type === "table" ? "Table" : "View", "table", { placeholder: t.name, help: "Empty: the task's name." }),
+      text("bq-pl-tdesc", "Description", "description"),
+      kindHost,
+      sqlArea("Configuration: SELECT query", "The query whose result the " + (t.type === "table" ? "table holds" : "view returns") +
+        ". ${ref(\"name\")} refers to another task's table, as in Dataform's SQLX."));
+  }
+  if (t.type === "declaration") {
+    return el("div", { class: "bq-pl-task-form" },
+      el("p", { class: "unavailable", text: "Declare source: a table or view this pipeline reads but does not make, so other tasks can ${ref()} it." }),
+      proj, text("bq-pl-tds", "Dataset", "dataset", { required: true }), text("bq-pl-ttable", "Table / View", "table", { required: true }),
+      text("bq-pl-tdesc", "Description", "description"));
+  }
+  if (t.type === "assertion") {
+    return el("div", { class: "bq-pl-task-form" },
+      el("h4", { text: "Assertion data test" }), proj,
+      text("bq-pl-tds", "Dataset", "dataset", { placeholder: "dataform_assertions" }),
+      text("bq-pl-ttable", "Table", "table", { placeholder: t.name, help: "The test's name: the view its failing rows are kept in." }),
+      sqlArea("Assertion query", "Returns the rows that break the test: the test fails when it returns any."));
+  }
+  // A unit test: the action it tests, the inputs standing in for that
+  // action's references, and the rows it is expected to return.
+  // Dataform core refuses a test of an incremental table ("Running tests
+  // on incremental datasets is not yet supported"), so it is not offered.
+  const actions = doc.tasks.filter((x) => (x.type === "table" && x.tableType !== "incremental") || x.type === "view").map((x) => x.table || x.name);
+  const tested = el("select", { id: "bq-pl-tested", onchange: () => { t.testedTask = tested.value; keep(); } },
+    el("option", { value: "", text: actions.length ? "Choose the action to test" : "Add a Table or View task first" }),
+    ...actions.map((a) => el("option", { value: a, text: a })));
+  tested.value = t.testedTask || "";
+  if (!Array.isArray(t.inputs)) t.inputs = [];
+  const inputs = el("div", { class: "bq-pl-inputs" });
+  const drawInputs = () => setChildren(inputs, ...t.inputs.map((inp, i) => el("fieldset", { class: "bq-pl-input" },
+    el("legend", { text: `Input ${i + 1}` }),
+    bqField(`bq-pl-in-name-${i}`, "Referenced table", el("input", { type: "text", id: `bq-pl-in-name-${i}`, value: inp.name || "",
+      oninput: (e) => { inp.name = e.target.value.trim(); keep(); } })),
+    bqField(`bq-pl-in-sql-${i}`, "Input rows (SELECT)", (() => { const a = el("textarea", { id: `bq-pl-in-sql-${i}`, class: "mono", rows: "3",
+      oninput: () => { inp.sql = a.value; keep(); } }); a.value = inp.sql || ""; return a; })()),
+    el("button", { type: "button", class: "secondary", text: "Remove input", "aria-label": `Remove input ${i + 1}`,
+      onclick: () => { t.inputs.splice(i, 1); keep(); drawInputs(); } }))),
+  el("button", { type: "button", class: "secondary", text: "Add input", onclick: () => { t.inputs.push({ name: "", sql: "SELECT 1 AS id" }); keep(); drawInputs(); } }));
+  drawInputs();
+  return el("div", { class: "bq-pl-task-form" },
+    bqField("bq-pl-tested", "Action to test", tested, "A Table (not an incremental one) or View task of this pipeline."),
+    el("p", { class: "unavailable", text: `BigQuery Unit test: ${t.name}. Run > Run unit tests runs it (execution mode Unit tests).` }),
+    inputs, sqlArea("Expected output (SELECT)", "The rows the tested action returns for these inputs: same columns, same rows, same values."));
+}
+
+// bqRunSelectDialog is Run's pane for Select tasks to run (mode "tasks"),
+// Select tags to run ("tags") and Run unit tests ("unit"): Authentication,
+// the selection, and the execution options Google lists. It saves the
+// pipeline and runs the selection.
+function bqRunSelectDialog(tab, doc, contentOf, ctx, runs, mode) {
+  const { dialog, close } = openModal({ labelledBy: "bq-runsel-title" });
+  const auth = bqAuthFields("bq-runsel", doc.settings.serviceAccount || "");
+  const allTags = [...new Set(doc.tasks.flatMap((t) => t.tags || []))].sort();
+  const units = doc.tasks.filter((t) => t.type === "unit_test");
+  const picks = new Set();
+  const row = (value, label, extra) => el("tr", {},
+    el("td", {}, el("input", { type: "checkbox", value, "aria-label": `Select ${label}`, onchange: (e) => { if (e.target.checked) picks.add(value); else picks.delete(value); } })),
+    el("td", { class: "mono", text: label }), el("td", { text: extra }));
+  const table = (head, rows) => el("table", { class: "bq-history-table bq-runsel-table" },
+    el("thead", {}, el("tr", {}, ...["", ...head].map((h) => el("th", { scope: "col", text: h })))), el("tbody", {}, ...rows));
+  let selection;
+  let unitScope = "select";
+  if (mode === "tasks") {
+    selection = el("fieldset", {}, el("legend", { text: "Selection of tasks" }),
+      table(["Task", "Type"], doc.tasks.filter((t) => t.type !== "unit_test" && t.type !== "declaration").map((t) => row(t.name, t.name, BQ_TASK_TYPES[t.type]))));
+  } else if (mode === "tags") {
+    selection = el("fieldset", {}, el("legend", { text: "Selection of tags" }),
+      allTags.length ? table(["Tag", "Tasks"], allTags.map((g) => row(g, g, doc.tasks.filter((t) => (t.tags || []).includes(g)).map((t) => t.name).join(", "))))
+        : el("p", { class: "unavailable", text: "No task has a tag yet: give tasks tags in their details." }));
+  } else {
+    const scopes = [["select", "Select unit tests"], ["tags", "Select unit test tags"], ["all", "All Unit Tests"]];
+    const list = el("div", {});
+    const drawScope = () => {
+      picks.clear();
+      if (unitScope === "all") return setChildren(list, el("p", { class: "unavailable", text: `${units.length} unit tests run.` }));
+      if (unitScope === "tags") {
+        const tags = [...new Set(units.flatMap((t) => t.tags || []))].sort();
+        return setChildren(list, tags.length ? table(["Tag"], tags.map((g) => row(g, g, ""))) : el("p", { class: "unavailable", text: "No unit test has a tag." }));
+      }
+      setChildren(list, table(["Unit test", "Action to test"], units.map((t) => row(t.name, t.name, t.testedTask || ""))));
+    };
+    selection = el("fieldset", {}, el("legend", { text: "Execution mode: Unit tests" }),
+      ...scopes.map(([v, label]) => el("label", { class: "radio" }, el("input", { type: "radio", name: "bq-runsel-scope", value: v, checked: v === unitScope ? true : null,
+        onchange: () => { unitScope = v; drawScope(); } }), el("span", { text: " " + label }))), list);
+    drawScope();
+  }
+  const check = (id, label, checked = false) => el("label", { class: "checkbox" }, el("input", { type: "checkbox", id, checked: checked ? true : null }), el("span", { text: " " + label }));
+  const maxN = el("input", { type: "number", id: "bq-runsel-max", min: "1", max: "5000", step: "1", value: "" });
+  const maxWrap = bqField("bq-runsel-max", "Maximum concurrent actions", maxN, "A whole number from 1 to 5000.");
+  maxWrap.hidden = true;
+  const limit = el("label", { class: "checkbox" }, el("input", { type: "checkbox", id: "bq-runsel-limit", onchange: (e) => { maxWrap.hidden = !e.target.checked; } }),
+    el("span", { text: " Limit concurrent actions" }));
+  const options = mode === "unit"
+    ? el("fieldset", {}, el("legend", { text: "Execution options" }), check("bq-runsel-interactive", "Execute as interactive job with high priority", true))
+    : el("fieldset", {}, el("legend", { text: "Execution options" }),
+      check("bq-runsel-deps", "Include dependencies"), check("bq-runsel-dependents", "Include dependents"),
+      check("bq-runsel-full", "Run with full refresh"), check("bq-runsel-interactive", "Run as interactive job with high priority (default)", true),
+      limit, maxWrap);
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const run = el("button", { type: "submit", class: "primary", text: "Run" });
+  const title = mode === "unit" ? "Run unit tests" : mode === "tags" ? "Select tags to run" : "Select tasks to run";
+  dialog.append(el("form", { class: "modal-body is-wide", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const fail = (m) => { error.textContent = m; error.hidden = false; };
+    const on = (id) => !!dialog.querySelector(`#${id}`)?.checked;
+    const o = { includeDependencies: on("bq-runsel-deps"), includeDependents: on("bq-runsel-dependents"), fullRefresh: on("bq-runsel-full"),
+      batch: !on("bq-runsel-interactive"), tasks: [], tags: [], unitTests: mode === "unit" };
+    if (on("bq-runsel-limit")) {
+      const n = Number(maxN.value);
+      if (!Number.isInteger(n) || n < 1 || n > 5000) return fail("Maximum concurrent actions is a whole number from 1 to 5000.");
+      o.maxConcurrent = n;
+    }
+    if (mode === "tasks") o.tasks = [...picks];
+    else if (mode === "tags" || (mode === "unit" && unitScope === "tags")) o.tags = [...picks];
+    else if (mode === "unit" && unitScope === "select") o.tasks = [...picks];
+    if (mode !== "unit" || unitScope !== "all") {
+      if (!picks.size) return fail(mode === "tags" || unitScope === "tags" ? "Select at least one tag." : "Select at least one task.");
+    }
+    setBusy(run, true);
+    try {
+      const saved = await bqSaveAsset(tab, "pipeline", contentOf(), ctx.onSaved);
+      if (!saved) return;
+      const r = await bqDfCall("runselected", { name: tab.savedId, serviceAccount: auth.value(), bucket: doc.settings.bucket || "",
+        runtimeTemplate: doc.settings.runtimeTemplate || "", run: o });
+      close();
+      announce("Run started");
+      const host = document.querySelector(`[data-runs="${tab.id}"]`) || runs;
+      await bqExecutionDetail(host, r.invocation, () => bqExecutionsList(host, { id: tab.savedId, name: tab.title, kind: "pipeline" }));
+    } catch (err) { fail(err.message); } finally { setBusy(run, false); }
+  } },
+    el("h2", { id: "bq-runsel-title", text: title }), error, auth.group, selection, options,
+    el("div", { class: "modal-actions" }, el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }), run)));
+  dialog.querySelector("input, button")?.focus();
+}
+
+// bqDurationField is a duration in seconds, minutes, hours or days.
+function bqDurationField(id, label, help, seconds = "") {
+  const n = el("input", { type: "number", id, min: "0", step: "1", value: seconds === "" ? "" : String(seconds) });
+  const unit = el("select", { id: `${id}-unit`, "aria-label": `${label} unit` },
+    ...[["1", "Seconds"], ["60", "Minutes"], ["3600", "Hours"], ["86400", "Days"]].map(([v, t]) => el("option", { value: v, text: t })));
+  if (seconds !== "" && seconds % 60 === 0) { unit.value = seconds % 3600 === 0 ? "3600" : "60"; n.value = String(seconds / Number(unit.value)); }
+  const wrap = el("div", { class: "form-field" }, el("label", { for: id, text: label }), el("div", { class: "input-with-button" }, n, unit),
+    el("p", { class: "form-help", text: help }));
+  return { wrap, seconds: () => (n.value.trim() === "" ? 0 : Math.round(Number(n.value) * Number(unit.value))) };
+}
+
+// bqTriggerDialog is a pipeline's Trigger: Configuration Type: Trigger
+// (event-based execution), the tables to monitor (Search tables), the
+// Trigger Condition, Max Wait Duration and Min Execution Duration. With a
+// schedule, it is Edit's form for that trigger.
+function bqTriggerDialog(asset, ctx, { notebook = false, defaults = {}, schedule = null, onDone = null } = {}) {
+  const { dialog, close } = openModal({ labelledBy: "bq-trig-title" });
+  const name = el("input", { type: "text", id: "bq-trig-name", required: true, maxlength: "63", value: schedule ? schedule.id : "", disabled: schedule ? true : null });
+  const auth = bqAuthFields("bq-trig", (schedule ? schedule.serviceAccount : defaults.serviceAccount) || "");
+  const nb = bqNotebookOptionFields("bq-trig", schedule ? { template: schedule.runtimeTemplate || "", bucket: schedule.bucket || "" } : defaults);
+  const tables = [...((schedule && schedule.tables) || [])];
+  const known = () => (((ctx && ctx.tree && ctx.tree()) || {}).datasets || []).flatMap((d) => (d.tables || []).map((t) => `${currentProject()}.${d.id}.${t.id}`));
+  const search = el("input", { type: "search", id: "bq-trig-search", list: "bq-trig-tables", placeholder: "project.dataset.table", autocomplete: "off" });
+  const datalist = el("datalist", { id: "bq-trig-tables" }, ...known().map((t) => el("option", { value: t })));
+  const chosen = el("ul", { class: "bq-trig-chosen", "aria-label": "Tables to monitor" });
+  const drawChosen = () => setChildren(chosen, ...(tables.length ? tables.map((t, i) => el("li", {}, el("span", { class: "mono", text: t }),
+    el("button", { type: "button", class: "secondary", text: "Remove", "aria-label": `Remove ${t}`, onclick: () => { tables.splice(i, 1); drawChosen(); } })))
+    : [el("li", { class: "unavailable", text: "No table yet." })]));
+  const addTable = () => {
+    const v = search.value.trim();
+    if (!v) return;
+    const full = v.split(".").length === 2 ? `${currentProject()}.${v}` : v;
+    if (!tables.includes(full)) tables.push(full);
+    search.value = "";
+    drawChosen();
+  };
+  search.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addTable(); } });
+  drawChosen();
+  const cond = (v, label) => el("label", { class: "radio" }, el("input", { type: "radio", name: "bq-trig-cond", value: v,
+    checked: ((schedule && schedule.condition) || "ANY") === v ? true : null }), el("span", { text: " " + label }));
+  const parse = (d) => { if (!d) return ""; const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/.exec(d); return m ? (Number(m[1] || 0) * 3600 + Number(m[2] || 0) * 60 + Math.round(Number(m[3] || 0))) : ""; };
+  const maxWait = bqDurationField("bq-trig-maxwait", "Max Wait Duration (optional)", "From 1 second to 7 days: how long to wait for ALL tables before running anyway.", parse(schedule && schedule.maxWait));
+  const minExec = bqDurationField("bq-trig-minexec", "Min Execution Duration (optional)", "From 3 minutes to 24 hours; 3 minutes when empty: the least time between two runs.", parse(schedule && schedule.minExec) || 180);
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const create = el("button", { type: "submit", class: "primary", text: schedule ? "Update schedule" : "Create schedule" });
+  dialog.append(el("form", { class: "modal-body is-wide", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const fail = (m) => { error.textContent = m; error.hidden = false; };
+    addTable();
+    if (!schedule && !name.value.trim()) return fail("A trigger name is required.");
+    if (!tables.length) return fail("Add at least one table to monitor.");
+    const mw = maxWait.seconds(), me = minExec.seconds();
+    if (mw && (mw < 1 || mw > 7 * 86400)) return fail("Max Wait Duration is from 1 second to 7 days.");
+    if (me && (me < 180 || me > 86400)) return fail("Min Execution Duration is from 3 minutes to 24 hours.");
+    if (notebook && !nb.bucket()) return fail("A Cloud Storage bucket is required: each run writes its executed notebook there.");
+    const body = { name: asset.id, displayName: name.value.trim(), serviceAccount: auth.value(), bucket: nb.bucket(), runtimeTemplate: nb.template(),
+      tables, condition: dialog.querySelector('input[name="bq-trig-cond"]:checked')?.value || "ANY", maxWaitSeconds: mw, minExecSeconds: me };
+    setBusy(create, true);
+    try {
+      const r = schedule ? await bqDfCall("updateschedule", { ...body, schedule: schedule.name }) : await bqDfCall("createtrigger", body);
+      if (r.warning) notify(r.warning, "error"); else notify(schedule ? `Updated trigger ${schedule.id}` : `Created trigger ${name.value.trim()}`);
+      close();
+      if (onDone) onDone(r);
+    } catch (err) { fail(err.message); } finally { setBusy(create, false); }
+  } },
+    el("h2", { id: "bq-trig-title", text: schedule ? `Edit trigger: ${schedule.id}` : "Trigger" }), error,
+    el("p", { class: "unavailable", text: `Pipeline: ${asset.name} · Region ${asset.location || "us-central1"}` }),
+    bqField("bq-trig-name", "Trigger", name), auth.group, notebook ? nb.group : null,
+    el("fieldset", { class: "bq-trig-config" }, el("legend", { text: "Configuration Type: Trigger (event-based execution)" }),
+      el("div", { class: "form-field" }, el("label", { for: "bq-trig-search", text: "Search tables" }),
+        el("div", { class: "input-with-button" }, search, el("button", { type: "button", class: "secondary", text: "Add", "aria-label": "Add the table to monitor", onclick: addTable })),
+        datalist, el("p", { class: "form-help", text: "The tables whose updates run the pipeline." })),
+      chosen,
+      el("fieldset", {}, el("legend", { text: "Trigger Condition" }), cond("ALL", "Wait for ALL tables to update"), cond("ANY", "Trigger if ANY table updates")),
+      maxWait.wrap, minExec.wrap),
+    el("div", { class: "modal-actions" }, el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }), create)));
+  (schedule ? search : name).focus();
+}
+
+// --- Scheduling ------------------------------------------------------------
+//
+// BigQuery's Scheduling page (https://docs.cloud.google.com/bigquery/docs/
+// orchestrate-workloads, read 2026-11-22): one list of the project's
+// schedules of every kind, notebooks, pipelines and data preparations
+// (Dataform workflow configurations, time-based or triggers) with the
+// scheduled queries (BigQuery Data Transfer Service), filtered by type,
+// with Column display options, Create (a schedule of each kind), and each
+// row's View actions (Disable or Enable, Delete). A Dataform schedule's
+// details have Run, Edit, Delete, Past executions and Refresh.
+
+const BQ_SCHED_TYPES = ["Scheduled Query", "Notebook", "Pipeline", "Data preparation"];
+const BQ_SCHED_COLUMNS = [["type", "Type"], ["config", "Configuration type"], ["status", "Status"], ["frequency", "Frequency"], ["region", "Region"],
+  ["asset", "Resource"], ["lastRun", "Last run"], ["lastRunState", "Last run status"], ["updated", "Last updated"], ["serviceAccount", "Service account"]];
+const BQ_SCHED_DEFAULT_COLUMNS = ["type", "config", "status", "frequency", "region", "asset", "lastRun", "lastRunState"];
+const BQ_SCHED_PREF = "cloudburrow.bigquery.scheduling.columns";
+
+async function renderBigQueryScheduling(view) {
+  const project = currentProject();
+  let typeFilter = "";
+  let shown;
+  try { shown = JSON.parse(readStored(BQ_SCHED_PREF, "null")); } catch { shown = null; }
+  if (!Array.isArray(shown)) shown = BQ_SCHED_DEFAULT_COLUMNS;
+  const host = el("div", { class: "bq-scheduling" });
+  const detail = el("section", { class: "bq-sched-detail", "aria-label": "Schedule details" });
+  let rows = [];
+  let assets = [];
+  const dfOn = bqDataformOn();
+  const sqOn = !!capabilityOf("bigquery-scheduled-queries").id;
+  const load = async () => {
+    rows = [];
+    const errors = [];
+    if (dfOn) {
+      try {
+        const r = await bqDfCall("allschedules", {});
+        assets = r.assets || [];
+        rows.push(...r.schedules.map((x) => ({ ...x, source: "dataform", status: x.disabled ? "Disabled" : "Enabled",
+          frequency: x.config === "Trigger" ? `On update of ${x.condition === "ALL" ? "all of" : "any of"} ${(x.tables || []).join(", ")}` : `${x.frequency}${x.timeZone ? " (" + x.timeZone + ")" : ""}`,
+          asset: x.assetName })));
+      } catch (err) { errors.push(err.message); }
+    }
+    if (sqOn) {
+      try {
+        const l = await api(`/api/resources/bigquery-scheduled-queries?project=${encodeURIComponent(project)}`);
+        rows.push(...(l.items || []).map((it) => ({ source: "transfer", name: it.name, id: it.fields["Display name"] && it.fields["Display name"] !== "—" ? it.fields["Display name"] : it.name,
+          type: "Scheduled Query", config: "Schedule", status: /disabled/i.test(it.status || "") ? "Disabled" : "Enabled", disabled: /disabled/i.test(it.status || ""),
+          frequency: it.fields["Schedule (UTC)"], region: it.fields.Region, asset: it.fields["Destination dataset"], lastRun: "", lastRunState: it.fields["Last run"],
+          updated: "", serviceAccount: "" })));
+      } catch (err) { errors.push(err.message); }
+    }
+    return errors;
+  };
+  const colPicker = () => {
+    const { dialog, close } = openModal({ labelledBy: "bq-schedcols-title" });
+    const boxes = BQ_SCHED_COLUMNS.map(([k, label]) => el("label", { class: "checkbox" }, el("input", { type: "checkbox", value: k, checked: shown.includes(k) ? true : null }), el("span", { text: " " + label })));
+    dialog.append(el("form", { class: "modal-body", onsubmit: (e) => {
+      e.preventDefault();
+      shown = boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value);
+      writeStored(BQ_SCHED_PREF, JSON.stringify(shown));
+      close(); draw();
+    } }, el("h2", { id: "bq-schedcols-title", text: "Column display options" }), el("fieldset", {}, el("legend", { class: "sr-only", text: "Columns" }), ...boxes),
+      el("div", { class: "modal-actions" }, el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }), el("button", { type: "submit", class: "primary", text: "OK" }))));
+    boxes[0].querySelector("input").focus();
+  };
+  const toggle = async (r) => {
+    try {
+      if (r.source === "dataform") await bqDfCall("toggleschedule", { schedule: r.name, disabled: !r.disabled });
+      else await send(`/api/actions/bigquery-scheduled-queries?project=${encodeURIComponent(project)}`, "POST", { Path: [r.name], Action: r.disabled ? "enable" : "disable" });
+      notify(`${r.disabled ? "Enabled" : "Disabled"} ${r.id}`);
+      refresh();
+    } catch (err) { notify(err.message, "error"); }
+  };
+  const remove = async (r) => {
+    await confirmDestructive({ title: "Delete schedule?", detail: r.id, confirmWord: r.id, onConfirm: async () => {
+      if (r.source === "dataform") await bqDfCall("deleteschedule", { schedule: r.name });
+      else await send(`/api/resources/bigquery-scheduled-queries?project=${encodeURIComponent(project)}&name=${encodeURIComponent(r.name)}`, "DELETE");
+    } });
+    setChildren(detail);
+    refresh();
+  };
+  const assetOf = (r) => ({ id: r.asset, name: r.assetName, kind: r.assetKind, location: r.region });
+  const showDetail = async (r) => {
+    if (r.source === "transfer") { navigate(`/bigquery-scheduled-queries/${encodeURIComponent(r.name)}${scopeSearch()}`); return; }
+    let d = r;
+    try { d = await bqDfCall("schedule", { schedule: r.name }); } catch (err) { notify(err.message, "error"); }
+    const runs = el("div", { class: "bq-sched-runs" });
+    const a = { id: d.asset, name: d.assetName, kind: d.assetKind, location: d.region };
+    const dl = (pairs) => el("dl", { class: "bq-exec-summary" }, ...pairs.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: v || "—" })]));
+    setChildren(detail,
+      el("h2", { text: `Schedule details: ${d.id}` }),
+      el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Schedule actions" },
+        el("button", { type: "button", class: "secondary", text: "Run", onclick: async () => {
+          try { const x = await bqDfCall("runschedule", { schedule: d.name }); notify(`Started a run of ${d.id}`); bqExecutionDetail(runs, x.invocation, () => bqExecutionsList(runs, a, d.name)); }
+          catch (err) { notify(err.message, "error"); }
+        } }),
+        el("button", { type: "button", class: "secondary", text: "Edit", onclick: () => (d.config === "Trigger"
+          ? bqTriggerDialog(a, null, { notebook: !!d.bucket, schedule: d, onDone: () => { refresh(); showDetail(d); } })
+          : bqEditScheduleDialog(d, () => { refresh(); showDetail(d); })) }),
+        el("button", { type: "button", class: "secondary", text: d.disabled ? "Enable" : "Disable", onclick: () => toggle(d).then(() => showDetail(d)) }),
+        el("button", { type: "button", class: "secondary danger", text: "Delete", onclick: () => remove(d) }),
+        el("button", { type: "button", class: "secondary", text: "Past executions", onclick: () => bqExecutionsList(runs, a, d.name) }),
+        el("button", { type: "button", class: "secondary", text: "Refresh", onclick: () => showDetail(d) })),
+      el("p", { class: "unavailable", text: d.disabled ? "Schedule is disabled" : "Schedule is enabled" }),
+      dl([["Type", d.type], ["Resource", d.assetName], ["Region", d.region], ["Configuration type", d.config === "Trigger" ? "Trigger (event-based execution)" : "Schedule (time-based recurrence)"],
+        ...(d.config === "Trigger" ? [["Tables", (d.tables || []).join(", ")], ["Trigger Condition", d.condition === "ALL" ? "Wait for ALL tables to update" : "Trigger if ANY table updates"],
+          ["Max Wait Duration", d.maxWait], ["Min Execution Duration", d.minExec]] : [["Frequency (cron)", d.frequency], ["Timezone", d.timeZone || "UTC"]]),
+        ["Authentication", d.serviceAccount || "My user credentials"], ["Cloud Storage bucket", d.bucket], ["Runtime template", d.runtimeTemplate],
+        ["Created", d.created], ["Last updated", d.updated]]),
+      el("p", { class: "unavailable", text: "History of manual runs is not shown in Past executions of a data preparation's schedule; Executions in its editor has every run." }),
+      runs);
+    bqExecutionsList(runs, a, d.name);
+    detail.querySelector("button")?.focus();
+  };
+  const createFor = (kind) => {
+    if (kind === "sql") { navigate(`/bigquery-scheduled-queries/create${scopeSearch()}`); return; }
+    const choices = assets.filter((x) => x.kind === kind);
+    const { dialog, close } = openModal({ labelledBy: "bq-schedpick-title" });
+    const pick = el("select", { id: "bq-schedpick" }, ...choices.map((x) => el("option", { value: x.name, text: `${x.displayName} (${x.location})` })));
+    const label = { notebook: "Notebook", pipeline: "Pipeline", data_preparation: "Data preparation" }[kind];
+    dialog.append(el("form", { class: "modal-body", onsubmit: async (e) => {
+      e.preventDefault();
+      const x = choices.find((c) => c.name === pick.value);
+      if (!x) return;
+      close();
+      const out = await bqScheduleDialog({ id: x.name, name: x.displayName, kind, location: x.location },
+        { notebook: kind === "notebook", title: `Schedule ${label.toLowerCase()}` });
+      if (out) refresh();
+    } }, el("h2", { id: "bq-schedpick-title", text: `${label} schedule` }),
+      choices.length ? bqField("bq-schedpick", label, pick) : el("p", { class: "unavailable", text: `No ${label.toLowerCase()} in this project yet: create one in Studio first.` }),
+      el("div", { class: "modal-actions" }, el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+        el("button", { type: "submit", class: "primary", text: "Continue", disabled: choices.length ? null : true }))));
+    (choices.length ? pick : dialog.querySelector("button")).focus();
+  };
+  const createMenu = bqMenu("Create", [
+    { label: "Scheduled Query", disabled: !sqOn || null, title: sqOn ? null : "The BigQuery Data Transfer Service is not served on this instance", run: () => createFor("sql") },
+    { label: "Notebook schedule", disabled: !dfOn || null, title: dfOn ? null : BQ_NO_DATAFORM, run: () => createFor("notebook") },
+    { label: "Pipeline schedule", disabled: !dfOn || null, title: dfOn ? null : BQ_NO_DATAFORM, run: () => createFor("pipeline") },
+    { label: "Data Preparation schedule", disabled: !dfOn || null, title: dfOn ? null : BQ_NO_DATAFORM, run: () => createFor("data_preparation") },
+  ]);
+  bqMenuButton(createMenu, "Create", "Create a schedule");
+  const filter = el("select", { id: "bq-sched-type", onchange: () => { typeFilter = filter.value; draw(); } },
+    el("option", { value: "", text: "All types" }), ...BQ_SCHED_TYPES.map((t) => el("option", { value: t, text: t })));
+  const list = el("div", { class: "bq-sched-table" });
+  const draw = () => {
+    const visible = rows.filter((r) => !typeFilter || r.type === typeFilter);
+    const cols = BQ_SCHED_COLUMNS.filter(([k]) => shown.includes(k));
+    // The table scrolls in its own box on a narrow screen, as the
+    // resource lists do, so the page never scrolls sideways.
+    setChildren(list, visible.length ? el("div", { class: "table-wrap bq-sched-wrap" }, el("table", { class: "bq-history-table bq-scheduling-table" },
+      el("caption", { class: "sr-only", text: "Schedules" }),
+      el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Name" }), ...cols.map(([, h]) => el("th", { scope: "col", text: h })), el("th", { scope: "col", text: "Actions" }))),
+      el("tbody", {}, ...visible.map((r) => el("tr", { "data-schedule": r.id },
+        el("td", {}, el("button", { type: "button", class: "link-button", text: r.id, "aria-label": `View schedule ${r.id}`, onclick: () => showDetail(r) })),
+        ...cols.map(([k]) => (k === "status" || k === "lastRunState") && r[k] ? bqStateCell(r[k]) : el("td", { class: k === "frequency" ? "mono" : null, text: r[k] || "—" })),
+        el("td", {}, bqMenu(`View actions for schedule ${r.id}`, [
+          { label: r.disabled ? "Enable" : "Disable", run: () => toggle(r) },
+          { label: "Delete", danger: true, run: () => remove(r) },
+        ])))))))
+      : el("div", { class: "state" }, el("h2", { text: typeFilter ? `No ${typeFilter.toLowerCase()} schedules` : "No schedules" }),
+        el("p", { text: "Schedule a query, notebook, pipeline or data preparation: Create, or Schedule in its Studio editor." })));
+  };
+  const refresh = async () => {
+    setChildren(list, spinner("Loading schedules"));
+    const errors = await load();
+    draw();
+    if (errors.length) list.prepend(el("p", { class: "form-error", role: "alert", text: errors.join(" ") }));
+  };
+  setChildren(view, pageHeader("Scheduling", "Scheduled queries, notebooks, pipelines and data preparations"),
+    host);
+  if (!project) { setChildren(host, el("div", { class: "state" }, el("h2", { text: "Choose a project" }), el("p", { text: "Schedules are listed per project. Choose one in the toolbar." }))); return; }
+  setChildren(host,
+    el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Scheduling actions" }, createMenu,
+      el("button", { type: "button", class: "secondary", text: "Refresh", onclick: () => refresh() }),
+      el("button", { type: "button", class: "secondary", text: "Column display options", onclick: colPicker })),
+    el("div", { class: "filter-bar" }, bqField("bq-sched-type", "Filter by type", filter)),
+    dfOn ? null : el("p", { class: "unavailable", text: BQ_NO_DATAFORM }),
+    list, detail);
+  await refresh();
+  announce(`Scheduling: ${rows.length} schedules`);
+}
+
+// bqEditScheduleDialog is a time-based schedule's Edit: its frequency,
+// time zone, service account and notebook options; Update schedule.
+function bqEditScheduleDialog(d, onDone) {
+  const { dialog, close } = openModal({ labelledBy: "bq-edsched-title" });
+  const cron = el("input", { type: "text", id: "bq-edsched-cron", class: "mono", value: d.frequency || "" });
+  const zone = el("select", { id: "bq-edsched-zone" }, ...bqTimeZones().map((z) => el("option", { value: z, text: z })));
+  zone.value = d.timeZone || "UTC";
+  const auth = bqAuthFields("bq-edsched", d.serviceAccount || "");
+  const nb = bqNotebookOptionFields("bq-edsched", { template: d.runtimeTemplate || "", bucket: d.bucket || "" });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const save = el("button", { type: "submit", class: "primary", text: "Update schedule" });
+  dialog.append(el("form", { class: "modal-body is-wide", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (!cron.value.trim()) { error.textContent = "A schedule needs a frequency."; error.hidden = false; return; }
+    setBusy(save, true);
+    try {
+      await bqDfCall("updateschedule", { schedule: d.name, cron: cron.value.trim(), timeZone: zone.value, serviceAccount: auth.value(), bucket: nb.bucket(), runtimeTemplate: nb.template() });
+      notify(`Updated schedule ${d.id}`);
+      close();
+      onDone();
+    } catch (err) { error.textContent = err.message; error.hidden = false; } finally { setBusy(save, false); }
+  } }, el("h2", { id: "bq-edsched-title", text: `Edit schedule: ${d.id}` }), error,
+    el("fieldset", {}, el("legend", { text: "Configuration Type: Schedule (time-based recurrence)" }),
+      bqField("bq-edsched-cron", "Repeats (cron)", cron, "Unix cron: minute, hour, day of month, month, day of week."), bqField("bq-edsched-zone", "Timezone", zone)),
+    auth.group, d.assetKind === "data_preparation" ? null : nb.group,
+    el("div", { class: "modal-actions" }, el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }), save)));
+  cron.focus();
+}
+
 // bqLocalModel asks the instance's local model (the Agent Studio relay,
 // /api/ai/playground) for a one-shot answer. Data canvas's natural
 // language steps use it; Google's use Gemini in BigQuery, which
@@ -22311,6 +24291,132 @@ function bqNotebookOutputs(outputs) {
   });
 }
 
+// BQ_NO_COLAB says why Connect to a runtime is off.
+const BQ_NO_COLAB = "Connecting to a Colab Enterprise runtime needs Colab Enterprise's runtimes, which this instance does not serve " +
+  "(they run on the local Agent Platform endpoint).";
+
+// bqManageSessions is Manage sessions' Active sessions dialog (#2094):
+// "In the Active sessions dialog, click the terminate icon, then click
+// Terminate" (https://docs.cloud.google.com/bigquery/docs/use-spark, read
+// 2026-11-23). It lists the project's interactive sessions that are
+// creating or active, over the Dataproc API's sessions.list, and
+// Terminate is sessions.terminate. The dialog's columns are not documented
+// (UNVERIFIED (re-read 2026-11-23: https://docs.cloud.google.com/bigquery/docs/use-spark)): they are the Interactive sessions page's.
+function bqManageSessions() {
+  const project = currentProject();
+  const { dialog, close } = openModal({ labelledBy: "bq-sessions-title" });
+  const body = el("div", { class: "bq-sessions", role: "status", "aria-live": "polite" }, spinner("Loading sessions"));
+  const load = async () => {
+    try {
+      const res = await api(`/api/resources/dataproc-sessions?project=${encodeURIComponent(project)}`);
+      const active = (res.items || []).filter((r) => r.status === "ACTIVE" || r.status === "CREATING");
+      if (!active.length) { setChildren(body, el("p", { class: "unavailable", text: "There are no active sessions." })); return; }
+      setChildren(body, el("div", { class: "table-scroll" }, el("table", { class: "bq-sessions-table" },
+        el("thead", {}, el("tr", {}, ...["Session ID", "Status", "Region", "Type", "Creation time", "Elapsed time"].map((h) => el("th", { scope: "col", text: h })),
+          el("th", { scope: "col" }, el("span", { class: "sr-only", text: "Actions" })))),
+        el("tbody", {}, ...active.map((r) => {
+          const f = r.fields || {};
+          const full = (r.opens || [])[0] || r.name;
+          return el("tr", {},
+            el("td", { class: "mono", text: f["Session ID"] || r.name }),
+            el("td", { text: f.Status || r.status }), el("td", { text: f.Region || "" }), el("td", { text: f.Type || "" }),
+            el("td", { text: f["Creation time"] || "" }), el("td", { text: f["Elapsed time"] || "" }),
+            el("td", {}, el("button", { type: "button", class: "icon-button", "aria-label": `Terminate session ${r.name}`, title: "Terminate",
+              html: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>',
+              onclick: () => confirmDestructive({ title: "Terminate session?", detail: r.name, style: "confirm", confirmLabel: "Terminate",
+                consequence: "The session's Spark Connect server stops; a notebook on it loses its Spark session.",
+                onConfirm: async () => {
+                  await send(`/api/actions/dataproc-sessions?project=${encodeURIComponent(project)}`, "POST", { Path: [full], Action: "terminate" });
+                  announce(`Session ${r.name} terminated`);
+                  load();
+                } }) })));
+        })))));
+    } catch (err) { setChildren(body, el("p", { class: "form-error", role: "alert", text: err.message })); }
+  };
+  const closeBtn = el("button", { type: "button", class: "primary", text: "Close", onclick: () => close() });
+  dialog.append(el("div", { class: "modal-body" },
+    el("h2", { id: "bq-sessions-title", text: "Active sessions" }),
+    body,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", text: "Refresh", onclick: () => { setChildren(body, spinner("Loading sessions")); load(); } }), closeBtn)));
+  closeBtn.focus();
+  load();
+}
+
+// bqConnectToRuntime is Connect to a runtime
+// (https://docs.cloud.google.com/bigquery/docs/create-notebooks and
+// https://docs.cloud.google.com/colab/docs/connect-to-runtime, read
+// 2026-11-23): the Connect to Agent Platform runtime dialog, with Connect
+// to an existing runtime (Runtimes: the region's running runtimes) or
+// Create new runtime (Runtime Template, Runtime name), which assigns a
+// runtime from the template through Colab Enterprise's NotebookService.
+// onConnect gets the runtime's resource name.
+function bqConnectToRuntime(tab, onConnect) {
+  const project = currentProject();
+  const { dialog, close } = openModal({ labelledBy: "bq-rt-title" });
+  const region = el("select", { id: "bq-rt-region" }, ...COLAB_REGIONS.map((r) => el("option", { value: r, text: r })));
+  const runtimes = el("select", { id: "bq-rt-runtimes" });
+  const template = el("select", { id: "bq-rt-template" });
+  const name = el("input", { type: "text", id: "bq-rt-name", maxlength: "128" });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const primary = el("button", { type: "submit", class: "primary", text: "Connect" });
+  const choice = (value, label, checked) => el("label", { class: "check-line" },
+    el("input", { type: "radio", name: "bq-rt-mode", value, checked: checked || null, onchange: () => sync() }), el("span", { text: label }));
+  const existing = el("div", { class: "form-row" }, el("label", { for: "bq-rt-runtimes", text: "Runtimes" }), runtimes);
+  const fresh = el("div", {},
+    el("div", { class: "form-row" }, el("label", { for: "bq-rt-template", text: "Runtime Template" }), template),
+    el("div", { class: "form-row" }, el("label", { for: "bq-rt-name", text: "Runtime name" }), name));
+  const mode = () => dialog.querySelector('input[name="bq-rt-mode"]:checked').value;
+  const sync = () => { existing.hidden = mode() !== "existing"; fresh.hidden = mode() !== "new"; };
+  const q = () => `project=${encodeURIComponent(project)}&region=${encodeURIComponent(region.value)}`;
+  const load = async () => {
+    setChildren(runtimes, el("option", { value: "", text: "Loading…" }));
+    setChildren(template, el("option", { value: "", text: "Loading…" }));
+    try {
+      const [rs, ts] = await Promise.all([api(`/api/resources/colab-runtimes?${q()}`), api(`/api/resources/colab-templates?${q()}`)]);
+      const running = (rs.items || []).filter((r) => r.status === "Running");
+      setChildren(runtimes, ...(running.length ? running.map((r) => el("option", { value: r.name, text: `${(r.fields || {})["Runtime name"] || r.name} (${r.name})` }))
+        : [el("option", { value: "", text: `No running runtimes in ${region.value}` })]));
+      setChildren(template, ...((ts.items || []).length ? ts.items.map((t) => el("option", { value: t.name, text: `${(t.fields || {})["Display name"] || t.name} (${t.name})` }))
+        : [el("option", { value: "", text: `No runtime templates in ${region.value}: create one on Colab Enterprise's Runtime templates page` })]));
+    } catch (err) { error.textContent = err.message; error.hidden = false; }
+  };
+  region.addEventListener("change", load);
+  dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const fail = (m) => { error.textContent = m; error.hidden = false; };
+    if (mode() === "existing") {
+      if (!runtimes.value) return fail("Choose a running runtime, or create a new one.");
+      close();
+      return onConnect(`projects/${project}/locations/${region.value}/notebookRuntimes/${runtimes.value}`);
+    }
+    if (!template.value) return fail("Choose a runtime template.");
+    if (!name.value.trim()) return fail("Runtime name is required.");
+    setBusy(primary, true);
+    try {
+      const made = await send(`/api/resources/colab-runtimes?${q()}`, "POST", { notebookRuntimeTemplate: template.value, displayName: name.value.trim() });
+      close();
+      onConnect(`projects/${project}/locations/${region.value}/notebookRuntimes/${made.name}`);
+    } catch (err) {
+      setBusy(primary, false);
+      fail(err.message);
+    }
+  } },
+    el("h2", { id: "bq-rt-title", text: "Connect to Agent Platform runtime" }),
+    el("div", { class: "form-row" }, el("label", { for: "bq-rt-region", text: "Region" }), region),
+    el("fieldset", {}, el("legend", { text: "Select a runtime" }),
+      choice("existing", "Connect to an existing runtime", true), choice("new", "Create new runtime")),
+    existing, fresh,
+    el("p", { class: "form-help", text: "A Colab Enterprise runtime of this instance: a container on this machine whose only route is this instance's BigQuery." }),
+    error,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }), primary)));
+  sync();
+  load();
+  region.focus();
+}
+
 function bqNotebookTab(tab, ctx) {
   let doc;
   try { doc = JSON.parse(tab.query || ""); } catch { doc = JSON.parse(bqNotebookDoc([])); }
@@ -22319,6 +24425,9 @@ function bqNotebookTab(tab, ctx) {
   // tab's number, which another browser's tab reuses.
   if (!tab.runtimeKey) tab.runtimeKey = tab.savedId || `nb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const key = tab.runtimeKey;
+  // rc is a runtime call: on the default runtime, or on the Colab
+  // Enterprise runtime Connect to a runtime connected the tab to.
+  const rc = (op, extra = {}) => bqRuntimeCall(op, key, { runtime: tab.colabRuntime || "", ...extra });
   const text = (c) => (Array.isArray(c.source) ? c.source.join("") : String(c.source || ""));
   const keep = () => { tab.query = JSON.stringify(doc, null, 1); ctx.save(); };
   const cellsHost = el("ol", { class: "bq-nb-cells", "aria-label": "Cells" });
@@ -22338,17 +24447,18 @@ function bqNotebookTab(tab, ctx) {
     connectBtn.setAttribute("aria-pressed", on ? "true" : "false");
     interruptBtn.hidden = restartBtn.hidden = deleteBtn.hidden = !on;
     status.className = runtime.state === "FAILED" ? "form-error bq-nb-runtime" : "unavailable bq-nb-runtime";
-    status.textContent = on ? `Connected to a runtime: Python ${runtime.python}, project ${runtime.project}, idle shutdown after ${runtime.idleShutdown}.`
+    const which = tab.colabRuntime ? `the runtime ${tab.colabRuntime.split("/").pop()}` : "a runtime";
+    status.textContent = on ? `Connected to ${which}: Python ${runtime.python}, project ${runtime.project}, idle shutdown after ${runtime.idleShutdown}.`
       : busy ? (runtime.message || "Starting the runtime…")
         : runtime.state === "FAILED" ? `The runtime failed: ${runtime.message}` : "Not connected.";
   };
   // connect starts the runtime and waits for it, as Colab's Connect does.
   const connect = async () => {
-    let r = await bqRuntimeCall("connect", key);
+    let r = await rc("connect");
     showRuntime(r);
     while (r.state === "BUILDING" || r.state === "STARTING") {
       await new Promise((ok) => setTimeout(ok, 1000));
-      r = await bqRuntimeCall("status", key);
+      r = await rc("status");
       showRuntime(r);
     }
     if (r.state !== "CONNECTED") throw new Error(`The runtime failed: ${r.message || r.state}`);
@@ -22356,11 +24466,11 @@ function bqNotebookTab(tab, ctx) {
     return r;
   };
   connectBtn.addEventListener("click", () => connect().catch((err) => { showRuntime({ state: "FAILED", message: err.message }); }));
-  interruptBtn.addEventListener("click", () => bqRuntimeCall("interrupt", key).then(() => announce("Interrupted")).catch((err) => notify(err.message, "error")));
+  interruptBtn.addEventListener("click", () => rc("interrupt").then(() => announce("Interrupted")).catch((err) => notify(err.message, "error")));
   restartBtn.addEventListener("click", async () => {
     try {
       showRuntime({ state: "STARTING", message: "Restarting the session…" });
-      showRuntime(await bqRuntimeCall("restart", key));
+      showRuntime(await rc("restart"));
       await connect();
       for (const c of doc.cells) if (c.cell_type === "code") c.execution_count = null;
       keep(); draw();
@@ -22369,7 +24479,18 @@ function bqNotebookTab(tab, ctx) {
   });
   deleteBtn.addEventListener("click", async () => {
     showRuntime({ state: "STARTING", message: "Deleting the runtime…" });
-    try { await bqRuntimeCall("disconnect", key); showRuntime({ state: "DISCONNECTED" }); announce("Runtime deleted"); } catch (err) { showRuntime({ state: "FAILED", message: err.message }); }
+    try {
+      await rc("disconnect");
+      // A Colab Enterprise runtime is deleted through its API, as Colab's
+      // Disconnect and delete runtime deletes it.
+      if (tab.colabRuntime) {
+        const [, project, , region, , id] = tab.colabRuntime.split("/");
+        await send(`/api/resources/colab-runtimes?project=${encodeURIComponent(project)}&region=${encodeURIComponent(region)}&name=${encodeURIComponent(id)}`, "DELETE");
+        tab.colabRuntime = "";
+        ctx.save();
+      }
+      showRuntime({ state: "DISCONNECTED" }); announce("Runtime deleted");
+    } catch (err) { showRuntime({ state: "FAILED", message: err.message }); }
   });
   const runCell = async (c, out, label) => {
     if (c.cell_type !== "code") return true;
@@ -22377,7 +24498,7 @@ function bqNotebookTab(tab, ctx) {
     try {
       if (runtime.state !== "CONNECTED" && !isSql(c)) await connect();
       if (runtime.state === "CONNECTED") {
-        const res = await bqRuntimeCall("run", key, { code: text(c) });
+        const res = await rc("run", { code: text(c) });
         c.outputs = res.outputs || [];
         c.execution_count = res.execution_count;
         keep();
@@ -22430,21 +24551,146 @@ function bqNotebookTab(tab, ctx) {
   };
   draw();
   showRuntime(runtime);
-  bqRuntimeCall("status", key).then(showRuntime).catch((err) => {
+  rc("status").then(showRuntime).catch((err) => {
     connectBtn.disabled = true;
     status.textContent = `${err.message}. %%bigquery cells still run on this instance's BigQuery.`;
   });
+  // The arrow beside Connect: "click the drop-down next to Connect and
+  // then click Connect to a runtime"
+  // (https://docs.cloud.google.com/bigquery/docs/create-notebooks, read
+  // 2026-11-23), which connects the notebook to a Colab Enterprise runtime:
+  // an existing one, or a new one from a runtime template.
+  const more = bqMenu("Additional connection options", [
+    SERVICES.some((sv) => sv.id === "colab-runtimes")
+      ? { label: "Connect to a runtime", run: () => bqConnectToRuntime(tab, async (name) => {
+        tab.colabRuntime = name; ctx.save();
+        try { await connect(); } catch (err) { tab.colabRuntime = ""; ctx.save(); showRuntime({ state: "FAILED", message: err.message }); }
+      }) }
+      : { label: "Connect to a runtime", disabled: true, title: BQ_NO_COLAB, run: () => {} },
+    // "Click the runtime selector, then click Manage sessions"
+    // (https://docs.cloud.google.com/bigquery/docs/use-spark, End the Spark
+    // session, read 2026-11-23): the Spark Connect sessions of
+    // Serverless for Apache Spark that an Apache Spark notebook runs on.
+    bqSparkOn()
+      ? { label: "Manage sessions", run: () => bqManageSessions() }
+      : { label: "Manage sessions", disabled: true, title: BQ_NO_SPARK, run: () => {} },
+  ]);
+  const moreBtn = more.querySelector("button");
+  moreBtn.classList.remove("bq-node-menu");
+  moreBtn.classList.add("bq-connect-more");
+  moreBtn.setAttribute("title", "Additional connection options");
+  moreBtn.textContent = "▾";
+  // The menu bar, shown by Toggle header visibility, as Google's is
+  // (https://docs.cloud.google.com/bigquery/docs/manage-notebooks, read
+  // 2026-11-23): File > Rename (the Rename notebook dialog) and File >
+  // Download (the file type), Edit > Notebook settings (Omit code cell
+  // output when saving this notebook). The setting is kept in the
+  // notebook's metadata (UNVERIFIED (re-read 2026-11-23:
+  // https://docs.cloud.google.com/bigquery/docs/manage-notebooks): Google
+  // does not document where), and a Save leaves the outputs out.
+  const omit = () => !!(doc.metadata && doc.metadata.cloudburrow && doc.metadata.cloudburrow.omit_code_cell_output);
+  const saved = () => {
+    if (!omit()) return tab.query || bqNotebookDoc([]);
+    const copy = JSON.parse(JSON.stringify(doc));
+    for (const c of copy.cells) if (c.cell_type === "code") { c.outputs = []; c.execution_count = null; }
+    return JSON.stringify(copy, null, 1);
+  };
+  const download = (ext) => {
+    const base = (tab.title || "notebook").replace(/[\\/:*?"<>|]+/g, "_");
+    let body = saved();
+    let type = "application/x-ipynb+json";
+    if (ext === "py") {
+      // As Jupyter's script export writes it: Markdown as comments, each
+      // code cell after an "In[ ]" marker.
+      type = "text/x-python";
+      body = "#!/usr/bin/env python\n# coding: utf-8\n" + doc.cells.map((c) => (c.cell_type === "code"
+        ? `\n# In[ ]:\n\n\n${text(c)}\n`
+        : "\n" + text(c).split("\n").map((l) => "# " + l).join("\n") + "\n")).join("");
+    }
+    // Not attached to the document, so the router never sees the click
+    // and the browser saves the file.
+    const url = URL.createObjectURL(new Blob([body], { type }));
+    el("a", { href: url, download: `${base}.${ext}` }).click();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    announce(`Downloaded ${base}.${ext}`);
+  };
+  const rename = () => {
+    const { dialog, close } = openModal({ labelledBy: "bq-nb-rename-title" });
+    const input = el("input", { type: "text", id: "bq-nb-rename-name", value: tab.title || "", required: true, maxlength: "256" });
+    const error = el("p", { class: "form-error", role: "alert", hidden: true });
+    const primary = el("button", { type: "submit", class: "primary", text: "Rename" });
+    dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: async (e) => {
+      e.preventDefault();
+      const name = input.value.trim();
+      if (!name) { error.textContent = "A notebook needs a name."; error.hidden = false; return; }
+      setBusy(primary, true);
+      try {
+        if (tab.savedId) await bqDfCall("rename", { name: tab.savedId, displayName: name });
+        tab.title = name;
+        ctx.save();
+        close();
+        if (tab.savedId && ctx.onSaved) await ctx.onSaved(bqAssetQuery({ name: tab.savedId, displayName: name, kind: "notebook", content: tab.query }));
+        notify(`Renamed to ${name}`);
+      } catch (err) { setBusy(primary, false); error.textContent = err.message; error.hidden = false; }
+    } },
+      el("h2", { id: "bq-nb-rename-title", text: "Rename notebook" }),
+      el("label", { for: "bq-nb-rename-name", text: "Name" }), input, error,
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }), primary)));
+    input.focus();
+  };
+  const settings = () => {
+    const { dialog, close } = openModal({ labelledBy: "bq-nb-settings-title" });
+    const box = el("input", { type: "checkbox", id: "bq-nb-omit", checked: omit() || null });
+    dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: (e) => {
+      e.preventDefault();
+      doc.metadata = doc.metadata || {};
+      doc.metadata.cloudburrow = { ...(doc.metadata.cloudburrow || {}), omit_code_cell_output: box.checked };
+      keep();
+      close();
+      announce(box.checked ? "Code cell output is omitted when saving" : "Code cell output is saved");
+    } },
+      el("h2", { id: "bq-nb-settings-title", text: "Notebook settings" }),
+      el("label", { class: "check-line", for: "bq-nb-omit" }, box, el("span", { text: "Omit code cell output when saving this notebook" })),
+      el("div", { class: "modal-actions" },
+        el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
+        el("button", { type: "submit", class: "primary", text: "Save" }))));
+    box.focus();
+  };
+  const fileMenu = bqMenu("File", [
+    { label: "Rename", run: rename },
+    { label: "Download", items: [
+      { label: "Download .ipynb", run: () => download("ipynb") },
+      { label: "Download .py", run: () => download("py") },
+    ] },
+  ]);
+  bqMenuButton(fileMenu, "File", "File");
+  const editMenu = bqMenu("Edit", [{ label: "Notebook settings", run: settings }]);
+  bqMenuButton(editMenu, "Edit", "Edit");
+  const menubar = el("div", { class: "bq-toolbar bq-nb-menubar", role: "toolbar", "aria-label": "Notebook menu bar", hidden: !tab.headerShown || null },
+    fileMenu, editMenu);
+  const toggle = el("button", { type: "button", class: "icon-button bq-nb-header-toggle", "aria-label": "Toggle header visibility",
+    title: "Toggle header visibility", "aria-expanded": tab.headerShown ? "true" : "false", text: tab.headerShown ? "▴" : "▾",
+    onclick: () => {
+      tab.headerShown = !tab.headerShown;
+      menubar.hidden = !tab.headerShown;
+      toggle.setAttribute("aria-expanded", tab.headerShown ? "true" : "false");
+      toggle.textContent = tab.headerShown ? "▴" : "▾";
+      ctx.save();
+    } });
+  const header = el("div", { class: "bq-nb-header" }, toggle, menubar);
   const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Notebook actions" },
-    connectBtn, interruptBtn, restartBtn, deleteBtn,
+    el("span", { class: "bq-connect-group" }, connectBtn, more), interruptBtn, restartBtn, deleteBtn,
     el("button", { type: "button", class: "secondary", text: "+ Code", onclick: () => addCell("code", "") }),
     el("button", { type: "button", class: "secondary", text: "+ SQL", onclick: () => addCell("code", "%%bigquery\n") }),
     el("button", { type: "button", class: "secondary", text: "+ Text", onclick: () => addCell("markdown", "") }),
     el("button", { type: "button", class: "primary", text: "Run all", onclick: runAll }),
-    el("button", { type: "button", class: "secondary", text: "Save", onclick: () => bqSaveAsset(tab, "notebook", tab.query || bqNotebookDoc([]), ctx.onSaved) }),
+    el("button", { type: "button", class: "secondary", text: "Save", onclick: () => bqSaveAsset(tab, "notebook", saved(), ctx.onSaved) }),
+    bqScheduleButton(tab, "notebook"),
     el("button", { type: "button", class: "secondary", text: "Version history", disabled: tab.savedId ? null : true,
       title: tab.savedId ? null : "Save the notebook first", onclick: () => bqVersionHistory({ id: tab.savedId, name: tab.title, kind: "notebook" }, (content, title) => ctx.openAsset("notebook", content, title)) }),
     tab.savedId ? el("button", { type: "button", class: "secondary", text: "Share", onclick: () => bqManagePermissions({ id: tab.savedId, name: tab.title }) }) : null);
-  return el("div", { class: "bq-notebook" }, toolbar, status,
+  return el("div", { class: "bq-notebook" }, header, toolbar, status,
     el("p", { class: "unavailable bq-hint", text: BQ_RUNTIME_NOTE + " " + (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
     cellsHost);
 }
@@ -22506,8 +24752,11 @@ function bqCanvasTab(tab, ctx) {
   if (!doc.assistant) doc.assistant = { tables: [], instructions: "", chat: [] };
   let next = doc.nodes.reduce((n, x) => Math.max(n, x.id), 0);
   const results = {};
+  const errors = {};
   const keep = () => { tab.query = JSON.stringify(doc); ctx.save(); };
   const host = el("ol", { class: "bq-canvas-nodes", "aria-label": "Canvas nodes" });
+  if (!doc.view) doc.view = { zoom: 1 };
+  let selected = null;
   const byId = (id) => doc.nodes.find((n) => n.id === id);
   const add = (node) => { node.id = ++next; node.parents = node.parents || []; doc.nodes.push(node); keep(); draw(); return node; };
   const tables = () => {
@@ -22529,6 +24778,7 @@ function bqCanvasTab(tab, ctx) {
   const runNode = async (n, out) => {
     setChildren(out, spinner("Running"));
     try {
+      delete errors[n.id];
       results[n.id] = await queryOf(refOf(n) ? `${sqlOf(n)} LIMIT 100` : sqlOf(n));
       drawResult(n, out);
       // A Destination node with its SQL toggle on follows its SQL node.
@@ -22537,6 +24787,7 @@ function bqCanvasTab(tab, ctx) {
       }
       return true;
     } catch (err) {
+      errors[n.id] = err.message;
       setChildren(out, el("p", { class: "form-error", role: "alert", text: err.message }));
       return false;
     }
@@ -22632,6 +24883,252 @@ function bqCanvasTab(tab, ctx) {
     } catch (err) {
       setChildren(out, el("p", { class: "form-error", role: "alert", text: err.message }));
     }
+  };
+  // --- The board: Google's canvas of nodes joined by their edges, with
+  // Zoom controls, Zoom to Fit, Zoom to Selection, Zoom In, Zoom Out, Full
+  // screen and Tidy canvas
+  // (https://docs.cloud.google.com/bigquery/docs/data-canvas, read
+  // 2026-11-23). A node keeps the place it was dragged to (x, y); the
+  // others are laid out in columns by their depth in the graph, which Tidy
+  // canvas applies to every node.
+  const NODE_W = 520, GAP_X = 72, GAP_Y = 24, PAD = 24;
+  const edges = el("svg", { class: "bq-canvas-edges", "aria-hidden": "true", focusable: "false" });
+  const world = el("div", { class: "bq-canvas-world" }, edges, host);
+  const stage = el("div", { class: "bq-canvas-stage" }, world);
+  const board = el("div", { class: "bq-canvas-board", role: "region", "aria-label": "Canvas", tabindex: "0",
+    "aria-describedby": `bq-canvas-board-help-${tab.id}` }, stage);
+  const zoomSel = el("select", { id: `bq-canvas-zoom-${tab.id}`, class: "bq-canvas-zoom", "aria-label": "Zoom level" });
+  const ZOOMS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
+  const depthOf = (n, seen = new Set()) => {
+    if (seen.has(n.id)) return 0;
+    seen.add(n.id);
+    return n.parents.map(byId).filter(Boolean).reduce((d, p) => Math.max(d, 1 + depthOf(p, seen)), 0);
+  };
+  const liOf = (n) => host.querySelector(`[data-node="${n.id}"]`);
+  let extent = { w: 0, h: 0 };
+  const layout = () => {
+    const placed = [];
+    const cols = {};
+    for (const n of doc.nodes) {
+      const li = liOf(n);
+      if (!li) continue;
+      const h = li.offsetHeight;
+      let x, y;
+      if (n.pinned && Number.isFinite(n.x) && Number.isFinite(n.y)) { x = n.x; y = n.y; } else {
+        const d = depthOf(n);
+        x = PAD + d * (NODE_W + GAP_X);
+        y = cols[d] === undefined ? PAD : cols[d];
+        cols[d] = y + h + GAP_Y;
+      }
+      li.style.left = x + "px";
+      li.style.top = y + "px";
+      placed.push({ n, x, y, w: li.offsetWidth || NODE_W, h });
+    }
+    const at = Object.fromEntries(placed.map((b) => [b.n.id, b]));
+    extent = { w: Math.max(...placed.map((b) => b.x + b.w), 0) + PAD, h: Math.max(...placed.map((b) => b.y + b.h), 0) + PAD };
+    edges.setAttribute("width", String(extent.w));
+    edges.setAttribute("height", String(extent.h));
+    setChildren(edges, ...placed.flatMap((b) => b.n.parents.map((pid) => at[pid]).filter(Boolean).map((a) => {
+      const x1 = a.x + a.w, y1 = a.y + 22, x2 = b.x, y2 = b.y + 22, mid = Math.max(24, (x2 - x1) / 2);
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", `M${x1},${y1} C${x1 + mid},${y1} ${x2 - mid},${y2} ${x2},${y2}`);
+      path.setAttribute("class", "bq-canvas-edge");
+      return path;
+    })));
+    applyZoom();
+  };
+  const resizes = new ResizeObserver(() => requestAnimationFrame(() => { if (board.isConnected) layout(); }));
+  const applyZoom = () => {
+    const z = doc.view.zoom;
+    world.style.transform = `scale(${z})`;
+    world.style.width = Math.max(extent.w, NODE_W + 2 * PAD) + "px";
+    stage.style.width = Math.ceil(Math.max(extent.w, NODE_W + 2 * PAD) * z) + "px";
+    stage.style.height = Math.ceil(Math.max(extent.h, 120) * z) + "px";
+    const pct = Math.round(z * 100);
+    setChildren(zoomSel, ...[...new Set([...ZOOMS.map((v) => Math.round(v * 100)), pct])].sort((a, b) => a - b).map((v) => {
+      const o = el("option", { value: String(v), text: `${v}%` }); o.selected = v === pct; return o;
+    }));
+    if (zoomIn) { zoomIn.disabled = z >= 2; zoomOut.disabled = z <= 0.25; zoomSelection.disabled = !byId(selected); }
+  };
+  const setZoom = (z, anchor) => {
+    const before = doc.view.zoom;
+    z = Math.min(2, Math.max(0.25, Math.round(z * 100) / 100));
+    if (z === before) return;
+    // The point under the anchor (the pointer, or the board's centre)
+    // stays where it is.
+    const ax = anchor ? anchor.x : board.clientWidth / 2, ay = anchor ? anchor.y : board.clientHeight / 2;
+    const wx = (board.scrollLeft + ax) / before, wy = (board.scrollTop + ay) / before;
+    doc.view.zoom = z;
+    keep();
+    applyZoom();
+    board.scrollLeft = wx * z - ax;
+    board.scrollTop = wy * z - ay;
+    announce(`Zoom ${Math.round(z * 100)}%`);
+  };
+  const step = (dir) => {
+    const z = doc.view.zoom;
+    const next = dir > 0 ? ZOOMS.find((v) => v > z + 0.001) : [...ZOOMS].reverse().find((v) => v < z - 0.001);
+    setZoom(next === undefined ? z : next);
+  };
+  const zoomToFit = () => {
+    layout();
+    if (!doc.nodes.length) { setZoom(1); return; }
+    const z = Math.min(1, (board.clientWidth - 8) / extent.w, (board.clientHeight - 8) / extent.h);
+    setZoom(Math.max(0.25, z));
+    applyZoom();
+    board.scrollLeft = 0;
+    board.scrollTop = 0;
+  };
+  const zoomToSelection = () => {
+    const n = byId(selected);
+    const li = n && liOf(n);
+    if (!li) return;
+    const z = Math.max(0.25, Math.min(1, (board.clientWidth - 16) / li.offsetWidth, (board.clientHeight - 16) / li.offsetHeight));
+    setZoom(z);
+    applyZoom();
+    const z2 = doc.view.zoom;
+    board.scrollLeft = parseFloat(li.style.left) * z2 - (board.clientWidth - li.offsetWidth * z2) / 2;
+    board.scrollTop = parseFloat(li.style.top) * z2 - 8;
+    const first = li.querySelector("button, input, select, textarea");
+    if (first) first.focus({ preventScroll: true });
+  };
+  const tidy = () => {
+    for (const n of doc.nodes) { delete n.pinned; delete n.x; delete n.y; }
+    keep();
+    layout();
+    announce("Canvas tidied");
+  };
+  board.addEventListener("wheel", (e) => {
+    // Control and the wheel zoom, as Google's page says.
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    const r = board.getBoundingClientRect();
+    setZoom(doc.view.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1), { x: e.clientX - r.left, y: e.clientY - r.top });
+  }, { passive: false });
+  // The node clicked or focused is the selection Zoom to Selection uses.
+  const choose = (li) => {
+    const id = li ? Number(li.dataset.node) : null;
+    if (id === selected) return;
+    selected = id;
+    for (const x of host.querySelectorAll(".bq-canvas-node.is-selected")) x.classList.remove("is-selected");
+    if (li) li.classList.add("is-selected");
+    applyZoom();
+  };
+  host.addEventListener("focusin", (e) => choose(e.target.closest(".bq-canvas-node")));
+  host.addEventListener("pointerdown", (e) => choose(e.target.closest(".bq-canvas-node")));
+  // dragNode moves a node by its handle: dragged with the pointer, or the
+  // arrow keys (24 px, Shift for 96), so moving needs no dragging.
+  const dragNode = (n, li, handle) => {
+    const moveTo = (x, y) => {
+      n.x = Math.max(0, Math.round(x)); n.y = Math.max(0, Math.round(y)); n.pinned = true;
+      li.style.left = n.x + "px"; li.style.top = n.y + "px";
+    };
+    handle.addEventListener("keydown", (e) => {
+      const d = e.shiftKey ? 96 : 24;
+      const delta = { ArrowLeft: [-d, 0], ArrowRight: [d, 0], ArrowUp: [0, -d], ArrowDown: [0, d] }[e.key];
+      if (!delta) return;
+      e.preventDefault();
+      moveTo(parseFloat(li.style.left) + delta[0], parseFloat(li.style.top) + delta[1]);
+      keep(); layout();
+      handle.focus({ preventScroll: false });
+    });
+    handle.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      const z = doc.view.zoom, sx = e.clientX, sy = e.clientY, ox = parseFloat(li.style.left), oy = parseFloat(li.style.top);
+      const move = (m) => { moveTo(ox + (m.clientX - sx) / z, oy + (m.clientY - sy) / z); layout(); };
+      const up = () => { handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", up); keep(); };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", up);
+    });
+  };
+  // nodeMenu is a node's menu, its items as Google's node types list them:
+  // Delete, Debug and Duplicate; Run, and Run the node and the following
+  // node, where the node runs; a SQL node's Export as scheduled query.
+  const deleteNode = (n) => {
+    doc.nodes = doc.nodes.filter((x) => x.id !== n.id);
+    for (const x of doc.nodes) x.parents = x.parents.filter((p) => p !== n.id);
+    if (selected === n.id) selected = null;
+    keep(); draw();
+    announce(`${nodeTitle(n)} deleted`);
+  };
+  const duplicate = (n) => {
+    const copy = JSON.parse(JSON.stringify(n));
+    delete copy.id; delete copy.pinned; delete copy.x; delete copy.y; delete copy.saved;
+    const made = add(copy);
+    announce(`${nodeTitle(n)} duplicated as ${nodeTitle(made)}`);
+  };
+  const runs = (n) => ["table", "sql", "insights", "viz"].includes(n.type) || (n.type === "dest" && n.saved);
+  const runOne = async (n) => {
+    const li = liOf(n);
+    const out = li && li.querySelector(".bq-nb-output");
+    if (!out) return true;
+    if (n.type === "insights") { await runInsights(n, out); return true; }
+    if (n.type === "viz") { const b = [...li.querySelectorAll("button")].find((x) => x.textContent === "Draw"); if (b) b.click(); return true; }
+    return runNode(n, out);
+  };
+  const following = (n) => {
+    const out = [], seen = new Set([n.id]);
+    let frontier = [n.id];
+    while (frontier.length) {
+      const next = doc.nodes.filter((x) => !seen.has(x.id) && x.parents.some((p) => frontier.includes(p)));
+      for (const x of next) { seen.add(x.id); out.push(x); }
+      frontier = next.map((x) => x.id);
+    }
+    return out;
+  };
+  const runWithFollowing = async (n) => {
+    if (!(await runOne(n))) return;
+    for (const x of following(n).filter(runs)) if (!(await runOne(x))) return;
+    announce(`Ran ${nodeTitle(n)} and the nodes that follow it`);
+  };
+  // Refresh canvas runs every node that runs, parents before children.
+  const refresh = async () => {
+    const order = [...doc.nodes].filter(runs).sort((a, b) => depthOf(a) - depthOf(b));
+    for (const n of order) await runOne(n);
+    announce("Canvas refreshed");
+  };
+  // Debug shows what the node is and how its last run ended, and asks the
+  // local model what went wrong (Gemini at Google).
+  // UNVERIFIED (re-read 2026-11-23: <https://docs.cloud.google.com/bigquery/docs/data-canvas>):
+  // Google's page describes Debug only as "Debug the node.".
+  const debug = (n, box) => {
+    box.hidden = false;
+    const def = { type: n.type, parents: n.parents };
+    for (const k of ["ref", "sql", "query", "chart", "dataset", "table"]) if (n[k]) def[k] = n[k];
+    const err = errors[n.id];
+    const answer = el("div", { class: "bq-canvas-summary", role: "status" });
+    const sql = sqlOf(n);
+    setChildren(box, el("div", { class: "bq-nb-cell-bar" }, el("h4", { text: "Debug" }),
+      el("button", { type: "button", class: "secondary", text: "Close", "aria-label": `Close Debug of ${nodeTitle(n)}`, onclick: () => { box.hidden = true; } })),
+      el("pre", { class: "mono", tabindex: "0", "aria-label": `${nodeTitle(n)} definition`, text: JSON.stringify(def, null, 2) }),
+      el("p", { class: err ? "form-error" : "unavailable", text: err ? `Last run failed: ${err}` : results[n.id] ? "Last run succeeded." : "Not run yet." }),
+      sql && err ? el("button", { type: "button", class: "secondary", text: "Suggest a fix", onclick: async () => {
+        setChildren(answer, spinner("Asking the local model"));
+        try {
+          const fix = await bqLocalModel(`This BigQuery GoogleSQL query failed.\nQuery:\n${sql}\nError: ${err}\nExplain the cause in one sentence, then give the corrected query.`);
+          setChildren(answer, el("p", { text: fix }));
+        } catch (e) { setChildren(answer, el("p", { class: "unavailable", text: e.message })); }
+      } }) : null, answer);
+  };
+  const nodeMenu = (n, out, debugOut) => {
+    const t = n.type;
+    const items = [];
+    if (t === "sql") items.push({ label: "Export as scheduled query", run: () => bqScheduledQueryPane(sqlOf(n), null, () => {}) });
+    if (t === "dest") {
+      items.push({ label: "Detach", disabled: !n.saved, title: n.saved ? null : "Save the table first",
+        run: () => { Object.assign(n, { type: "table", ref: refOf(n), parents: [] }); keep(); draw(); announce("Detached into a table node"); } });
+    }
+    if (t === "viz") items.push({ label: "Export as PNG", run: () => { const svg = liOf(n) && liOf(n).querySelector("svg.bq-chart"); if (svg) bqChartPNG(svg); else notify("Draw the chart first.", "error"); } });
+    items.push({ label: "Delete", danger: true, run: () => deleteNode(n) });
+    if (t !== "insights") items.push({ label: "Debug", run: () => debug(n, debugOut) });
+    items.push({ label: "Duplicate", run: () => duplicate(n) });
+    if (runs(n)) {
+      items.push({ label: "Run", run: () => runOne(n) });
+      if (t !== "insights") items.push({ label: "Run the node and the following node", run: () => runWithFollowing(n) });
+    }
+    return bqMenu(`Node actions for ${nodeTitle(n)}`, items);
   };
   const drawNode = (n) => {
     const out = el("div", { class: "bq-nb-output", role: "status" });
@@ -22734,20 +25231,29 @@ function bqCanvasTab(tab, ctx) {
       area.addEventListener("input", () => { n.text = area.value; keep(); });
       body.push(area);
     }
-    const node = el("li", { class: "bq-canvas-node bq-canvas-" + n.type, "data-node": String(n.id) },
-      el("div", { class: "bq-nb-cell-bar" }, el("h3", { text: nodeTitle(n) }),
+    const debugOut = el("div", { class: "bq-canvas-debug", hidden: true });
+    const handle = el("button", { type: "button", class: "icon-button bq-canvas-move", "aria-label": `Move ${nodeTitle(n)}`,
+      title: "Drag, or use the arrow keys, to move the node", "aria-describedby": `bq-canvas-move-help-${tab.id}`,
+      html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l3 3h-2v4h4V8l3 3-3 3v-2h-4v4h2l-3 3-3-3h2v-4H7v2l-3-3 3-3v2h4V6H9z"/></svg>' });
+    const node = el("li", { class: "bq-canvas-node bq-canvas-" + n.type, "data-node": String(n.id),
+      "aria-label": nodeTitle(n) + (parents.length ? ", from " + parents.map(nodeTitle).join(" and ") : "") },
+      el("div", { class: "bq-nb-cell-bar bq-canvas-bar" }, handle, el("h3", { text: nodeTitle(n) }),
         parents.length ? el("span", { class: "unavailable", text: "from " + parents.map(nodeTitle).join(" and ") }) : null,
-        el("button", { type: "button", class: "secondary", text: "Delete", "aria-label": `Delete ${nodeTitle(n)}`, onclick: () => {
-          doc.nodes = doc.nodes.filter((x) => x.id !== n.id);
-          for (const x of doc.nodes) x.parents = x.parents.filter((p) => p !== n.id);
-          keep(); draw();
-        } })),
-      ...body, nodeActions(n, out), out);
+        nodeMenu(n, out, debugOut)),
+      ...body, nodeActions(n, out), out, debugOut);
+    dragNode(n, node, handle);
     drawResult(n, out);
     return node;
   };
-  const draw = () => setChildren(host, ...(doc.nodes.length ? doc.nodes.map(drawNode)
-    : [el("li", { class: "unavailable", text: "Start with a Search, SQL or Text node from the toolbar, or ask the Data Canvas Assistant." })]));
+  const draw = () => {
+    setChildren(host, ...(doc.nodes.length ? doc.nodes.map(drawNode)
+      : [el("li", { class: "unavailable bq-canvas-empty", text: "Start with a Search, SQL or Text node from the toolbar, or ask the Data Canvas Assistant." })]));
+    for (const li of host.querySelectorAll(".bq-canvas-node")) {
+      if (Number(li.dataset.node) === selected) li.classList.add("is-selected");
+      resizes.observe(li);
+    }
+    layout();
+  };
 
   // The Data Canvas Assistant: a chat that adds nodes for a data question,
   // over the tables chosen in its Settings (Add Data) and its Instructions.
@@ -22821,26 +25327,68 @@ function bqCanvasTab(tab, ctx) {
     openAssistant.setAttribute("aria-expanded", String(!panel.hidden));
     if (!panel.hidden) { drawChat(); question.focus(); }
   } });
+  zoomSel.addEventListener("change", () => setZoom(Number(zoomSel.value) / 100));
+  const zoomToFitB = el("button", { type: "button", class: "secondary", text: "Zoom to Fit", onclick: zoomToFit });
+  const zoomSelection = el("button", { type: "button", class: "secondary", text: "Zoom to Selection", title: "Select a node first", onclick: zoomToSelection });
+  const zoomIn = el("button", { type: "button", class: "secondary", text: "Zoom In", onclick: () => step(1) });
+  const zoomOut = el("button", { type: "button", class: "secondary", text: "Zoom Out", onclick: () => step(-1) });
+  // Full screen: the browser's, or the canvas over the whole window where
+  // the browser refuses it.
+  const fullScreen = el("button", { type: "button", class: "secondary", text: "Full screen", "aria-pressed": "false" });
+  const setFull = (on) => {
+    root.classList.toggle("is-fullscreen", on);
+    fullScreen.textContent = on ? "Exit full screen" : "Full screen";
+    fullScreen.setAttribute("aria-pressed", String(on));
+    requestAnimationFrame(layout);
+  };
+  fullScreen.addEventListener("click", async () => {
+    const on = !root.classList.contains("is-fullscreen");
+    if (!on) {
+      if (document.fullscreenElement === root) { try { await document.exitFullscreen(); } catch { /* left by the browser */ } }
+      setFull(false);
+      return;
+    }
+    try { if (root.requestFullscreen) await root.requestFullscreen(); } catch { /* drawn over the window instead */ }
+    setFull(true);
+  });
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement && root.classList.contains("is-fullscreen") && root.dataset.native === "1") setFull(false);
+    root.dataset.native = document.fullscreenElement === root ? "1" : "";
+  });
+  const more = bqMenu("More actions", [
+    { label: "Clear canvas", run: () => {
+      if (!doc.nodes.length) { announce("The canvas is already clear"); return; }
+      confirmDestructive({ title: "Clear canvas?", detail: "Every node of this canvas is removed.", confirmLabel: "Clear", style: "confirm",
+        consequence: "Version history keeps the canvas as last saved.",
+        onConfirm: async () => { doc.nodes = []; selected = null; keep(); draw(); announce("Canvas cleared"); } });
+    } },
+  ]);
+  bqMenuButton(more, "More actions", "More actions");
+  const root = el("div", { class: "bq-canvas" });
+  root.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && root.classList.contains("is-fullscreen") && document.fullscreenElement !== root && !e.target.closest(".bq-menu")) setFull(false);
+  });
   draw();
   const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Data canvas actions" },
     el("button", { type: "button", class: "secondary", text: "Search", "aria-label": "Add a Search node", onclick: () => add({ type: "search" }) }),
     el("button", { type: "button", class: "secondary", text: "SQL", "aria-label": "Add a SQL node", onclick: () => add({ type: "sql", sql: "" }) }),
     el("button", { type: "button", class: "secondary", text: "Text", "aria-label": "Add a Text node", onclick: () => add({ type: "text" }) }),
-    openAssistant,
-    el("button", { type: "button", class: "secondary", text: "Clear canvas", onclick: () => {
-      if (!doc.nodes.length) return;
-      confirmDestructive({ title: "Clear canvas?", detail: "Every node of this canvas is removed.", confirmLabel: "Clear", style: "confirm",
-        consequence: "Version history keeps the canvas as last saved.",
-        onConfirm: async () => { doc.nodes = []; keep(); draw(); announce("Canvas cleared"); } });
-    } }),
+    zoomSel, zoomToFitB, zoomSelection, zoomIn, zoomOut, fullScreen,
+    el("button", { type: "button", class: "secondary", text: "Tidy canvas", onclick: tidy }),
+    el("button", { type: "button", class: "secondary", text: "Refresh canvas", onclick: refresh }),
+    openAssistant, more,
     el("button", { type: "button", class: "primary", text: "Save", onclick: () => bqSaveAsset(tab, "data_canvas", tab.query || JSON.stringify(doc), ctx.onSaved) }),
     el("button", { type: "button", class: "secondary", text: "Version history", disabled: tab.savedId ? null : true,
       title: tab.savedId ? null : "Save the canvas first", onclick: () => bqVersionHistory({ id: tab.savedId, name: tab.title, kind: "data_canvas" }, (content, title) => ctx.openAsset("data_canvas", content, title)) }),
     tab.savedId ? el("button", { type: "button", class: "secondary", text: "Share", onclick: () => bqManagePermissions({ id: tab.savedId, name: tab.title }) }) : null);
-  return el("div", { class: "bq-canvas" }, toolbar,
-    el("p", { class: "unavailable bq-hint", text: "Natural language (Ask in natural language, Generate, Insights' summary, the Data Canvas Assistant) uses this instance's local model; Google's uses Gemini in BigQuery, which is not run locally, so its answers are unverified against Google's. " +
+  setChildren(root, toolbar,
+    el("p", { class: "unavailable bq-hint", text: "Natural language (Ask in natural language, Generate, Insights' summary, Debug's Suggest a fix, the Data Canvas Assistant) uses this instance's local model; Google's uses Gemini in BigQuery, which is not run locally, so its answers are unverified against Google's. " +
       (bqDataformOn() ? BQ_DATAFORM_NOTE : BQ_NO_DATAFORM) }),
-    el("div", { class: "bq-canvas-body" }, host, panel));
+    el("p", { class: "sr-only", id: `bq-canvas-board-help-${tab.id}`, text: "Control and the mouse wheel zoom. A node's move handle moves it with the arrow keys." }),
+    el("p", { class: "sr-only", id: `bq-canvas-move-help-${tab.id}`, text: "Arrow keys move the node; Shift moves it further." }),
+    el("div", { class: "bq-canvas-body" }, board, panel));
+  requestAnimationFrame(() => { if (board.isConnected) layout(); });
+  return root;
 }
 
 // bqRepoFileTab is a file of a Dataform repository's workspace opened from
@@ -23008,7 +25556,8 @@ function bqQueryTab(tab, ctx) {
     const legacy = settings.legacySql === true;
     return { legacySql: legacy, priority: settings.priority || "INTERACTIVE", location: settings.location || "",
              destinationDataset: settings.destinationDataset || "", destinationTable: settings.destinationTable || "",
-             writeDisposition: settings.writeDisposition || "", defaultDataset: "" };
+             writeDisposition: settings.writeDisposition || "", defaultDataset: "", queryMode: settings.queryMode || "",
+             serviceAccount: settings.queryMode === "continuous" ? settings.serviceAccount || "" : "" };
   };
 
   let timer = null;
@@ -23117,31 +25666,356 @@ function bqQueryTab(tab, ctx) {
   // Edit > Query settings, where Google's docs put it ("click Edit > Query
   // settings", https://docs.cloud.google.com/bigquery/docs/running-queries,
   // read 2026-11-19).
+  // Edit > Query mode (#2094): "click Edit > Query mode > Optional job
+  // creation. To confirm this choice, click Confirm" and "click Edit >
+  // Query mode > Continuous query. To confirm this choice, click Confirm"
+  // (https://docs.cloud.google.com/bigquery/docs/running-queries and
+  // https://docs.cloud.google.com/bigquery/docs/continuous-queries, read
+  // 2026-11-23). The docs name these two modes; the one chosen is checked,
+  // and choosing it again goes back to an ordinary query job. The
+  // confirmation's wording is not documented (UNVERIFIED (re-read 2026-11-23:
+  // https://docs.cloud.google.com/bigquery/docs/running-queries, https://docs.cloud.google.com/bigquery/docs/continuous-queries)).
+  const setMode = (mode) => {
+    if ((settings.queryMode || "") === mode) return;
+    const apply = () => { settings.queryMode = mode; save(); drawDialect(); announce(mode ? `Query mode: ${BQ_QUERY_MODES[mode]}` : "Query mode: a query job"); };
+    if (!mode) { apply(); return; }
+    confirmDestructive({ title: `Switch to ${BQ_QUERY_MODES[mode]}?`, style: "confirm", confirmLabel: "Confirm",
+      detail: mode === "optional"
+        ? "BigQuery runs a query without creating a job unless it determines that one is needed; a query run so has a query ID and no job history."
+        : "The query runs as a continuous query, on a reservation with a CONTINUOUS assignment, processing new data as it arrives.",
+      consequence: "Choose the mode again in Edit > Query mode to go back.",
+      onConfirm: async () => apply() });
+  };
   const edit = bqMenu("Edit", [
     { label: "Query settings", run: () => bqQuerySettings(settings, () => { save(); validate(); drawDialect(); }) },
+    { label: "Query mode", items: Object.entries(BQ_QUERY_MODES).map(([mode, label]) => ({
+      label, checked: () => (settings.queryMode || "") === mode,
+      run: () => setMode((settings.queryMode || "") === mode ? "" : mode) })) },
     { label: "Clear query", run: () => { editor.value = ""; tab.query = ""; save(); validate(); setChildren(results); } },
   ]);
   bqMenuButton(edit, "Edit", "Edit");
 
+  // Tools > Parser-based auto-completion (#2094), on by default; its
+  // suggestions are attachSqlCompletion's.
+  const tools = bqMenu("Tools", [
+    { label: "Parser-based auto-completion", checked: () => bqAutocompleteOn(),
+      run: () => { const on = !bqAutocompleteOn(); writeStored(BQ_AUTOCOMPLETE, on ? "on" : "off"); announce(on ? "Parser-based auto-completion on" : "Parser-based auto-completion off"); } },
+  ]);
+  bqMenuButton(tools, "Tools", "Tools");
+  attachSqlCompletion(editor, () => settings.defaultDataset || "");
+
+  // File, Google's menu of the query editor (#2094), holds Schedule: "click
+  // File > Schedule" opens the New scheduled query pane, and on a query
+  // opened with a scheduled query page's Edit, "click File > Schedule >
+  // Update scheduled query" saves it back
+  // (https://docs.cloud.google.com/bigquery/docs/scheduling-queries, read
+  // 2026-11-23). Both over this instance's BigQuery Data Transfer Service.
+  // The docs name no other File item.
+  const createScheduled = () => bqScheduledQueryPane(editor.value, null, (sq) => { tab.scheduledQuery = sq.name; save(); });
+  const file = bqMenu("File", [
+    tab.scheduledQuery
+      ? { label: "Schedule", items: [
+          { label: "Update scheduled query", run: () => bqScheduledQueryPane(editor.value, tab.scheduledQuery, () => {}) },
+          { label: "New scheduled query", run: createScheduled },
+        ] }
+      : { label: "Schedule", run: createScheduled },
+  ]);
+  bqMenuButton(file, "File", "File");
+
   const dialect = el("span", { class: "unavailable bq-dialect" });
-  const drawDialect = () => { dialect.textContent = settings.legacySql ? "Legacy SQL" : "GoogleSQL"; };
+  const modeTag = el("span", { class: "bq-mode", role: "status" });
+  const drawDialect = () => {
+    dialect.textContent = settings.legacySql ? "Legacy SQL" : "GoogleSQL";
+    modeTag.textContent = settings.queryMode ? BQ_QUERY_MODES[settings.queryMode] || "" : "";
+    modeTag.hidden = !settings.queryMode;
+  };
   drawDialect();
   const toolbar = el("div", { class: "bq-toolbar", role: "toolbar", "aria-label": "Query editor actions" },
-    run, saveMenu, share,
-    el("button", { class: "secondary", type: "button", text: "Schedule", disabled: true, title: BQ_UNAVAILABLE_SCHEDULE,
-                   "aria-description": BQ_UNAVAILABLE_SCHEDULE }),
-    edit, dialect);
+    run, saveMenu, share, file, edit, tools, dialect, modeTag);
   validate();
   return el("div", { class: "bq-query-tab" },
-    toolbar, editor, validator,
+    toolbar, el("div", { class: "bq-editor-wrap" }, editor), validator,
     el("p", { class: "unavailable bq-hint",
       text: (tab.savedId ? bqSavedNote() + " " : "") +
-        "Schedule is not available locally (the Data Transfer Service is not run). ⌘/Ctrl + Enter runs; ⌘/Ctrl + S saves." }),
+        "⌘/Ctrl + Enter runs; ⌘/Ctrl + S saves." }),
     results);
+}
+
+// BQ_QUERY_MODES are Edit > Query mode's modes, in Google's words.
+const BQ_QUERY_MODES = { optional: "Optional job creation", continuous: "Continuous query" };
+
+// Tools > Parser-based auto-completion's setting, kept in this browser.
+const BQ_AUTOCOMPLETE = "cloudburrow.bigquery.autocomplete";
+const bqAutocompleteOn = () => readStored(BQ_AUTOCOMPLETE, "on") !== "off";
+
+// attachSqlCompletion is Parser-based auto-completion (#2094) in the
+// query editor: while it is on, typing a name, a dot or a space after a
+// keyword opens the suggestions for that place in the statement, which the
+// instance reads from the GoogleSQL statement and its catalog (POST
+// /api/studio/bigquery?call=complete); Ctrl+Space opens them on demand.
+// Up and Down move, Enter or Tab inserts, Escape closes. Turned off, no
+// suggestion opens as you type, project names included.
+function attachSqlCompletion(editor, defaultDataset) {
+  const list = el("ul", { class: "completions bq-sql-completions", role: "listbox", hidden: true, "aria-label": "Suggestions" });
+  list.id = `bq-sql-completions-${Math.random().toString(36).slice(2, 9)}`;
+  editor.setAttribute("aria-autocomplete", "list");
+  editor.setAttribute("aria-controls", list.id);
+  editor.setAttribute("aria-expanded", "false");
+  editor.setAttribute("aria-keyshortcuts", "Control+Space");
+  let shown = [], active = 0, replace = "", timer = null, seq = 0;
+  const close = () => { list.hidden = true; shown = []; editor.setAttribute("aria-expanded", "false"); editor.removeAttribute("aria-activedescendant"); };
+  const choose = (it) => {
+    const at = editor.selectionStart;
+    const start = at - replace.length;
+    let insert = it.insert;
+    // A table path's closing backtick already typed is not doubled.
+    editor.setRangeText(insert, start, at, "end");
+    editor.dispatchEvent(new Event("input", { bubbles: true }));
+    close();
+    editor.focus();
+    // A dataset or a project inserts its dot: the next names follow.
+    if (insert.endsWith(".") && bqAutocompleteOn()) request(false);
+  };
+  const draw = () => {
+    setChildren(list, ...shown.map((it, i) => {
+      const li = el("li", { role: "option", id: `${list.id}-${i}`, class: i === active ? "active" : "", "aria-selected": String(i === active) },
+        el("span", { class: "mono", text: it.label }),
+        el("span", { class: "bq-completion-kind", text: it.detail ? `${it.kind} · ${it.detail}` : it.kind }));
+      li.addEventListener("mousedown", (e) => { e.preventDefault(); choose(it); });
+      return li;
+    }));
+    editor.setAttribute("aria-activedescendant", `${list.id}-${active}`);
+    const cur = list.children[active];
+    if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+  };
+  const request = async (explicit) => {
+    const mine = ++seq;
+    const at = editor.selectionStart;
+    if (at !== editor.selectionEnd) { close(); return; }
+    try {
+      const res = await bqStudioCall("complete", { before: editor.value.slice(0, at), after: editor.value.slice(at), defaultDataset: defaultDataset() });
+      if (mine !== seq || document.activeElement !== editor) return;
+      shown = (res.items || []).slice(0, 100);
+      replace = res.replace || "";
+      // Typed out in full, a lone suggestion has nothing to add.
+      if (!explicit && shown.length === 1 && shown[0].insert === replace) shown = [];
+      // Nothing typed yet where only a keyword can follow: not offered
+      // unasked.
+      if (!explicit && !replace && shown.every((it) => it.kind === "Keyword")) shown = [];
+      if (!shown.length) { close(); if (explicit) announce("No suggestions"); return; }
+      active = 0;
+      if (!list.isConnected) editor.after(list);
+      // Under the line the cursor is on.
+      const lines = editor.value.slice(0, at).split("\n").length;
+      const lh = parseFloat(getComputedStyle(editor).lineHeight) || 20;
+      list.style.top = `${Math.min(editor.offsetTop + lines * lh + 8 - editor.scrollTop, editor.offsetTop + editor.offsetHeight)}px`;
+      list.style.left = `${editor.offsetLeft + 16}px`;
+      draw();
+      list.hidden = false;
+      editor.setAttribute("aria-expanded", "true");
+    } catch { if (mine === seq) close(); }
+  };
+  editor.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && (e.key === " " || e.code === "Space")) { e.preventDefault(); request(true); return; }
+    if (list.hidden) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      active = (active + (e.key === "ArrowDown" ? 1 : shown.length - 1)) % shown.length;
+      draw();
+    } else if ((e.key === "Enter" && !e.metaKey && !e.ctrlKey) || e.key === "Tab") {
+      e.preventDefault();
+      // The key's own line break, should one still arrive, is not typed.
+      swallow = true;
+      choose(shown[active]);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    }
+  });
+  editor.addEventListener("input", (e) => {
+    clearTimeout(timer);
+    if (!bqAutocompleteOn()) { close(); return; }
+    if (e.isTrusted === false && e.inputType === undefined) return;
+    const at = editor.selectionStart;
+    const c = editor.value[at - 1] || "";
+    // A name being typed, a dot, a backtick, or a space or comma after a
+    // word: the places a suggestion is due.
+    if (!/[A-Za-z0-9_.`, ]/.test(c)) { close(); return; }
+    timer = setTimeout(() => request(false), 150);
+  });
+  let swallow = false;
+  editor.addEventListener("beforeinput", (e) => {
+    if (swallow && (e.inputType === "insertLineBreak" || e.inputType === "insertParagraph" || e.inputType === "insertText" && e.data === "\t")) e.preventDefault();
+  });
+  editor.addEventListener("keyup", () => { swallow = false; });
+  editor.addEventListener("blur", () => setTimeout(close, 150));
 }
 
 // bqMenuButton turns a bqMenu's button into a labelled text button, as
 // Google's Save, Share and Edit are.
+// bqScheduledQueryPane is Google's New scheduled query pane
+// (https://docs.cloud.google.com/bigquery/docs/scheduling-queries, read
+// 2026-11-23): Name for the scheduled query; Schedule options (Repeats:
+// Daily by default, Weekly, Monthly, Custom with its Custom schedule, or
+// On-demand; Start now or Start at set time; Schedule end time);
+// Destination for query results (Set a destination table for query
+// results: Dataset name, Table name, Destination table partitioning field,
+// Destination table write preference); Advanced options (Customer-managed
+// key, Scheduled query credential); Additional configurations (Send email
+// notifications, Pub/Sub topic); Save. With name set it is Update scheduled
+// query, filled from the config, and saves it back. The Daily, Weekly and
+// Monthly choices' "At" and day fields are UNVERIFIED (re-read 2026-11-23:
+// <https://docs.cloud.google.com/bigquery/docs/scheduling-queries>): the
+// page names only Daily, Custom and On-demand.
+const BQ_SQ_DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+async function bqScheduledQueryPane(query, name, onSaved) {
+  const panel = infoPanelHost();
+  if (!panel) return;
+  const call = (c, body) => send(`/api/studio/bigquery-scheduled-queries?call=${c}&project=${encodeURIComponent(currentProject())}`, "POST", body);
+  let cur = { displayName: "", schedule: "every day 00:00", onDemand: false, writeDisposition: "WRITE_APPEND", email: false };
+  if (name) {
+    try { cur = await call("get", { name }); } catch (err) { notify(err.message, "error"); return; }
+  }
+  const opener = document.activeElement;
+  const id = (s) => "bq-sq-" + s;
+  const input = (k, attrs = {}) => el("input", { type: "text", id: id(k), ...attrs });
+  const field = (k, label, control, help) => el("div", { class: "form-field" },
+    el("label", { for: id(k), text: label }), control, help ? el("p", { class: "form-help", id: id(k) + "-help", text: help }) : null);
+  const two = (n) => String(n).padStart(2, "0");
+  // A Daily, Weekly or Monthly schedule read back into its fields.
+  let repeats = "Daily", at = "00:00", day = "Monday", monthDay = "1";
+  const m = /^every day (\d\d:\d\d)$/.exec(cur.schedule || "") || [];
+  const w = /^every (sunday|monday|tuesday|wednesday|thursday|friday|saturday) (\d\d:\d\d)$/i.exec(cur.schedule || "") || [];
+  const mo = /^(\d{1,2}) of month (\d\d:\d\d)$/.exec(cur.schedule || "") || [];
+  if (cur.onDemand) repeats = "On-demand";
+  else if (m[1]) at = m[1];
+  else if (w[1]) { repeats = "Weekly"; day = w[1][0].toUpperCase() + w[1].slice(1).toLowerCase(); at = w[2]; }
+  else if (mo[1]) { repeats = "Monthly"; monthDay = mo[1]; at = mo[2]; }
+  else repeats = "Custom";
+  const nameIn = input("name", { value: cur.displayName || "", required: true, maxlength: "1024", placeholder: "My scheduled query" });
+  const rep = el("select", { id: id("repeats") }, ...["Daily", "Weekly", "Monthly", "Custom", "On-demand"].map((r) => {
+    const o = el("option", { value: r, text: r }); o.selected = r === repeats; return o; }));
+  const atIn = el("input", { type: "time", id: id("at"), value: at });
+  const dayIn = el("select", { id: id("day") }, ...BQ_SQ_DAYS.map((d) => { const o = el("option", { value: d, text: d }); o.selected = d === day; return o; }));
+  const mdIn = el("input", { type: "number", id: id("monthday"), min: "1", max: "31", value: monthDay });
+  const custom = input("custom", { value: repeats === "Custom" ? cur.schedule || "" : "", placeholder: "every mon 23:30", "aria-describedby": id("custom") + "-help" });
+  const atF = field("at", "At (UTC)", atIn), dayF = field("day", "Day of the week", dayIn), mdF = field("monthday", "Day of the month", mdIn);
+  const customF = field("custom", "Custom schedule", custom,
+    'Cron-like, in UTC: "every mon 23:30", "every 6 hours", "every hour on mon,tue,wed,thu,fri". Runs are at least 5 minutes apart.');
+  const local = (iso) => { if (!iso) return ""; const d = new Date(iso); return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}`; };
+  const startNow = el("input", { type: "radio", name: "bq-sq-start", id: id("start-now"), value: "now" });
+  const startSet = el("input", { type: "radio", name: "bq-sq-start", id: id("start-set"), value: "set" });
+  (cur.startTime ? startSet : startNow).checked = true;
+  const startAt = el("input", { type: "datetime-local", id: id("start-at"), value: local(cur.startTime), "aria-label": "Start date and run time" });
+  const endOn = el("input", { type: "checkbox", id: id("end-on") });
+  endOn.checked = !!cur.endTime;
+  const endAt = el("input", { type: "datetime-local", id: id("end-at"), value: local(cur.endTime), "aria-label": "End date and time" });
+  const startBox = el("div", { class: "form-field" }, el("label", { for: id("start-at"), text: "Start date and run time" }), startAt);
+  const endBox = el("div", { class: "form-field" }, el("label", { for: id("end-at"), text: "End date and time" }), endAt);
+  const destOn = el("input", { type: "checkbox", id: id("dest-on") });
+  destOn.checked = !!cur.table;
+  const ds = input("dataset", { value: cur.dataset || "" });
+  const tb = input("table", { value: cur.table || "", placeholder: "mytable_{run_date}" });
+  const part = input("partition", { value: cur.partitionField || "" });
+  const wd = el("fieldset", { class: "form-field" }, el("legend", { text: "Destination table write preference" }),
+    ...[["WRITE_APPEND", "Append to table"], ["WRITE_TRUNCATE", "Overwrite table"]].map(([v, l]) => {
+      const r = el("input", { type: "radio", name: "bq-sq-wd", id: id("wd-" + v), value: v });
+      r.checked = (cur.writeDisposition || "WRITE_APPEND") === v;
+      return el("label", { class: "check-line", for: id("wd-" + v) }, r, el("span", { text: " " + l }));
+    }));
+  const destBox = el("div", { class: "bq-sq-dest" },
+    field("dataset", "Dataset name", ds), field("table", "Table name", tb, "Templates such as {run_date} and {run_time} are filled in at each run."),
+    field("partition", "Destination table partitioning field", part, "Leave blank for DDL and DML queries, and for integer range partitioning."), wd);
+  const kms = input("kms", { value: cur.kmsKey || "", placeholder: "projects/PROJECT/locations/LOCATION/keyRings/RING/cryptoKeys/KEY" });
+  const sa = input("sa", { value: cur.serviceAccount || "", placeholder: "name@PROJECT.iam.gserviceaccount.com" });
+  const advanced = el("details", { class: "bq-sq-advanced" }, el("summary", { text: "Advanced options" }),
+    field("kms", "Customer-managed key", kms, "Optional: a Cloud KMS key of this instance encrypts the destination table."),
+    field("sa", "Scheduled query credential", sa, "Optional: the service account the query runs as."));
+  const email = el("input", { type: "checkbox", id: id("email") });
+  email.checked = !!cur.email;
+  const topic = input("topic", { value: cur.topic || "", placeholder: "projects/myproject/topics/mytopic" });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const sync = () => {
+    const r = rep.value;
+    atF.hidden = !["Daily", "Weekly", "Monthly"].includes(r);
+    dayF.hidden = r !== "Weekly";
+    mdF.hidden = r !== "Monthly";
+    customF.hidden = r !== "Custom";
+    startBox.hidden = !startSet.checked;
+    endBox.hidden = !endOn.checked;
+    destBox.hidden = !destOn.checked;
+  };
+  for (const c of [rep, startNow, startSet, endOn, destOn]) c.addEventListener("change", sync);
+  const close = () => { closeActionPanel(); if (opener && opener.isConnected) opener.focus(); };
+  const submit = el("button", { type: "submit", class: "primary", text: "Save" });
+  const form = el("form", { class: "action-form bq-sq-form", novalidate: true },
+    field("name", "Name for the scheduled query", nameIn),
+    el("h3", { text: "Schedule options" }),
+    field("repeats", "Repeats", rep), atF, dayF, mdF, customF,
+    el("fieldset", { class: "form-field" }, el("legend", { text: "Start" }),
+      el("label", { class: "check-line", for: id("start-now") }, startNow, el("span", { text: " Start now" })),
+      el("label", { class: "check-line", for: id("start-set") }, startSet, el("span", { text: " Start at set time" }))),
+    startBox,
+    el("label", { class: "check-line", for: id("end-on") }, endOn, el("span", { text: " Schedule end time" })), endBox,
+    el("h3", { text: "Destination for query results" }),
+    el("label", { class: "check-line", for: id("dest-on") }, destOn, el("span", { text: " Set a destination table for query results" })),
+    destBox, advanced,
+    el("h3", { text: "Additional configurations" }),
+    el("label", { class: "check-line", for: id("email") }, email, el("span", { text: " Send email notifications" })),
+    el("p", { class: "form-help", text: "Failure emails are recorded on the scheduled query's page, never sent." }),
+    field("topic", "Pub/Sub topic", topic),
+    error,
+    el("div", { class: "form-actions" }, submit, el("button", { type: "button", class: "secondary", text: "Cancel", onclick: close })));
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const say = (t) => { error.textContent = t; error.hidden = false; };
+    error.hidden = true;
+    const r = rep.value;
+    const hhmm = atIn.value || "00:00";
+    const sched = r === "Daily" ? `every day ${hhmm}` : r === "Weekly" ? `every ${dayIn.value.toLowerCase()} ${hhmm}`
+      : r === "Monthly" ? `${Number(mdIn.value) || 1} of month ${hhmm}` : r === "Custom" ? custom.value.trim() : "";
+    if (!nameIn.value.trim()) { say("Name for the scheduled query is required."); nameIn.focus(); return; }
+    if (r === "Custom" && !sched) { say("Custom schedule is required."); custom.focus(); return; }
+    if (startSet.checked && !startAt.value) { say("Choose the start date and run time."); startAt.focus(); return; }
+    if (endOn.checked && !endAt.value) { say("Choose the schedule end time."); endAt.focus(); return; }
+    if (destOn.checked && (!ds.value.trim() || !tb.value.trim())) { say("Dataset name and Table name are required for a destination table."); (ds.value.trim() ? tb : ds).focus(); return; }
+    const body = {
+      name: name || "", displayName: nameIn.value.trim(), query, schedule: sched, onDemand: r === "On-demand",
+      startTime: startSet.checked ? new Date(startAt.value).toISOString().replace(/\.\d+Z$/, "Z") : "",
+      endTime: endOn.checked ? new Date(endAt.value).toISOString().replace(/\.\d+Z$/, "Z") : "",
+      dataset: destOn.checked ? ds.value.trim() : "", table: destOn.checked ? tb.value.trim() : "",
+      partitionField: destOn.checked ? part.value.trim() : "",
+      writeDisposition: (form.querySelector("input[name=bq-sq-wd]:checked") || {}).value || "WRITE_APPEND",
+      kmsKey: kms.value.trim(), serviceAccount: sa.value.trim(), email: email.checked, topic: topic.value.trim(),
+    };
+    setBusy(submit, true);
+    try {
+      const sq = await call("save", body);
+      close();
+      notify(name ? `Updated scheduled query ${sq.displayName}` : `Created scheduled query ${sq.displayName}`);
+      onSaved(sq);
+    } catch (err) {
+      say(err.message);
+    } finally {
+      setBusy(submit, false);
+    }
+  });
+  const title = name ? "Update scheduled query" : "New scheduled query";
+  panel.hidden = false;
+  panel.dataset.actionPanel = "scheduled-query";
+  document.documentElement.setAttribute("data-info", "open");
+  setChildren(panel, el("section", { class: "side-panel bq-sq-pane", id: "bq-sq-pane", role: "region", "aria-labelledby": "bq-sq-title" },
+    el("div", { class: "info-head" }, el("h2", { id: "bq-sq-title", text: title }),
+      el("button", { type: "button", class: "icon-button", id: "bq-sq-close", "aria-label": `Close ${title}`, onclick: close,
+        html: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>' })),
+    el("p", { class: "form-help", text: "A scheduled query is a transfer of this instance's BigQuery Data Transfer Service: it runs here, on this instance's BigQuery, never on Google's. Times are in UTC." }),
+    form));
+  panel.addEventListener("keydown", (e) => { if (e.key === "Escape" && panel.dataset.actionPanel === "scheduled-query") { e.preventDefault(); close(); } });
+  sync();
+  nameIn.focus();
+}
+
 function bqMenuButton(menu, label, title) {
   const b = menu.querySelector("button");
   b.classList.remove("icon-button", "bq-node-menu");
@@ -23241,6 +26115,20 @@ function bqQuerySettings(settings, onSave) {
     el("label", { for: "bq-dest-write", text: "Destination table write preference" }), disposition);
   const location = el("input", { type: "text", id: "bq-location", value: settings.location || "",
                                  placeholder: "Automatic location selection" });
+  // Continuous query > Use service account (#2193): "In the Continuous
+  // query section, select the Use service account box … select the
+  // service account" (https://docs.cloud.google.com/bigquery/docs/continuous-queries,
+  // read 2026-11-23); shown in Continuous query mode.
+  const useSA = el("input", { type: "checkbox", id: "bq-use-sa" });
+  useSA.checked = !!settings.serviceAccount;
+  const saEmail = el("input", { type: "email", id: "bq-sa", value: settings.serviceAccount || "",
+                                placeholder: "name@project.iam.gserviceaccount.com" });
+  const saFields = el("div", { class: "bq-dest-fields", hidden: useSA.checked ? null : true },
+    el("label", { for: "bq-sa", text: "Service account" }), saEmail);
+  const continuousSet = settings.queryMode === "continuous"
+    ? el("fieldset", {}, el("legend", { text: "Continuous query" }),
+        el("label", { class: "bq-radio" }, useSA, el("span", { text: " Use service account" })), saFields)
+    : null;
   const form = el("form", { class: "modal-body bq-settings", onsubmit: (e) => {
     e.preventDefault();
     const fd = new FormData(form);
@@ -23251,6 +26139,7 @@ function bqQuerySettings(settings, onSave) {
     settings.priority = fd.get("bq-priority");
     settings.legacySql = fd.get("bq-dialect") === "legacy";
     settings.location = location.value.trim();
+    if (continuousSet) settings.serviceAccount = useSA.checked ? saEmail.value.trim() : "";
     close();
     onSave();
   } },
@@ -23268,11 +26157,13 @@ function bqQuerySettings(settings, onSave) {
       radio("bq-dialect", "standard", "GoogleSQL", !settings.legacySql),
       radio("bq-dialect", "legacy", "Legacy SQL", !!settings.legacySql),
       el("label", { for: "bq-location", text: "Data location" }), location),
+    continuousSet,
     el("div", { class: "modal-actions" },
       el("button", { type: "button", class: "secondary", text: "Cancel", onclick: () => close() }),
       el("button", { type: "submit", class: "primary", text: "Save" })));
   form.addEventListener("change", () => {
     destFields.hidden = new FormData(form).get("bq-dest") !== "table";
+    saFields.hidden = !useSA.checked;
   });
   dialog.append(form);
 }

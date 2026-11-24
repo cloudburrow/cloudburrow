@@ -504,6 +504,7 @@ service.
 | Memorystore | **Yes**: a key on the default server; a created Redis instance, READY at its own address with the same AUTH string, with its key with RDB persistence and **empty** without (#1911); Redis clusters and Valkey instances with persistence keep their keys, and come back **empty** without it, as on Google | `TestMemorystoreAcrossRestart`, `TestMemorystoreCreatedAcrossRestart`, `TestMemorystoreRDBAcrossRestart`, `TestMemorystoreClustersAcrossRestart` |
 | Cloud SQL for PostgreSQL | **Yes**: a table's row | `TestCloudSQLAcrossRestart` |
 | Cloud SQL for MySQL | **Yes**: a table's row | `TestCloudSQLMySQLAcrossRestart` |
+| Kubernetes Engine's logs | **Yes**: a cluster keeps running, and its in-cluster logging agent ships every line a pod writes while the CLI is stopped once it is back, each once (the entries shipped before the stop are held in Cloud Logging's memory, so they are not) | `TestGKELogsAcrossRestart` |
 | **Pub/Sub** | **No**, as `cloudburrow status` says: Google's emulator loses its state on restart even when given `--data-dir`, which we measured | none |
 | **Spanner** | **No**: the emulator is in memory, and a restart of it loses a row | none; `TestSpannerStateDoesNotSurviveARestart` restarts the emulator alone |
 | **BigQuery** | **No**: the emulator keeps its data in memory, and a restart of it loses a dataset | none; `TestBigQueryEmulatorRestartsPromptly` restarts the emulator alone |

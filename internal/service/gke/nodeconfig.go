@@ -161,5 +161,8 @@ func (s *Server) configurePoolOf(ctx context.Context, kind string, np *container
 			return err
 		}
 	}
+	if err := s.configureMachine(ctx, kind, np.GetName(), np.GetConfig().GetMachineType()); err != nil {
+		return err
+	}
 	return s.configurePool(ctx, kind, np.GetName(), nodeLabels(np.GetConfig()), t, true)
 }

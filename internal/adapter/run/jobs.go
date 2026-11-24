@@ -378,6 +378,9 @@ func (j *JobsServer) CreateJob(ctx context.Context, req *runpb.CreateJobRequest)
 	if err := checkJobCustom(ctx, job, orgpolicy.MethodCreate); err != nil {
 		return nil, err
 	}
+	if err := s.checkVPC(job.GetName(), job.GetTemplate().GetTemplate().GetVpcAccess()); err != nil {
+		return nil, err
+	}
 	spec, err := s.prepareJob(job, id, 1)
 	if err != nil {
 		return nil, err
@@ -503,6 +506,9 @@ func (j *JobsServer) UpdateJob(ctx context.Context, req *runpb.UpdateJobRequest)
 	}
 	// Custom constraints on the job as the update leaves it (#1895).
 	if err := checkJobCustom(ctx, req.GetJob(), orgpolicy.MethodUpdate); err != nil {
+		return nil, err
+	}
+	if err := j.s.checkVPC(req.GetJob().GetName(), req.GetJob().GetTemplate().GetTemplate().GetVpcAccess()); err != nil {
 		return nil, err
 	}
 	spec, err := s.prepareJob(req.GetJob(), id, prev.GetGeneration()+1)

@@ -302,6 +302,9 @@ func (f *Front) authorize(ctx context.Context, method string, fr frame) error {
 		if d.Unauthenticated {
 			return unauthenticated()
 		}
+		if d.ScopeInsufficient {
+			return iamcheck.InsufficientScopes("pubsub.googleapis.com", strings.TrimPrefix(method, "/"))
+		}
 		if !d.Holds(perm) {
 			return denied()
 		}

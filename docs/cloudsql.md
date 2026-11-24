@@ -771,15 +771,24 @@ docs.cloud.google.com/sql/docs/postgres/use-advanced-disaster-recovery):
 gives the replica a Percona XtraBackup backup of the source instead of a dump, and then
 replicates by GTID auto-positioning from the backup's GTID set (`xtrabackup_binlog_info`).
 
+- **Versions**, as [Google's guide](https://docs.cloud.google.com/sql/docs/mysql/migrate-xtrabackup-physical-file)
+  has them (re-read 2026-11-23): "Cloud SQL supports physical file-based migration for MySQL 5.7
+  and 8.0. MySQL 5.6 and 8.4 are not supported." A `MYSQL_8_0` replica restores with XtraBackup
+  8.0, a `MYSQL_5_7` one with XtraBackup 2.4 (#1524), as the guide names them. A `MYSQL_5_6` or
+  `MYSQL_8_4` replica's verification answers `UNSUPPORTED_MIGRATION_TYPE`, and its
+  `startExternalSync` is 400 (UNVERIFIED, re-read 2026-11-23: the guide gives the limit, not Cloud
+  SQL's error; the wording is CloudBurrow's). Until #1524 a `MYSQL_8_4` replica was synced physically here too.
+
 - **The backup** is the folder `xtrabackup --backup --target-dir` writes, uploaded to Cloud
   Storage, and the source representation instance's `dumpFilePath` names the folder
   (`gs://BUCKET/FOLDER`). A replica created with a folder that holds `xtrabackup_checkpoints` is
   not seeded from it as from a dump: it waits for the physical sync. With no `dumpFilePath`, and a
   source that is a CloudBurrow instance's server (`sqlinst-NAME:3306`, or `cloudsql-mysql:3306`),
   the sync takes the backup itself, with the source's volume mounted and the replication user.
-- **How it runs** on a persistent instance: a Kubernetes Job of the official multi-arch `percona/percona-xtrabackup` image
-  of the replica's major version (`8.0`, XtraBackup 8.0.35, or `8.4`, 8.4.0; pinned by digest, and
-  pulled by the node the first time), on the replica's volume while its server is stopped: the
+- **How it runs** on a persistent instance: a Kubernetes Job of the official `percona/percona-xtrabackup` image
+  of the replica's major version (`8.0`, XtraBackup 8.0.35, multi-arch; or `2.4`, XtraBackup 2.4.29,
+  linux/amd64 only like `mysql:5.7`, so it runs wherever a `MYSQL_5_7` instance does; pinned by
+  digest, and pulled by the node the first time), on the replica's volume while its server is stopped: the
   backup's files are first written onto that volume, then `xtrabackup --prepare` and
   `--copy-back` replace the data directory, without the source's `auto.cnf` (its server UUID)
   and `mysqld-auto.cnf`. The server starts on the copy with an `--init-file` that sets `root`'s
@@ -813,7 +822,9 @@ replicates by GTID auto-positioning from the backup's GTID set (`xtrabackup_binl
   `INSUFFICIENT_PRIVILEGE` and `REPLICA_ALREADY_SETUP`. The replication user needs
   `REPLICATION SLAVE`, `REPLICATION CLIENT` and `SELECT` (so every table's engine can be seen),
   and, when the sync takes the backup, XtraBackup's `RELOAD`, `PROCESS`, `BACKUP_ADMIN` and
-  `SELECT` on `performance_schema.log_status`. A zstd-compressed backup is decompressed first.
+  `SELECT` on `performance_schema.log_status`; for a MySQL 5.7 source, XtraBackup 2.4's `RELOAD`,
+`LOCK TABLES` and `PROCESS` (5.7 has neither `BACKUP_ADMIN` nor `log_status`). A zstd-compressed
+backup is decompressed first.
 - In the console, a MySQL replica's **Verify external sync settings** and **Start external sync**
   have a **Migration type**, `LOGICAL` or `PHYSICAL`.
 
@@ -899,18 +910,19 @@ enforced, as on Cloud SQL; its binary log starts afresh after its initialisation
 with `SET PERSIST` is `SET GLOBAL` there: a REGIONAL instance's semi-synchronous replication is set
 again when its server restarts. A point-in-time recovery stops at the first transaction committed
 after the target by the binary log event's time, in seconds, as 5.7's and 5.6's GTID events carry no
-commit timestamp (8.0.1 added it). A physical (XtraBackup) external sync stays 501: CloudBurrow's
-XtraBackup images are 8.0's and 8.4's. `flags.list` answers no flags for it. The console's version
+commit timestamp (8.0.1 added it). A physical (XtraBackup) external sync is served too (#1524), with
+XtraBackup 2.4 ([A physical sync](#external-primaries-1501-1524)). `flags.list` answers no flags for it. The console's version
 picker offers it, and its instance page has the same Create read replica, high availability, point-in-
 time clone, Demote and Create blue-green deployment actions as 8.0's.
 
 **MySQL 5.6 (#1524)** is served the same way. Its official image, `mysql:5.6`, was last built in
 2021-12 (5.6.51), only for linux/amd64, and is pinned by that manifest's digest
 (`docker buildx imagetools inspect mysql:5.6`, 2026-11-18). It starts under the same open-files
-limit, and serves and refuses what a MySQL 5.7 instance does; its upgrade is to `MYSQL_5_7`. Two
+limit, and serves and refuses what a MySQL 5.7 instance does; its upgrade is to `MYSQL_5_7`. Three
 more are 400, as Cloud SQL documents them: a blue-green deployment ("your instance must run Cloud SQL
-for MySQL version 5.7, 8.0, or 8.4"), and a replica of a 5.6 read replica, as Cloud SQL logs a
-replica's binary log on "MySQL 5.7 and later only"; the console offers neither. MySQL 5.6 has no
+for MySQL version 5.7, 8.0, or 8.4"), a replica of a 5.6 read replica, as Cloud SQL logs a
+replica's binary log on "MySQL 5.7 and later only", and a physical (XtraBackup) external sync
+("MySQL 5.6 and 8.4 are not supported", #1524); the console offers neither of the first two. MySQL 5.6 has no
 `super_read_only`, so a 5.6 replica is `read_only`; no `WAIT_FOR_EXECUTED_GTID_SET`, so a failover
 waits with `WAIT_UNTIL_SQL_THREAD_AFTER_GTIDS`; no lossless (`AFTER_SYNC`) semi-synchronous
 replication, so a REGIONAL 5.6 instance's standby acknowledges after the commit; no TLS certificate
@@ -1716,11 +1728,44 @@ skips, and `TestCloudSQLServerRefusedWithoutEULA` checks the refusal instead; th
 
 An Enterprise instance is refused 400. SQL Server is refused 400.
 
-Cloud SQL for MySQL's managed connection pooling is a thread pool inside the server (<https://docs.cloud.google.com/sql/docs/mysql/managed-connection-pooling>). The community MySQL server has no thread pool, so it is refused 501.
+A VM reaches the pooler on 6432 at the instance's private IP and at its Private Service Connect endpoints, beside the server's 5432: both ports are in the VM's `private-services` NAT chain.
 
-A VM does not reach the pooler at a private IP or a Private Service Connect endpoint. Only the server's port is in their NAT chains.
+### Cloud SQL for MySQL
 
-The console has Connections' Enable Managed Connection Pool, with Advanced pooling options, on the create page and in Edit. The Overview's Connect to this instance shows whether the instance pools connections.
+Cloud SQL for MySQL's managed connection pooling is, as Google documents it (<https://docs.cloud.google.com/sql/docs/mysql/managed-connection-pooling> and <https://docs.cloud.google.com/sql/docs/mysql/configure-mcp>, read 2026-11-22), "a server-side thread pool rather than an external connection multiplexer": "each open client connection still maintains a dedicated server session and counts toward the `max_connections` limit". The community MySQL server has no thread pool, so CloudBurrow runs one in front of it, in the instance's pod (`internal/mysqlpool`, run from the cloudburrow-storage image as `mysql-thread-pool`):
 
-`TestCloudSQLManagedConnectionPooling` (compat, the official `sqladmin/v1` client and Cloud SQL Go connector) shows it pools. Eight clients signed in through the connector share at most `max_pool_size` 2 server connections. With pooling off, each client has a server connection of its own.
+- The instance's Service's 3306 targets the thread pool, so every path a client takes goes through it: the host tunnel, the connectors and the Auth Proxy (3307), the private IP and the Private Service Connect endpoints. Clients keep connecting on 3306.
+- Each client connection signs in to mysqld with a session of its own (the authentication exchange is relayed untouched, TLS included: the pool terminates the client's TLS with a certificate it makes at start, as mysqld does, and signs in to mysqld over TLS too).
+- A statement runs only while it holds one of `max_pool_size` threads, from the command's first byte to the last packet of its answer, read by the MySQL client/server protocol (result sets, multiple results, prepared statements, cursors' fetches, `LOAD DATA LOCAL INFILE`). Between statements a connection holds no thread. A connection inside a transaction is given the next thread first. Replication sessions (`COM_BINLOG_DUMP`, `COM_REGISTER_SLAVE`) hold none.
+- `max_pool_size` is the only flag, as Google documents. Its default "depends on the number of vCPU cores" (CloudBurrow's: one thread a vCPU, UNVERIFIED, re-read 2026-11-22); it takes a whole number from 1 (the page gives no range). Any other flag, PostgreSQL's included, is 400.
+- Enterprise Plus only: an Enterprise instance is 400. Enabling it restarts the instance, as Google documents, and so does changing `max_pool_size` here. `thread_cache_size` defaults to 0 while it is on, unless a database flag sets it. `poolerCount` is not answered.
+- Its metrics are in Cloud Monitoring: see [Pooling metrics](#pooling-metrics).
+
+`TestCloudSQLMySQLManagedConnectionPooling` (compat, the official `sqladmin/v1` client and Cloud SQL Go connector for MySQL) shows it pools: with `max_pool_size` 2, eight clients at once have eight sessions (connection IDs), and the server, by its own clock (`SYSDATE(6)` at each statement's start and end), runs at most two of their half-second statements at a time; turned off, more than two run together.
+
+The console has Connections' Enable Managed Connection Pool, with Advanced pooling options (MySQL's: `max_pool_size` alone), on the create page and in Edit. The Overview's Connect to this instance shows whether the instance pools connections.
+
+### Pooling metrics
+
+Managed connection pooling's metrics are in Cloud Monitoring (#2163), with Google's types, kinds, units, labels and monitored resources (<https://docs.cloud.google.com/monitoring/api/metrics_gcp_c>, read 2026-11-22), sampled every 60 seconds with the instance's other `cloudsql.googleapis.com` metrics (a read samples first when the last sample is older than ten seconds):
+
+| Metric | Kind, unit | Resource | Read from |
+| --- | --- | --- | --- |
+| `database/mysql/conn_pool/threads` (`status`: `active`, `idle`) | GAUGE, 1 | `cloudsql_database` | the thread pool's threads busy and free |
+| `database/mysql/conn_pool/pending_connections` | GAUGE, 1 | `cloudsql_database` | the connections queued for a thread |
+| `database/mysql/conn_pool/avg_wait_time` | GAUGE, ms | `cloudsql_database` | the average wait of the statements given a thread since the last sample (0 when none was) |
+| `per_database/conn_pool/client_connections` (`status`: `active`, `waiting`) | GAUGE, 1 | `cloudsql_instance_database` | PgBouncer's `SHOW POOLS` `cl_active` and `cl_waiting`, summed over the database's pools |
+| `per_database/conn_pool/server_connections` (`status`: `active`, `idle`) | GAUGE, 1 | `cloudsql_instance_database` | `SHOW POOLS` `sv_active`, and `sv_idle` plus `sv_used` |
+| `per_database/conn_pool/num_pools` | GAUGE, 1 | `cloudsql_instance_database` | the database's rows in `SHOW POOLS` (a pool a user) |
+| `per_database/conn_pool/client_connections_avg_wait_time` | GAUGE, us | `cloudsql_instance_database` | `SHOW STATS` `avg_wait_time` (PgBouncer's last 60-second stats period) |
+| `per_database/conn_pool/client_connections_attempts_count` | CUMULATIVE, 1 | `cloudsql_instance_database` | the pooler log's `login attempt` lines |
+| `per_database/conn_pool/client_connections_error_count` | CUMULATIVE, 1 | `cloudsql_instance_database` | the pooler log's `pooler error` lines: the errors PgBouncer sends a client as it disconnects it (a failed sign-in, a server connection that failed, a timeout, a limit reached) |
+
+The thread pool's figures are its page on pod port 13307 (`mysql-thread-pool --status`), read through the API server's pod proxy; no Service publishes it. PgBouncer's are read on its `pgbouncer` console database as `cloudburrow_stats`, its `stats_users`, which signs in only from the pod's loopback (the port-forward the CLI reads through, as the server trusts `postgres` there) and only to that database; every other sign-in is md5 against the server's password, SCRAM where the server keeps SCRAM, as before. The two cumulative counts run from the first time CloudBurrow read the instance's pooler log; each read takes the lines since the last. A database of the server no client has used through the pooler reads zero, with no pools. The console's own reads are not counted.
+
+The instance's Overview offers them in its Chart list while pooling is on: MySQL's Connection pool threads (active), (idle), Connection pool pending connections and Connection pool average wait time; PostgreSQL's Client connections (active), (waiting), Server connections (active), (idle), Number of connection pools, Average wait time (the databases' mean), Client connection attempts count and Error count (both summed over the databases). Metrics explorer lists them under `cloudsql_database` and `cloudsql_instance_database`.
+
+`TestCloudSQLConnectionPoolingMetrics` (compat, the official `sqladmin/v1`, Cloud SQL Go connector and `monitoring/apiv3` clients) runs pooled load and reads the series back: with `max_pool_size` 2 and eight clients looping one-second statements, PostgreSQL's database reads eight clients (at least five waiting), at most two server connections, one pool, an average wait above half a second, an error for each sign-in with a wrong password (pgx tries each address the connector's localhost resolves to) and eight attempts more than that; MySQL's pool reads two threads active, none idle, five or six pending and an average wait above half a second; after the load, nothing waits or is busy. `TestCloudSQLPoolingMetricsThroughThePage` (browser) picks Number of connection pools on a pooled instance's Overview by keyboard and sees its readings, and Metrics explorer's table of `client_connections`.
+
+`TestCloudSQLManagedConnectionPooling` (compat, the official `sqladmin/v1` client and Cloud SQL Go connector) shows it pools. Eight clients signed in through the connector share at most `max_pool_size` 2 server connections. With pooling off, each client has a server connection of its own. `TestCloudSQLPrivateIPAndPSCReachableFromAVM` (compat) shows a VM reaching the pooler of one instance at its private IP and of another at a Private Service Connect endpoint, each answering PostgreSQL's SSLRequest on 6432.
 

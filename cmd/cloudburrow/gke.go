@@ -20,6 +20,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/cluster"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -216,6 +217,14 @@ func (b gkeBackend) ConfigureKubelet(ctx context.Context, kind, pool string, set
 	return b.g.ConfigureKubelet(ctx, kind, pool, settings)
 }
 
+func (b gkeBackend) ConfigureMachine(ctx context.Context, kind, pool string, m gke.NodeMachine) error {
+	return b.g.ConfigureMachine(ctx, kind, pool, cluster.NodeMachine(m))
+}
+
+func (b gkeBackend) RollbackControlPlane(ctx context.Context, kind, image string) error {
+	return b.g.RollbackControlPlane(ctx, kind, image)
+}
+
 func (b gkeBackend) KeepEndpoint(ctx context.Context, kind string) error {
 	return b.g.KeepEndpoint(ctx, kind)
 }
@@ -246,6 +255,10 @@ func (s *gkeService) Start(ctx context.Context) error {
 		Versions:     gkeVersions(s.cfg.Cluster.NodeImage),
 		MinFreeBytes: gkeMinFree(),
 		Networks:     s.networks,
+		MachineType: func(name string) (gke.MachineShape, bool) {
+			m, ok := compute.LookupMachineType(name)
+			return gke.MachineShape{CPUs: m.CPUs, MemoryMiB: m.MemoryMb, Shared: m.Shared}, ok
+		},
 	})
 	if err != nil {
 		return err

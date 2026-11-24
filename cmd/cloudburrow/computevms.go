@@ -38,19 +38,24 @@ type computeVMs struct {
 	installer *components.Installer
 	bg        context.Context
 	// guestBase is the in-cluster URL of the Compute port, which the guest
-	// reads its metadata under; metadataHost the metadata server's
-	// in-cluster host:port (GCE_METADATA_HOST).
-	guestBase    func() string
-	metadataHost func() string
+	// reads its metadata under: the guest's metadata server relay carries
+	// metadata.google.internal and 169.254.169.254 there (#2177).
+	guestBase func() string
+	// opsAgentHosts are the Ops Agent's Logging and Monitoring addresses
+	// (#2139, computeopsagent.go); nil or "" when not served.
+	opsAgentHosts func() (logging, monitoring string)
 
 	mu     sync.Mutex
 	built  map[string]bool
 	tunnel map[string]*netfwd.Forwarder
-	build  sync.Mutex
+	// lbTunnels are load balancers' tunnels to instances' ports (#2153,
+	// computelb.go), by instance key and port.
+	lbTunnels map[string]*netfwd.Forwarder
+	build     sync.Mutex
 }
 
 func newComputeVMs(cfg config.Config, bg context.Context) *computeVMs {
-	return &computeVMs{cfg: cfg, bg: bg, built: map[string]bool{}, tunnel: map[string]*netfwd.Forwarder{},
+	return &computeVMs{cfg: cfg, bg: bg, built: map[string]bool{}, tunnel: map[string]*netfwd.Forwarder{}, lbTunnels: map[string]*netfwd.Forwarder{},
 		installer: &components.Installer{Kubeconfig: cfg.KubeconfigPath(), Namespace: cfg.Cluster.Namespace, Instance: cfg.Name}}
 }
 
@@ -225,17 +230,16 @@ func (b *computeVMs) podManifest(vm compute.VMSpec, ref string) string {
 			guest = base + compute.GuestPrefix + vm.GuestToken
 		}
 	}
-	meta := ""
-	if b.metadataHost != nil {
-		meta = b.metadataHost()
-	}
 	env := []any{
 		map[string]string{"name": "container", "value": "docker"},
 		map[string]string{"name": "CLOUDBURROW_GUEST_METADATA", "value": guest},
 		map[string]string{"name": "CLOUDBURROW_INTERNAL_IP", "value": vm.InternalIP},
-		map[string]string{"name": "GCE_METADATA_HOST", "value": meta},
+		// The metadata server's name on Compute Engine (#2177): the
+		// guest's relay answers it at 169.254.169.254.
+		map[string]string{"name": "GCE_METADATA_HOST", "value": "metadata.google.internal"},
 		map[string]string{"name": "GOOGLE_CLOUD_PROJECT", "value": vm.Project},
 	}
+	env = append(env, b.opsAgentEnv()...)
 	host := vm.Hostname
 	if i := strings.Index(host, "."); i > 0 {
 		host = host[:i]
@@ -259,6 +263,14 @@ func (b *computeVMs) podManifest(vm compute.VMSpec, ref string) string {
 				"resources": map[string]any{"limits": map[string]string{"cpu": strconv.Itoa(cpu), "memory": strconv.Itoa(mem) + "Mi"},
 					"requests": map[string]string{"cpu": "50m", "memory": "64Mi"}}}},
 			"volumes": volumes}}
+	// A Shielded VM's vTPM (#2179, computevtpm.go).
+	spec := pod["spec"].(map[string]any)
+	vmc := spec["containers"].([]any)[0].(map[string]any)
+	vmc["volumeMounts"] = vtpmPod(vm, ref, spec, mounts)
+	// metadata.google.internal (and metadata, under the google.internal
+	// search domain) is the metadata server, as on Compute Engine (#2177).
+	pod["spec"].(map[string]any)["hostAliases"] = []any{map[string]any{"ip": "169.254.169.254",
+		"hostnames": []string{"metadata.google.internal", "metadata"}}}
 	svc := map[string]any{"apiVersion": "v1", "kind": "Service",
 		"metadata": map[string]any{"name": vm.Key, "namespace": b.ns(), "labels": labels},
 		"spec": map[string]any{"selector": map[string]string{"cloudburrow.dev/vm": vm.Key},
@@ -277,6 +289,9 @@ func (b *computeVMs) Start(ctx context.Context, vm compute.VMSpec) error {
 		return err
 	}
 	if err := b.installer.Apply(ctx, pvcManifest(b.ns(), vm.BootDisk.Key, vm.BootDisk.SizeGb, "disk")); err != nil {
+		return err
+	}
+	if err := b.ensureVTPMClaim(ctx, vm); err != nil {
 		return err
 	}
 	if err := b.installer.Apply(ctx, b.podManifest(vm, ref)); err != nil {
@@ -308,6 +323,7 @@ func (b *computeVMs) Stop(ctx context.Context, vm compute.VMSpec) error {
 	if f != nil {
 		_ = f.Stop(context.Background())
 	}
+	b.stopLBTunnels(ctx, vm)
 	// A suspended guest is thawed first, so it can shut down.
 	_ = b.freeze(ctx, vm, false)
 	if _, err := b.kubectl(ctx, "delete", "pod,service", vm.Key, "--ignore-not-found", "--wait=true", "--timeout=2m"); err != nil {
@@ -345,6 +361,31 @@ func (b *computeVMs) Suspend(ctx context.Context, vm compute.VMSpec) error {
 }
 func (b *computeVMs) Resume(ctx context.Context, vm compute.VMSpec) error {
 	return b.freeze(ctx, vm, false)
+}
+
+// CPUUsage implements compute.VMCPU: the CPU seconds the VM's container
+// has used, its cgroup's cpu.stat usage_usec (the container has its own
+// cgroup namespace, so /sys/fs/cgroup is the VM's whole cgroup).
+func (b *computeVMs) CPUUsage(ctx context.Context, vm compute.VMSpec) (float64, error) {
+	out, err := b.kubectl(ctx, "exec", vm.Key, "-c", "vm", "--", "cat", "/sys/fs/cgroup/cpu.stat")
+	if err != nil {
+		return 0, err
+	}
+	return cpuStatSeconds(out)
+}
+
+// cpuStatSeconds is cpu.stat's usage_usec in seconds.
+func cpuStatSeconds(stat string) (float64, error) {
+	for _, line := range strings.Split(stat, "\n") {
+		if f := strings.Fields(line); len(f) == 2 && f[0] == "usage_usec" {
+			us, err := strconv.ParseUint(f[1], 10, 64)
+			if err != nil {
+				return 0, err
+			}
+			return float64(us) / 1e6, nil
+		}
+	}
+	return 0, fmt.Errorf("no usage_usec in cpu.stat")
 }
 
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]|\x1b[MD78]|\r`)
@@ -391,5 +432,9 @@ func (b *computeVMs) stopAll() {
 	for k, f := range b.tunnel {
 		_ = f.Stop(context.Background())
 		delete(b.tunnel, k)
+	}
+	for k, f := range b.lbTunnels {
+		_ = f.Stop(context.Background())
+		delete(b.lbTunnels, k)
 	}
 }

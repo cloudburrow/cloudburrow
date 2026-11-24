@@ -178,7 +178,7 @@ func (s *dataTransferSvc) Start(ctx context.Context) error {
 // front serves on the same port: they are never Data Transfer's.
 func (s *dataTransferSvc) bigQueryLocal(r *http.Request) http.Handler {
 	switch {
-	case connectionAPIPath.MatchString(r.URL.Path):
+	case connectionAPIPath.MatchString(r.URL.Path), reservationAPIPath.MatchString(r.URL.Path):
 		return nil
 	case r.URL.Path == "/$discovery/rest" && r.URL.Query().Get("version") == "v1":
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -208,6 +208,13 @@ func (s *dataTransferSvc) bigQueryLocal(r *http.Request) http.Handler {
 // front's (internal/bigqueryfront's connectionRoute), with or without a
 // connection ID and a :getIamPolicy-style verb.
 var connectionAPIPath = regexp.MustCompile(`^/v1/projects/[^/]+/locations/[^/]+/connections(?:[/:]|$)`)
+
+// reservationAPIPath is a BigQuery Reservation API v1 path (#2193), the
+// BigQuery front's (internal/bigqueryfront/reservations.go): reservations
+// and their assignments, capacity commitments, reservation groups, the BI
+// reservation, the assignment searches and upgradeEdition. None is Data
+// Transfer's.
+var reservationAPIPath = regexp.MustCompile(`^/v1/projects/[^/]+/locations/[^/:]+(?:/(?:reservations|capacityCommitments|reservationGroups|biReservation)(?:[/:]|$)|:(?:search(?:All)?Assignments|upgradeEdition)$)`)
 
 func (s *dataTransferSvc) Stop(ctx context.Context) error {
 	var errs []error

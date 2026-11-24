@@ -33,6 +33,8 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/bigtablefront"
 	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/debugpprof"
+	"github.com/cloudburrow/cloudburrow/internal/filestorecsi"
+	"github.com/cloudburrow/cloudburrow/internal/mysqlpool"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 	"github.com/cloudburrow/cloudburrow/internal/rediscmek"
 	"github.com/cloudburrow/cloudburrow/internal/redistlsfront"
@@ -100,12 +102,33 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "filestore-csi-node" {
+		// The Filestore CSI driver's node plugin, in a Kubernetes Engine
+		// cluster's node (#2192).
+		if err := filestorecsi.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			if !errors.Is(err, filestorecsi.ErrUsage) {
+				fmt.Fprintln(os.Stderr, "cloudburrow-storage filestore-csi-node:", err)
+			}
+			os.Exit(2)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "memorystore-cmek" {
 		// A Memorystore for Redis server's persistence files, sealed with
 		// its customer-managed key (#2113).
 		if err := rediscmek.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
 			if !errors.Is(err, rediscmek.ErrUsage) {
 				fmt.Fprintln(os.Stderr, "cloudburrow-storage memorystore-cmek:", err)
+			}
+			os.Exit(2)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "mysql-thread-pool" {
+		// Cloud SQL for MySQL's Managed Connection Pooling (#2141).
+		if err := mysqlpool.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			if !errors.Is(err, mysqlpool.ErrUsage) {
+				fmt.Fprintln(os.Stderr, "cloudburrow-storage mysql-thread-pool:", err)
 			}
 			os.Exit(2)
 		}

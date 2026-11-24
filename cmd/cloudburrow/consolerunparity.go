@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"gopkg.in/yaml.v3"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
@@ -56,6 +57,7 @@ var runFieldTabs = []struct{ name, tab string }{
 	{"env", runTabVariables}, {"secretEnv", runTabVariables},
 	{"secretFiles", runTabVolumes}, {"memoryVolumes", runTabVolumes},
 	{"nfsVolumes", runTabVolumes}, {"gcsVolumes", runTabVolumes},
+	{"vpcMode", runTabNetworking}, {"vpcNetwork", runTabNetworking}, {"vpcSubnet", runTabNetworking}, {"vpcTags", runTabNetworking},
 	{"vpcConnector", runTabNetworking}, {"vpcEgress", runTabNetworking}, {"sessionAffinity", runTabNetworking},
 	{"serviceAccount", runTabSecurity}, {"encryptionKey", runTabSecurity},
 }
@@ -348,14 +350,50 @@ func (p runProvider) runNetworkingSection(svc *ksvcStatus) console.Section {
 	props := []console.Property{
 		{Label: "Ingress", Value: runIngressAll},
 		{Label: "Default URL", Value: unsetAs(svc.Status.URL, runNoURL)},
+		{Label: "VPC", Value: runVPCMode(pod.GetVpcAccess())},
 		{Label: "VPC connector", Value: orDash(pod.GetVpcAccess().GetConnector())},
-		{Label: "VPC egress", Value: orDash(strings.TrimPrefix(pod.GetVpcAccess().GetEgress().String(), "VPC_EGRESS_UNSPECIFIED"))},
+		{Label: "Network", Value: orDash(runVPCInterface(pod.GetVpcAccess()).GetNetwork())},
+		{Label: "Subnet", Value: orDash(runVPCInterface(pod.GetVpcAccess()).GetSubnetwork())},
+		{Label: "Network tags", Value: orDash(strings.Join(runVPCInterface(pod.GetVpcAccess()).GetTags(), ", "))},
+		{Label: "Traffic routing", Value: runVPCRouting(pod.GetVpcAccess())},
 		{Label: "Session affinity", Value: yesNo(pod.GetSessionAffinity())},
 	}
 	return console.Section{ID: "networking", Label: "Networking", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{{Properties: props}},
 		Note: "Only INGRESS_TRAFFIC_ALL is mapped: every service is reachable from the host and the cluster. " +
-			"A VPC connector and egress are stored, without effect. Change them here, then View diff & redeploy."}
+			"A VPC connection (a Serverless VPC Access connector, or Direct VPC egress to a network and subnet) is checked against this instance's " +
+			"connectors and networks and recorded; no traffic is routed through it (docs/gaps.md). Change it here, then View diff & redeploy."}
+}
+
+// runVPCMode is how a revision connects to a VPC for outbound traffic, in
+// Google's words (#2140).
+func runVPCMode(v *runpb.VpcAccess) string {
+	switch {
+	case v.GetConnector() != "":
+		return "Serverless VPC Access connector"
+	case len(v.GetNetworkInterfaces()) > 0:
+		return "Direct VPC egress"
+	}
+	return "None"
+}
+
+func runVPCInterface(v *runpb.VpcAccess) *runpb.VpcAccess_NetworkInterface {
+	if l := v.GetNetworkInterfaces(); len(l) > 0 {
+		return l[0]
+	}
+	return nil
+}
+
+// runVPCRouting is the Traffic routing choice: requests to private IPs
+// only unless ALL_TRAFFIC, Cloud Run's default.
+func runVPCRouting(v *runpb.VpcAccess) string {
+	switch {
+	case v == nil:
+		return "-"
+	case v.GetEgress() == runpb.VpcAccess_ALL_TRAFFIC:
+		return "Route all traffic to the VPC"
+	}
+	return "Route only requests to private IPs to the VPC"
 }
 
 // runSecuritySection is the Security tab.

@@ -166,6 +166,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// data source. TestTerraformAppHub applies them, plans clean and
 	// destroys.
 	{config.ServiceAppHub, "apphub_custom_endpoint", "GOOGLE_APPHUB_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// AlloyDB for PostgreSQL (#2191): google_alloydb_cluster, _instance,
+	// _user and _backup. TestTerraformAlloyDB applies them, plans clean and
+	// destroys.
+	{config.ServiceAlloyDB, "alloydb_custom_endpoint", "GOOGLE_ALLOYDB_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// The Kubernetes Engine API (#1913): a google_container_cluster with
 	// remove_default_node_pool and a google_container_node_pool apply, plan
 	// clean, update in place and destroy in
@@ -190,6 +194,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// so a google_compute_* resource never reaches Google either. With
 	// the compute service enabled the next row sets it instead.
 	{config.ServiceGKE, "compute_custom_endpoint", "GOOGLE_COMPUTE_CUSTOM_ENDPOINT", "/compute/v1/", true, ""},
+	// Filestore (#2192): google_filestore_instance, _snapshot and _backup
+	// apply, plan clean, update in place and destroy in
+	// TestTerraformFilestore.
+	{config.ServiceFilestore, "filestore_custom_endpoint", "GOOGLE_FILESTORE_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Cloud Monitoring (#1939): google_monitoring_metric_descriptor.
 	{config.ServiceMonitoring, "monitoring_custom_endpoint", "GOOGLE_MONITORING_CUSTOM_ENDPOINT", "/", true, ""},
 	// The Compute Engine API's VPC networking (#1936), on its own port,
@@ -290,6 +298,47 @@ var terraformEndpoints = []terraformEndpoint{
 	// by default; the one v3 server binds any location's resource, in
 	// TestTerraformTagsLocationTagBinding.
 	{resourceManagerEndpoint, "tags_location_custom_endpoint", "GOOGLE_TAGS_LOCATION_CUSTOM_ENDPOINT", "/v3/", true, ""},
+	// The IAM and identity APIs the Resource Manager port serves beside
+	// those (#1578), each with the provider's own endpoint argument:
+	// Cloud Identity groups (#1812), google_cloud_identity_group and
+	// _group_membership in TestTerraformCloudIdentityGroupAndMembership;
+	// the Organization Policy API v2 (#1890), google_org_policy_policy and
+	// _custom_constraint in TestTerraformOrgPolicyPolicyAndCustomConstraint;
+	// IAM v2 deny policies, google_iam_deny_policy in
+	// TestTerraformIAMDenyPolicy; IAM v3 principal access boundary policies
+	// and their bindings (#2057), google_iam_principal_access_boundary_policy
+	// and google_iam_projects_policy_binding in
+	// TestTerraformIAMPrincipalAccessBoundary; workforce pools, whose
+	// provider takes iam_workforce_pool_custom_endpoint, not iam_'s,
+	// google_iam_workforce_pool and _provider in
+	// TestTerraformIAMWorkforcePool. Until now each of these was refused
+	// locally (unserved) though the instance serves it.
+	{resourceManagerEndpoint, "cloud_identity_custom_endpoint", "GOOGLE_CLOUD_IDENTITY_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{resourceManagerEndpoint, "org_policy_custom_endpoint", "GOOGLE_ORG_POLICY_CUSTOM_ENDPOINT", "/v2/", true, ""},
+	{resourceManagerEndpoint, "iam2_custom_endpoint", "GOOGLE_IAM2_CUSTOM_ENDPOINT", "/v2/", true, ""},
+	{resourceManagerEndpoint, "iam3_custom_endpoint", "GOOGLE_IAM3_CUSTOM_ENDPOINT", "/v3/", true, ""},
+	{resourceManagerEndpoint, "iam_workforce_pool_custom_endpoint", "GOOGLE_IAM_WORKFORCE_POOL_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// IAM Credentials (#1747), on the metadata port:
+	// data.google_service_account_access_token mints a token for a
+	// service account in TestTerraformServiceAccountAccessToken.
+	{metadataEndpoint, "iam_credentials_custom_endpoint", "GOOGLE_IAM_CREDENTIALS_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Storage Batch Operations (#1957), on its own port beside Cloud
+	// Storage: google_storage_batch_operations_job in
+	// TestTerraformStorageBatchOperationsJob.
+	{storageBatchService, "storage_batch_operations_custom_endpoint", "GOOGLE_STORAGE_BATCH_OPERATIONS_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Container Analysis (#1912), on the Run port under
+	// /containeranalysis/ as gcloud's override is:
+	// google_container_analysis_note and _occurrence in
+	// TestTerraformContainerAnalysisNoteAndOccurrence.
+	{config.ServiceRun, "container_analysis_custom_endpoint", "GOOGLE_CONTAINER_ANALYSIS_CUSTOM_ENDPOINT", "/containeranalysis/v1/", true, ""},
+	// Network Connectivity's service connection policies (#2141), on the
+	// Compute Engine port: google_network_connectivity_service_connection_policy
+	// in TestTerraformNetworkConnectivityServiceConnectionPolicy.
+	// The policy's base path is network_connectivityv1_'s; hubs, spokes and
+	// the rest are network_connectivity_'s, which the same port answers
+	// UNIMPLEMENTED, locally.
+	{config.ServiceCompute, "network_connectivity_custom_endpoint", "GOOGLE_NETWORK_CONNECTIVITY_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{config.ServiceCompute, "network_connectivityv1_custom_endpoint", "GOOGLE_NETWORK_CONNECTIVITYV1_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Document AI (#1953), on the local AI endpoint: the provider's base
 	// path is https://{{location}}-documentai.googleapis.com/v1/, and the
 	// resources' URLs carry projects/{project}/locations/{location}, so the
@@ -307,6 +356,10 @@ var terraformEndpoints = []terraformEndpoint{
 // resourceManagerEndpoint keys the Resource Manager rows. It is not a
 // selectable service: the project registry, and so its API, always runs.
 const resourceManagerEndpoint config.Service = "resourcemanager"
+
+// metadataEndpoint keys the IAM Credentials row (#1578): the metadata
+// server, which every instance runs, serves it (#1747).
+const metadataEndpoint config.Service = "metadata"
 
 // sqlAdminEndpoint keys the Cloud SQL Admin API row: it is served when
 // either Cloud SQL service is (#1301), and is not a service of its own.
@@ -364,17 +417,21 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		analyticsHubService:            cfg.Endpoints.AnalyticsHub,
 		config.ServiceMonitoring:       cfg.Endpoints.Monitoring,
 		config.ServiceCompute:          cfg.Endpoints.Compute,
+		config.ServiceFilestore:        cfg.Endpoints.Filestore,
 		config.ServiceWorkflows:        cfg.Endpoints.Workflows,
 		config.ServiceParameterManager: cfg.Endpoints.ParameterManager,
 		config.ServiceDataform:         cfg.Endpoints.Dataform,
 		config.ServiceAppHub:           cfg.Endpoints.AppHub,
+		config.ServiceAlloyDB:          cfg.Endpoints.AlloyDB,
 		localAIEndpoint:                cfg.Endpoints.LocalAI,
 		storageTransferService:         cfg.Endpoints.StorageTransfer,
 		storageInsightsService:         cfg.Endpoints.StorageInsights,
 		dataTransferService:            cfg.Endpoints.DataTransfer,
 		firebaseRulesService:           cfg.Endpoints.FirebaseRules,
+		storageBatchService:            cfg.Endpoints.StorageBatchOperations,
+		metadataEndpoint:               cfg.Endpoints.Metadata,
 	}
-	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, apiKeysService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
+	enabled := map[config.Service]bool{resourceManagerEndpoint: true, metadataEndpoint: true, serviceUsageService: true, apiKeysService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
 	for _, s := range cfg.EnabledServices() {
 		enabled[s] = true
@@ -387,9 +444,11 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	enabled[config.ServiceParameterManager] = parameterManagerEnabled(cfg)
 	enabled[config.ServiceDataform] = dataformEnabled(cfg)
 	enabled[config.ServiceAppHub] = appHubEnabled(cfg)
+	enabled[config.ServiceAlloyDB] = alloyDBEnabled(cfg)
 	enabled[localAIEndpoint] = localAIServed(cfg)
 	enabled[storageTransferService] = storageJobsEnabled(cfg)
 	enabled[storageInsightsService] = storageJobsEnabled(cfg)
+	enabled[storageBatchService] = storageJobsEnabled(cfg)
 	enabled[dataTransferService] = dataTransferEnabled(cfg)
 	enabled[firebaseRulesService] = firebaseRulesEnabled(cfg)
 	var set []terraformURL
@@ -805,9 +864,11 @@ func runTerraform(args []string, stdout, stderr io.Writer) error {
 			"which the provider would send to real Google:\n  %s", binary, subcommand(theirs), strings.Join(bad, "\n  "))
 	}
 	// Under --iam-enforcement the provider signs in as a principal this
-	// instance knows (terraformauth.go); otherwise as "owner".
+	// instance knows (terraformauth.go); otherwise as "owner", unless the
+	// module calls the IAM Credentials API, which authenticates the caller
+	// whatever the mode (moduleCallsIAMCredentials).
 	auth := terraformOwnerAuth
-	if enforced && !offlineSubcommands[subcommand(theirs)] {
+	if (enforced || moduleCallsIAMCredentials(dir)) && !offlineSubcommands[subcommand(theirs)] {
 		a, cleanup, err := terraformEnforcedAuth(cfg, dir, os.Getenv)
 		if err != nil {
 			return err

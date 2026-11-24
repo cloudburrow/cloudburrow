@@ -608,7 +608,9 @@ func decodeRemoteObject(v *runtime.RemoteObject, res any) error {
 // previous execution context, which Chrome has already replaced: it then
 // fails at once with "Cannot find context with specified id" (#1607), a
 // race in the harness rather than an answer from the page. The poll is
-// started again in the new context, within the same 30 seconds.
+// started again in the new context, within the same 30 seconds; so is one
+// a form's own submission navigated away from mid-evaluation ("Inspected
+// target navigated or closed"), unless the tab's context is gone.
 func (p *tab) waitFor(expr string) {
 	p.t.Helper()
 	p.waitForWithin(expr, 30*time.Second)
@@ -624,7 +626,10 @@ func (p *tab) waitForWithin(expr string, limit time.Duration) {
 		if err == nil && ok {
 			return
 		}
-		if err != nil && contextReplaced(err) && time.Now().Before(deadline) {
+		// Only a replaced context is polled again, and only while the tab
+		// itself lives: the expression must still turn true before the
+		// deadline, so a page that never gets there fails as before.
+		if err != nil && contextReplaced(err) && p.ctx.Err() == nil && time.Now().Before(deadline) {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
@@ -633,11 +638,13 @@ func (p *tab) waitForWithin(expr string, limit time.Duration) {
 }
 
 // contextReplaced reports whether err is Chrome refusing an evaluation in an
-// execution context a navigation has just replaced.
+// execution context a navigation has just replaced (or, as a form's own
+// submission does, navigated away from mid-evaluation).
 func contextReplaced(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "Cannot find context with specified id") ||
-		strings.Contains(msg, "Execution context was destroyed")
+		strings.Contains(msg, "Execution context was destroyed") ||
+		strings.Contains(msg, "Inspected target navigated or closed")
 }
 
 // tabTo presses Tab until the focused element, bound to a, satisfies pred.

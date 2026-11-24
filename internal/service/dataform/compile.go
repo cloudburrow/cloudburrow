@@ -25,12 +25,21 @@ import (
 // ---- npm ----
 
 func (s *Server) InstallNpmPackages(ctx context.Context, req *dfpb.InstallNpmPackagesRequest) (*dfpb.InstallNpmPackagesResponse, error) {
-	if req.GetPipelineConfig() != nil {
-		return nil, apierror.Unimplemented("pipeline_config is not served by CloudBurrow")
+	if err := checkPipelineConfig("pipeline_config", req.GetPipelineConfig()); err != nil {
+		return nil, err
 	}
 	_, dir, err := s.workspace(req.GetWorkspace())
 	if err != nil {
 		return nil, err
+	}
+	wsDir := dir
+	if p := req.GetPipelineConfig(); p != nil {
+		// A DATAFORM pipeline's packages are its folder's; a single file
+		// asset has none.
+		if p.GetPipelineType() != dfpb.PipelineConfig_DATAFORM {
+			return nil, apierror.FailedPrecondition("a %s single file asset has no npm packages to install", p.GetPipelineType())
+		}
+		dir = filepath.Join(dir, filepath.FromSlash(p.GetPath()))
 	}
 	if s.opts.Runner == nil {
 		return nil, apierror.FailedPrecondition("installing npm packages needs Docker, which this instance cannot run")
@@ -53,7 +62,7 @@ func (s *Server) InstallNpmPackages(ctx context.Context, req *dfpb.InstallNpmPac
 		}
 		env = parseEnv(b)
 	}
-	defer s.lock(dir)()
+	defer s.lock(wsDir)()
 	if err := s.opts.Runner.InstallPackages(ctx, dir, env); err != nil {
 		return nil, apierror.FailedPrecondition("npm install failed: %v", err)
 	}
@@ -97,11 +106,11 @@ func checkCompilationConfig(c *dfpb.CodeCompilationConfig) error {
 	if p := c.GetBuiltinAssertionNamePrefix(); p != "" && !assertionPrefixRE.MatchString(p) {
 		return apierror.InvalidArgument("code_compilation_config.builtin_assertion_name_prefix %q: letters, digits and underscores only", p)
 	}
-	if c.GetDefaultNotebookRuntimeOptions() != nil {
-		return apierror.Unimplemented("notebooks are not served by CloudBurrow's Dataform")
+	if err := checkNotebookRuntimeOptions(c.GetDefaultNotebookRuntimeOptions()); err != nil {
+		return err
 	}
-	if c.GetPipelineConfig() != nil {
-		return apierror.Unimplemented("code_compilation_config.pipeline_config is not served by CloudBurrow")
+	if err := checkPipelineConfig("code_compilation_config.pipeline_config", c.GetPipelineConfig()); err != nil {
+		return err
 	}
 	for k, v := range c.GetVars() {
 		if strings.ContainsAny(k, ",=") || strings.Contains(v, ",") {
@@ -200,13 +209,21 @@ func (s *Server) ListReleaseConfigs(_ context.Context, req *dfpb.ListReleaseConf
 	return out, nil
 }
 
-func (s *Server) UpdateReleaseConfig(_ context.Context, req *dfpb.UpdateReleaseConfigRequest) (*dfpb.ReleaseConfig, error) {
+func (s *Server) UpdateReleaseConfig(ctx context.Context, req *dfpb.UpdateReleaseConfigRequest) (*dfpb.ReleaseConfig, error) {
 	in := req.GetReleaseConfig()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur, err := s.release(in.GetName())
 	if err != nil {
 		return nil, err
+	}
+	// Strict act-as (runas.go): the repository's service account.
+	if parent, _, ok := strings.Cut(in.GetName(), "/releaseConfigs/"); ok {
+		if r, err := s.repo(parent); err == nil {
+			if err := s.actAs(ctx, parent, r.GetServiceAccount()); err != nil {
+				return nil, err
+			}
+		}
 	}
 	next := clone(cur)
 	paths := req.GetUpdateMask().GetPaths()
@@ -301,9 +318,9 @@ func (s *Server) compile(ctx context.Context, parent string, c *dfpb.Compilation
 	}
 	repo := clone(r)
 	s.mu.Unlock()
-	if c.GetGcsRepositorySnapshotMetadata() != nil {
-		return nil, apierror.Unimplemented("Cloud Storage repository snapshots are not served by CloudBurrow")
-	}
+	// Output only: a snapshot is written when the compilation config asks
+	// for one (pipelines.go).
+	c.GcsRepositorySnapshotMetadata = nil
 	cfg := clone(c.GetCodeCompilationConfig())
 	var dir, sha string
 	switch src := c.GetSource().(type) {
@@ -379,23 +396,49 @@ func (s *Server) compile(ctx context.Context, parent string, c *dfpb.Compilation
 		return nil, apierror.FailedPrecondition("compiling needs Docker, which this instance cannot run")
 	}
 	project := strings.Split(parent, "/")[1]
-	out, err := s.opts.Runner.Compile(ctx, dir, compileFlags(cfg))
-	if err != nil {
-		return nil, apierror.FailedPrecondition("Dataform core could not compile the project: %v", err)
+	id := newUUID()
+	var actions []*dfpb.CompilationResultAction
+	var merge map[string][]string
+	if p := cfg.GetPipelineConfig(); p != nil && p.GetPipelineType() != dfpb.PipelineConfig_DATAFORM {
+		// A single file asset: its one file, compiled here.
+		actions, err = singleFileActions(dir, project, p, cfg)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		root := dir
+		if p != nil {
+			if root, err = pipelineRoot(dir, p); err != nil {
+				return nil, err
+			}
+		}
+		out, err := s.opts.Runner.Compile(ctx, root, compileFlags(cfg))
+		if err != nil {
+			return nil, apierror.FailedPrecondition("Dataform core could not compile the project: %v", err)
+		}
+		g, err := parseGraph(out)
+		if err != nil {
+			return nil, apierror.FailedPrecondition("Dataform core's output: %v", err)
+		}
+		g.prefixBuiltinAssertions(cfg.GetBuiltinAssertionNamePrefix())
+		c.DataformCoreVersion = g.DataformCoreVersion
+		c.CompilationErrors = g.errors(project)
+		actions = g.actions(project)
+		merge = g.mergeKeys(project)
 	}
-	g, err := parseGraph(out)
-	if err != nil {
-		return nil, apierror.FailedPrecondition("Dataform core's output: %v", err)
+	if len(c.GetCompilationErrors()) == 0 {
+		md, err := s.uploadSnapshot(ctx, dir, id, cfg.GetDefaultNotebookRuntimeOptions())
+		if err != nil {
+			return nil, err
+		}
+		c.GcsRepositorySnapshotMetadata = md
 	}
-	g.prefixBuiltinAssertions(cfg.GetBuiltinAssertionNamePrefix())
-	c.Name = parent + "/compilationResults/" + newUUID()
+	c.Name = parent + "/compilationResults/" + id
 	c.CodeCompilationConfig = cfg
 	c.ResolvedGitCommitSha = sha
-	c.DataformCoreVersion = g.DataformCoreVersion
 	c.CreateTime = s.now()
 	c.DataEncryptionState, c.InternalMetadata = nil, nil
-	c.CompilationErrors = g.errors(project)
-	rec := &compilation{C: c, Actions: g.actions(project)}
+	rec := &compilation{C: c, Actions: actions, Merge: merge}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.repos[parent]; !ok {
@@ -580,6 +623,38 @@ type dfAction struct {
 	ParentAction       *dfTarget     `json:"parentAction"`
 	ActionDescriptor   *dfDescriptor `json:"actionDescriptor"`
 	BigQuery           *dfBigQuery   `json:"bigquery"`
+	// A notebook's.
+	NotebookContents string `json:"notebookContents"`
+	// A data preparation's.
+	DataPreparationYaml     string    `json:"dataPreparationYaml"`
+	ErrorTable              *dfTarget `json:"errorTable"`
+	ErrorTableRetentionDays int32     `json:"errorTableRetentionDays"`
+	Load                    *dfLoad   `json:"load"`
+}
+
+// dfLoad is a data preparation's load mode, as Dataform core compiles it.
+type dfLoad struct {
+	Replace *struct{} `json:"replace"`
+	Append  *struct{} `json:"append"`
+	Maximum *struct {
+		ColumnName string `json:"columnName"`
+	} `json:"maximum"`
+	Unique *struct {
+		ColumnName string `json:"columnName"`
+	} `json:"unique"`
+	Merge *struct {
+		UniqueKey []string `json:"uniqueKey"`
+	} `json:"merge"`
+}
+
+// dfTest is a unit test (`type: "test"`) as Dataform core compiles it.
+type dfTest struct {
+	Name                string    `json:"name"`
+	TestQuery           string    `json:"testQuery"`
+	ExpectedOutputQuery string    `json:"expectedOutputQuery"`
+	FileName            string    `json:"fileName"`
+	Target              *dfTarget `json:"target"`
+	CanonicalTarget     *dfTarget `json:"canonicalTarget"`
 }
 
 type dfBigQuery struct {
@@ -598,6 +673,7 @@ type dfGraph struct {
 	Declarations     []dfAction `json:"declarations"`
 	Notebooks        []dfAction `json:"notebooks"`
 	DataPreparations []dfAction `json:"dataPreparations"`
+	Tests            []dfTest   `json:"tests"`
 	GraphErrors      struct {
 		CompilationErrors []struct {
 			FileName     string    `json:"fileName"`
@@ -670,6 +746,29 @@ func (g *dfGraph) errors(project string) []*dfpb.CompilationResult_CompilationEr
 	var out []*dfpb.CompilationResult_CompilationError
 	for _, e := range g.GraphErrors.CompilationErrors {
 		out = append(out, &dfpb.CompilationResult_CompilationError{Message: e.Message, Stack: e.Stack, Path: e.FileName, ActionTarget: e.ActionTarget.proto(project)})
+	}
+	return out
+}
+
+// mergeKeys are the unique keys of the data preparations whose load mode
+// is MERGE (Dataform core's `loadMode: { mode: "MERGE", uniqueKey: [...] }`,
+// BigQuery Studio's Upsert write mode), by target (targetKey).
+//
+// UNVERIFIED (re-read 2026-11-22: https://docs.cloud.google.com/dataform/reference/rest/v1/projects.locations.repositories.compilationResults/query,
+// https://docs.cloud.google.com/bigquery/docs/data-prep-introduction): the
+// API's LoadConfig has only replace, append, maximum and unique, so a
+// MERGE data preparation's contents_sql carries no load config, and the
+// keys stay in the server's own record of the compilation result; the
+// invocation merges on them, and its generated_sql shows the MERGE.
+func (g *dfGraph) mergeKeys(project string) map[string][]string {
+	out := map[string][]string{}
+	for _, a := range g.DataPreparations {
+		if a.Load != nil && a.Load.Merge != nil && a.Target != nil {
+			out[targetKey(a.Target.proto(project))] = append([]string(nil), a.Load.Merge.UniqueKey...)
+		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
@@ -748,16 +847,54 @@ func (g *dfGraph) actions(project string) []*dfpb.CompilationResultAction {
 	}
 	for _, a := range g.Notebooks {
 		x := base(a)
-		x.CompiledObject = &dfpb.CompilationResultAction_Notebook_{Notebook: &dfpb.CompilationResultAction_Notebook{DependencyTargets: targets(a.DependencyTargets, project), Disabled: a.Disabled, Tags: a.Tags}}
+		x.CompiledObject = &dfpb.CompilationResultAction_Notebook_{Notebook: &dfpb.CompilationResultAction_Notebook{DependencyTargets: targets(a.DependencyTargets, project), Disabled: a.Disabled, Tags: a.Tags, Contents: a.NotebookContents}}
 		out = append(out, x)
 	}
 	for _, a := range g.DataPreparations {
 		x := base(a)
-		x.CompiledObject = &dfpb.CompilationResultAction_DataPreparation_{DataPreparation: &dfpb.CompilationResultAction_DataPreparation{DependencyTargets: targets(a.DependencyTargets, project), Disabled: a.Disabled, Tags: a.Tags}}
+		dp := &dfpb.CompilationResultAction_DataPreparation{DependencyTargets: targets(a.DependencyTargets, project), Disabled: a.Disabled, Tags: a.Tags}
+		if a.DataPreparationYaml != "" {
+			dp.Definition = &dfpb.CompilationResultAction_DataPreparation_ContentsYaml{ContentsYaml: a.DataPreparationYaml}
+		} else {
+			def := &dfpb.CompilationResultAction_DataPreparation_SqlDefinition{Query: a.Query, Load: a.Load.proto()}
+			if a.ErrorTable != nil {
+				def.ErrorTable = &dfpb.CompilationResultAction_DataPreparation_ErrorTable{Target: a.ErrorTable.proto(project), RetentionDays: a.ErrorTableRetentionDays}
+			}
+			dp.Definition = &dfpb.CompilationResultAction_DataPreparation_ContentsSql{ContentsSql: def}
+		}
+		x.CompiledObject = &dfpb.CompilationResultAction_DataPreparation_{DataPreparation: dp}
 		out = append(out, x)
+	}
+	for _, t := range g.Tests {
+		target := t.Target
+		if target == nil {
+			target = &dfTarget{Name: t.Name}
+		}
+		ct := t.CanonicalTarget
+		if ct == nil {
+			ct = target
+		}
+		out = append(out, &dfpb.CompilationResultAction{Target: target.proto(project), CanonicalTarget: ct.proto(project), FilePath: t.FileName,
+			CompiledObject: &dfpb.CompilationResultAction_BigqueryUnitTest{BigqueryUnitTest: &dfpb.CompilationResultAction_BigQueryUnitTest{
+				DisplayName: t.Name, TestQuery: t.TestQuery, ExpectedOutputQuery: t.ExpectedOutputQuery}}})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return targetKey(out[i].GetTarget()) < targetKey(out[j].GetTarget()) })
 	return out
+}
+
+func (l *dfLoad) proto() *dfpb.CompilationResultAction_LoadConfig {
+	switch {
+	case l == nil, l.Merge != nil:
+		// MERGE has no API LoadConfig (mergeKeys).
+		return nil
+	case l.Append != nil:
+		return &dfpb.CompilationResultAction_LoadConfig{Mode: &dfpb.CompilationResultAction_LoadConfig_Append{Append: &dfpb.CompilationResultAction_SimpleLoadMode{}}}
+	case l.Maximum != nil:
+		return &dfpb.CompilationResultAction_LoadConfig{Mode: &dfpb.CompilationResultAction_LoadConfig_Maximum{Maximum: &dfpb.CompilationResultAction_IncrementalLoadMode{Column: l.Maximum.ColumnName}}}
+	case l.Unique != nil:
+		return &dfpb.CompilationResultAction_LoadConfig{Mode: &dfpb.CompilationResultAction_LoadConfig_Unique{Unique: &dfpb.CompilationResultAction_IncrementalLoadMode{Column: l.Unique.ColumnName}}}
+	}
+	return &dfpb.CompilationResultAction_LoadConfig{Mode: &dfpb.CompilationResultAction_LoadConfig_Replace{Replace: &dfpb.CompilationResultAction_SimpleLoadMode{}}}
 }
 
 func targetKey(t *dfpb.Target) string {

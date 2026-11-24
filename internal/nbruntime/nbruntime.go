@@ -32,8 +32,10 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -41,10 +43,10 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed image/Dockerfile image/kernel.py image/relay.py
+//go:embed image/Dockerfile image/kernel.py image/relay.py image/requirements.txt image/build-requirements.txt
 var context_ embed.FS
 
-var contextFiles = []string{"Dockerfile", "kernel.py", "relay.py"}
+var contextFiles = []string{"Dockerfile", "kernel.py", "relay.py", "requirements.txt", "build-requirements.txt"}
 
 // Tag is the runtime image's tag: its build context's hash, so a changed
 // Dockerfile or kernel is a new image, never a stale one.
@@ -84,6 +86,8 @@ const (
 	relayAlias = "host.docker.internal"
 	relayPort  = "8080"
 	endpoint   = "http://" + relayAlias + ":" + relayPort
+	// dataprocEndpoint is the Dataproc API's, gRPC in plaintext (#2156).
+	dataprocEndpoint = relayAlias + ":8081"
 )
 
 // IdleTimeout is how long a runtime is kept without a cell run: Colab
@@ -127,6 +131,14 @@ type Manager struct {
 	// BigQuery is the instance's BigQuery REST address on the host
 	// (host:port), live at each connect.
 	BigQuery func() string
+	// Dataproc is the instance's Dataproc API address on the host
+	// (host:port), "" when it is not served: an Apache Spark notebook's
+	// DataprocSparkSession creates its Spark Connect session there and
+	// reaches it through the same port (#2156).
+	Dataproc func() string
+	// Region is the Dataproc region a notebook's sessions are made in;
+	// "" is us-central1.
+	Region string
 	// Logf receives the manager's own notes, or is nil.
 	Logf func(format string, args ...any)
 	// Docker is the docker command ("" for "docker"); tests swap it.
@@ -141,6 +153,7 @@ type Manager struct {
 
 type session struct {
 	key, project string
+	opts         Options
 	status       Status
 	names        []string // network last
 	stop         func()
@@ -184,6 +197,37 @@ func (m *Manager) Status(key string) Status {
 // host has none, and returns at once: Status follows it to CONNECTED or
 // FAILED. A runtime already connected or starting is kept.
 func (m *Manager) Connect(key, project string) Status {
+	return m.ConnectWith(key, project, Options{})
+}
+
+// Options are a runtime's settings from its Colab Enterprise runtime
+// template (#2105): its idle shutdown and its environment variables.
+type Options struct {
+	// IdleTimeout replaces the default IdleTimeout when positive.
+	IdleTimeout time.Duration
+	// IdleDisabled keeps the runtime however long it is idle.
+	IdleDisabled bool
+	// Env is set in the kernel's environment.
+	Env map[string]string
+	// Token, when set, is the bearer token the kernel's Google clients
+	// send (CB_ACCESS_TOKEN): the identity a run executes as (#2173),
+	// instead of the anonymous credentials the instance takes as its own.
+	Token string
+}
+
+// idleTimeout is the session's idle shutdown, 0 when it has none.
+func (s *session) idleTimeout() time.Duration {
+	switch {
+	case s.opts.IdleDisabled:
+		return 0
+	case s.opts.IdleTimeout > 0:
+		return s.opts.IdleTimeout
+	}
+	return IdleTimeout
+}
+
+// ConnectWith is Connect with a runtime template's options.
+func (m *Manager) ConnectWith(key, project string, opts Options) Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.sessions == nil {
@@ -192,7 +236,7 @@ func (m *Manager) Connect(key, project string) Status {
 	if s := m.sessions[key]; s != nil && s.status.State != StateFailed {
 		return s.status
 	}
-	s := &session{key: key, project: project, status: Status{State: StateStarting, Project: project, Image: Tag()}}
+	s := &session{key: key, project: project, opts: opts, status: Status{State: StateStarting, Project: project, Image: Tag()}}
 	m.sessions[key] = s
 	go m.start(s)
 	return s.status
@@ -310,13 +354,25 @@ func (m *Manager) launch(ctx context.Context, s *session) error {
 		return err
 	}
 	s.stop = stop
+	// The Dataproc API's port (#2156), on the relay's 8081.
+	dpTarget := ""
+	if m.Dataproc != nil {
+		if dp := m.Dataproc(); dp != "" {
+			t, stopDP, err := m.target(ctx, dp)
+			if err != nil {
+				stop()
+				return err
+			}
+			dpTarget, s.stop = t, func() { stop(); stopDP() }
+		}
+	}
 	suffix := nameSafe.ReplaceAllString(strings.ToLower(s.key), "-")
 	if len(suffix) > 30 {
 		suffix = suffix[len(suffix)-30:]
 	}
 	suffix = strings.Trim(suffix, "-") + fmt.Sprintf("-%d", time.Now().UnixNano()%1e6)
 	network, relay, kernel := "cb-nb-net-"+suffix, "cb-nb-relay-"+suffix, "cb-nb-"+suffix
-	label := "cloudburrow.instance=" + m.Instance
+	label := "io.cloudburrow.instance=" + m.Instance // sparkproc.InstanceLabel: swept by stop
 	image := Tag()
 
 	if out, err := m.docker(ctx, "network", "create", "--internal", "--label", label, network); err != nil {
@@ -329,7 +385,7 @@ func (m *Manager) launch(ctx context.Context, s *session) error {
 	if !m.desktop {
 		relayArgs = append(relayArgs, "--add-host", "host.docker.internal:host-gateway")
 	}
-	relayArgs = append(relayArgs, image, "-I", "/opt/cloudburrow/relay.py", target)
+	relayArgs = append(relayArgs, image, "-I", "/opt/cloudburrow/relay.py", target, dpTarget)
 	if out, err := m.docker(ctx, relayArgs...); err != nil {
 		return errors.New("start the runtime's relay: " + out)
 	}
@@ -346,9 +402,31 @@ func (m *Manager) launch(ctx context.Context, s *session) error {
 	if bin == "" {
 		bin = "docker"
 	}
-	cmd := exec.Command(bin, "run", "-i", "--rm", "--init", "--name", kernel, "--label", label, "--network", network,
-		"-e", "GOOGLE_CLOUD_PROJECT="+s.project, "-e", "CB_BIGQUERY_ENDPOINT="+endpoint, "-e", "NO_GCE_CHECK=True",
-		image)
+	var cmdEnv []string
+	runArgs := []string{"run", "-i", "--rm", "--init", "--name", kernel, "--label", label, "--network", network,
+		"-e", "GOOGLE_CLOUD_PROJECT=" + s.project, "-e", "CB_BIGQUERY_ENDPOINT=" + endpoint, "-e", "NO_GCE_CHECK=True"}
+	for _, k := range sortedKeys(s.opts.Env) {
+		runArgs = append(runArgs, "-e", k+"="+s.opts.Env[k])
+	}
+	if s.opts.Token != "" {
+		// Passed by name, so the token is not on docker's command line.
+		runArgs = append(runArgs, "-e", "CB_ACCESS_TOKEN")
+		cmdEnv = append(cmdEnv, "CB_ACCESS_TOKEN="+s.opts.Token)
+	}
+	if dpTarget != "" {
+		region := m.Region
+		if region == "" {
+			region = "us-central1"
+		}
+		// Google's DataprocSparkSession reads its API endpoint and region
+		// from these; kernel.py points its clients at the relay.
+		runArgs = append(runArgs, "-e", "CB_DATAPROC_ENDPOINT="+dataprocEndpoint,
+			"-e", "GOOGLE_CLOUD_DATAPROC_API_ENDPOINT="+dataprocEndpoint, "-e", "GOOGLE_CLOUD_REGION="+region)
+	}
+	cmd := exec.Command(bin, append(runArgs, image)...)
+	if len(cmdEnv) > 0 {
+		cmd.Env = append(os.Environ(), cmdEnv...)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -386,10 +464,14 @@ func (m *Manager) launch(ctx context.Context, s *session) error {
 			return fmt.Errorf("the runtime did not start: %s", strings.TrimSpace(stderr.String()))
 		}
 		m.mu.Lock()
+		idle := s.idleTimeout()
 		s.status = Status{State: StateConnected, Python: r.Python, Project: s.project, Image: image,
-			Started: time.Now().UTC(), Idle: IdleTimeout.String(), Notes: r.Notes}
+			Started: time.Now().UTC(), Notes: r.Notes}
+		if idle > 0 {
+			s.status.Idle = idle.String()
+			s.timer = time.AfterFunc(idle, func() { m.idle(s) })
+		}
 		s.last = time.Now()
-		s.timer = time.AfterFunc(IdleTimeout, func() { m.idle(s) })
 		m.mu.Unlock()
 		m.logf("notebook runtime %s: connected (%s)", s.key, kernel)
 		return nil
@@ -412,15 +494,25 @@ func (m *Manager) waitReady(ctx context.Context, name string) error {
 	}
 }
 
-// idle shuts a runtime down after IdleTimeout without a cell run.
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// idle shuts a runtime down after its idle timeout without a cell run.
 func (m *Manager) idle(s *session) {
 	m.mu.Lock()
-	quiet := time.Since(s.last) >= IdleTimeout
+	idle := s.idleTimeout()
+	quiet := time.Since(s.last) >= idle
 	m.mu.Unlock()
 	if !quiet {
 		m.mu.Lock()
 		if s.timer != nil {
-			s.timer.Reset(IdleTimeout - time.Since(s.last))
+			s.timer.Reset(idle - time.Since(s.last))
 		}
 		m.mu.Unlock()
 		return
@@ -514,9 +606,11 @@ func (m *Manager) Restart(key string) Status {
 	if s == nil {
 		return Status{State: StateDisconnected}
 	}
-	project := s.project
+	// The new kernel keeps the runtime's template options (a Colab
+	// Enterprise runtime's idle shutdown and environment).
+	project, opts := s.project, s.opts
 	_ = m.Disconnect(key)
-	return m.Connect(key, project)
+	return m.ConnectWith(key, project, opts)
 }
 
 // Disconnect deletes the notebook's runtime (Disconnect and delete

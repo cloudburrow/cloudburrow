@@ -86,7 +86,7 @@ func TestConsoleComputeVMs(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := vpcRow(l, "web-1")
-	if r == nil || r.Status != "RUNNING" || r.Fields["Zone"] != "us-central1-a" || r.Fields["External IP"] != "127.0.0.1" ||
+	if r == nil || r.Status != "RUNNING" || r.Fields["Zone"] != "us-central1-a" || !strings.HasPrefix(r.Fields["External IP"], "192.0.2.") ||
 		r.Fields["Connect"] != "SSH (port 2222)" || !strings.HasPrefix(r.Fields["Internal IP"], "10.128.") {
 		t.Fatalf("the instance's row: %+v", r)
 	}
@@ -144,7 +144,7 @@ func TestConsoleComputeVMs(t *testing.T) {
 	}
 	settle(t, s, project)
 	dl, _ := disks.List(ctx, project)
-	if r := vpcRow(dl, "data-1"); r == nil || r.Fields["In use by"] != "web-1" || r.Fields["Size"] != "20 GB" || r.Actions[3].Unavailable == "" {
+	if r := vpcRow(dl, "data-1"); r == nil || r.Fields["In use by"] != "web-1" || r.Fields["Size"] != "20 GB" || r.Actions[len(r.Actions)-1].ID != "delete" || r.Actions[len(r.Actions)-1].Unavailable == "" {
 		t.Fatalf("the attached disk's row: %+v", r)
 	}
 	if err := vms.ActAt(ctx, project, path, "detachdisk", map[string]string{"deviceName": "data"}); err != nil {

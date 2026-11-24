@@ -56,6 +56,14 @@ digest (#2141): PgBouncer, Copyright (c) 2007-2009 Marko Kreen, Skype
 Technologies OU, under the ISC License, in an image whose Dockerfile and
 entrypoint are under the MIT License.
 
+CloudBurrow does not ship NFS-Ganesha. A Filestore instance (#2192) runs
+in an image CloudBurrow builds locally from internal/filestoreserver/image
+(MIT) on Debian's debian:trixie-slim, with Debian's packages of
+NFS-Ganesha 6.5 (LGPL-3.0-or-later), rpcbind (BSD-3-Clause), nfs-common
+(GPL-2.0-or-later), dbus and netbase installed at build time and run as
+separate programs; none of their code is in this repository or linked into
+the CLI.
+
 The binary is linked with Google's differential privacy library
 (github.com/google/differential-privacy/go/v4 v4.1.0), Copyright Google LLC,
 under the Apache License, Version 2.0, and with its dependencies
@@ -273,3 +281,18 @@ libwebgpu_dawn.dylib, Dawn (https://dawn.googlesource.com/dawn, Copyright
 2017-2026 The Dawn & Tint Authors, BSD 3-Clause License). Their licence
 texts ship beside them as LICENSE-LiteRT-LM, LICENSE-llguidance and
 LICENSE-Dawn.
+
+Cloud Router's BGP sessions with router appliances (#2140) run GoBGP
+(https://github.com/osrg/gobgp, v3.37.0), Copyright (C) 2014-2021 Nippon
+Telegraph and Telephone Corporation, under the Apache
+License, Version 2.0. GoBGP is not part of this repository, of the binary or
+of a release archive: the CLI builds gobgpd and gobgp from the module at that
+version (checked against sum.golang.org) into a local image the first time a
+router needs a BGP speaker (dependencies.json, cloudRouterBGP).
+
+The binary is linked with Google's go-tpm (github.com/google/go-tpm v0.9.8),
+Copyright Google LLC, under the Apache License, Version 2.0, and includes
+code ported from Google's go-tpm-tools (github.com/google/go-tpm-tools
+v0.4.11: server.CreateImportBlob and the client package's EK and AK
+templates), Copyright Google LLC, under the Apache License, Version 2.0
+(internal/service/compute/mdsmtls.go and vtpm.go, #2179).

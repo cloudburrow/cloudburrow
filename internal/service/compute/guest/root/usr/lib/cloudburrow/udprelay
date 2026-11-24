@@ -1,0 +1,68 @@
+#!/usr/bin/perl
+# The guest's UDP relay (#2180): one per UDP VPC address and port of a
+# load balancer or Private Service Connect endpoint the instance reaches,
+# which the ruleset's relay chain redirects to 127.0.0.1:LOCAL. Each
+# client (its address and port) is one flow: a TCP connection to
+# CloudBurrow's relay that begins with the PROXY protocol version 2
+# header CloudBurrow gave for it (family DGRAM: the instance's internal
+# IP, the address dialled and its guest token), then carries each
+# datagram as a frame (a 2-byte big-endian length and the datagram), and
+# the replies back the same way, which go back to the client. A flow idle
+# for 600 seconds is closed.
+#   udprelay LOCAL HOST PORT HEADERFILE
+use strict;
+use warnings;
+use IO::Socket::INET;
+use IO::Select;
+
+my ($lp, $host, $rport, $hdrf) = @ARGV;
+open(my $hf, '<:raw', $hdrf) or die "the header: $!";
+my $hdr = do { local $/; <$hf> };
+close $hf;
+my $u = IO::Socket::INET->new(LocalAddr => '127.0.0.1', LocalPort => $lp, Proto => 'udp', ReuseAddr => 1)
+  or die "udp $lp: $!";
+my $sel = IO::Select->new($u);
+my (%tcp, %peer, %buf, %seen);
+
+sub drop {
+  my ($k) = @_;
+  my $t = $tcp{$k} or return;
+  $sel->remove($t);
+  delete $peer{fileno $t};
+  close $t;
+  delete $tcp{$k}; delete $buf{$k}; delete $seen{$k};
+}
+
+while (1) {
+  for my $h ($sel->can_read(5)) {
+    if ($h == $u) {
+      my $d;
+      my $from = $u->recv($d, 65535);
+      next unless defined $from;
+      my $k = unpack('H*', $from);
+      my $t = $tcp{$k};
+      if (!$t) {
+        $t = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $rport, Proto => 'tcp') or next;
+        binmode $t;
+        syswrite($t, $hdr);
+        $tcp{$k} = $t; $peer{fileno $t} = [$k, $from]; $buf{$k} = '';
+        $sel->add($t);
+      }
+      $seen{$k} = time;
+      syswrite($t, pack('n', length $d) . $d) or drop($k);
+    } else {
+      my ($k, $from) = @{$peer{fileno $h}};
+      my $c;
+      my $n = sysread($h, $c, 65537);
+      if (!$n) { drop($k); next; }
+      $buf{$k} .= $c; $seen{$k} = time;
+      while (length($buf{$k}) >= 2) {
+        my $l = unpack('n', $buf{$k});
+        last if length($buf{$k}) < 2 + $l;
+        send($u, substr($buf{$k}, 2, $l), 0, $from);
+        $buf{$k} = substr($buf{$k}, 2 + $l);
+      }
+    }
+  }
+  for my $k (keys %seen) { drop($k) if time - $seen{$k} > 600; }
+}

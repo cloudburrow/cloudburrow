@@ -59,7 +59,53 @@ const (
 	SQLPGInsightsExecTime = "cloudsql.googleapis.com/database/postgresql/insights/aggregate/execution_time"
 	SQLPGInsightsIOTime   = "cloudsql.googleapis.com/database/postgresql/insights/aggregate/io_time"
 	SQLPGInsightsLockTime = "cloudsql.googleapis.com/database/postgresql/insights/aggregate/lock_time"
+
+	// Managed connection pooling (#2163). MySQL's thread pool, on
+	// cloudsql_database: its threads by status (active, idle), the
+	// connections waiting in its work queue, and the average time a
+	// statement waited there over the sample, in milliseconds, all from
+	// the pool's own figures (internal/mysqlpool). PostgreSQL's pooler,
+	// on cloudsql_instance_database (each database): its client
+	// connections by status (active, waiting), its server connections by
+	// status (active, idle), its pools and the clients' average wait in
+	// microseconds, from PgBouncer's SHOW POOLS and SHOW STATS; and the
+	// sign-in attempts and the errors that disconnected a client, counted
+	// from the pooler's log (its "login attempt" and "pooler error"
+	// lines) since CloudBurrow first read it.
+	SQLMySQLPoolThreads   = "cloudsql.googleapis.com/database/mysql/conn_pool/threads"
+	SQLMySQLPoolPending   = "cloudsql.googleapis.com/database/mysql/conn_pool/pending_connections"
+	SQLMySQLPoolAvgWait   = "cloudsql.googleapis.com/database/mysql/conn_pool/avg_wait_time"
+	SQLPoolClientConns    = "cloudsql.googleapis.com/per_database/conn_pool/client_connections"
+	SQLPoolClientAttempts = "cloudsql.googleapis.com/per_database/conn_pool/client_connections_attempts_count"
+	SQLPoolClientAvgWait  = "cloudsql.googleapis.com/per_database/conn_pool/client_connections_avg_wait_time"
+	SQLPoolClientErrors   = "cloudsql.googleapis.com/per_database/conn_pool/client_connections_error_count"
+	SQLPoolNumPools       = "cloudsql.googleapis.com/per_database/conn_pool/num_pools"
+	SQLPoolServerConns    = "cloudsql.googleapis.com/per_database/conn_pool/server_connections"
 )
+
+// SQLMySQLPool is a MySQL thread pool's figures at one sample.
+type SQLMySQLPool struct {
+	// Active and Idle are its threads; Pending the connections queued
+	// for one.
+	Active, Idle, Pending int64
+	// Waits and WaitedUs are the statements given a thread since the pool
+	// started and the microseconds they waited in all.
+	Waits, WaitedUs int64
+}
+
+// SQLPGPool is one database's pooler figures at one sample.
+type SQLPGPool struct {
+	Database                    string
+	Pools                       int64
+	ClientActive, ClientWaiting int64
+	ServerActive, ServerIdle    int64
+	AvgWaitUs                   int64
+	// Attempts and Errors are the sign-ins and the errors that
+	// disconnected a client since the counting began; Counted is whether
+	// they were.
+	Attempts, Errors uint64
+	Counted          bool
+}
 
 // SQLLoad is one user's statement totals in one database, in
 // microseconds.
@@ -111,6 +157,11 @@ type SQLInstance struct {
 	// Load and Waits are Query insights' readings (PostgreSQL).
 	Load  []SQLLoad
 	Waits []SQLWait
+	// MySQLPool is MySQL's thread pool, nil where none was read; PGPools
+	// PostgreSQL's pooler by database, HasPGPool whether it was read.
+	MySQLPool *SQLMySQLPool
+	PGPools   []SQLPGPool
+	HasPGPool bool
 }
 
 // SQLSource reads every Cloud SQL instance now.
@@ -252,6 +303,29 @@ func (b *SQLBuiltin) sampleAt(now time.Time) {
 		if in.HasServer && in.Engine == "POSTGRES" {
 			b.insightsLocked(in, now, start, had && prev.HasServer)
 		}
+		if mp := in.MySQLPool; mp != nil {
+			for _, st := range []struct {
+				status string
+				n      int64
+			}{{"active", mp.Active}, {"idle", mp.Idle}} {
+				pt(SQLMySQLPoolThreads, map[string]string{"status": st.status}, gauge, tInt, "1", at, int64Value(st.n))
+			}
+			pt(SQLMySQLPoolPending, nil, gauge, tInt, "1", at, int64Value(mp.Pending))
+			// The sample's average: the waits since the last sample, or
+			// since the pool started at the first.
+			waits, waited := mp.Waits, mp.WaitedUs
+			if pp := prev.MySQLPool; had && pp != nil && mp.Waits >= pp.Waits && mp.WaitedUs >= pp.WaitedUs {
+				waits, waited = mp.Waits-pp.Waits, mp.WaitedUs-pp.WaitedUs
+			}
+			avg := int64(0)
+			if waits > 0 {
+				avg = (waited/waits + 500) / 1000
+			}
+			pt(SQLMySQLPoolAvgWait, nil, gauge, tInt, "ms", at, int64Value(avg))
+		}
+		if in.HasPGPool {
+			b.pgPoolLocked(in, now)
+		}
 		b.prev[key] = in
 	}
 	for k := range b.prev {
@@ -317,6 +391,53 @@ func (b *SQLBuiltin) insightsLocked(in SQLInstance, now, last time.Time, hadServ
 	}
 }
 
+// pgPoolLocked records in's pooler metrics at now, each database's on
+// the cloudsql_instance_database resource.
+func (b *SQLBuiltin) pgPoolLocked(in SQLInstance, now time.Time) {
+	at := &monitoringpb.TimeInterval{StartTime: timestamppb.New(now), EndTime: timestamppb.New(now)}
+	for _, pd := range in.PGPools {
+		res := &monitoredres.MonitoredResource{Type: "cloudsql_instance_database", Labels: map[string]string{
+			"project_id": in.Project, "location": in.Region, "resource_id": in.Project + ":" + in.Instance, "database": pd.Database}}
+		add := func(metric string, labels map[string]string, kind metricpb.MetricDescriptor_MetricKind, unit string, v int64) {
+			if labels == nil {
+				labels = map[string]string{}
+			}
+			ts := &monitoringpb.TimeSeries{Metric: &metricpb.Metric{Type: metric, Labels: labels}, Resource: clone(res),
+				MetricKind: kind, ValueType: tInt, Unit: unit}
+			k := seriesKey(ts)
+			if cur := b.series[k]; cur != nil {
+				ts = cur
+			} else {
+				b.series[k] = ts
+			}
+			iv := at
+			if kind == cumulative {
+				st, ok := b.cumStart[k]
+				if !ok || v < b.cumLast[k] {
+					st = now
+					b.cumStart[k] = st
+				}
+				b.cumLast[k] = v
+				iv = &monitoringpb.TimeInterval{StartTime: timestamppb.New(st), EndTime: timestamppb.New(now)}
+			}
+			ts.Points = append(ts.Points, &monitoringpb.Point{Interval: iv, Value: int64Value(v)})
+			if len(ts.Points) > tasksRing {
+				ts.Points = ts.Points[len(ts.Points)-tasksRing:]
+			}
+		}
+		add(SQLPoolClientConns, map[string]string{"status": "active"}, gauge, "1", pd.ClientActive)
+		add(SQLPoolClientConns, map[string]string{"status": "waiting"}, gauge, "1", pd.ClientWaiting)
+		add(SQLPoolServerConns, map[string]string{"status": "active"}, gauge, "1", pd.ServerActive)
+		add(SQLPoolServerConns, map[string]string{"status": "idle"}, gauge, "1", pd.ServerIdle)
+		add(SQLPoolNumPools, nil, gauge, "1", pd.Pools)
+		add(SQLPoolClientAvgWait, nil, gauge, "us", pd.AvgWaitUs)
+		if pd.Counted {
+			add(SQLPoolClientAttempts, nil, cumulative, "1", int64(pd.Attempts))
+			add(SQLPoolClientErrors, nil, cumulative, "1", int64(pd.Errors))
+		}
+	}
+}
+
 func sqlKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -333,6 +454,15 @@ var sqlDescriptors = []struct {
 	vt                    metricpb.MetricDescriptor_ValueType
 	labels                []string
 }{
+	{SQLMySQLPoolAvgWait, "MySQL Connection Pool Average Wait Time", "Average time spent by the connection on the work queue in milliseconds.", "ms", gauge, tInt, nil},
+	{SQLMySQLPoolPending, "MySQL Connection Pool Pending Connections", "Number of connections presently enqueued in the work queue.", "1", gauge, tInt, nil},
+	{SQLMySQLPoolThreads, "MySQL Connection Pool Threads", "Number of threads in the connection pool.", "1", gauge, tInt, []string{"status"}},
+	{SQLPoolClientConns, "Client connections", "Number of client connections per database grouped by status.", "1", gauge, tInt, []string{"status"}},
+	{SQLPoolClientAttempts, "Client connection attempts count", "Number of client connection attempts received per database.", "1", cumulative, tInt, nil},
+	{SQLPoolClientAvgWait, "Average wait time", "Average wait time spent by clients waiting for a server connection per database in microseconds.", "us", gauge, tInt, nil},
+	{SQLPoolClientErrors, "Error count", "Count of errors that cause client disconnection including auth error, client connection setup error, server connection error and timeout errors.", "1", cumulative, tInt, nil},
+	{SQLPoolNumPools, "Number of connection pools", "Number of connection pools per database.", "1", gauge, tInt, nil},
+	{SQLPoolServerConns, "Server connections", "Number of server connections per database grouped by status.", "1", gauge, tInt, []string{"status"}},
 	{SQLCPUUtilization, "CPU utilization", "Current CPU utilization represented as a percentage of the reserved CPU that is currently in use.", "10^2.%", gauge, tDouble, nil},
 	{SQLCPUUsageTime, "CPU usage", "Cumulative CPU usage time in seconds.", "s{CPU}", delta, tDouble, nil},
 	{SQLCPUReserved, "CPU reserved cores", "Number of cores reserved for the database.", "1", gauge, tDouble, nil},
@@ -361,7 +491,7 @@ func (b *SQLBuiltin) Descriptors(project string) []*metricpb.MetricDescriptor {
 	for _, d := range sqlDescriptors {
 		md := &metricpb.MetricDescriptor{Name: descriptorName(project, d.typ), Type: d.typ, MetricKind: d.kind, ValueType: d.vt,
 			Unit: d.unit, DisplayName: d.name, Description: d.desc, MonitoredResourceTypes: []string{"cloudsql_database"}}
-		if strings.Contains(d.typ, "/insights/") {
+		if strings.Contains(d.typ, "/insights/") || strings.Contains(d.typ, "/per_database/") {
 			md.MonitoredResourceTypes = []string{"cloudsql_instance_database"}
 		}
 		for _, l := range d.labels {

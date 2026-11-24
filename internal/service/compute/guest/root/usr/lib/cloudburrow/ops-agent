@@ -1,0 +1,223 @@
+#!/bin/sh
+# Google's Ops Agent in the guest (#2139), kept to this machine. The agent
+# (Fluent Bit and the OpenTelemetry Collector, installed from Google's
+# repository at the pinned version) is Google's, unchanged; CloudBurrow's
+# systemd drop-ins run it in the group cloudburrow-opsagent and call this
+# script at three points:
+#
+#   fence             (cloudburrow-ops-agent-fence.service, before the
+#                     agent) resolves the instance's local Cloud Logging
+#                     and Cloud Monitoring endpoints (CLOUDBURROW_LOGGING_HOST,
+#                     CLOUDBURROW_MONITORING_HOST, host:port) to addresses
+#                     and installs the nftables table inet
+#                     cloudburrow_opsagent: every packet a process of the
+#                     group sends is dropped unless it goes to the loopback
+#                     interface (not DNS) or to one of those two addresses
+#                     and ports. No DNS query leaves the agent, so no Google
+#                     host name is even looked up.
+#   condition KIND    (each agent unit's ExecCondition) lets the unit start
+#                     only when the fence is in force and its endpoint is
+#                     served: KIND fluentbit needs Logging, otel Monitoring.
+#   localize KIND     (the last ExecStartPre, after Google's config
+#                     generator) points the generated configuration at the
+#                     local endpoints and checks it: Fluent Bit's
+#                     stackdriver outputs get cloud_logging_base_url (plain
+#                     HTTP, tls Off) and the in-guest metadata relay as
+#                     metadata_server; the Collector's googlecloud and
+#                     googlemanagedprometheus exporters get metric (and log)
+#                     endpoint with use_insecure and the project. Any other
+#                     output or exporter (an OTLP exporter to
+#                     telemetry.googleapis.com, for one), or a Google host
+#                     left in the configuration, fails the unit: the agent
+#                     does not start.
+#
+# The metadata server relay (metadata-server, 127.0.0.1:8169) answers the
+# agent's metadata reads for this instance, its service account's tokens
+# included, from the instance's own metadata server (#2177).
+set -u
+RUN=/run/cloudburrow-ops-agent
+RELAY=http://127.0.0.1:8169
+GROUP=cloudburrow-opsagent
+TABLE=cloudburrow_opsagent
+
+log() { echo "$*" | /usr/lib/cloudburrow/console cloudburrow-ops-agent; }
+
+# resolve HOST:PORT prints ADDRESS:PORT, the host's first IPv4 address.
+resolve() {
+  h=${1%:*}
+  p=${1##*:}
+  case "$p" in '' | *[!0-9]*) return 1 ;; esac
+  ip=$(getent ahostsv4 "$h" | awk 'NR == 1 { print $1 }')
+  [ -n "$ip" ] || return 1
+  echo "$ip:$p"
+}
+
+fence() {
+  mkdir -p "$RUN"
+  rm -f "$RUN/fenced" "$RUN/logging" "$RUN/monitoring"
+  gid=$(getent group "$GROUP" | cut -d: -f3)
+  if [ -z "$gid" ]; then
+    log "no group $GROUP: the Ops Agent is not started"
+    exit 1
+  fi
+  if [ -n "${CLOUDBURROW_LOGGING_HOST:-}" ]; then
+    resolve "$CLOUDBURROW_LOGGING_HOST" > "$RUN/logging" || rm -f "$RUN/logging"
+  fi
+  if [ -n "${CLOUDBURROW_MONITORING_HOST:-}" ]; then
+    resolve "$CLOUDBURROW_MONITORING_HOST" > "$RUN/monitoring" || rm -f "$RUN/monitoring"
+  fi
+  {
+    echo "table inet $TABLE"
+    echo "delete table inet $TABLE"
+    echo "table inet $TABLE {"
+    echo "  chain output {"
+    echo "    type filter hook output priority -10; policy accept;"
+    echo "    meta skgid $gid th dport 53 counter drop comment \"no DNS for the Ops Agent\""
+    echo "    meta skgid $gid oif \"lo\" accept"
+    for f in logging monitoring; do
+      [ -s "$RUN/$f" ] || continue
+      a=$(cat "$RUN/$f")
+      echo "    meta skgid $gid ip daddr ${a%:*} tcp dport ${a##*:} accept comment \"local Cloud ${f}\""
+    done
+    echo "    meta skgid $gid counter drop comment \"the Ops Agent reaches only this instance's Cloud Logging and Cloud Monitoring\""
+    echo "  }"
+    echo "}"
+  } > "$RUN/fence.nft"
+  if ! nft -f "$RUN/fence.nft" || ! nft list table inet "$TABLE" | grep -q "meta skgid $gid counter"; then
+    log "cannot install the Ops Agent's egress fence: the agent is not started"
+    exit 1
+  fi
+  touch "$RUN/fenced"
+  log "Ops Agent egress fenced to: $(cat "$RUN/logging" 2>/dev/null) $(cat "$RUN/monitoring" 2>/dev/null)"
+}
+
+condition() {
+  if [ ! -f "$RUN/fenced" ] || ! nft list table inet "$TABLE" > /dev/null 2>&1; then
+    log "$1: no egress fence, not started"
+    exit 1
+  fi
+  case "$1" in
+    fluentbit) need=logging ;;
+    otel) need=monitoring ;;
+    *) [ -s "$RUN/logging" ] || [ -s "$RUN/monitoring" ] || { log "neither Cloud Logging nor Cloud Monitoring is served: the Ops Agent is not started"; exit 1; }; exit 0 ;;
+  esac
+  if [ ! -s "$RUN/$need" ]; then
+    log "$1: Cloud ${need} is not served by this instance, not started"
+    exit 1
+  fi
+  exit 0
+}
+
+# localize_fluentbit rewrites and checks fluent_bit_main.conf.
+localize_fluentbit() {
+  conf="$RUNTIME_DIRECTORY/fluent_bit_main.conf"
+  base="http://$(cat "$RUN/logging")"
+  awk -v base="$base" -v relay="$RELAY" '
+    function flush(   i, last) {
+      last = n
+      while (last > 0 && buf[last] == "") last--
+      for (i = 1; i <= n; i++) {
+        if (sd && buf[i] ~ /^[ \t]+tls[ \t]/) {
+          sub(/On$/, "Off", buf[i])
+        }
+        print buf[i]
+        if (sd && i == last) {
+          print "    cloud_logging_base_url " base
+          print "    metadata_server " relay
+        }
+      }
+      n = 0; sd = 0
+    }
+    /^\[/ { flush() }
+    { buf[++n] = $0 }
+    /^[ \t]+Name[ \t]+stackdriver[ \t]*$/ { sd = 1 }
+    END { flush() }
+  ' "$conf" > "$conf.local" || return 1
+  # Checks: only stackdriver and prometheus_exporter outputs, each
+  # stackdriver output on plain HTTP to the local endpoint.
+  awk -v base="$base" -v relay="$RELAY" '
+    function done() {
+      if (!out) return
+      if (name == "stackdriver") {
+        if (url != base || meta != relay || tls != "Off") bad = 1
+      } else if (name != "prometheus_exporter") bad = 1
+    }
+    /^\[/ { done(); out = ($0 ~ /^\[OUTPUT\]/); name = ""; url = ""; meta = ""; tls = "" }
+    out && $1 == "Name" { name = $2 }
+    out && $1 == "cloud_logging_base_url" { url = $2 }
+    out && $1 == "metadata_server" { meta = $2 }
+    out && $1 == "tls" { tls = $2 }
+    END { done(); exit bad }
+  ' "$conf.local" || return 1
+  # No output may name a Google host as its own (Host, cloud_logging_base_url).
+  if awk '/^\[/ { out = ($0 ~ /^\[OUTPUT\]/) } out && tolower($2) ~ /google(apis)?\.com/ && $1 != "http_request_key" { f = 1 } END { exit !f }' "$conf.local"; then
+    return 1
+  fi
+  mv "$conf.local" "$conf"
+}
+
+# localize_otel rewrites and checks otel.yaml.
+localize_otel() {
+  conf="$RUNTIME_DIRECTORY/otel.yaml"
+  ep=$(cat "$RUN/monitoring")
+  # Without Cloud Logging, the Collector's log exporter (unused by the
+  # default pipelines) is pointed at the discard port of the loopback.
+  lep=$(cat "$RUN/logging" 2>/dev/null || echo 127.0.0.1:9)
+  awk -v ep="$ep" -v lep="$lep" -v proj="${GOOGLE_CLOUD_PROJECT:-}" '
+    function emit(key, addr) {
+      print "    " key ":"
+      print "      endpoint: " addr
+      print "      use_insecure: true"
+    }
+    function flush(   i, hasm, hasl) {
+      if (n == 0) return
+      print buf[1]
+      if (typ == "googlecloud" || typ == "googlemanagedprometheus") {
+        if (proj != "") print "    project: " proj
+        for (i = 2; i <= n; i++) {
+          if (buf[i] ~ /^    project:/) continue
+          print buf[i]
+          if (buf[i] == "    metric:") { hasm = 1; print "      endpoint: " ep; print "      use_insecure: true" }
+          if (typ == "googlecloud" && buf[i] == "    log:") { hasl = 1; print "      endpoint: " lep; print "      use_insecure: true" }
+        }
+        if (!hasm) emit("metric", ep)
+        if (typ == "googlecloud" && !hasl) emit("log", lep)
+      } else {
+        bad = 1
+      }
+      n = 0
+    }
+    /^exporters:/ { print; inex = 1; next }
+    inex && /^[^ ]/ { flush(); inex = 0 }
+    inex && /^  [^ ]/ {
+      flush(); n = 1; buf[1] = $0
+      name = $1; sub(/:$/, "", name); typ = name; sub(/\/.*/, "", typ)
+      next
+    }
+    inex { buf[++n] = $0; next }
+    { print }
+    END { flush(); exit bad }
+  ' "$conf" > "$conf.local" || return 1
+  if grep -qE 'endpoint: *[^ ]*(googleapis|google)\.com' "$conf.local" || grep -q 'googleclientauth' "$conf.local"; then
+    return 1
+  fi
+  mv "$conf.local" "$conf"
+}
+
+localize() {
+  case "$1" in
+    fluentbit) localize_fluentbit ;;
+    otel) localize_otel ;;
+    *) return 1 ;;
+  esac || {
+    log "$1: the generated configuration names something other than this instance's endpoints: not started"
+    exit 1
+  }
+}
+
+case "${1:-}" in
+  fence) fence ;;
+  condition) condition "${2:-}" ;;
+  localize) localize "${2:-}" ;;
+  *) echo "usage: ops-agent fence|condition KIND|localize KIND" >&2; exit 2 ;;
+esac

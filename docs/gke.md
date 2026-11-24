@@ -80,4 +80,6 @@ An ephemeral instance deletes its clusters when it stops; a persistent one keeps
 
 ## Not yet
 
-A local node has this machine's CPU and memory whatever its pool's machine type (a machine type change re-creates the nodes, labelled with the new type). The remaining differences (a rollback-safe upgrade cannot go back a minor version, the support end dates, monitoring components other than system components, the log forwarder running in the CLI) are listed in [docs/compatibility.md](compatibility.md#kubernetes-engine-api--googlecontainerv1).
+Container logs are shipped as GKE ships them, by a logging agent on every node: while a cluster's system or workload logs are on, its kube-system DaemonSet `fluentbit-gke` runs CloudBurrow's own agent, built from the CLI and loaded into the nodes (never pulled), which reads each node's container log files and writes them to the instance's Cloud Logging. It keeps its place in each file on the node, so logs keep shipping across a restart of the CLI: lines written while it is stopped arrive once it is back. Logging `none` removes the DaemonSet.
+
+A local node has this machine's CPU and memory whatever its pool's machine type (a machine type change re-creates the nodes, labelled with the new type). The remaining differences (a rollback-safe upgrade cannot go back a minor version, the support end dates, monitoring components other than system components) are listed in [docs/compatibility.md](compatibility.md#kubernetes-engine-api--googlecontainerv1).

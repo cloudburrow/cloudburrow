@@ -212,6 +212,22 @@ func TestComputed(t *testing.T) {
 	}
 }
 
+func TestRegex(t *testing.T) {
+	re := Regex("job", func(m proto.Message) string {
+		n := m.(*schedulerpb.Job).GetName()
+		return n[strings.LastIndexByte(n, '/')+1:]
+	})
+	for f, want := range map[string]int{`job =~ "^gam"`: 1, `job =~ "a"`: 3, `job =~ "^(alpha|beta)-"`: 2, `job =~ "zzz"`: 0} {
+		got, err := Apply(f, jobs(), re)
+		if err != nil || len(got) != want {
+			t.Errorf("%s = %d, %v; want %d", f, len(got), err, want)
+		}
+	}
+	if _, err := Apply(`job =~ "("`, jobs(), re); err == nil {
+		t.Error("a bad regular expression was accepted")
+	}
+}
+
 func TestWildcard(t *testing.T) {
 	for _, tc := range []struct {
 		p, s string

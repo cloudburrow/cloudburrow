@@ -102,3 +102,31 @@ func TestConsoleDataTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestDataTransferRepeatFrequency (#2094): Create transfer's Repeat
+// frequency, Google's Hours, Days, Weeks, Months, Custom and On-demand,
+// as the schedule the service runs.
+func TestDataTransferRepeatFrequency(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		repeat, frequency, custom, want string
+		onDemand, fails                 bool
+	}{
+		{repeat: "Hours", frequency: "6", want: "every 6 hours"},
+		{repeat: "Days", frequency: "2", want: "every 48 hours"},
+		{repeat: "Weeks", frequency: "1", want: "every 168 hours"},
+		{repeat: "Months", frequency: "1", want: "1 of month 00:00"},
+		{repeat: "Months", frequency: "3", want: "1 of jan,apr,jul,oct 00:00"},
+		{repeat: "Months", frequency: "5", fails: true},
+		{repeat: "Days", frequency: "0", fails: true},
+		{repeat: "Custom", custom: "every mon 09:00", want: "every mon 09:00"},
+		{repeat: "", custom: "every 24 hours", want: "every 24 hours"},
+		{repeat: "On-demand", onDemand: true},
+		{repeat: "Yearly", frequency: "1", fails: true},
+	} {
+		got, onDemand, err := dtRepeat(map[string]string{"repeat": c.repeat, "frequency": c.frequency, "schedule": c.custom})
+		if (err != nil) != c.fails || got != c.want || onDemand != c.onDemand {
+			t.Errorf("%s every %s: %q, on-demand %v, %v", c.repeat, c.frequency, got, onDemand, err)
+		}
+	}
+}

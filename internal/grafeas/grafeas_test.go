@@ -121,3 +121,28 @@ func TestNotesOccurrencesAndSummary(t *testing.T) {
 		t.Errorf("reloaded %d notes, %d occurrences", len(st2.notes), len(st2.occs))
 	}
 }
+
+// UpdateNote takes v1beta1's attestation_authority for v1's attestation,
+// as hashicorp/google's google_container_analysis_note sends it (#1578),
+// and an unknown path is still refused.
+func TestUpdateNoteTakesTheV1beta1AttestationName(t *testing.T) {
+	s := NewServer(NewStore(func([]byte) error { return nil }))
+	ctx := context.Background()
+	hint := func(n string) *pb.Note {
+		return &pb.Note{Type: &pb.Note_Attestation{Attestation: &pb.AttestationNote{Hint: &pb.AttestationNote_Hint{HumanReadableName: n}}}}
+	}
+	if _, err := s.CreateNote(ctx, &pb.CreateNoteRequest{Parent: "projects/p", NoteId: "a", Note: hint("one")}); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"attestationAuthority", "attestation_authority"} {
+		got, err := s.UpdateNote(ctx, &pb.UpdateNoteRequest{Name: "projects/p/notes/a", Note: hint(path),
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{path}}})
+		if err != nil || got.GetAttestation().GetHint().GetHumanReadableName() != path {
+			t.Errorf("UpdateNote with mask %s = %v, %v", path, got, err)
+		}
+	}
+	if _, err := s.UpdateNote(ctx, &pb.UpdateNoteRequest{Name: "projects/p/notes/a", Note: hint("x"),
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"attestationAuthorityX"}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("an unknown mask path: %v; want INVALID_ARGUMENT", err)
+	}
+}

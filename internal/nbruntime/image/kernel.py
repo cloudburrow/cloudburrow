@@ -7,8 +7,10 @@
 # BigQuery is the instance's: the client's endpoint is CB_BIGQUERY_ENDPOINT,
 # its credentials anonymous (the instance takes every caller to be its one
 # identity) and its project GOOGLE_CLOUD_PROJECT, set for
-# google.cloud.bigquery.Client() and %%bigquery alike. The container has no
-# route but that one (an --internal Docker network).
+# google.cloud.bigquery.Client() and %%bigquery alike. A run that executes
+# as a service account or a user (#2173) is given that identity's bearer
+# token in CB_ACCESS_TOKEN, which the clients send instead. The container
+# has no route but that one (an --internal Docker network).
 import io
 import json
 import os
@@ -17,6 +19,8 @@ import sys
 
 PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 ENDPOINT = os.environ.get("CB_BIGQUERY_ENDPOINT", "")
+TOKEN = os.environ.pop("CB_ACCESS_TOKEN", "")
+DATAPROC = os.environ.get("CB_DATAPROC_ENDPOINT", "")
 MAX_TEXT = 1 << 20
 
 # Answers go to the original stdout; the cells' own output is captured.
@@ -96,9 +100,19 @@ class Shell(InteractiveShell):
 shell = Shell.instance()
 
 
+def run_credentials():
+    """The run's credentials: its identity's token, else anonymous."""
+    from google.auth.credentials import AnonymousCredentials
+
+    if not TOKEN:
+        return AnonymousCredentials()
+    from google.oauth2.credentials import Credentials
+
+    return Credentials(token=TOKEN)
+
+
 def setup_bigquery():
     from google.api_core.client_options import ClientOptions
-    from google.auth.credentials import AnonymousCredentials
     from google.cloud import bigquery
 
     init = bigquery.Client.__init__
@@ -107,7 +121,7 @@ def setup_bigquery():
         if not args and kwargs.get("project") is None:
             kwargs["project"] = PROJECT
         if len(args) < 2 and kwargs.get("credentials") is None:
-            kwargs["credentials"] = AnonymousCredentials()
+            kwargs["credentials"] = run_credentials()
         opts = kwargs.get("client_options")
         if opts is None:
             kwargs["client_options"] = ClientOptions(api_endpoint=ENDPOINT)
@@ -124,7 +138,7 @@ def setup_bigquery():
 
     ctx = bigquery_magics.context
     ctx.project = PROJECT
-    ctx.credentials = AnonymousCredentials()
+    ctx.credentials = run_credentials()
     ctx.bigquery_client_options = ClientOptions(api_endpoint=ENDPOINT)
     try:
         ctx.progress_bar_type = None
@@ -132,7 +146,71 @@ def setup_bigquery():
         pass
 
 
+def setup_dataproc():
+    """An Apache Spark notebook's session (#2156) is the instance's.
+
+    Google's DataprocSparkSession (google-cloud-dataproc-spark-connect)
+    creates a Spark Connect session with google-cloud-dataproc's
+    SessionControllerClient and reaches it through its TCP-over-WebSocket
+    bridge (wss://HOST/tcp-over-websocket-bridge/...) with a bearer token
+    of Application Default Credentials. Here the Dataproc clients use the
+    relay's plaintext gRPC port, the bridge the same port over ws://, and
+    the credentials are local ones the instance takes, as BigQuery's are
+    anonymous.
+    """
+    import grpc
+    import google.auth
+    from google.auth import credentials as gcreds
+    from google.cloud import dataproc_v1
+
+    class LocalCredentials(gcreds.Credentials):
+        def __init__(self):
+            super().__init__()
+            self.token = TOKEN or "cloudburrow-local"
+
+        def refresh(self, request):
+            self.token = TOKEN or "cloudburrow-local"
+
+    creds = LocalCredentials()
+
+    def local_default(scopes=None, request=None, quota_project_id=None, default_scopes=None):
+        return creds, PROJECT
+
+    google.auth.default = local_default
+
+    def local(cls):
+        init = cls.__init__
+
+        def local_init(self, *args, **kwargs):
+            if kwargs.get("transport") is None:
+                kwargs.pop("credentials", None)
+                kwargs.pop("client_options", None)
+                kwargs["transport"] = cls.get_transport_class("grpc")(channel=grpc.insecure_channel(DATAPROC))
+            init(self, *args, **kwargs)
+
+        cls.__init__ = local_init
+
+    for name in ("SessionControllerClient", "SessionTemplateControllerClient", "BatchControllerClient"):
+        local(getattr(dataproc_v1, name))
+
+    from google.cloud.dataproc_spark_connect.client import proxy
+
+    connect = proxy.websocketclient.connect
+
+    def local_connect(uri, *args, **kwargs):
+        if uri.startswith("wss://"):
+            uri = "ws://" + DATAPROC + "/" + uri.split("/", 3)[3]
+        return connect(uri, *args, **kwargs)
+
+    proxy.websocketclient.connect = local_connect
+
+
 notes = []
+if DATAPROC:
+    try:
+        setup_dataproc()
+    except Exception as err:  # the shell still runs Python
+        notes.append("Dataproc client setup failed: %s" % err)
 try:
     setup_bigquery()
 except Exception as err:  # the shell still runs Python

@@ -257,7 +257,8 @@ func (p cloudSQLInstancesProvider) sqlCreateFormIn(project string) []console.Fie
 			Help:        "CIDR ranges allowed to connect, separated by commas, such as 203.0.113.0/24. Recorded and shown on Connections > Networking."},
 	}, append(sqlPrivateIPFields(connSec, nets, ranges, nil),
 		// Managed connection pooling (#2141): Enterprise Plus PostgreSQL.
-		sqlPoolFields(connSec, map[string]string{"engine": sqlEnginePostgres, "edition": "ENTERPRISE_PLUS"}, nil)...)...), append([]console.Field{
+		append(sqlPoolFields(connSec, map[string]string{"engine": sqlEnginePostgres, "edition": "ENTERPRISE_PLUS"}, nil),
+			sqlMySQLPoolFields(connSec, map[string]string{"engine": sqlEngineMySQL, "edition": "ENTERPRISE_PLUS"}, nil)...)...)...), append([]console.Field{
 		{Name: "allowDataApi", Label: "Allow Data API", Type: "checkbox", Section: connSec,
 			Help: "Lets instances.executeSql run statements on the instance (settings.dataApiAccess ALLOW_DATA_API); off by default, as Google's is."},
 		serverCAModeSection(serverCAModeField(internalCAMode), securitySec),

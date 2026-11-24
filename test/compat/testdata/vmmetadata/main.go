@@ -1,0 +1,144 @@
+// Command vmmetadata runs inside a Compute Engine VM (#2177) and reads the
+// VM's metadata server through Google's official client package,
+// cloud.google.com/go/compute/metadata, as an application on Compute
+// Engine does: OnGCE, the project, the instance's name, ID, zone and
+// hostname, an attribute, the network interface's IP, the service
+// account's email, a token, and a wait-for-change through Subscribe. It
+// prints KEY=VALUE lines (never the token itself) and fails on any error.
+//
+// It talks only to the metadata server the VM names (GCE_METADATA_HOST,
+// or the package's default, metadata.google.internal / 169.254.169.254,
+// which the VM answers itself), never to a Google API.
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"cloud.google.com/go/compute/metadata"
+)
+
+// httpsTransport carries the package's requests to the HTTPS metadata
+// server of a Shielded VM (#2179), as Google documents it: port 443 of
+// metadata.google.internal, the root certificate and the client
+// credentials Google's guest agent wrote under /run/google-mds-mtls.
+type httpsTransport struct{ rt http.RoundTripper }
+
+func (t httpsTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.URL.Scheme = "https"
+	return t.rt.RoundTrip(r)
+}
+
+func httpsClient() (*http.Client, error) {
+	root, err := os.ReadFile("/run/google-mds-mtls/root.crt")
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(root) {
+		return nil, fmt.Errorf("no root certificate")
+	}
+	creds, err := os.ReadFile("/run/google-mds-mtls/client.key")
+	if err != nil {
+		return nil, err
+	}
+	cert, err := tls.X509KeyPair(creds, creds)
+	if err != nil {
+		return nil, err
+	}
+	tr := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, Certificates: []tls.Certificate{cert}, ServerName: "metadata.google.internal"}}
+	return &http.Client{Transport: httpsTransport{tr}, Timeout: 30 * time.Second}, nil
+}
+
+func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	c := metadata.NewClient(nil)
+	if len(os.Args) > 1 && os.Args[1] == "https" {
+		hc, err := httpsClient()
+		if err != nil {
+			fmt.Printf("FAIL https: %v\n", err)
+			os.Exit(1)
+		}
+		c = metadata.NewClient(hc)
+		fmt.Println("transport=https")
+	}
+	fail := func(what string, err error) {
+		fmt.Printf("FAIL %s: %v\n", what, err)
+		os.Exit(1)
+	}
+	if len(os.Args) < 2 || os.Args[1] != "https" {
+		if !metadata.OnGCEWithContext(ctx) {
+			fail("OnGCE", fmt.Errorf("false"))
+		}
+		fmt.Println("ongce=true")
+	}
+	for _, k := range []struct {
+		name string
+		get  func(context.Context) (string, error)
+	}{
+		{"project", c.ProjectIDWithContext},
+		{"numeric", c.NumericProjectIDWithContext},
+		{"name", c.InstanceNameWithContext},
+		{"id", c.InstanceIDWithContext},
+		{"zone", c.ZoneWithContext},
+		{"hostname", c.HostnameWithContext},
+		{"ip", c.InternalIPWithContext},
+		{"email", func(ctx context.Context) (string, error) { return c.EmailWithContext(ctx, "default") }},
+		{"role", func(ctx context.Context) (string, error) { return c.InstanceAttributeValueWithContext(ctx, "role") }},
+		{"nic", func(ctx context.Context) (string, error) {
+			return c.GetWithContext(ctx, "instance/network-interfaces/0/ip")
+		}},
+	} {
+		v, err := k.get(ctx)
+		if err != nil {
+			fail(k.name, err)
+		}
+		fmt.Printf("%s=%s\n", k.name, strings.TrimSpace(v))
+	}
+	raw, err := c.GetWithContext(ctx, "instance/service-accounts/default/token")
+	if err != nil {
+		fail("token", err)
+	}
+	var tok struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+		TokenType   string `json:"token_type"`
+	}
+	if err := json.Unmarshal([]byte(raw), &tok); err != nil || tok.AccessToken == "" {
+		fail("token", fmt.Errorf("%v: %d bytes", err, len(raw)))
+	}
+	fmt.Printf("token=%s expires_in=%d\n", tok.TokenType, tok.ExpiresIn)
+	scopes, err := c.ScopesWithContext(ctx, "default")
+	if err != nil {
+		fail("scopes", err)
+	}
+	fmt.Printf("scopes=%s\n", strings.Join(scopes, ","))
+	// Subscribe is wait_for_change: it returns the current value first,
+	// then each change, until the callback says stop.
+	if len(os.Args) > 1 && os.Args[1] == "watch" {
+		seen := 0
+		err := c.SubscribeWithContext(ctx, "instance/attributes/role", func(_ context.Context, v string, ok bool) error {
+			seen++
+			fmt.Printf("watch%d=%s\n", seen, v)
+			if seen >= 2 {
+				return errStop
+			}
+			return nil
+		})
+		if err != nil && err != errStop {
+			fail("subscribe", err)
+		}
+	}
+	fmt.Println("OK")
+}
+
+var errStop = fmt.Errorf("stop")

@@ -95,7 +95,31 @@ func (s *Server) remoteOf(ctx context.Context, name string) (remote, error) {
 		return remote{}, err
 	}
 	rm := remote{url: gr.GetUrl(), branch: gr.GetDefaultBranch()}
-	if link := gr.GetGitRepositoryLink(); link != "" {
+	s.mu.Lock()
+	connector := s.connectors[name]
+	s.mu.Unlock()
+	if c := gr.GetSshAuthenticationConfig(); c != nil {
+		key, err := s.secret(ctx, c.GetUserPrivateKeySecretVersion())
+		if err != nil {
+			return remote{}, apierror.FailedPrecondition("git remote SSH private key %s: %v", c.GetUserPrivateKeySecretVersion(), err)
+		}
+		conf, err := s.sshConf(name, gr.GetUrl(), c, key)
+		if err != nil {
+			return remote{}, apierror.Internal(err, "write the git remote's SSH key")
+		}
+		rm.conf = conf
+	} else if connector != "" {
+		// Personal authentication: the caller's own token from the
+		// account connector.
+		if s.opts.AccountToken == nil {
+			return remote{}, apierror.FailedPrecondition("git_remote_settings.account_connector %s: Developer Connect is not served on this instance", connector)
+		}
+		tok, err := s.opts.AccountToken(ctx, connector, strings.TrimPrefix(callerOf(ctx), "user:"))
+		if err != nil {
+			return remote{}, err
+		}
+		rm.conf = []string{"http.extraHeader=Authorization: Bearer " + tok}
+	} else if link := gr.GetGitRepositoryLink(); link != "" {
 		tok, err := s.linkToken(ctx, link)
 		if err != nil {
 			return remote{}, apierror.FailedPrecondition("git remote access token of %s: %v", link, err)
@@ -391,7 +415,24 @@ func (s *Server) ComputeRepositoryAccessTokenStatus(ctx context.Context, req *df
 	out := func(st dfpb.ComputeRepositoryAccessTokenStatusResponse_TokenStatus) (*dfpb.ComputeRepositoryAccessTokenStatusResponse, error) {
 		return &dfpb.ComputeRepositoryAccessTokenStatusResponse{TokenStatus: st}, nil
 	}
-	if link := gr.GetGitRepositoryLink(); link != "" {
+	s.mu.Lock()
+	connector := s.connectors[req.GetName()]
+	s.mu.Unlock()
+	if c := gr.GetSshAuthenticationConfig(); c != nil {
+		if _, err := s.secret(ctx, c.GetUserPrivateKeySecretVersion()); err != nil {
+			if apierror.From(err).Code == 7 {
+				return out(dfpb.ComputeRepositoryAccessTokenStatusResponse_PERMISSION_DENIED)
+			}
+			return out(dfpb.ComputeRepositoryAccessTokenStatusResponse_NOT_FOUND)
+		}
+	} else if connector != "" {
+		if s.opts.AccountToken == nil {
+			return out(dfpb.ComputeRepositoryAccessTokenStatusResponse_NOT_FOUND)
+		}
+		if _, err := s.opts.AccountToken(ctx, connector, strings.TrimPrefix(callerOf(ctx), "user:")); err != nil {
+			return out(dfpb.ComputeRepositoryAccessTokenStatusResponse_NOT_FOUND)
+		}
+	} else if link := gr.GetGitRepositoryLink(); link != "" {
 		if _, err := s.linkToken(ctx, link); err != nil {
 			return out(dfpb.ComputeRepositoryAccessTokenStatusResponse_NOT_FOUND)
 		}

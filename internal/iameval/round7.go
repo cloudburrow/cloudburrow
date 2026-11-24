@@ -145,7 +145,8 @@ func computeDeny(permission, resource string) error {
 // compute.addresses.use and an INTERNAL address's createInternal are the
 // thirteenth round's (cmd/cloudburrow/iamenforce13.go).
 // VM instances, disks, snapshots and subnetworks keep their own allow
-// policies (#2112, internal/service/compute/iam.go), which apply beside
+// policies (#2112; a subnet's is Shared VPC's Individual subnets, #2140;
+// internal/service/compute/iam.go), which apply beside
 // the project's and its ancestors'; nothing else served keeps one. Their
 // getIamPolicy and setIamPolicy are compute.<collection>.getIamPolicy and
 // setIamPolicy on the resource, and testIamPermissions answers what the
@@ -198,6 +199,12 @@ var ComputeJSON = func() []JSONMethod {
 	coll(global, "networks", "networks", false, map[string]string{"PATCH": "compute.networks.update", "switchToCustomMode": "compute.networks.switchToCustomMode"})
 	coll(region, "subnetworks", "subnetworks", true, map[string]string{"PATCH": "compute.subnetworks.update",
 		"expandIpCidrRange": "compute.subnetworks.expandIpCidrRange", "setPrivateIpGoogleAccess": "compute.subnetworks.setPrivateIpGoogleAccess"})
+	// A subnet's policy (#2140): testIamPermissions needs
+	// compute.subnetworks.list, as its reference page says.
+	subnet := `(` + p + region + `/subnetworks/[^/]+)`
+	add("GET", subnet+`/getIamPolicy`, "compute.subnetworks.getIamPolicy")
+	add("POST", subnet+`/setIamPolicy`, "compute.subnetworks.setIamPolicy")
+	add("POST", subnet+`/testIamPermissions`, "compute.subnetworks.list")
 	coll(global, "firewalls", "firewalls", false, map[string]string{"PATCH": "compute.firewalls.update", "PUT": "compute.firewalls.update"})
 	coll(global, "routes", "routes", false, nil)
 	coll(region, "addresses", "addresses", true, map[string]string{"setLabels": "compute.addresses.setLabels"})
@@ -205,6 +212,10 @@ var ComputeJSON = func() []JSONMethod {
 	coll(zone, "disks", "disks", true, map[string]string{"createSnapshot": "compute.disks.createSnapshot",
 		"resize": "compute.disks.resize", "setLabels": "compute.disks.setLabels"})
 	coll(global, "snapshots", "snapshots", false, map[string]string{"setLabels": "compute.snapshots.setLabels"})
+	// Private Service Connect (#2140): endpoints and service attachments.
+	coll(global, "forwardingRules", "globalForwardingRules", false, map[string]string{"setLabels": "compute.globalForwardingRules.setLabels"})
+	coll(region, "forwardingRules", "forwardingRules", true, map[string]string{"setLabels": "compute.forwardingRules.setLabels"})
+	coll(region, "serviceAttachments", "serviceAttachments", true, map[string]string{"PATCH": "compute.serviceAttachments.update"})
 	instanceVerbs := map[string]string{}
 	for _, v := range []string{"attachDisk", "detachDisk", "reset", "resume", "setDeletionProtection", "setLabels", "setMachineType",
 		"setMetadata", "setTags", "start", "stop", "suspend"} {
@@ -243,6 +254,17 @@ var ComputeJSON = func() []JSONMethod {
 	add("GET", `(`+p+zone+`/diskTypes/[^/]+)`, "compute.diskTypes.get")
 	add("GET", `(`+p+`)`, "compute.projects.get")
 	add("POST", `(`+p+`)/setCommonInstanceMetadata`, "compute.projects.setCommonInstanceMetadata")
+	// Shared VPC (#2140): each method's REST reference names its
+	// permission on the project (projects/enableXpnHost and the rest, read
+	// 2026-11-22; the getters' compute.projects.get is UNVERIFIED, re-read 2026-11-22:
+	// https://docs.cloud.google.com/compute/docs/reference/rest/v1/projects/getXpnResources names none).
+	for verb, perm := range map[string]string{"enableXpnHost": "compute.organizations.enableXpnHost",
+		"disableXpnHost": "compute.organizations.disableXpnHost", "enableXpnResource": "compute.organizations.enableXpnResource",
+		"disableXpnResource": "compute.organizations.disableXpnResource", "listXpnHosts": "compute.projects.get"} {
+		add("POST", `(`+p+`)/`+verb, perm)
+	}
+	add("GET", `(`+p+`)/getXpnHost`, "compute.projects.get")
+	add("GET", `(`+p+`)/getXpnResources`, "compute.projects.get")
 	return out
 }()
 

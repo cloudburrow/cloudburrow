@@ -70,11 +70,19 @@ var serviceUsageAPIs = []struct {
 	// The Network Connectivity API's service connectivity automation
 	// (#2141), on the Compute Engine port.
 	{config.ServiceCompute, serviceusage.API{Name: "networkconnectivity.googleapis.com", Title: "Network Connectivity API"}},
+	{config.ServiceCompute, serviceusage.API{Name: "vpcaccess.googleapis.com", Title: "Serverless VPC Access API"}},
+	{config.ServiceCompute, serviceusage.API{Name: "certificatemanager.googleapis.com", Title: "Certificate Manager API"}},
+	{config.ServiceCompute, serviceusage.API{Name: "iap.googleapis.com", Title: "Cloud Identity-Aware Proxy API"}},
+	{config.ServiceCompute, serviceusage.API{Name: "networksecurity.googleapis.com", Title: "Network Security API"}},
+	{config.ServiceCompute, serviceusage.API{Name: "networkservices.googleapis.com", Title: "Network Services API"}},
 	{config.ServiceWorkflows, serviceusage.API{Name: "workflows.googleapis.com", Title: "Workflows API"}},
 	{config.ServiceWorkflows, serviceusage.API{Name: "workflowexecutions.googleapis.com", Title: "Workflow Executions API"}},
 	{config.ServiceParameterManager, serviceusage.API{Name: "parametermanager.googleapis.com", Title: "Parameter Manager API"}},
 	{config.ServiceDataform, serviceusage.API{Name: "dataform.googleapis.com", Title: "Dataform API"}},
+	{config.ServiceDataproc, serviceusage.API{Name: "dataproc.googleapis.com", Title: "Cloud Dataproc API"}},
 	{config.ServiceAppHub, serviceusage.API{Name: "apphub.googleapis.com", Title: "App Hub API"}},
+	{config.ServiceAlloyDB, serviceusage.API{Name: "alloydb.googleapis.com", Title: "AlloyDB API"}},
+	{config.ServiceFilestore, serviceusage.API{Name: "file.googleapis.com", Title: "Cloud Filestore API"}},
 	{config.ServiceTrace, serviceusage.API{Name: "cloudtrace.googleapis.com", Title: "Cloud Trace API"}},
 	{config.ServiceTrace, serviceusage.API{Name: "telemetry.googleapis.com", Title: "Telemetry API"}},
 }

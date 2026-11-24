@@ -15,10 +15,9 @@ package sqladmin
 // restores to a new instance, and major version upgrades, one major
 // version at a time (5.6 to 5.7, 5.7 to 8.0), which are mysqldump's, as
 // 8.0's are. Read replicas, high availability, point-in-time recovery,
-// demotion and the external syncs are 501: CloudBurrow's replication,
-// standby and recovery steps are written in MySQL 8.0's statements (CHANGE
-// REPLICATION SOURCE, START REPLICA, SET PERSIST), which 5.7 and 5.6 have
-// not.
+// demotion and the external syncs run CloudBurrow's MySQL 8.0 steps in
+// 5.7's and 5.6's statements (MySQLDialect). A physical external sync of
+// 5.7 restores an XtraBackup 2.4 backup; Google supports none of 5.6.
 
 import (
 	"net/http"
@@ -78,26 +77,18 @@ func (s *Server) copyRefusal(version, what string) error {
 	return nil
 }
 
-// legacyMySQLWhy is the reason a MySQL 5.7 or 5.6 instance cannot have
-// what legacyRefusal refuses.
-const legacyMySQLWhy = "a physical (XtraBackup) sync restores Percona XtraBackup 8.0's or 8.4's backup, which is MySQL 8.0's and " +
-	"8.4's only; a MYSQL_5_7 or MYSQL_5_6 replica of an external server is synced with mysqldump (syncMode ONLINE or OFFLINE)"
-
-// legacyUnimplemented is the 501 for what, on a MySQL 5.7 or 5.6 instance.
-func legacyUnimplemented(what string) error {
-	return unimplemented(what+" on a MYSQL_5_7 or MYSQL_5_6 instance", legacyMySQLWhy)
-}
-
-// legacyRefusal is the 501 for the settings of spec a MySQL 5.7 or 5.6
+// legacyRefusal is the error for the settings of spec a MySQL 5.7 or 5.6
 // instance cannot have here, or nil. Read replicas, REGIONAL, point-in-time
 // recovery, demotion and external replicas run MySQL 8.0's steps in 5.7's
-// and 5.6's statements (MySQLDialect).
+// and 5.6's statements (MySQLDialect); a physical external sync of 5.7 runs
+// XtraBackup 2.4 (#1524), and one of 5.6 is 400, as Google supports none
+// (physicalVersionErr).
 func legacyRefusal(spec Spec) error {
 	if !legacyMySQL(spec.DatabaseVersion) {
 		return nil
 	}
-	if ext := spec.External; ext != nil && ext.Physical {
-		return legacyUnimplemented("a physical external sync")
+	if ext := spec.External; ext != nil && ext.Physical && !physicalVersionSupported(spec.DatabaseVersion) {
+		return physicalVersionErr(spec.DatabaseVersion)
 	}
 	return nil
 }

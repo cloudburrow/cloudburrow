@@ -40,14 +40,14 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 		"storage-transfer-agent-pools"}},
 	config.ServicePubSub:        {Providers: []string{"pubsub", "pubsub-subscriptions", "pubsub-snapshots", "pubsub-schemas"}},
 	config.ServiceTasks:         {Providers: []string{"tasks"}},
-	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-domains", "run-instances", "run-builds", "cloud-build-triggers", "cloud-build-worker-pools", "cloud-build-dashboard", "cloud-build-repositories", "cloud-build-settings", "secure-source-manager", "artifact-registry", "artifact-registry-settings", "functions", "eventarc", "eventarc-buses", "eventarc-pipelines", "eventarc-enrollments", "eventarc-google-api-sources", "eventarc-channels", "vertex-models", "vertex-endpoints"}},
+	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-domains", "run-instances", "run-builds", "cloud-build-triggers", "cloud-build-worker-pools", "cloud-build-dashboard", "cloud-build-repositories", "cloud-build-settings", "secure-source-manager", "developer-connect-account-connectors", "artifact-registry", "artifact-registry-settings", "functions", "eventarc", "eventarc-buses", "eventarc-pipelines", "eventarc-enrollments", "eventarc-google-api-sources", "eventarc-channels", "vertex-models", "vertex-endpoints", "colab-runtimes", "colab-templates", "colab-notebooks", "colab-executions", "colab-schedules", "vertex-pipeline-runs", "vertex-pipeline-schedules", "workbench-instances"}},
 	config.ServiceSecrets:       {Providers: []string{"secrets", "secrets-regional"}},
 	config.ServiceFirestore:     {Providers: []string{"firestore", "firestore-databases"}},
 	config.ServiceDatastore:     {Providers: []string{"datastore"}},
 	config.ServiceBigtable:      {Providers: []string{"bigtable", "bigtable-instances"}},
 	config.ServiceSpanner:       {Providers: []string{"spanner"}},
 	config.ServiceCloudSQL:      {Providers: []string{"cloudsql", "cloudsql-instances", "cloudsql-backups"}},
-	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs", "bigquery-transfers", "bigquery-scheduled-queries", "bigquery-sharing", "bigquery-clean-rooms"}},
+	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs", "bigquery-transfers", "bigquery-scheduled-queries", "bigquery-sharing", "bigquery-clean-rooms", "bigquery-capacity", "bigquery-commitments", "bigquery-reservation-groups", "bigquery-bi-engine"}},
 	config.ServiceScheduler:     {Providers: []string{"scheduler"}},
 	config.ServiceKMS:           {Providers: []string{"kms", "kms-ekm", "kms-autokey", "kms-config", "kms-inventory", "kms-hsm"}},
 	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings", "logging-saved-queries", "logging-log-scopes", "logging-trace-scopes", "observability-settings", "observability-buckets", "logging-analytics"}, Screen: "/logs"},
@@ -60,15 +60,32 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceParameterManager: {Providers: []string{"parametermanager", "parametermanager-templates"}},
 	config.ServiceDataform:         {Providers: []string{"dataform", "dataform-folders", "dataform-settings"}},
 	config.ServiceAppHub:           {Providers: []string{"apphub", "apphub-discovered", "apphub-settings"}},
+	config.ServiceAlloyDB:          {Providers: []string{"alloydb", "alloydb-backups"}},
+	config.ServiceFilestore:        {Providers: []string{"filestore", "filestore-backups", "filestore-snapshots"}},
 	config.ServiceTrace:            {Providers: []string{"trace-explorer"}},
+	config.ServiceDataproc:         {Providers: []string{"dataproc-batches", "dataproc-sessions", "dataproc-templates", "dataproc-clusters", "dataproc-jobs", "dataproc-workflows", "dataproc-autoscaling"}},
 	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
 	// clusters, beside the instance's own.
 	config.ServiceGKE: {Providers: []string{"gkeclusters"}},
 	config.ServiceMonitoring: {Providers: []string{"monitoring-explorer", "monitoring-metrics", "monitoring-alerting", "monitoring-incidents",
 		"monitoring-channels", "monitoring-uptime", "monitoring-dashboards", "monitoring-groups", "monitoring-services", "monitoring-snoozes"}},
 	// VPC network (#1936): the Compute Engine API's networking.
-	config.ServiceCompute: {Providers: []string{"vpc-networks", "vpc-firewalls", "vpc-routes", "vpc-addresses", "vpc-psc", "psc-policies",
-		"compute-instances", "compute-disks", "compute-snapshots", "compute-images", "compute-machinetypes", "compute-metadata"}},
+	config.ServiceCompute: {Providers: []string{"vpc-networks", "vpc-firewalls", "vpc-routes", "vpc-addresses",
+		"compute-instances", "compute-disks", "compute-snapshots", "compute-images", "compute-machinetypes", "compute-metadata",
+		"vpc-subnets", "vpc-peering", "hybrid-routers", "netservices-nat", "vpc-sharedvpc", "netservices-psc-endpoints", "netservices-psc-published", "psc-policies", "vpc-connectors", "vpc-addresses-internal", "vpc-routes-effective",
+		"compute-instance-schedules", "compute-snapshot-schedules", "compute-instance-templates", "compute-instance-groups",
+		"compute-machine-images", "compute-ssh-keys",
+		// Cloud Load Balancing (#2153).
+		"netservices-lb", "netservices-lb-backends", "netservices-lb-frontends", "compute-healthchecks", "compute-negs", "netservices-lb-certs",
+		// Cloud Armor, Cloud CDN, IAP and Certificate Manager (#2160).
+		"netsecurity-armor", "netservices-cdn", "security-iap", "security-iap-tcp", "ccm-certificates", "ccm-maps", "ccm-dnsauth", "ccm-issuance",
+		"netsecurity-armor-edge", "netsecurity-armor-waf", "servicemesh-routing",
+		// Trust configs and Client Authentication (#2160).
+		"ccm-trustconfigs", "netsecurity-clientauth", "netsecurity-clienttls", "netsecurity-meshauthz", "netsecurity-authz",
+		// Address groups and Backend Authentication (#2160).
+		"netsecurity-addressgroups", "netsecurity-backendauth",
+		// Secure Web Proxy (#2160).
+		"netsecurity-swp-proxies", "netsecurity-swp-policies", "netsecurity-swp-urllists", "netsecurity-swp-tls"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable
@@ -181,7 +198,10 @@ func coverageDeps(t *testing.T) consoleDeps {
 		workflows:        &workflowsService{},
 		parameterManager: &parameterManagerService{},
 		dataform:         &dataformService{},
+		dataproc:         &dataprocService{},
 		appHub:           &appHubService{},
+		alloyDB:          &alloyDBService{},
+		filestore:        &filestoreService{},
 		trace:            &traceService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.
 		serviceUsage: newServiceUsageServer(cfg, projects, store.NewMemory()),

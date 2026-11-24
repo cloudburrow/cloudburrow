@@ -256,7 +256,7 @@ func (p dataformFoldersProvider) Detail(ctx context.Context, project string, pth
 				Fields: map[string]string{"Type": "Folder", "Created": kmsTime(f.GetCreateTime())}})
 		case r != nil:
 			kind := "Repository"
-			switch r.GetLabels()[dataformAssetLabel] {
+			switch dataformAssetKind(r) {
 			case "sql":
 				kind = "Saved query"
 			case "notebook":

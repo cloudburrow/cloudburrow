@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CloudBurrow's reactor for the Dataproc RANGER component's image (#2162),
+  copied next to Apache Ranger 2.8.0's own pom.xml. Its modules are Ranger's root (".", whose own modules are
+  every Ranger module) and cloudburrow-distro (distro.pom.xml). The
+  Dockerfile builds "-pl cloudburrow-distro -am": the Admin server and the
+  HDFS, Hive and YARN plugins, and only the modules they need, so
+  never the Kylin plugin, whose Kylin dependency (RoaringBitmap
+  0.7.36-os-kylin-r1) is only on repo.spring.io, which answers 401;
+  Dataproc's Ranger component installs no Kylin plugin. Ranger's root is
+  then the reactor's first project, the one Ranger's assembly descriptors
+  find their modules through (useAllReactorProjects).
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>dev.cloudburrow.ranger</groupId>
+    <artifactId>cloudburrow-ranger-build</artifactId>
+    <version>2.8.0</version>
+    <packaging>pom</packaging>
+    <modules>
+        <module>.</module>
+        <module>cloudburrow-distro</module>
+    </modules>
+</project>

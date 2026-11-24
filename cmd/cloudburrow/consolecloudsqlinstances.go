@@ -216,7 +216,7 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 	if err := sqlCreateConnections(st, v); err != nil {
 		return "", err
 	}
-	if v["engine"] == sqlEnginePostgres && v["edition"] == "ENTERPRISE_PLUS" {
+	if (v["engine"] == sqlEnginePostgres || v["engine"] == sqlEngineMySQL) && v["edition"] == "ENTERPRISE_PLUS" {
 		if pc := sqlPoolConfig(v); pc != nil && pc.ConnectionPoolingEnabled {
 			st.ConnectionPoolConfig = pc
 		}
