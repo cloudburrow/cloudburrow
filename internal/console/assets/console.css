@@ -2959,6 +2959,10 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .compute-connect { border: 0; margin: 0; padding: 0; }
 .compute-connect legend { font-weight: 500; margin-bottom: 4px; }
 .compute-connect .radio-row { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+/* The form row's input and label rules are for text fields: a radio keeps
+   its own size, and its label sits beside it in the body text's colour. */
+.compute-connect .radio-row input { width: auto; flex: none; margin: 0; padding: 0; }
+.compute-connect .radio-row label { display: inline; margin: 0; color: var(--text); }
 .compute-connect input[type="radio"] { accent-color: var(--accent); margin: 0; }
 .compute-autostop select { margin-right: 8px; }
 .compute-address { margin-top: 8px; }

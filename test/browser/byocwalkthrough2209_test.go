@@ -102,7 +102,11 @@ func (w *walk) create(conn, name string) {
 	p.navigate("/settings/compute/create")
 	p.waitFor(`document.getElementById("compute-connection") !== null && document.querySelectorAll("#compute-sizes input[name=compute-size]").length === 4`)
 	p.eval(fmt.Sprintf(`(() => { const s = document.getElementById("compute-connection"); s.value = %q; s.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, conn), nil)
-	p.waitFor(`document.getElementById("compute-permissions-ok") !== null && document.querySelectorAll("#compute-sizes input[name=compute-size]").length === 4`)
+	// The previous connection's sizes and permissions are on the page until
+	// this one's arrive: wait for its account in the price, and Create.
+	account := conn[strings.Index(conn, "-")+1:]
+	p.waitForWithin(fmt.Sprintf(`document.getElementById("compute-permissions-ok") !== null && document.querySelectorAll("#compute-sizes input[name=compute-size]").length === 4 && `+
+		`document.getElementById("compute-price-detail").textContent.includes(%q) && !document.getElementById("compute-create-submit").disabled`, account), time.Minute)
 	var price string
 	p.eval(`document.getElementById("compute-price-hourly").textContent`, &price)
 	if !strings.Contains(price, "$") {

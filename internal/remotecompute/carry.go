@@ -770,6 +770,39 @@ func short(v string) string {
 }
 
 // create makes the container again on To from its own configuration.
+// publishSpecs is a container's port bindings as --publish values, each
+// once: Docker Desktop records a binding given once twice in
+// HostConfig.PortBindings, and a Linux dockerd refuses the second (its own
+// first holds the address), so a node carried from a Mac to a Linux VM
+// would not start.
+func publishSpecs(bindings map[string][]portBinding) []string {
+	ports := make([]string, 0, len(bindings))
+	for p := range bindings {
+		ports = append(ports, p)
+	}
+	sort.Strings(ports)
+	var specs []string
+	seen := map[string]bool{}
+	for _, p := range ports {
+		for _, b := range bindings[p] {
+			spec := p
+			if b.HostPort != "" || b.HostIP != "" {
+				spec = b.HostPort + ":" + p
+				if ip := b.HostIP; strings.Contains(ip, ":") {
+					spec = "[" + ip + "]:" + spec // an IPv6 address, as --publish takes it
+				} else if ip != "" {
+					spec = ip + ":" + spec
+				}
+			}
+			if !seen[spec] {
+				seen[spec] = true
+				specs = append(specs, spec)
+			}
+		}
+	}
+	return specs
+}
+
 func (c *Carry) create(ctx context.Context, ct containerInfo, image string) error {
 	name := strings.TrimPrefix(ct.Name, "/")
 	args := []string{"create", "--name", name}
@@ -808,22 +841,8 @@ func (c *Carry) create(ctx context.Context, ct containerInfo, image string) erro
 		}
 		args = append(args, "--tmpfs", spec)
 	}
-	ports := make([]string, 0, len(hc.PortBindings))
-	for p := range hc.PortBindings {
-		ports = append(ports, p)
-	}
-	sort.Strings(ports)
-	for _, p := range ports {
-		for _, b := range hc.PortBindings[p] {
-			spec := p
-			if b.HostPort != "" || b.HostIP != "" {
-				spec = b.HostPort + ":" + p
-				if b.HostIP != "" {
-					spec = b.HostIP + ":" + spec
-				}
-			}
-			args = append(args, "--publish", spec)
-		}
+	for _, spec := range publishSpecs(hc.PortBindings) {
+		args = append(args, "--publish", spec)
 	}
 	if r := hc.RestartPolicy; r.Name != "" && r.Name != "no" {
 		pol := r.Name

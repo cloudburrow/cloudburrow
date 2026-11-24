@@ -21,6 +21,7 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -41,7 +42,14 @@ func main() {
 	listen := flag.String("listen", "127.0.0.1:0", "address of the control endpoint (the sign-in page opener)")
 	awsStandIn := flag.String("aws-standin", "", "container=host:port of the stand-in an AWS VM boots as")
 	azureStandIn := flag.String("azure-standin", "", "container=host:port of the stand-in an Azure VM boots as")
+	relay := flag.String("relay", "", "host:port: relay stdin and stdout to it (the ssh config's ProxyCommand) and exit")
 	flag.Parse()
+	if *relay != "" {
+		if err := relayStdio(*relay); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if *dir == "" || *awsStandIn == "" || *azureStandIn == "" {
 		log.Fatal("--dir, --aws-standin and --azure-standin are required")
 	}
@@ -83,11 +91,16 @@ func main() {
 	if err := os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: az.Certificate().Raw}), 0o600); err != nil {
 		log.Fatal(err)
 	}
-	host, port, _ := net.SplitHostPort(azAddr)
+	self, err := os.Executable()
+	if err != nil {
+		log.Fatal(err)
+	}
 	sshConfig := filepath.Join(*dir, "ssh_config")
 	// Azure's VMs have addresses in 203.0.113.0/24 (TEST-NET-3), which
-	// reach nothing: each is the Azure stand-in here.
-	if err := os.WriteFile(sshConfig, []byte(fmt.Sprintf("Host 203.0.113.*\n  HostName %s\n  Port %s\n", host, port)), 0o600); err != nil {
+	// reach nothing: each is the Azure stand-in here. A ProxyCommand, not
+	// HostName and Port, as ssh's -p would override Port; the VM's address
+	// stays the host's name, so its pinned host key still matches.
+	if err := os.WriteFile(sshConfig, []byte(fmt.Sprintf("Host 203.0.113.*\n  ProxyCommand %q -relay %s\n", self, azAddr)), 0o600); err != nil {
 		log.Fatal(err)
 	}
 
@@ -146,6 +159,20 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	<-ctx.Done()
+}
+
+// relayStdio copies stdin to addr and addr to stdout until either ends.
+func relayStdio(addr string) error {
+	c, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	done := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(c, os.Stdin); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(os.Stdout, c); done <- struct{}{} }()
+	<-done
+	return nil
 }
 
 func splitStandIn(v string) (name, addr string, err error) {
