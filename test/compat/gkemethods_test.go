@@ -259,7 +259,9 @@ func TestGKERotationLocationsAndUpgradeInfo(t *testing.T) {
 			`jsonpath={.items[*].status.containerStatuses[*].ready}`).CombinedOutput()
 		return err == nil && strings.Contains(string(out), "true") && !strings.Contains(string(out), "false")
 	}) {
-		t.Error("CoreDNS is not ready after the rotation")
+		out, _ := exec.Command("kubectl", "--kubeconfig", akc, "-n", "kube-system", "describe", "pods", "-l", "k8s-app=kube-dns").CombinedOutput()
+		logs, _ := exec.Command("kubectl", "--kubeconfig", akc, "-n", "kube-system", "logs", "-l", "k8s-app=kube-dns", "--tail", "20").CombinedOutput()
+		t.Errorf("CoreDNS is not ready after the rotation:\n%s\n%s", out, logs)
 	}
 
 	// Last, as it cuts the host off the cluster for a while:

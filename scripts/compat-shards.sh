@@ -184,6 +184,9 @@ COMPAT_LOCALAI_TESTS="^Test($(echo "$COMPAT_LOCALAI_TEST_NAMES" | tr -s ' \n' '|
 # 6,765 s of its 120m in main run 45047408927, 3,360 s of them these
 # tests', before Landing 167's six new local AI tests (#1799, #2127,
 # #2131), which had run in no shard.
+# A fourteenth, gkeupgrade, is the served shard's instance again for
+# Kubernetes Engine's upgrade, rollback and rotation tests
+# (COMPAT_GKE_UPGRADE_TESTS), which the gke shard skips.
 COMPAT_LOCALAI_SPEECH_TESTS="^Test($(echo "$COMPAT_LOCALAI_TEST_NAMES" | tr -s ' ' '\n' | grep -E '^(Speech|BigQueryMLTranscribe)' | paste -sd'|' -))\$"
 
 # The Kubernetes Engine API's tests (COMPAT_GKE_TESTS), which make kind
@@ -194,8 +197,24 @@ COMPAT_LOCALAI_SPEECH_TESTS="^Test($(echo "$COMPAT_LOCALAI_TEST_NAMES" | tr -s '
 # 3 s), the Kubernetes Engine tests 2,440 s and then 2,828 s of it.
 COMPAT_GKE_TESTS='^Test(GKE[A-Za-z0-9_]*|GcloudContainer[A-Za-z0-9_]*|TerraformContainerClusterAndNodePool)$'
 
+# The gkeupgrade shard's tests (COMPAT_GKE_UPGRADE_TESTS), by name, which
+# the gke shard skips: Kubernetes Engine's upgrades, rollbacks and
+# rotations, through the client and gcloud, each of which moves a
+# cluster's control plane or nodes through versions or certificates. The
+# gke shard reached go test's 60m in main run 45382531465 once Landing
+# 168 (#2100) added them: its 25 tests had taken 3,558 s when the alarm
+# stopped TestGKENodeLabelsAndTaints, and TestGKERollbackSafeUpgrade alone
+# 577 s. These took 2,080 s of that, which leaves gke about 1,480 s with
+# its three tests that never ran (about 30 minutes in all).
+COMPAT_GKE_UPGRADE_TEST_NAMES="GKERollbackSafeUpgrade GKEUpgradeMasterThenNodePool
+  GcloudContainerClustersUpgrade GKERotationLocationsAndUpgradeInfo
+  GcloudContainerRotationLocationsAndUpgradeInfo GKERollbackNodePoolUpgrade
+  GcloudContainerNodePoolsRollback GKEAutoUpgradePausesPastItsWindow
+  GKEBlueGreenCompleteNodePoolUpgrade GcloudContainerNodePoolsCompleteUpgrade"
+COMPAT_GKE_UPGRADE_TESTS="^Test($(echo "$COMPAT_GKE_UPGRADE_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
+
 # The shards, in the order ci.yml's matrix lists them.
-COMPAT_SHARDS="storage served gke run crossservice scale emulators memorystore sql sqlreplicas acceptance iam localai localaispeech"
+COMPAT_SHARDS="storage served gke gkeupgrade run crossservice scale emulators memorystore sql sqlreplicas acceptance iam localai localaispeech"
 
 # The crossservice shard's tests (COMPAT_CROSSSERVICE_TESTS), which the run shard skips:
 # Eventarc's, whose triggers route events from Cloud Storage, Pub/Sub,
@@ -426,7 +445,7 @@ compat_shard() {
       SETUP_TESTS="TestSecretManagerRestartSetup TestTasksRestartSetup TestSchedulerRestartSetup TestStorageAcrossRestart"
       PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart"
       PROBE_VARS=SECRETS,TASKS,SCHEDULER,STORAGE ;;
-    served|gke)
+    served|gke|gkeupgrade)
       # Cloud Trace (#2118), beside the Cloud Logging its spans' log
       # entries are correlated with.
       SERVICES=kms,logging,privateca,gke,monitoring,compute,trace,filestore
@@ -458,10 +477,15 @@ compat_shard() {
       # Filestore (#2192), in process: its NFS servers are mounted from
       # Kubernetes Engine clusters' pods (TestGKEFilestore*, gke shard).
       TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE,MONITORING,COMPUTE,TRACE,FILESTORE
-      if [ "$1" = gke ]; then
-        # The served shard's instance again, for the Kubernetes Engine
-        # tests alone (COMPAT_GKE_TESTS).
+      if [ "$1" = gkeupgrade ]; then
+        # The served shard's instance again, for Kubernetes Engine's
+        # upgrade, rollback and rotation tests (COMPAT_GKE_UPGRADE_TESTS).
+        COMPAT_RUN=$COMPAT_GKE_UPGRADE_TESTS
+      elif [ "$1" = gke ]; then
+        # The served shard's instance again, for the other Kubernetes
+        # Engine tests (COMPAT_GKE_TESTS but COMPAT_GKE_UPGRADE_TESTS).
         COMPAT_RUN=$COMPAT_GKE_TESTS
+        COMPAT_SKIP=$COMPAT_GKE_UPGRADE_TESTS
         # Kubernetes Engine's logs (#2100): a cluster whose pod writes a
         # line every half second, all of whose lines, those written while
         # the CLI was stopped too, its in-cluster agent ships once.
@@ -776,7 +800,7 @@ compat_shard() {
   # bq's (#696) run in the emulators shard, with BigQuery, and gcloud sql's
   # in the sql shard.
   case "$1" in
-    storage|served|gke|run|crossservice|scale|emulators|memorystore|sql|sqlreplicas) TEST_VARS+=,GCLOUD ;;
+    storage|served|gke|gkeupgrade|run|crossservice|scale|emulators|memorystore|sql|sqlreplicas) TEST_VARS+=,GCLOUD ;;
   esac
 }
 
