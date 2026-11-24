@@ -14,6 +14,9 @@
 # With SMOKE_PLATFORM set (os/arch, e.g. linux/arm64), the installed binary
 # must also report that platform, so a runner that installs another
 # platform's archive fails rather than passing for the wrong one (#689).
+# On darwin/arm64 the installer must also have installed the Apple GPU
+# (Metal) runner where the CLI looks by default,
+# <prefix>/libexec/cloudburrow/litert-lm/cloudburrow_generate.
 #
 # The release workflow runs this after publishing (#603). It needs nothing
 # from this checkout but itself, so it can be run by hand against any tag.
@@ -54,6 +57,13 @@ fi
 got="$("$bin" version --short)" || die "cloudburrow version --short failed"
 [ "$got" = "$tag" ] || die "the installed binary reports ${got}, not ${tag}"
 say "cloudburrow version --short: ${got}"
+
+if [ "${SMOKE_PLATFORM:-}" = darwin/arm64 ]; then
+	runner="${tmp}/prefix/libexec/cloudburrow/litert-lm/cloudburrow_generate"
+	[ -x "$runner" ] || die "the installer did not install the Apple GPU (Metal) runner at ${runner}"
+	grep -q 'installed the Apple GPU (Metal) runner' "${tmp}/install.log" || die "the installer did not report the Apple GPU runner"
+	say "Apple GPU (Metal) runner: ${runner}"
+fi
 
 status=0
 "$bin" doctor >"${tmp}/doctor.log" 2>&1 || status=$?

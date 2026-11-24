@@ -917,6 +917,11 @@ jobs:
           brew install --formula cloudburrow-smoke/local/cloudburrow
           brew test cloudburrow-smoke/local/cloudburrow
           brew audit --strict --formula cloudburrow-smoke/local/cloudburrow
+          # The formula's Apple GPU runner, where the CLI looks for it.
+          if [ "${{ matrix.platform }}" = darwin/arm64 ]; then
+            runner="$(brew --prefix cloudburrow-smoke/local/cloudburrow)/libexec/cloudburrow/litert-lm/cloudburrow_generate"
+            [ -x "${runner}" ] || { echo "::error::the formula did not install the Apple GPU runner at ${runner}" >&2; exit 1; }
+          fi
 
   # The setup-cloudburrow action at this tag, driving the CLI this run just
   # published, as a workflow pinned to the tag with `version: <tag>` would
