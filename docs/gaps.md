@@ -406,9 +406,16 @@ driver and container toolkit at create), is one guided action: a new VM of the s
 moved onto it, the old VM deleted, with the plan and the price difference shown first (`cloud
 scale <vm> --size gpu`, Compute capacity's Change VM) (#2209).
 
+Closed: a move from a VM back to this machine closes what is left of the instance's connection
+to the VM and waits, bounded, until every port it forwarded is free here before the instance
+starts here (a port still taken fails the move, named, and it rolls back to the VM, its data
+kept); a VM an instance runs on is never deleted from under it (refused from the console, the CLI
+and the API, unless the instance moves off first or the user chooses the typed *Delete VM and
+this instance's data*); and the first-run walk-through, `TestByocFirstRunWalkThrough`, passes end
+to end (#2209).
+
 | Gap | Why open | Size |
 |---|---|---|
-| A move from a VM back to this machine can fail with *Address already in use* and roll back: the ssh forwards of the instance's session on the VM still hold its ports here when the node starts. The first-run walk-through (`TestByocFirstRunWalkThrough`) passes connect, create, the move onto the AWS VM and the Cloud Run deploy; the CLI moved the instance from this machine to AWS and from AWS to Azure. The walk-through's later steps (AWS to Azure in the console, scale, stop, start, back, delete) wait on this fix (#2209) | not built yet | S |
 | **Not yet tested against real AWS or Azure** (#2209): every flow runs against `awsfake` and `azurefake`, recorded from the clouds' API references, and the stand-in hosts; the user runs the first real-cloud check, [byoc.md's Test it on your account](byoc.md#test-it-on-your-account) | needs live AWS/Azure (nothing here signs in to them) | M |
 
 ## Excluded on purpose

@@ -129,7 +129,10 @@ the one address SSH is open to and when it was set) and auto-stop. There:
 - **Allow my address** (SSH connections): moves the firewall's SSH rule to this machine's
   current public address now. CloudBurrow also does so before each connection and reconnection,
   and every three minutes while the instance runs.
-- **Delete** (type the instance's name to confirm).
+- **Delete** (type the instance's name to confirm). A VM an instance runs on holds that
+  instance's cluster and data, so Delete is refused for it (from the console, the CLI and the
+  API): move the instance off first, or choose **Delete VM and this instance's data**, which asks
+  for the VM's name typed back, stops the instance, and deletes its data with the VM.
 - **View resources**: everything tagged `cloudburrow-instance=<name>`.
 
 CLI: `cloudburrow cloud status|scale [<vm>] --size large|start|stop|delete|resources`,
@@ -175,13 +178,18 @@ The move, step by step (each step is a line in the console and the terminal):
    is made again from its own `docker inspect` (name, labels, privileges, tmpfs, published
    ports, address, aliases, mounts). A bind mount of a path of this machine becomes a volume
    holding the path's content. Progress shows the bytes copied;
-4. **start**: the VM is recorded as the instance's compute and `up` starts again with the same
+4. **ports** (a move back to this machine only): the instance's connection to the VM forwarded
+   every port its containers publish to this machine, so before they start here, what is left of
+   it is closed (an SSH connection whose process is gone is ended) and each of those ports is
+   waited for until it is free, for at most two minutes. A port still taken then fails the move
+   with the port and what holds it named, and the move rolls back to the VM, its data kept;
+5. **start**: the VM is recorded as the instance's compute and `up` starts again with the same
    arguments, so it runs there;
-5. **verify**: `up` must report ready, and the cluster's nodes must run on the VM;
-6. **cleanup**: only then are the instance's containers, volumes and the committed images
+6. **verify**: `up` must report ready, and the cluster's nodes must run on the VM;
+7. **cleanup**: only then are the instance's containers, volumes and the committed images
    removed from this machine.
 
-A failure at any of steps 2 to 5 **rolls back**: what was made at the destination is removed, the
+A failure at any of steps 2 to 6 **rolls back**: what was made at the destination is removed, the
 source's record comes back, and the instance starts where it ran, as it was, with its data.
 Nothing is removed from the source before the instance runs at the destination.
 
@@ -257,6 +265,14 @@ internet.
 2. deletes them, the VM first and the network last, waiting for each;
 3. **lists again**, and reports any resource still there by type and ID. The VM's record stays,
    marked failed, so you can Delete again, or remove what is named in the cloud's own console.
+
+A VM an instance runs on is never deleted from under it: Delete is refused, naming the instance
+(`cloudburrow cloud delete` exits with the reason; the API answers 409 with `in_use_by`). Move the
+instance off it first (`cloudburrow cloud move <instance> --to local`, or Move back to this
+machine), or delete the VM and the instance's data together: `cloudburrow cloud delete --name
+<vm> --with-instance-data`, or Compute capacity's **Delete VM and this instance's data** (type the
+VM's name). That stops the instance, forgets that it ran on the VM, then deletes the VM; the
+instance starts afresh on this machine at its next `cloudburrow up`.
 
 Disconnecting a cloud that still has a VM is refused: without its credentials CloudBurrow could
 no longer stop or delete it. Delete first.
@@ -355,8 +371,9 @@ never reach a real endpoint:
   VM, deploy a Cloud Run service from the console there, move the instance from AWS to Azure
   (the revision comes back on the Azure VM's node), scale, stop and start the Azure VM, move it
   back to this machine, and delete both VMs, nothing left in either cloud, with WCAG and keyboard
-  subtests. It passes through the Cloud Run deploy on the AWS VM; the steps after it wait on the
-  move back to this machine ([gaps.md](gaps.md#bring-your-own-cloud)). `CLOUDBURROW_BYOC_FAKES` is refused unless every endpoint is a loopback address, and
+  subtests; on the way it checks that the Azure VM, while the instance runs on it, cannot be
+  deleted (the API's 409, the page's typed *Delete VM and this instance's data*, cancelled).
+  `CLOUDBURROW_BYOC_FAKES` is refused unless every endpoint is a loopback address, and
   keeps the fakes' credentials in a directory, never the keychain.
 - Moves are tested for real against the stand-ins: `TestStandInInterruptedMoveResumes` cuts a
   carry off half way, resumes it with the data whole, and rolls a second one back from its
@@ -391,7 +408,8 @@ open its console, and keep a terminal on `cloudburrow cloud status --name lab`.
 | 11 | Change networks (a phone hotspot), wait 3 minutes | The NSG's SSH rule moves to the new address (*Connection: SSH from …* changes); the instance reconnects. |
 | 12 | (Optional, GPU quota needed) the slider to **GPU**, **Change VM** | A dialog with the plan (`lab-az-gpu`, move, delete `lab-az`) and the price difference; then a new GPU VM, the move, and `lab-az` deleted. |
 | 13 | Interrupt a move: start **Move back to this machine**, and during *volume* stop the move's process (`kill <pid>` of `cloudburrow cloud move`) | *The move … was interrupted* with **Resume move** and **Roll back move**; **Resume move** finishes it: *Runs on: This machine's Docker*. |
-| 14 | **Delete** each VM (type its name) | Progress ends *Nothing tagged cloudburrow-instance=… is left*; in each cloud's console nothing tagged is left; Settings > Compute: **Disconnect** removes the keychain items. |
+| 14 | (Do this before row 13, while the instance runs on `lab-az`.) **Delete** on `lab-az` | The button reads **Delete VM and this instance's data**, with the reason beside it; its dialog asks for the VM's name. Cancel it. |
+| 15 | **Delete** each VM (type its name) | Progress ends *Nothing tagged cloudburrow-instance=… is left*; in each cloud's console nothing tagged is left; Settings > Compute: **Disconnect** removes the keychain items. |
 
 Report each row that differs (a message, a step that took much longer, something left in a
 cloud) on #2209.
