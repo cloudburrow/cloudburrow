@@ -2874,6 +2874,15 @@ var parityRows = []parityRow{
 	{Resource: "Vertex AI Training: create a hyperparameter tuning job", Service: "vertexai", Methods: []string{"JobService/CreateHyperparameterTuningJob"},
 		Excluded: "Google's console creates hyperparameter tuning through Train new model's Hyperparameter tuning step, a training pipeline with the " +
 			"hyperparameter tuning task (https://docs.cloud.google.com/vertex-ai/docs/training/using-hyperparameter-tuning, Console tab), which this console offers"},
+	{Resource: "Vertex AI Training: Neural Architecture Search jobs", Service: "vertexai",
+		Methods: []string{"JobService/GetNasJob", "JobService/ListNasJobs", "JobService/CancelNasJob", "JobService/DeleteNasJob",
+			"JobService/GetNasTrialDetail", "JobService/ListNasTrialDetails"},
+		Provider: "vertex-nas-jobs", Offers: "Training's Neural Architecture Search tab: a Region menu, a job's page (its details, search space, " +
+			"search and train trial worker pools, a chart of the search trials' rewards, and its Trials table, each a NAS trial detail), Cancel and Delete",
+		Tests: []string{"TestVertexAITrainingNASThroughThePages"}},
+	{Resource: "Vertex AI Training: create a NAS job", Service: "vertexai", Methods: []string{"JobService/CreateNasJob"},
+		Excluded: "Google creates NAS jobs with vertex-nas-cli and the API (https://docs.cloud.google.com/vertex-ai/docs/training/neural-architecture-search/overview); " +
+			"the console lists and opens them"},
 	{Resource: "Vertex AI batch inference", Service: "vertexai",
 		Methods: []string{"JobService/CreateBatchPredictionJob", "JobService/GetBatchPredictionJob", "JobService/ListBatchPredictionJobs",
 			"JobService/CancelBatchPredictionJob", "JobService/DeleteBatchPredictionJob"},

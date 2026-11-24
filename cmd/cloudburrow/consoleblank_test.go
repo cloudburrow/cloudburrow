@@ -98,6 +98,7 @@ var emulatorOnly = map[string]string{
 	"vertex-custom-jobs":                 "custom jobs are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAITrainingThroughThePages drives the page)",
 	"vertex-batch-predictions":           "batch predictions are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAITrainingThroughThePages drives the page)",
 	"vertex-datasets":                    "datasets are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAIDatasetsThroughThePages drives the page)",
+	"vertex-nas-jobs":                    "NAS jobs are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAITrainingNASThroughThePages drives the page)",
 	"vertex-hyperparameter-tuning-jobs":  "hyperparameter tuning jobs are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAITrainingHyperparameterTuningThroughThePages drives the page)",
 }
 

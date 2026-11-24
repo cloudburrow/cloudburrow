@@ -259,6 +259,7 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// UNVERIFIED (re-read 2026-11-24): deleting a hyperparameter tuning job
 	// from the console is not described (training/using-hyperparameter-tuning).
 	"vertex-hyperparameter-tuning-jobs": unverified,
+	"vertex-nas-jobs":                   unverified,
 	// UNVERIFIED (re-read 2026-11-24): deleting a dataset from the console
 	// is not described (image-data/classification/create-dataset).
 	"vertex-datasets": unverified,
