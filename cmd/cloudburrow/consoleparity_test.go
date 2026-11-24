@@ -2357,6 +2357,10 @@ var parityRows = []parityRow{
 		Commands: []string{"env", "gcloud-setup", "terraform", "version", "diagnose"},
 		Screen:   "/connect", Offers: "Connect: what `env` exports in each of its formats with Copy, client snippets, the gcloud-setup, gcloud-teardown and terraform commands to copy; About, as `version` prints it; Download bundle, the `diagnose` bundle (#802)",
 		Tests: []string{"TestConsoleConnectIsTheInstancesEnv", "TestConnectVariablesAreEnvJSON", "TestAboutIsTheBuildsVersion", "TestConsoleDiagnoseBundleHoldsNoCredentials", "TestConnectPageShowsTheEnvironmentAndDownloadsTheBundle"}},
+	{Resource: "Bring your own cloud",
+		Commands: []string{"cloud"},
+		Screen:   "/settings/compute", Offers: "Settings > Compute: Connect AWS (IAM Identity Center's device sign-in, or an access key) and Connect Azure (Microsoft's sign-in, then a subscription), Disconnect; Create VM (region, closest first; Small, Medium, Large or GPU with each one's hourly price; auto-stop; the permission check; the Monthly estimate), its progress; Compute capacity (/compute-capacity): each VM's state, type and price, the size slider and Resize, Start, Stop, Delete and its tagged resources, with the admin token pasted once per tab (#2209)",
+		Tests: []string{"TestComputeConnectCreateAndDelete", "TestCloudCLIAWSWholeFlow", "TestByocConnectCreateScaleDelete", "TestByocFailuresAreShownInPlainWords"}},
 	{Resource: "Local AI models",
 		Routes: []string{"GET /admin/local-models", "POST /admin/local-models/{id}/{action}"},
 		Screen: "/agent-platform/model-garden/local-models", Offers: "Local models: each catalogued model's state (not pinned, not downloaded, " +

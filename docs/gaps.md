@@ -38,8 +38,9 @@ tracks it; a closed issue is named only where it says what was built.
 | App Hub | 5 | 1 | 1 | 3 | 0 |
 | Dataform | 7 | 0 | 2 | 4 | 1 |
 | Console | 9 | 7 | 2 | 0 | 0 |
-| Remote compute | 3 | 3 | 0 | 0 | 0 |
-| **Total** | **92** | **17** | **24** | **44** | **7** |
+| Remote compute | 1 | 1 | 0 | 0 | 0 |
+| Bring your own cloud | 5 | 4 | 0 | 0 | 1 |
+| **Total** | **95** | **19** | **24** | **44** | **8** |
 
 ## Cloud Storage
 
@@ -374,15 +375,27 @@ latency and resource charts (#1267); the Artifact Registry repository Permission
 
 ## Remote compute
 
-Phase 1 of #2209, `up --compute ssh://user@host`, is built ([remote-compute.md](remote-compute.md)):
+Phase 1 of #2209, `up --compute ssh://user@host`, is built, and a VM made by [Bring your own cloud](#bring-your-own-cloud) becomes the instance's compute through it ([remote-compute.md](remote-compute.md)):
 the instance's Docker on a remote Linux host over one supervised SSH connection, with the
 console, the APIs and the metadata server staying on this machine.
 
 | Gap | Why open | Size |
 |---|---|---|
-| Phase 2, the provisioners (#2209): a planned `cloud connect aws\|azure` command with the user's own CLI sign-in, the least-privilege IAM policy and Azure custom role, `up --compute aws\|azure --size …` creating a tagged VPC or resource group and a Linux VM with Docker (cloud-init setting sshd's `GatewayPorts clientspecified` and installing CloudBurrow's public key), SSH from the user's IP only or through AWS SSM or `az ssh`, a planned `cloud resources` listing, and a `delete` that removes and verifies everything; the console's point-and-click flow over `internal/remotecompute`. Tested against local stand-ins (a moto/LocalStack-compatible EC2 API, a recorded ARM server) | not built yet | L |
-| Phase 3, scaling (#2209): a planned `scale` command (CPUs and memory) and the console's Compute capacity page, idle auto-stop, the cost estimate before every create or resize, GPU sizes, and more VMs as extra nodes | not built yet | L |
 | Containers that bind-mount a path of this machine do not find it on a remote host: Vertex AI's model containers (`internal/modelgarden/docker.go`'s model directory, `internal/service/vertexai/exec.go`), the TensorFlow converter's model and output directories (`internal/tfconvert`), the video decoder's input (`internal/videodecode`), BigQuery's Spark procedures' work directory and connector jar (`internal/sparkproc`) and Dataform's npm cache and project (`cmd/cloudburrow/dataform.go`). Each needs its files copied to the host before the run and its outputs copied back. Pods and every container that takes its input over the network or `docker cp` work (#2209) | not built yet | M |
+
+## Bring your own cloud
+
+#2209 phases 2 and 3 ([byoc.md](byoc.md)): connect AWS or Azure, create, resize, start, stop and
+delete the VM, from the console and `cloudburrow cloud`, tested against local fakes of each
+cloud's API.
+
+| Gap | Why open | Size |
+|---|---|---|
+| **Not yet tested against real AWS or Azure** (#2209): every flow runs against `awsfake` and `azurefake`, recorded from the clouds' API references; the user runs the first real-cloud check | needs live AWS/Azure (nothing here signs in to them) | M |
+| AWS connects over SSH from the user's address (security group, TCP 22 from a /32), not through SSM Session Manager port forwarding, which would need the session-manager-plugin's WebSocket protocol in Go (#2209) | not built yet | M |
+| The firewall's source address is read once, at create: when the user's public address changes, SSH is refused until the VM is deleted and created again; no "update my address" action yet (#2209) | not built yet | S |
+| Auto-stop is chosen at create only (cloud-init installs it); changing it later, and a GPU/CPU change, need a new VM (#2209) | not built yet | S |
+| More VMs as extra nodes of one instance (multi-node over the tunnel), phase 3's "later, if needed" (#2209) | not built yet | L |
 
 ## Excluded on purpose
 
