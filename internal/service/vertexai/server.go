@@ -158,6 +158,9 @@ func (s *Server) Handler() http.Handler {
 		"customJobs", "batchPredictionJobs", "trainingPipelines", "hyperparameterTuningJobs", "datasets"} {
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c, s.serveNotebookREST)
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
+		// Their operations as the Python SDK polls them, under /ui (#1940).
+		mux.HandleFunc("GET /ui/projects/{project}/locations/{location}/"+c+"/{id}/operations/{op}", s.serveNotebookREST)
+		mux.HandleFunc("GET /ui/projects/{project}/locations/{location}/"+c+"/{id}/{sub}/{subid}/operations/{op}", s.serveNotebookREST)
 	}
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/notebookRuntimes:assign", s.serveNotebookREST)
 	// Workbench instances, notebooks.googleapis.com v2 (#2173).

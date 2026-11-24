@@ -63,6 +63,7 @@ func dsReadObject(t *testing.T, ctx context.Context, gcs *storage.Client, bucket
 // Storage source and refuses ImportData; a custom training pipeline on the
 // image dataset gets AIP_TRAINING_DATA_URI and its siblings, whose files
 // hold the predefined split; AutoML is UNIMPLEMENTED.
+// covers: google.cloud.aiplatform.v1.DatasetService/CreateDataset, google.cloud.aiplatform.v1.DatasetService/CreateDatasetVersion, google.cloud.aiplatform.v1.DatasetService/DeleteDataset, google.cloud.aiplatform.v1.DatasetService/DeleteDatasetVersion, google.cloud.aiplatform.v1.DatasetService/DeleteSavedQuery, google.cloud.aiplatform.v1.DatasetService/ExportData, google.cloud.aiplatform.v1.DatasetService/GetAnnotationSpec, google.cloud.aiplatform.v1.DatasetService/GetDataset, google.cloud.aiplatform.v1.DatasetService/GetDatasetVersion, google.cloud.aiplatform.v1.DatasetService/ImportData, google.cloud.aiplatform.v1.DatasetService/ListAnnotations, google.cloud.aiplatform.v1.DatasetService/ListDataItems, google.cloud.aiplatform.v1.DatasetService/ListDatasets, google.cloud.aiplatform.v1.DatasetService/ListDatasetVersions, google.cloud.aiplatform.v1.DatasetService/ListSavedQueries, google.cloud.aiplatform.v1.DatasetService/RestoreDatasetVersion, google.cloud.aiplatform.v1.DatasetService/SearchDataItems, google.cloud.aiplatform.v1.DatasetService/UpdateDataset, google.cloud.aiplatform.v1.DatasetService/UpdateDatasetVersion
 func TestVertexAIDatasets(t *testing.T) {
 	h := New(t)
 	endpoint := runShardEndpoint(h, envRunLocalAI, EnvPrediction)

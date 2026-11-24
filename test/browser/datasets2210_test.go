@@ -96,10 +96,12 @@ func TestVertexAIDatasetsThroughThePages(t *testing.T) {
 	p.eval(`location.pathname + location.search`, &createPath)
 	imgName := fmt.Sprintf("browser flowers %d", stamp)
 	p.submitForm(map[string]string{"displayName": imgName, "importPath": "gs://" + bucket + "/flowers.jsonl"}, "displayName")
+	// The dataset is listed at once; its import is a long-running
+	// operation, so its Items count follows.
 	var img item
-	for deadline := time.Now().Add(3 * time.Minute); img.Name == ""; time.Sleep(time.Second) {
-		if img = find(imgName); img.Name == "" && time.Now().After(deadline) {
-			t.Fatalf("the dataset %q is not listed", imgName)
+	for deadline := time.Now().Add(3 * time.Minute); img.Name == "" || img.Fields["Items"] == "0"; time.Sleep(time.Second) {
+		if img = find(imgName); (img.Name == "" || img.Fields["Items"] == "0") && time.Now().After(deadline) {
+			t.Fatalf("the dataset %q is not listed with its items: %+v", imgName, img)
 		}
 	}
 	name := parent + "/datasets/" + img.Name
@@ -136,6 +138,9 @@ func TestVertexAIDatasetsThroughThePages(t *testing.T) {
 	tabName := fmt.Sprintf("browser table %d", stamp)
 	p.navigate(createPath)
 	p.waitFor(`document.querySelector("#view #f-displayName") !== null`)
+	// The name field starts focused: leaving it empty shows its error,
+	// which moves the radios down, so it is left before a radio is clicked.
+	p.eval(`document.activeElement && document.activeElement.blur(), true`, nil)
 	clickRadio(p, "dataType", 1) // Tabular
 	p.waitFor(`document.querySelector("#view #f-dataSource-1") && document.querySelector("#view #f-dataSource-1").getClientRects().length > 0`)
 	clickRadio(p, "dataSource", 1) // BigQuery

@@ -60,6 +60,7 @@ func hpTrainerPool(image string) *aiplatformpb.WorkerPoolSpec {
 // INFEASIBLE; a running job is CANCELLED with its trials' custom jobs;
 // a hyperparameter tuning training pipeline names its backing job and
 // best trial; list and delete.
+// covers: google.cloud.aiplatform.v1.JobService/CreateHyperparameterTuningJob, google.cloud.aiplatform.v1.JobService/GetHyperparameterTuningJob, google.cloud.aiplatform.v1.JobService/ListHyperparameterTuningJobs, google.cloud.aiplatform.v1.JobService/CancelHyperparameterTuningJob, google.cloud.aiplatform.v1.JobService/DeleteHyperparameterTuningJob
 func TestVertexAIHyperparameterTuning(t *testing.T) {
 	h := New(t)
 	endpoint := runShardEndpoint(h, envRunLocalAI, EnvPrediction)

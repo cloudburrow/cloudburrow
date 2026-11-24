@@ -24,15 +24,12 @@ import (
 // arguments and reports loss = (lr-0.3)^2 as cloudml-hypertune writes a
 // report (JSON lines in /tmp/hypertune/output.metrics; the image has no
 // pip, so the line is written as the library writes it).
-const hpTrial2210 = `import json, os, sys, time
-lr = 0.5
-for a in sys.argv[1:]:
-    if a.startswith("--lr="):
-        lr = float(a[len("--lr="):])
-os.makedirs("/tmp/hypertune", exist_ok=True)
-with open("/tmp/hypertune/output.metrics", "w") as f:
-    f.write(json.dumps({"timestamp": time.time(), "trial": os.environ.get("CLOUD_ML_TRIAL_ID", "0"), "loss": str((lr - 0.3) ** 2), "global_step": "1", "checkpoint_path": ""}, sort_keys=True) + "\n")
-`
+// It is one line: Train new model's Arguments take one argument a line.
+const hpTrial2210 = `import json, os, sys, time; ` +
+	`lr = float(next((a[len("--lr="):] for a in sys.argv[1:] if a.startswith("--lr=")), "0.5")); ` +
+	`os.makedirs("/tmp/hypertune", exist_ok=True); ` +
+	`open("/tmp/hypertune/output.metrics", "w").write(json.dumps({"timestamp": time.time(), "trial": os.environ.get("CLOUD_ML_TRIAL_ID", "0"), ` +
+	`"loss": str((lr - 0.3) ** 2), "global_step": "1", "checkpoint_path": ""}, sort_keys=True) + "\n")`
 
 // TestVertexAITrainingHyperparameterTuningThroughThePages (#2210): Agent
 // Platform > Model development > Training's Hyperparameter tuning jobs
@@ -103,7 +100,12 @@ func TestVertexAITrainingHyperparameterTuningThroughThePages(t *testing.T) {
 				}
 			}
 			if it.Status == "Failed" || time.Now().After(deadline) {
-				t.Fatalf("%s %q = %+v, want %v", service, value, it, want)
+				// Its page, for the error it failed with.
+				_, detail := consoleDo(t, http.MethodGet, "/api/detail/"+service+q+"&name="+url.QueryEscape(it.Name), "")
+				if len(detail) > 4000 {
+					detail = detail[:4000]
+				}
+				t.Fatalf("%s %q = %+v, want %v; its page: %s", service, value, it, want, detail)
 			}
 		}
 	}
@@ -126,7 +128,7 @@ func TestVertexAITrainingHyperparameterTuningThroughThePages(t *testing.T) {
 					DoubleValueSpec: &aiplatformpb.StudySpec_ParameterSpec_DoubleValueSpec{MinValue: 0.01, MaxValue: 1}}}}},
 			TrialJobSpec: &aiplatformpb.CustomJobSpec{WorkerPoolSpecs: []*aiplatformpb.WorkerPoolSpec{{
 				MachineSpec: &aiplatformpb.MachineSpec{MachineType: "n1-standard-4"}, ReplicaCount: 1,
-				Task: &aiplatformpb.WorkerPoolSpec_ContainerSpec{ContainerSpec: &aiplatformpb.ContainerSpec{ImageUri: img, Command: []string{"sleep", "900"}}}}}}}})
+				Task: &aiplatformpb.WorkerPoolSpec_ContainerSpec{ContainerSpec: &aiplatformpb.ContainerSpec{ImageUri: img, Command: []string{"sh", "-c", "sleep 900", "sleeper"}}}}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

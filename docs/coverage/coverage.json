@@ -6529,9 +6529,9 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Implemented": 29,
+      "Implemented": 5,
       "Unimplemented": 27,
-      "Verified": 164
+      "Verified": 188
     },
     "rows": [
       {
@@ -6557,98 +6557,136 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/CreateDataset",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/CreateDatasetVersion",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/DeleteDataset",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/DeleteDatasetVersion",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/DeleteSavedQuery",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/ExportData",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/GetAnnotationSpec",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/GetDataset",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/GetDatasetVersion",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/ImportData",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/ListAnnotations",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/ListDataItems",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/ListDatasetVersions",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/ListDatasets",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/ListSavedQueries",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/RestoreDatasetVersion",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/SearchDataItems",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/UpdateDataset",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.DatasetService/UpdateDatasetVersion",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/CreateEndpoint",
@@ -6782,8 +6820,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CancelHyperparameterTuningJob",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/hptuning2210_test.go:64 TestVertexAIHyperparameterTuning"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CancelNasJob",
@@ -6811,8 +6851,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CreateHyperparameterTuningJob",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/hptuning2210_test.go:64 TestVertexAIHyperparameterTuning"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CreateModelDeploymentMonitoringJob",
@@ -6845,8 +6887,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/DeleteHyperparameterTuningJob",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/hptuning2210_test.go:64 TestVertexAIHyperparameterTuning"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/DeleteModelDeploymentMonitoringJob",
@@ -6879,8 +6923,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/GetHyperparameterTuningJob",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/hptuning2210_test.go:64 TestVertexAIHyperparameterTuning"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/GetModelDeploymentMonitoringJob",
@@ -6918,8 +6964,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/ListHyperparameterTuningJobs",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/hptuning2210_test.go:64 TestVertexAIHyperparameterTuning"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/ListModelDeploymentMonitoringJobs",

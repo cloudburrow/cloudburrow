@@ -1240,6 +1240,14 @@ func (s *Server) notebookREST() *rest.Transcoder {
 			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/contexts/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/executions/*/operations/*}"),
 		}}
+		// The Python SDK (google-cloud-aiplatform) polls under /ui, the
+		// first binding aiplatform_v1.yaml gives GetOperation (#1940): a
+		// dataset's import is polled as /ui/{name=.../datasets/*/operations/*}.
+		for _, m := range append([]*annotations.HttpRule(nil), t.Mixins...) {
+			if g := m.GetGet(); strings.HasPrefix(g, "/v1/{name=projects/*/locations/*/") {
+				t.Mixins = append(t.Mixins, opRule("/ui/"+strings.TrimPrefix(g, "/v1/")))
+			}
+		}
 		t.Mixins = append(t.Mixins, NotebookIAMMixins()...)
 		s.registerNotebooks(t)
 		iampb.RegisterIAMPolicyServer(t, &notebookIAM{s: s})

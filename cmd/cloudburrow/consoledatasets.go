@@ -140,9 +140,9 @@ func (datasetsProvider) CreateForm() (string, []console.Field) {
 		console.Field{Name: "dataSource", Label: "Select a data source", Type: "radio", Section: s2, ShowWhen: "dataType=tabular",
 			Options: []string{"gcs", "bigquery"}, Default: "gcs",
 			OptionLabels: map[string]string{"gcs": "Select CSV files from Cloud Storage", "bigquery": "Select a table or view from BigQuery"}},
-		console.Field{Name: "csvPath", Label: "Import file path", Type: "text", Section: s2, ShowWhen: "dataSource=gcs", Pattern: dsGCSPattern,
+		console.Field{Name: "csvPath", Label: "Import file path", Type: "text", Section: s2, ShowWhen: "dataType=tabular&dataSource=gcs", Pattern: dsGCSPattern,
 			Help: "gs://BUCKET/data.csv; a * matches several files with the same header."},
-		console.Field{Name: "bqPath", Label: "BigQuery path", Type: "text", Section: s2, ShowWhen: "dataSource=bigquery", Pattern: `^(bq://[^.\s]+\.[^.\s]+\.[^.\s]+)?$`,
+		console.Field{Name: "bqPath", Label: "BigQuery path", Type: "text", Section: s2, ShowWhen: "dataType=tabular&dataSource=bigquery", Pattern: `^(bq://[^.\s]+\.[^.\s]+\.[^.\s]+)?$`,
 			Help: "bq://PROJECT.DATASET.TABLE"},
 	)
 	return "Create", f

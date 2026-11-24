@@ -54,12 +54,16 @@ def main():
     image = aiplatform.ImageDataset.create(
         display_name="cb-flowers", gcs_source="gs://" + bucket + "/flowers.jsonl",
         import_schema_uri=aiplatform.schema.dataset.ioformat.image.single_label_classification, sync=True)
+    # create() keeps the Dataset it read before the import; read it again
+    # for the imported items' count.
+    image = aiplatform.ImageDataset(image.resource_name)
     out["image"] = {"name": image.resource_name, "schema": image.metadata_schema_uri,
                     "items": int(image.gca_resource.data_item_count)}
 
     text = aiplatform.TextDataset.create(
         display_name="cb-reviews", gcs_source="gs://" + bucket + "/reviews.jsonl",
         import_schema_uri=aiplatform.schema.dataset.ioformat.text.sentiment, sync=True)
+    text = aiplatform.TextDataset(text.resource_name)
     out["text"] = {"name": text.resource_name, "items": int(text.gca_resource.data_item_count)}
 
     tabular = aiplatform.TabularDataset.create(display_name="cb-tab", gcs_source=["gs://" + bucket + "/tab.csv"], sync=True)
