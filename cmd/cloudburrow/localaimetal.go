@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -42,6 +43,13 @@ func hostGenerator(cfg config.Config, modelPath, modelID string, log io.Writer) 
 		}
 	}
 	runner, err := liteRTLMRunner()
+	if errors.Is(err, hostai.ErrNoLiteRTLMRunner) {
+		// One line that says what is lost and how to get it back: an
+		// install that skipped the runner otherwise looks like a slow GPU.
+		fmt.Fprintf(log, "local AI: warning: the Apple GPU (Metal) runner is not installed, so generation runs on CPU in the runtime container; "+
+			"reinstall with scripts/install.sh or Homebrew, or set %s (%v)\n", hostai.LiteRTLMDirEnv, err)
+		return nil
+	}
 	if err != nil {
 		fmt.Fprintf(log, "local AI: generating on CPU in the runtime container: %v\n", err)
 		return nil

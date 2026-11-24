@@ -8,30 +8,117 @@ version may change behaviour.
 The release workflow publishes a tag's section of this file as the release notes. A scheduled
 release (every one to two days, [docs/ci.md](docs/ci.md#releasing)) commits nothing here: its
 notes are generated from the landings since the previous tag and kept in its annotated tag, and
-are used only when this file has no section for the tag. A tag with neither is refused. Before
+are used only when this file has no section for the tag. A tag with neither is refused. Those
+generated notes open with a **What's new** section made of the entries added under
+**Unreleased** since the previous tag (`scripts/release-notes.sh`), so every landing adds an entry
+here for each user-visible change it carries ([CONTRIBUTING.md](CONTRIBUTING.md#landings)). Before
 tagging `vX.Y.Z` by hand, move the entries under **Unreleased** into a new
 `## [X.Y.Z] - YYYY-MM-DD` section and add its link at the bottom.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-24
+
+Released by the schedule from `54131a7a6`. These entries were written after the release, from the
+landings since v0.5.0 (#2085 to #2196), the issues they closed, and the v0.6.0 docs. Only a row of
+[docs/compatibility.md](docs/compatibility.md) marked Verified is a support claim.
+
 ### Added
 
-- Model Garden deploys Hugging Face models locally (#1840): `ModelGardenService.Deploy` (gRPC and
-  REST) creates an Endpoint and a Model and serves the model with the engine Model Garden picks,
-  vLLM's CPU build for text generation and Text Embeddings Inference's for embeddings; the
-  endpoint answers `:predict`, `:rawPredict`, `:streamRawPredict` and v1beta1 `chat/completions`
-  in the shapes Google documents, and `UndeployModel`, `DeleteEndpoint` and `DeleteModel` free it.
-  The console's Deploy on a downloaded model opens the new Endpoints page, with progress through
-  to Ready and a test panel.
-- Scheduled releases (#1898): `.github/workflows/scheduled-release.yml` releases the newest commit
-  on main whose own push run of CI passed in full, compat shards included, every one to two days:
-  never within 24 hours of the last release, and always once 48 hours have passed and a newer
-  fully green commit exists. A minor bump when a `feat/` branch landed since the last tag, else a
-  patch. The notes are generated from the landings and kept in the annotated tag; nothing is
-  committed to main. `release.yml` is callable with the tag, and every release, a hand-pushed tag
-  included, now needs main's full push run (`scripts/require-ci-green.sh --main-push`), not only a
-  pull request's `ci-green`. [docs/ci.md](docs/ci.md#releasing) says how to dry-run, force, choose
-  the version or pause.
+- **Apple GPU (Metal) for local AI** (#2155, #2159). On macOS with Apple silicon, Model Garden's
+  GGUF and MLX deployments run llama.cpp (`llama-server`) or mlx-lm on the Mac's GPU as a
+  supervised host process, which the cluster reaches through a selector-less Service, so
+  `:predict`, `:rawPredict`, `:streamRawPredict` and `chat/completions` work unchanged.
+  Measured on an M4 Max with Qwen2.5-0.5B-Instruct Q4_K_M: 243 tokens/s on the GPU against 8.5 on
+  CPU in the cluster, and 234–245 tokens/s for MLX 4-bit. Gemini generation on Gemma (LiteRT-LM)
+  runs a macOS build of `cloudburrow_generate` on LiteRT-LM's GPU backend: Gemma 4 E2B decodes at
+  150 tokens/s against 32 on CPU. The darwin/arm64 archive and Homebrew ship that runner.
+  `cloudburrow up --local-ai-accelerator metal|cpu` (`localAI.accelerator`, `metal` by default on
+  Apple silicon) chooses where a deployment with no `machine_spec` runs. A `machine_spec` with
+  `NVIDIA_L4`, or any NVIDIA type, is the Apple GPU (`local-metal`), and the console's deploy form
+  offers "Apple GPU (Metal), local". Embeddings, vLLM, TEI, the PyTorch and ONNX runtimes and
+  custom containers stay on CPU, and NVIDIA is untested
+  ([prediction.md](docs/prediction.md#apple-gpu-metal)).
+- Model Garden browses all of Hugging Face and deploys any public Hub model on the instance's
+  cluster, with vLLM, Text Embeddings Inference, the PyTorch inference server, llama.cpp, mlx-lm or
+  ONNX Runtime (#2148). The console's Marketplace serves Docker Hub and deploys to the cluster
+  (#2149).
+- Vertex AI generation serves `candidateCount`, `responseLogprobs`/`logprobs`, `thinkingConfig`
+  and context caching (`cachedContents`), with Vertex AI Studio controls for each (#2107, #2121,
+  #2122). multimodalembedding@001's `:predict` request and `EmbedContent` audio, video, PDF and
+  `file_data` run on EmbeddingGemma 2 (#1651).
+- Document AI custom processors (Build, Train, Evaluate, v1beta3 datasets), Speech adaptation and
+  the v1 Adaptation service (#2106, #2124). chirp_3 speaker diarization in the `-tags onnx` build
+  (#2131), and recognition features gated by the model's supported languages (#2127).
+- New APIs: Cloud Trace with OTLP ingestion and Trace Explorer (#2118, `--port-trace`), the
+  Observability API (#2117), App Hub (#2110, `--port-apphub`), Dataform v1 and v1beta1 (#2105,
+  `--port-dataform`), Parameter Manager with templates and request quotas (#2054, #2063, #2090,
+  `--port-parametermanager`), Cloud Billing and Budgets (#2109), Firebase Rules (#2048, #2050,
+  `--port-firebaserules`), Network Connectivity service connection policies (#2141) and the Cloud
+  KMS Inventory API (#2053).
+- IAM: policies enforced on served APIs, with Policy Troubleshooter and Policy Analyzer (#1879).
+  Workforce Identity Federation with SAML exchange and SCIM (#2056, #2065, #2067, #2068),
+  principal access boundary policies (IAM v3, #2057), every Cloud Identity method (#2103), Cloud
+  Asset Inventory's IAM policy analysis (#2112), and Cloud Quotas on folders and organizations
+  (#2102).
+- BigQuery: ML imports TensorFlow SavedModels (#1775), and remote models cover the remaining Cloud
+  AI services, all run locally (#1799). Also data clean rooms and query templates (#2101), object
+  tables, Iceberg types, the default connection, CDC watermarks and stored procedures for Apache
+  Spark (#2104), table functions with `TABLE` parameters (#2120), and BigQuery Studio and Dataform
+  in the console (#2094, #2105, partial).
+- Databases: Spanner query plans for `PLAN` and `PROFILE` (#2029, partial). Bigtable `PROTO`
+  columns, Firestore with MongoDB compatibility database roles and Memorystore CMEK files (#2113),
+  and Memorystore for Valkey migration and replication in `CLUSTER` mode (#1577).
+- Kubernetes Engine upgrades clusters and node pools, with rollback and maintenance-window pause
+  (#2069, #2076), and more `ClusterManager` methods (#2100, partial). Backup and DR backs up and
+  restores Compute Engine VMs and disks (#2075).
+- Cloud Build fires triggers on pull requests from local repositories (#2077), fetches git source
+  dependencies (#2074) and lists private-pool machine types per region (#2073). Artifact Registry
+  serves the OCI referrers API, registry token auth and schema 1 manifests (#2111). Artifact
+  Analysis records language package licences (#2072).
+- Cloud Logging filters take `:`, `OR` and `NOT` (#2026, #2028). Also the `_Required` bucket and
+  sink, trace scopes and custom indexes (#2108), and log scopes (#2020). Cloud Monitoring serves
+  uptime checks and groups (#2146).
+- Console parity with the Google Cloud console for Cloud Storage, Firestore, Pub/Sub, Cloud Tasks,
+  Cloud Scheduler, Secret Manager, Cloud KMS, Cloud Run, Cloud Run functions, Cloud Build,
+  Artifact Registry, Secure Source Manager, Kubernetes Engine, Backup and DR, Cloud Logging,
+  Monitoring, Memorystore, Eventarc Advanced, Certificate Authority Service, API Keys, Document AI
+  and Speech-to-Text (#1843 to #1863 and their follow-ups, #2093 to #2099, #2142 to #2146).
+- `cloudburrow gc` lists, and with `--yes` removes, the Docker images and volumes past builds left
+  behind, and `stop` removes the images it built for the instance (#2152).
+
+### Changed
+
+- Licence: CloudBurrow is now licensed under the MIT License. v0.1.0–v0.5.0 were first published
+  under Apache 2.0, and their CloudBurrow code is now available under MIT too. Third-party code keeps its own licence (NOTICE, dependencies.json), and
+  [CONTRIBUTING.md](CONTRIBUTING.md) takes contributions under MIT with a Developer Certificate of
+  Origin sign-off.
+- Terraform: the pinned `google` provider is 8.12.0 (#1578).
+
+### Fixed
+
+- BigQuery: a time-travel window change could keep history older than the window (#2187), and a
+  stale clock read could set the engine's clock back (#2183). go-googlesql handles could be freed
+  before the call that read them, which hung queries (#2134, #2136). An Iceberg INSERT whose write
+  failed could answer 200 (#2161).
+- Cloud SQL: a clone of a blue-green-switched MySQL 5.7 instance started on the wrong server
+  (#2182), and MySQL replicas did not get the users made before them (#2183, #2184).
+- Kubernetes Engine: resuming a cancelled blue-green upgrade drained the blue nodes again (#2126),
+  and a node pool could be marked ERROR before its node registered (#2132).
+- Cloud Logging: one write's entries could be listed out of order (#2116), and `TailLogEntries`
+  ended OK, not with the context's status (#2133). Cloud Run: `GetService` reports `reconciling`
+  until the new revision is observed (#2138).
+- Cloud Quotas refuses a second preference for the same quota and dimensions (#2184). `env` wrote
+  an unnamed variable for Cloud Billing, which is now `CLOUDBURROW_BILLING_ENDPOINT` (#2151). Cloud
+  Storage's `anywhereCaches.pause` is gone from the JSON API, as on Google (#1791).
+
+## [0.5.0] - 2026-11-21
+
+Released by the schedule. Its notes were generated from the landings; these are the entries
+recorded under **Unreleased** between v0.4.0 and v0.5.0.
+
+### Added
+
 - Artifact Registry accuracy (#1897): cleanup policies run in the background about daily
   (`--artifact-registry-cleanup-interval`), with Delete and Keep conditions, keep most recent
   versions and dry runs written to Cloud Logging as BatchDeleteVersions Data Access audit
@@ -53,6 +140,38 @@ tagging `vX.Y.Z` by hand, move the entries under **Unreleased** into a new
   continuous analysis (inactive after 30 days unpulled, archived after 90). A repository's
   `vulnerability_scanning_config` is served, and the console's Create repository Vulnerability
   scanning option and an image's Vulnerabilities tab are on.
+
+### Fixed
+
+- **BigQuery: `CREATE VECTOR INDEX` works as a project's first statement** (#2045): on a fresh
+  instance, an index on a table of 10 MB or more failed "dataset _cloudburrow_query_results is not
+  found" until a query had run, as its tables are kept in that hidden dataset, which was made only
+  for a query result or a scratch table. The front now makes it before any statement that names
+  it (the ML vocabulary functions had the same gap); `datasets.list` still leaves it out.
+
+## [0.4.0] - 2026-11-19
+
+Released by the schedule. Its notes were generated from the landings; these are the entries
+recorded under **Unreleased** between v0.3.0 and v0.4.0.
+
+### Added
+
+- Model Garden deploys Hugging Face models locally (#1840): `ModelGardenService.Deploy` (gRPC and
+  REST) creates an Endpoint and a Model and serves the model with the engine Model Garden picks,
+  vLLM's CPU build for text generation and Text Embeddings Inference's for embeddings; the
+  endpoint answers `:predict`, `:rawPredict`, `:streamRawPredict` and v1beta1 `chat/completions`
+  in the shapes Google documents, and `UndeployModel`, `DeleteEndpoint` and `DeleteModel` free it.
+  The console's Deploy on a downloaded model opens the new Endpoints page, with progress through
+  to Ready and a test panel.
+- Scheduled releases (#1898): `.github/workflows/scheduled-release.yml` releases the newest commit
+  on main whose own push run of CI passed in full, compat shards included, every one to two days:
+  never within 24 hours of the last release, and always once 48 hours have passed and a newer
+  fully green commit exists. A minor bump when a `feat/` branch landed since the last tag, else a
+  patch. The notes are generated from the landings and kept in the annotated tag; nothing is
+  committed to main. `release.yml` is callable with the tag, and every release, a hand-pushed tag
+  included, now needs main's full push run (`scripts/require-ci-green.sh --main-push`), not only a
+  pull request's `ci-green`. [docs/ci.md](docs/ci.md#releasing) says how to dry-run, force, choose
+  the version or pause.
 - BigQuery jobs outlive their request (#1819): `jobs.query` and `jobs.getQueryResults` wait at
   most `timeoutMs` (10 s by default) and then answer `jobComplete: false` with the job's
   reference; `jobs.insert` answers a job still running `RUNNING`, `jobs.get` reports it so, and
@@ -86,20 +205,8 @@ tagging `vX.Y.Z` by hand, move the entries under **Unreleased** into a new
   and `FACE_DETECTION` on Google's MediaPipe models. Models are downloaded once into
   `<state-dir>/models` and checked against pinned SHA-256s.
 
-### Changed
-
-- Licence: CloudBurrow is now licensed under the MIT License. v0.1.0–v0.5.0 were first published
-  under Apache 2.0, and their CloudBurrow code is now available under MIT too. Third-party code keeps its own licence (NOTICE, dependencies.json), and
-  [CONTRIBUTING.md](CONTRIBUTING.md) takes contributions under MIT with a Developer Certificate of
-  Origin sign-off.
-
 ### Fixed
 
-- **BigQuery: `CREATE VECTOR INDEX` works as a project's first statement** (#2045): on a fresh
-  instance, an index on a table of 10 MB or more failed "dataset _cloudburrow_query_results is not
-  found" until a query had run, as its tables are kept in that hidden dataset, which was made only
-  for a query result or a scratch table. The front now makes it before any statement that names
-  it (the ML vocabulary functions had the same gap); `datasets.list` still leaves it out.
 - **Release pins follow the latest release** (#1901): scheduled releases are tagged every one to
   two days without a commit to `main`, so the README, SECURITY.md, docs/install.md, docs/ci.md,
   the install script's usage and action.yml no longer name a numbered release. They link
@@ -811,7 +918,10 @@ operation in [docs/compatibility.md](docs/compatibility.md) and summarised in
   one `checksums.txt`, a Homebrew formula and an installer that refuses an archive it cannot
   verify (#71, #324).
 
-[Unreleased]: https://github.com/cloudburrow/cloudburrow/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/cloudburrow/cloudburrow/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cloudburrow/cloudburrow/releases/tag/v0.1.0

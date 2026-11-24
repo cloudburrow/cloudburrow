@@ -316,6 +316,16 @@ tag's `## [X.Y.Z]` section of `CHANGELOG.md` when there is one, and otherwise th
 starts with the generated-notes marker. To publish hand-written notes instead, add the section to
 `CHANGELOG.md` on `main` first, or tag by hand.
 
+Generated notes open with a **What's new** section. It holds the `CHANGELOG.md` entries added under
+**Unreleased** between the previous tag and this one, then the issues the landings closed that no
+entry names: the issue of each `feat/N-...` and `fix/N-...` branch merged (not `fix/main-ci...`),
+and each `Closes #N` in a merge message. The issues are grouped by area, the part of the title
+before its first colon, with titles read through `gh` (`RELEASE_NOTES_REPO`, with `issues: read`).
+Issues labelled `workflow-red` and titles starting `CI:` are left out. The landing list, "Fix main
+CI" pull requests included, is folded into a collapsed **All landings** block. So the notes are only
+as good as the entries landings add ([CONTRIBUTING.md](../CONTRIBUTING.md#landings)). The jobs that
+render them check out the full history, so the previous tag is there.
+
 **Starting a release without the schedule.** Actions › Scheduled release › Run workflow:
 
 - with **dry run** ticked (the default), it decides and shows the commit, the version and the notes

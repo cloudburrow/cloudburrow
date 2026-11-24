@@ -33,23 +33,37 @@ func scriptPath(t *testing.T, name string) string {
 }
 
 // archive builds a release tarball holding name/cloudburrow, a stand-in that
-// prints the version the way the real binary does.
-func archive(t *testing.T, name string) []byte {
+// prints the version the way the real binary does, and, with runner set,
+// name/litert-lm/ as the darwin/arm64 archive carries it: the Apple GPU
+// runner, cloudburrow_generate, beside a dylib it loads.
+func archive(t *testing.T, name, runner string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 	bin := []byte("#!/bin/sh\necho 'cloudburrow " + tag + " (commit test)'\n")
-	for _, h := range []*tar.Header{
-		{Name: name + "/", Mode: 0o755, Typeflag: tar.TypeDir},
-		{Name: name + "/cloudburrow", Mode: 0o755, Size: int64(len(bin)), Typeflag: tar.TypeReg},
-	} {
-		if err := tw.WriteHeader(h); err != nil {
+	gen := []byte("#!/bin/sh\necho '" + runner + "'\n")
+	dylib := []byte("not really a dylib")
+	type entry struct {
+		h    *tar.Header
+		body []byte
+	}
+	entries := []entry{
+		{&tar.Header{Name: name + "/", Mode: 0o755, Typeflag: tar.TypeDir}, nil},
+		{&tar.Header{Name: name + "/cloudburrow", Mode: 0o755, Size: int64(len(bin)), Typeflag: tar.TypeReg}, bin},
+	}
+	if runner != "" {
+		entries = append(entries,
+			entry{&tar.Header{Name: name + "/litert-lm/", Mode: 0o755, Typeflag: tar.TypeDir}, nil},
+			entry{&tar.Header{Name: name + "/litert-lm/cloudburrow_generate", Mode: 0o755, Size: int64(len(gen)), Typeflag: tar.TypeReg}, gen},
+			entry{&tar.Header{Name: name + "/litert-lm/libLiteRtMetalAccelerator.dylib", Mode: 0o644, Size: int64(len(dylib)), Typeflag: tar.TypeReg}, dylib},
+		)
+	}
+	for _, e := range entries {
+		if err := tw.WriteHeader(e.h); err != nil {
 			t.Fatal(err)
 		}
-		if h.Typeflag == tar.TypeReg {
-			_, _ = tw.Write(bin)
-		}
+		_, _ = tw.Write(e.body)
 	}
 	_ = tw.Close()
 	_ = gz.Close()
@@ -61,8 +75,15 @@ func archive(t *testing.T, name string) []byte {
 // set, alters the archive after its checksum is computed.
 func release(t *testing.T, corrupt func([]byte) []byte, sums func(string) string) *httptest.Server {
 	t.Helper()
+	return releaseWithRunner(t, corrupt, sums, "")
+}
+
+// releaseWithRunner is release with runner, when set, as the archive's
+// litert-lm/cloudburrow_generate output.
+func releaseWithRunner(t *testing.T, corrupt func([]byte) []byte, sums func(string) string, runner string) *httptest.Server {
+	t.Helper()
 	name := fmt.Sprintf("cloudburrow_%s_%s_%s", tag, runtime.GOOS, runtime.GOARCH)
-	tarball := archive(t, name)
+	tarball := archive(t, name, runner)
 	sum := fmt.Sprintf("%x", sha256.Sum256(tarball))
 	checksums := fmt.Sprintf("%s  %s.tar.gz\n%s  cloudburrow_%s_other_os.tar.gz\n", sum, name, strings.Repeat("0", 64), tag)
 	if sums != nil {
@@ -146,6 +167,79 @@ func TestTheInstallerRefusesAnArchiveWithNoChecksum(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(prefix, "bin", "cloudburrow")); !os.IsNotExist(err) {
 		t.Error("a binary was installed without a checksum")
+	}
+}
+
+// The darwin/arm64 archive's Apple GPU runner is installed where the CLI
+// looks without CLOUDBURROW_LITERT_LM_DIR (hostai.LiteRTLMRunner's
+// bin/../libexec/cloudburrow/litert-lm) and where the Homebrew formula puts
+// it, and a reinstall replaces it whole: a file the new release dropped
+// does not linger beside the new runner.
+func TestTheInstallerInstallsTheAppleGPURunner(t *testing.T) {
+	prefix := t.TempDir()
+	runnerDir := filepath.Join(prefix, "libexec", "cloudburrow", "litert-lm")
+	if err := os.MkdirAll(runnerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(runnerDir, "libFromAnOlderRelease.dylib")
+	if err := os.WriteFile(stale, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := install(t, releaseWithRunner(t, nil, nil, "runner "+tag), prefix)
+	if err != nil {
+		t.Fatalf("install failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "installed the Apple GPU (Metal) runner in "+runnerDir) {
+		t.Errorf("the installer did not report the runner:\n%s", out)
+	}
+	got, err := exec.Command(filepath.Join(runnerDir, "cloudburrow_generate")).Output()
+	if err != nil || strings.TrimSpace(string(got)) != "runner "+tag {
+		t.Errorf("the installed runner printed %q (%v)", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(runnerDir, "libLiteRtMetalAccelerator.dylib")); err != nil {
+		t.Errorf("the runner's dylib was not installed: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("a file from the previous runner survived the reinstall (%v)", err)
+	}
+	for _, leftover := range []string{runnerDir + ".new", runnerDir + ".old"} {
+		if _, err := os.Stat(leftover); !os.IsNotExist(err) {
+			t.Errorf("the install left %s behind", leftover)
+		}
+	}
+
+	// An archive without litert-lm/ (every platform but darwin/arm64)
+	// installs the CLI alone; on Apple silicon it says generation will run
+	// on CPU, rather than leaving that to be discovered.
+	plain := t.TempDir()
+	out, err = install(t, release(t, nil, nil), plain)
+	if err != nil {
+		t.Fatalf("install failed: %v\n%s", err, out)
+	}
+	if onAppleSilicon := runtime.GOOS == "darwin" && runtime.GOARCH == "arm64"; onAppleSilicon != strings.Contains(out, "Gemma generation will run on CPU") {
+		t.Errorf("on %s/%s, the CPU note is wrong:\n%s", runtime.GOOS, runtime.GOARCH, out)
+	}
+	if _, err := os.Stat(filepath.Join(plain, "libexec")); !os.IsNotExist(err) {
+		t.Errorf("an archive without a runner installed libexec/ (%v)", err)
+	}
+}
+
+// install.sh, the Homebrew formula and the CLI's default lookup must agree
+// on where the runner lives, or one of the three installs it where the CLI
+// never looks and generation silently runs on CPU.
+func TestTheRunnerPathMatchesHomebrewAndTheCLI(t *testing.T) {
+	for _, c := range []struct{ file, want string }{
+		{scriptPath(t, "install.sh"), `runner_dir="${prefix}/libexec/cloudburrow/litert-lm"`},
+		{scriptPath(t, "render-formula.sh"), `(libexec/"cloudburrow").install "litert-lm"`},
+		{filepath.Join("..", "..", "internal", "hostai", "litertlm.go"), `filepath.Join(bin, "..", "libexec", "cloudburrow", "litert-lm")`},
+	} {
+		b, err := os.ReadFile(c.file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), c.want) {
+			t.Errorf("%s no longer has %s", c.file, c.want)
+		}
 	}
 }
 
