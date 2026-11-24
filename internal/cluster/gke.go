@@ -170,7 +170,7 @@ func (g *GKE) Resize(ctx context.Context, kind, image, pool string, n int) error
 		// Drain is Google's on a resize down; the pods go elsewhere.
 		_, _ = r.Run(ctx, "kubectl", "--kubeconfig", kc, "drain", name, "--ignore-daemonsets", "--delete-emptydir-data", "--force", "--timeout=60s")
 		_, _ = r.Run(ctx, "kubectl", "--kubeconfig", kc, "delete", "node", name, "--ignore-not-found")
-		if _, err := r.Run(ctx, "docker", "rm", "-f", "-v", name); err != nil {
+		if err := removeNodeContainer(ctx, r, name); err != nil {
 			return fmt.Errorf("remove node %s: %w", name, err)
 		}
 		g.forgetNode(kind, pool, name)
