@@ -23,8 +23,10 @@ package vertexai
 //   - CancelTrainingPipeline is best effort (error code 1); a running
 //     pipeline cannot be deleted.
 //
-// Not served (UNIMPLEMENTED, naming why): AutoML and hyperparameter tuning
-// task definitions, and input_data_config (Vertex AI managed datasets,
+// A hyperparameter tuning pipeline (hpTaskDefinition, hptuning.go) runs a
+// HyperparameterTuningJob and uploads the best trial's model.
+//
+// Not served (UNIMPLEMENTED, naming why): AutoML task definitions, and input_data_config (Vertex AI managed datasets,
 // which this instance does not serve).
 
 import (
@@ -51,6 +53,8 @@ const customTaskDefinition = "gs://google-cloud-aiplatform/schema/trainingjob/de
 type trainingEntry struct {
 	TP     *aiplatformpb.TrainingPipeline
 	cancel context.CancelFunc
+	// hp is a hyperparameter tuning task's inputs (hptuning.go).
+	hp *aiplatformpb.HyperparameterTuningJob
 }
 
 func trainingRunning(s aiplatformpb.PipelineState) bool {
@@ -107,20 +111,28 @@ func (s *Server) createTrainingPipeline(parent string, in *aiplatformpb.Training
 	switch {
 	case def == "":
 		return nil, apierror.InvalidArgument("training_pipeline.training_task_definition is required")
-	case def != customTaskDefinition:
-		return nil, apierror.Unimplemented("training_pipeline.training_task_definition %s is not served on this instance: only custom training (%s) is; "+
-			"AutoML and hyperparameter tuning pipelines are not run locally", def, customTaskDefinition)
+	case def != customTaskDefinition && def != hpTaskDefinition:
+		return nil, apierror.Unimplemented("training_pipeline.training_task_definition %s is not served on this instance: only custom training (%s) and hyperparameter tuning (%s) are; "+
+			"AutoML pipelines are not run locally", def, customTaskDefinition, hpTaskDefinition)
 	}
 	if in.GetInputDataConfig() != nil {
 		return nil, apierror.Unimplemented("training_pipeline.input_data_config names a Vertex AI managed dataset, which this instance does not serve: " +
 			"pass the training data to the job's container (its args or environment) as Cloud Storage or BigQuery URIs")
 	}
-	spec, err := trainingSpec(in.GetTrainingTaskInputs())
-	if err != nil {
-		return nil, err
-	}
-	if err := checkCustomJobSpec("training_pipeline.training_task_inputs", spec); err != nil {
-		return nil, err
+	var spec *aiplatformpb.CustomJobSpec
+	var hp *aiplatformpb.HyperparameterTuningJob
+	if def == hpTaskDefinition {
+		if hp, err = hpTaskInputs(in.GetTrainingTaskInputs()); err != nil {
+			return nil, err
+		}
+		spec = hp.GetTrialJobSpec()
+	} else {
+		if spec, err = trainingSpec(in.GetTrainingTaskInputs()); err != nil {
+			return nil, err
+		}
+		if err := checkCustomJobSpec("training_pipeline.training_task_inputs", spec); err != nil {
+			return nil, err
+		}
 	}
 	if m := in.GetModelToUpload(); m != nil {
 		if m.GetDisplayName() == "" {
@@ -159,7 +171,7 @@ func (s *Server) createTrainingPipeline(parent string, in *aiplatformpb.Training
 	tp.Name, tp.CreateTime, tp.UpdateTime, tp.StartTime, tp.EndTime, tp.Error = name, now, now, nil, nil, nil
 	tp.State, tp.TrainingTaskMetadata = aiplatformpb.PipelineState_PIPELINE_STATE_PENDING, nil
 	ctx, cancel := context.WithCancel(context.Background())
-	e := &trainingEntry{TP: tp, cancel: cancel}
+	e := &trainingEntry{TP: tp, cancel: cancel, hp: hp}
 	st.trainingPipelines[name] = e
 	st.save()
 	out := proto.Clone(tp).(*aiplatformpb.TrainingPipeline)
@@ -180,6 +192,10 @@ func (st *notebookStore) setTraining(e *trainingEntry, f func(tp *aiplatformpb.T
 }
 
 func (s *Server) runTrainingPipeline(ctx context.Context, e *trainingEntry, parent, project, location string, spec *aiplatformpb.CustomJobSpec) {
+	if e.hp != nil {
+		s.runHPTraining(ctx, e, parent)
+		return
+	}
 	st := s.notebooks()
 	st.mu.Lock()
 	tp := proto.Clone(e.TP).(*aiplatformpb.TrainingPipeline)

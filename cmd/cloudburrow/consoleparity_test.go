@@ -2565,6 +2565,16 @@ var parityRows = []parityRow{
 	{Resource: "Vertex AI Training: create a custom job", Service: "vertexai", Methods: []string{"JobService/CreateCustomJob"},
 		Excluded: "Google's console creates a CustomJob only through a training pipeline (https://docs.cloud.google.com/vertex-ai/docs/training/create-custom-job: " +
 			"\"you can't create a CustomJob directly\" in the console); Train new model does"},
+	{Resource: "Vertex AI Training: hyperparameter tuning jobs", Service: "vertexai",
+		Methods: []string{"JobService/GetHyperparameterTuningJob", "JobService/ListHyperparameterTuningJobs", "JobService/CancelHyperparameterTuningJob",
+			"JobService/DeleteHyperparameterTuningJob"},
+		Provider: "vertex-hyperparameter-tuning-jobs", Offers: "Training's Hyperparameter tuning jobs tab: a Region menu, a job's page (its details, study, " +
+			"trial worker pools and Trials table, each trial linking its custom job), Cancel and Delete; Train new model's Hyperparameter tuning step " +
+			"(Enable hyperparameter tuning, hyperparameters, Metric to optimize and Goal, Maximum number of trials and of parallel trials, Search algorithm)",
+		Tests: []string{"TestVertexAITrainingHyperparameterTuningThroughThePages"}},
+	{Resource: "Vertex AI Training: create a hyperparameter tuning job", Service: "vertexai", Methods: []string{"JobService/CreateHyperparameterTuningJob"},
+		Excluded: "Google's console creates hyperparameter tuning through Train new model's Hyperparameter tuning step, a training pipeline with the " +
+			"hyperparameter tuning task (https://docs.cloud.google.com/vertex-ai/docs/training/using-hyperparameter-tuning, Console tab), which this console offers"},
 	{Resource: "Vertex AI batch inference", Service: "vertexai",
 		Methods: []string{"JobService/CreateBatchPredictionJob", "JobService/GetBatchPredictionJob", "JobService/ListBatchPredictionJobs",
 			"JobService/CancelBatchPredictionJob", "JobService/DeleteBatchPredictionJob"},

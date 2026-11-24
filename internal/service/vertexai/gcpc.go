@@ -30,9 +30,14 @@ package vertexai
 //     names it (resourceType BigQueryJob, its selfLink); the outputs are
 //     the google.BQTable destination_table, the google.BQMLModel model,
 //     or an artifact whose metadata is the query's schema and rows.
+//   - hyperparameter_tuning_job (type HyperparameterTuningJob, and
+//     HyperparameterTuningJobWithMetrics, which also writes
+//     execution_metrics {"success_trials_count", "total_trials_count"}):
+//     the payload, empty fields removed, is a HyperparameterTuningJob
+//     (hptuning.go) created in the project and location, then waited for;
+//     gcp_resources names it (resourceType HyperparameterTuningJob).
 // A launcher this instance has no service for (dataflow, dataproc, the
-// AutoML, model, endpoint and hyperparameter tuning launchers) fails the
-// task naming it.
+// AutoML, model and endpoint launchers) fails the task naming it.
 
 import (
 	"context"
@@ -233,12 +238,14 @@ func (r *pipelineRun) runGCPC(ctx context.Context, module string, args []string,
 		return g.customJob(ctx, project, location)
 	case module == "batch_prediction_job":
 		return g.batchPrediction(ctx, project, location)
+	case module == "hyperparameter_tuning_job":
+		return g.hyperparameterTuningJob(ctx, project, location)
 	case strings.HasPrefix(module, "bigquery."):
 		return g.bigquery(ctx, project, location, strings.TrimPrefix(module, "bigquery."))
 	case strings.HasPrefix(module, "dataflow"):
 		return fmt.Errorf("Google Cloud Pipeline Components' %s launcher runs a Dataflow job, and Dataflow is not served on this instance", module)
 	}
-	return fmt.Errorf("Google Cloud Pipeline Components' %s launcher is not run on this instance: CustomJob, BatchPredictionJob and the BigQuery launchers are", module)
+	return fmt.Errorf("Google Cloud Pipeline Components' %s launcher is not run on this instance: CustomJob, HyperparameterTuningJob, BatchPredictionJob and the BigQuery launchers are", module)
 }
 
 func (g *gcpcRun) payload() (map[string]any, error) {
@@ -291,6 +298,45 @@ func (g *gcpcRun) customJob(ctx context.Context, project, location string) error
 	}
 	if done.GetState() != aiplatformpb.JobState_JOB_STATE_SUCCEEDED {
 		return jobStateError(done.GetName(), done.GetState(), done.GetError().GetCode(), done.GetError().GetMessage())
+	}
+	return nil
+}
+
+func (g *gcpcRun) hyperparameterTuningJob(ctx context.Context, project, location string) error {
+	p, err := g.payload()
+	if err != nil {
+		return err
+	}
+	b, _ := json.Marshal(removeEmpty(p))
+	job := &aiplatformpb.HyperparameterTuningJob{}
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(b, job); err != nil {
+		return fmt.Errorf("the HyperparameterTuningJob payload: %v", err)
+	}
+	created, err := g.r.s.createHPJob("projects/"+project+"/locations/"+location, job, nil)
+	if err != nil {
+		return apierror.From(err)
+	}
+	if err := g.writeResources("HyperparameterTuningJob", vertexURI(location, created.GetName())); err != nil {
+		return err
+	}
+	done, err := g.r.s.waitHPJob(ctx, created.GetName())
+	if err != nil {
+		return err
+	}
+	if done.GetState() != aiplatformpb.JobState_JOB_STATE_SUCCEEDED {
+		return jobStateError(done.GetName(), done.GetState(), done.GetError().GetCode(), done.GetError().GetMessage())
+	}
+	if g.args["type"] == "HyperparameterTuningJobWithMetrics" && g.args["execution_metrics"] != "" {
+		ok := 0
+		for _, t := range done.GetTrials() {
+			if t.GetState() == aiplatformpb.Trial_SUCCEEDED {
+				ok++
+			}
+		}
+		m, _ := json.Marshal(map[string]int{"success_trials_count": ok, "total_trials_count": len(done.GetTrials())})
+		if err := os.WriteFile(g.local(g.args["execution_metrics"]), m, 0o666); err != nil {
+			return err
+		}
 	}
 	return nil
 }

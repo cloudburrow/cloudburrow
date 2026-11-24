@@ -135,14 +135,23 @@ function agentPlatformRoutes() {
     // (https://docs.cloud.google.com/vertex-ai/docs/training/create-training-pipeline,
     // read 2026-11-24).
     page(`${AP}/training`, "Training", "Model development", { service: "vertex-training-pipelines", listedWhenOff: true, tabTitle: "Training pipelines",
-      pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`], kind: "Training pipeline",
+      pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`, `${AP}/training/hyperparameter-tuning-jobs`], kind: "Training pipeline",
       api: "projects.locations.trainingPipelines", about: "Training pipelines, each a custom job that trains a model and uploads it to the Model Registry",
       docs: "https://docs.cloud.google.com/vertex-ai/docs/training/create-training-pipeline",
       instead: "Start CloudBurrow with --services including run and storage: a job's workers run on Docker and write to Cloud Storage." }),
     page(`${AP}/training/custom-jobs`, "Training", "Model development", { service: "vertex-custom-jobs", listedWhenOff: true, tabTitle: "Custom jobs",
-      navHidden: true, navAs: `${AP}/training`, pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`], kind: "Custom job",
+      navHidden: true, navAs: `${AP}/training`, pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`, `${AP}/training/hyperparameter-tuning-jobs`], kind: "Custom job",
       api: "projects.locations.customJobs", about: "Custom training jobs, each worker a container of its image",
       docs: "https://docs.cloud.google.com/vertex-ai/docs/training/create-custom-job",
+      instead: "Start CloudBurrow with --services including run and storage." }),
+    // Its Hyperparameter tuning jobs tab (#2210): each trial a custom job
+    // (https://docs.cloud.google.com/vertex-ai/docs/training/using-hyperparameter-tuning,
+    // read 2026-11-24).
+    page(`${AP}/training/hyperparameter-tuning-jobs`, "Training", "Model development", { service: "vertex-hyperparameter-tuning-jobs", listedWhenOff: true,
+      tabTitle: "Hyperparameter tuning jobs", navHidden: true, navAs: `${AP}/training`,
+      pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`, `${AP}/training/hyperparameter-tuning-jobs`], kind: "Hyperparameter tuning job",
+      api: "projects.locations.hyperparameterTuningJobs", about: "Hyperparameter tuning jobs, each trial a custom job whose code reports metrics with cloudml-hypertune",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/training/using-hyperparameter-tuning",
       instead: "Start CloudBurrow with --services including run and storage." }),
     // Vertex AI Pipelines (#2173): the Pipelines page's Runs and Schedules
     // tabs ("Go to the Schedules tab on the Pipelines page":

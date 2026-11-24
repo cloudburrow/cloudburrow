@@ -6529,8 +6529,8 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Implemented": 5,
-      "Unimplemented": 32,
+      "Implemented": 10,
+      "Unimplemented": 27,
       "Verified": 164
     },
     "rows": [
@@ -6687,8 +6687,8 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CancelHyperparameterTuningJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CancelNasJob",
@@ -6716,8 +6716,8 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CreateHyperparameterTuningJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CreateModelDeploymentMonitoringJob",
@@ -6750,8 +6750,8 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/DeleteHyperparameterTuningJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/DeleteModelDeploymentMonitoringJob",
@@ -6784,8 +6784,8 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/GetHyperparameterTuningJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/GetModelDeploymentMonitoringJob",
@@ -6823,8 +6823,8 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/ListHyperparameterTuningJobs",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/ListModelDeploymentMonitoringJobs",
