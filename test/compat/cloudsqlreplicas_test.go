@@ -43,7 +43,7 @@ func TestCloudSQLReadReplicas(t *testing.T) {
 	if os.Getenv(EnvCloudSQL) != "" {
 		engines = append(engines, engine{version: "POSTGRES_17", create: "CREATE TABLE t (v text)",
 			dsn: func(_, conn string) string {
-				return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+				return fmt.Sprintf("host=%s user=postgres password=%s dbname=postgres sslmode=disable", conn, pgRootPassword)
 			},
 			register: func(n string, o ...cloudsqlconn.Option) (func() error, error) { return pgxv5.RegisterDriver(n, o...) }})
 	}
@@ -249,7 +249,7 @@ func TestCloudSQLReplicaOfUpsServer(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer cleanup()
-			db, err := sql.Open(drv, fmt.Sprintf("host=%s user=cloudburrow dbname=cloudburrow sslmode=disable", r.ConnectionName))
+			db, err := sql.Open(drv, fmt.Sprintf("host=%s user=cloudburrow password=%s dbname=cloudburrow sslmode=disable", r.ConnectionName, upPGPassword()))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -276,7 +276,7 @@ func TestGcloudSQLReadReplica(t *testing.T) {
 	n := time.Now().UnixNano() % 1e6
 	primary, replica := fmt.Sprintf("gcloud-pgp-%d", n), fmt.Sprintf("gcloud-pgr-%d", n)
 	g.must("sql", "instances", "create", primary, "--project", g.project, "--database-version=POSTGRES_17",
-		"--tier=db-custom-1-3840", "--region=us-central1", "--no-backup", "--quiet")
+		"--root-password=Root-pass1", "--tier=db-custom-1-3840", "--region=us-central1", "--no-backup", "--quiet")
 	defer g.run(nil, "sql", "instances", "delete", primary, "--project", g.project, "--quiet")
 	g.must("sql", "instances", "create", replica, "--project", g.project, "--master-instance-name="+primary,
 		"--tier=db-custom-1-3840", "--region=us-central1", "--quiet")

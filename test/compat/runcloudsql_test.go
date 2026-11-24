@@ -98,7 +98,8 @@ func TestRunServiceCloudSQLVolume(t *testing.T) {
 		Template: &runpb.RevisionTemplate{
 			Volumes: []*runpb.Volume{cloudSQLVolume("cloudsql", conn)},
 			Containers: []*runpb.Container{{Image: postgresImage, Command: []string{"sh", "-c"}, Args: []string{cloudSQLServeScript},
-				Env:          []*runpb.EnvVar{{Name: "CONN", Values: &runpb.EnvVar_Value{Value: conn}}},
+				Env: []*runpb.EnvVar{{Name: "CONN", Values: &runpb.EnvVar_Value{Value: conn}},
+					{Name: "PGPASSWORD", Values: &runpb.EnvVar_Value{Value: upPGPassword()}}},
 				VolumeMounts: []*runpb.VolumeMount{{Name: "cloudsql", MountPath: "/cloudsql"}}}},
 		}}})
 	if err != nil {
@@ -145,7 +146,7 @@ func TestRunJobCloudSQLVolume(t *testing.T) {
 	id := "compat-job-cloudsql"
 	name := runParent(h) + "/jobs/" + id
 	job := shellJob(`for i in $(seq 60); do [ -S "/cloudsql/$CONN/.s.PGSQL.5432" ] && break; sleep 1; done
-[ "$(psql -h "/cloudsql/$CONN" -U cloudburrow -d cloudburrow -tAc 'SELECT 1')" = 1 ]`, 1, map[string]string{"CONN": conn})
+[ "$(psql -h "/cloudsql/$CONN" -U cloudburrow -d cloudburrow -tAc 'SELECT 1')" = 1 ]`, 1, map[string]string{"CONN": conn, "PGPASSWORD": upPGPassword()})
 	tt := job.Template.Template
 	tt.Containers[0].Image = postgresImage
 	tt.Volumes = []*runpb.Volume{cloudSQLVolume("cloudsql", conn)}

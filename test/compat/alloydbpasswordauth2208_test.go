@@ -105,6 +105,7 @@ func TestAlloyDBPasswordAuthentication(t *testing.T) {
 	}
 
 	t.Run("iam", func(t *testing.T) {
+		h := h.For(t)
 		project := iamProject(t, h, "adbiam-")
 		p := newIAMPrincipalIn(t, h, envSQLResourceManager, project, "adbiam")
 		role := strings.TrimSuffix(p.email, ".gserviceaccount.com")

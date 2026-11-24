@@ -176,7 +176,7 @@ func TestCloudSQLSwitchover(t *testing.T) {
 	if os.Getenv(EnvCloudSQL) != "" {
 		// A PostgreSQL primary's DR replica and switchover are served
 		// (TestCloudSQLSwitchoverPostgres, #1524), with the same refusals.
-		pg := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: fmt.Sprintf("sw-pg-%d", n), DatabaseVersion: "POSTGRES_17",
+		pg := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: fmt.Sprintf("sw-pg-%d", n), DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1",
 			Region: "us-central1", Settings: plus()})
 		_, err = designate(pg.Name, "x")
 		wantCode(t, "a PostgreSQL primary's DR replica that is not its replica", err, 400, "not a read replica")

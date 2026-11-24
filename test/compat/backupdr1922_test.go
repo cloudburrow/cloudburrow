@@ -57,7 +57,7 @@ func TestBackupDRRestoreToANewInstance(t *testing.T) {
 		h.Endpoint(EnvCloudSQL)
 		c = sqlBackupCase{name: "postgres", version: "POSTGRES_17", instance: "bdrn-pg-" + suffix, created: true,
 			table: "bdr_rows", dsn: func(_, conn string) string {
-				return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+				return fmt.Sprintf("host=%s user=postgres password=%s dbname=postgres sslmode=disable", conn, pgRootPassword)
 			}, register: pgRegister}
 		bc, otherMajor = &sqladmin.BackupConfiguration{Enabled: true, StartTime: "03:00"}, "POSTGRES_16"
 	case os.Getenv(EnvMySQL) != "":

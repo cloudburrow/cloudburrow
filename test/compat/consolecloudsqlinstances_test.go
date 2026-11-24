@@ -111,7 +111,7 @@ func TestConsoleCloudSQLInstanceEditAndBackups(t *testing.T) {
 	svc := sqlAdminService(t, h)
 	project := h.Project()
 	name := fmt.Sprintf("console-bk-%d", time.Now().UnixNano()%1e6)
-	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17",
+	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1",
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}}).Do()
 	if err != nil {
 		t.Fatal(err)
@@ -169,7 +169,7 @@ func TestConsoleCloudSQLInstanceEditAndBackups(t *testing.T) {
 	}
 
 	c := sqlBackupCase{table: "cbk_rows", register: pgRegister, dsn: func(_, conn string) string {
-		return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+		return fmt.Sprintf("host=%s user=postgres password=%s dbname=postgres sslmode=disable", conn, pgRootPassword)
 	}}
 	conn := project + ":us-central1:" + name
 	sqlBackupRows(t, h, c, conn, "CREATE TABLE cbk_rows (id INT PRIMARY KEY, name TEXT)", "INSERT INTO cbk_rows VALUES (1, 'a')")
@@ -248,7 +248,7 @@ func consoleCloudSQLReadReplica(t *testing.T, version, prefix string) {
 	project := h.Project()
 	name := fmt.Sprintf("%s%d", prefix, time.Now().UnixNano()%1e6)
 	replica := name + "-r"
-	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: version,
+	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: version, RootPassword: "Root-pass1",
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}}).Do()
 	if err != nil {
 		t.Fatal(err)
@@ -356,7 +356,7 @@ func TestConsoleCloudSQLPointInTimeRestore(t *testing.T) {
 		t.Errorf("the instance's page = %d: %s", code, out)
 	}
 	c := sqlBackupCase{version: "POSTGRES_17", table: "cpitr_rows", register: pgRegister, dsn: func(_, conn string) string {
-		return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+		return fmt.Sprintf("host=%s user=postgres password=%s dbname=postgres sslmode=disable", conn, pgRootPassword)
 	}}
 	conn := project + ":us-central1:" + name
 	sqlBackupRows(t, h, c, conn, "CREATE TABLE cpitr_rows (id INT PRIMARY KEY, name TEXT)", "INSERT INTO cpitr_rows VALUES (1, 'a')")

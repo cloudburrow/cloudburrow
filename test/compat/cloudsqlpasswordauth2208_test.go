@@ -67,6 +67,7 @@ func TestCloudSQLPasswordAuthentication(t *testing.T) {
 
 	if addr := os.Getenv(EnvCloudSQL); addr != "" {
 		t.Run("up-postgres-direct", func(t *testing.T) {
+			h := h.For(t)
 			addr := h.Endpoint(EnvCloudSQL)
 			password := os.Getenv(EnvCloudSQLPassword)
 			if password == "" {
@@ -95,6 +96,7 @@ func TestCloudSQLPasswordAuthentication(t *testing.T) {
 	}
 	if os.Getenv(EnvMySQL) != "" {
 		t.Run("up-mysql-direct", func(t *testing.T) {
+			h := h.For(t)
 			open := func(password string) error {
 				cfg := mysql.NewConfig()
 				cfg.User, cfg.Passwd, cfg.Net, cfg.Addr, cfg.DBName = "cloudburrow", password, "tcp", h.Endpoint(EnvMySQL), "cloudburrow"
@@ -145,8 +147,10 @@ func TestCloudSQLPasswordAuthentication(t *testing.T) {
 	}
 	var made []created
 	t.Run("versions", func(t *testing.T) {
+		h := h.For(t)
 		for _, v := range versions {
 			t.Run(v.name, func(t *testing.T) {
+				h := h.For(t)
 				e := sqlEngine{mysql: strings.HasPrefix(v.name, "MYSQL_")}
 				name := "pw-" + strings.ToLower(strings.ReplaceAll(v.name, "_", "")) + "-" + suffix
 				ins := &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: v.name, RootPassword: "Root-pass1",
@@ -211,6 +215,7 @@ func TestCloudSQLPasswordAuthentication(t *testing.T) {
 		// An instance with no rootPassword: its postgres user cannot sign in.
 		if os.Getenv(EnvCloudSQL) != "" {
 			t.Run("no-root-password", func(t *testing.T) {
+				h := h.For(t)
 				name := "pw-none-" + suffix
 				in := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17",
 					Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}})
@@ -247,6 +252,7 @@ func TestCloudSQLPasswordAuthentication(t *testing.T) {
 		return
 	}
 	t.Run("auth-proxy", func(t *testing.T) {
+		h := h.For(t)
 		for i := range made {
 			made[i].port = freeLocalPort(t)
 			proxied[made[i].in.ConnectionName] = made[i].port

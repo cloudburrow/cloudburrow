@@ -37,7 +37,7 @@ func TestCloudSQLServerCertRotationDuringMaintenance(t *testing.T) {
 	n := time.Now().UnixNano() % 1e6
 	_, pool := sqlCAHierarchyFor(t, ctx, cas, project, fmt.Sprintf("rotca-%d", n), 100*24*time.Hour)
 	name := fmt.Sprintf("rotm-%d", n)
-	in := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", Region: "us-central1",
+	in := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1", Region: "us-central1",
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", IpConfiguration: &sqladmin.IpConfiguration{ServerCaMode: "CUSTOMER_MANAGED_CAS_CA",
 			ServerCaPool: pool, ServerCertificateRotationMode: "AUTOMATIC_ROTATION_DURING_MAINTENANCE"}}})
 	if ic := in.Settings.IpConfiguration; ic == nil || ic.ServerCertificateRotationMode != "AUTOMATIC_ROTATION_DURING_MAINTENANCE" {

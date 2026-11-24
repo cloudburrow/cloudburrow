@@ -36,7 +36,7 @@ func TestCloudSQLStopAndStart(t *testing.T) {
 	g := newGcloudSession(t, h)
 	project := g.project
 	name := fmt.Sprintf("stopstart-%d", time.Now().UnixNano()%1e6)
-	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17",
+	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1",
 		Region: "us-central1", Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}}).Do()
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestCloudSQLStopAndStart(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer cleanup()
-		db, err := sql.Open(drv, fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn))
+		db, err := sql.Open(drv, fmt.Sprintf("host=%s user=postgres password=%s dbname=postgres sslmode=disable", conn, pgRootPassword))
 		if err != nil {
 			t.Fatal(err)
 		}

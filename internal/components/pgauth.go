@@ -151,3 +151,12 @@ cloudsql_hba
 // pgStartCommand is a PostgreSQL server's command: pgAuthPrelude, then the
 // image's entrypoint with the backend's arguments.
 var pgStartCommand = []string{"sh", "-c", pgAuthPrelude + `exec docker-entrypoint.sh "$@"`, "sh"}
+
+// WithMySQLAdmin gives b, a created MySQL instance's server, the password
+// of CloudBurrow's account on it (#2208), which the scripts run in its
+// container sign in with.
+func WithMySQLAdmin(b Backend, adminPassword string) Backend {
+	b.Env = copyEnv(b.Env)
+	b.Env[pgAdminPasswordEnv] = adminPassword
+	return b
+}

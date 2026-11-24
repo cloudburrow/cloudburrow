@@ -66,7 +66,7 @@ func TestCloudSQLZonesNetworkingBackupsAndCharts(t *testing.T) {
 	// An instance for Networking, Backups and the chart.
 	svc := sqlAdminSDK(t)
 	name := fmt.Sprintf("browser-2141b-%d", time.Now().UnixNano()%1e6)
-	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", Region: "us-east1",
+	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1", Region: "us-east1",
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", LocationPreference: &sqladmin.LocationPreference{Zone: "us-east1-c"}}}).Do()
 	if err != nil {
 		t.Fatal(err)

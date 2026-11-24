@@ -355,7 +355,8 @@ func (s *Server) signInAndPipe(client net.Conn, r *bufio.Reader, raw net.Conn, c
 			email, ok = s.opts.IAMToken(token)
 		}
 		if !ok {
-			// UNVERIFIED: Google's words for a refused IAM sign-in.
+			// UNVERIFIED: Google's words for a refused IAM sign-in (re-read 2026-11-24:
+			// docs.cloud.google.com/alloydb/docs/database-users/manage-iam-auth names none).
 			_, _ = client.Write(pgwire.Fatal("28P01", "IAM authentication failed for user \""+user+"\""))
 			return
 		}

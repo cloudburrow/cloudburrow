@@ -47,13 +47,13 @@ func TestOrgPolicyCustomConstraintsCloudSQL(t *testing.T) {
 		}
 	}
 	name := fmt.Sprintf("cc-pg-%d", time.Now().UnixNano()%1e6)
-	_, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name + "-big", DatabaseVersion: "POSTGRES_17",
+	_, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name + "-big", DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1",
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", DataDiskSizeGb: 200}}).Do()
 	want412("a 200 GB instance", err, customMessage(disk, ddesc))
 	if os.Getenv(EnvCloudSQL) == "" {
 		t.Skip("an instance that is created needs --services cloudsql")
 	}
-	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17",
+	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1",
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", DataDiskSizeGb: 20}}).Do()
 	if err != nil {
 		t.Fatalf("a 20 GB instance: %v", err)

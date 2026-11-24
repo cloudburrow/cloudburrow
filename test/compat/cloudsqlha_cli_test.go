@@ -25,7 +25,7 @@ func TestGcloudSQLHighAvailability(t *testing.T) {
 	g := newGcloudSession(t, h)
 	name := fmt.Sprintf("gcloud-ha-%d", time.Now().UnixNano()%1e6)
 	g.must("sql", "instances", "create", name, "--project", g.project, "--database-version=POSTGRES_17",
-		"--tier=db-custom-1-3840", "--region=us-central1", "--availability-type=regional", "--quiet")
+		"--root-password=Root-pass1", "--tier=db-custom-1-3840", "--region=us-central1", "--availability-type=regional", "--quiet")
 	defer g.run(nil, "sql", "instances", "delete", name, "--project", g.project, "--quiet")
 	desc := func() (avail, zone, secondary string) {
 		t.Helper()
@@ -72,6 +72,7 @@ resource "google_sql_database_instance" "main" {
   name                = %[2]q
   region              = "us-central1"
   database_version    = "POSTGRES_17"
+  root_password       = "Root-pass1"
   deletion_protection = false
   settings {
     tier              = "db-custom-1-3840"

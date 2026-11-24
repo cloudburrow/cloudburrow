@@ -215,7 +215,8 @@ func (p *sqlProvisioner) Engine(spec sqladmin.Spec) sqladmin.Engine {
 	}
 	if spec.MySQL() {
 		return &sqladmin.MySQL{Name: spec.Name, Version: spec.DatabaseVersion,
-			RootPassword: spec.RootPassword, Admin: sqladmin.MySQLAdminUser, HostAddr: p.hostAddr(spec.ServerName())}
+			RootPassword: spec.RootPassword, Admin: sqladmin.MySQLAdminUser, AdminPassword: postgresAdminPassword(p.cfg),
+			HostAddr: p.hostAddr(spec.ServerName())}
 	}
 	user := "postgres"
 	if spec.MasterUp && !spec.AwaitingPrimary {
@@ -324,6 +325,10 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 		// Every TCP sign-in is checked by password (#2208): CloudBurrow's
 		// management role, and postgres's rootPassword at the first start.
 		b = components.WithPostgresAuth(b, components.PGAdminUser, postgresAdminPassword(p.cfg), "postgres", spec.RootPassword)
+	} else {
+		// CloudBurrow's MySQL account signs in with the management
+		// password, which no user knows (#2208), not rootPassword.
+		b = components.WithMySQLAdmin(b, postgresAdminPassword(p.cfg))
 	}
 	return b
 }
@@ -410,7 +415,7 @@ sro=$(mysql $MYSQL_LOCAL -N -e 'SELECT @@GLOBAL.super_read_only' 2>/dev/null || 
 // account at its first start after it.
 func (p *sqlProvisioner) mysqlSystemAccounts(ctx context.Context, deployment string, spec sqladmin.Spec) error {
 	var out strings.Builder
-	sql := sqladmin.MySQLSystemAccountsSQL(spec.DatabaseVersion, spec.RootPassword)
+	sql := sqladmin.MySQLSystemAccountsSQL(spec.DatabaseVersion, postgresAdminPassword(p.cfg))
 	if err := nodeExec(p.cfg, deployment)(ctx, strings.NewReader(sql), &out, "sh", "-c", mysqlSystemAccountsScript); err != nil {
 		return fmt.Errorf("create CloudBurrow's account on %s: %w %s", deployment, err, strings.TrimSpace(out.String()))
 	}

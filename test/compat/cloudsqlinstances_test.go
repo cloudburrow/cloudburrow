@@ -299,7 +299,7 @@ func TestGcloudSQLInstances(t *testing.T) {
 	g := newGcloudSession(t, h)
 	name := fmt.Sprintf("gcloud-pg-%d", time.Now().UnixNano()%1e6)
 	g.must("sql", "instances", "create", name, "--project", g.project, "--database-version=POSTGRES_17",
-		"--tier=db-custom-1-3840", "--region=us-central1", "--no-backup", "--quiet")
+		"--root-password=Root-pass1", "--tier=db-custom-1-3840", "--region=us-central1", "--no-backup", "--quiet")
 	out := g.must("sql", "instances", "describe", name, "--project", g.project, "--format=value(state,databaseVersion,connectionName)")
 	if !strings.Contains(out, "RUNNABLE") || !strings.Contains(out, "POSTGRES_17") || !strings.Contains(out, g.project+":us-central1:"+name) {
 		t.Errorf("describe: %s", out)
@@ -333,6 +333,7 @@ resource "google_sql_database_instance" "main" {
   name                = %[2]q
   region              = "us-central1"
   database_version    = "POSTGRES_17"
+  root_password       = "Root-pass1"
   deletion_protection = false
   settings {
     tier        = "db-custom-1-3840"

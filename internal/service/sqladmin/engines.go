@@ -417,11 +417,14 @@ type MySQL struct {
 	AppUser  string // the application's user, granted each new database
 	Database string
 	// RootPassword is the password the instance was created with: root's
-	// then, and its system accounts' for good (MySQLSystemAccountsSQL).
+	// then, and its system accounts' until AdminPassword replaces it.
 	RootPassword string
 	// Admin is the account CloudBurrow signs in as; "" is root.
-	Admin    string
-	HostAddr func() string
+	Admin string
+	// AdminPassword is Admin's password (#2208): CloudBurrow's management
+	// password, which no user knows; "" is RootPassword, as before.
+	AdminPassword string
+	HostAddr      func() string
 }
 
 // MySQLAdminUser is CloudBurrow's own account on a created MySQL
@@ -443,7 +446,8 @@ const MySQLAdminUser = "cloudsqladmin"
 var mysqlAdminHosts = []string{"localhost", "127.0.0.1", "::1"}
 
 // MySQLSystemAccountsSQL creates or refreshes MySQLAdminUser with every
-// privilege, signing in with the instance's creation password, with the
+// privilege, signing in with password (CloudBurrow's management password,
+// #2208, which no user knows), with the
 // binary log off: each server has its own, as a read replica's or a
 // standby's mysql schema is never copied from its primary's binary log,
 // and a logged CREATE USER would stop a replica that has one already.
@@ -492,13 +496,18 @@ func (m *MySQL) db() (*sql.DB, error) {
 	if addr == "" {
 		return nil, Errorf(http.StatusServiceUnavailable, "the MySQL tunnel is not up")
 	}
-	db, err := m.open(addr, m.admin())
+	password := m.RootPassword
+	if m.admin() != "root" && m.AdminPassword != "" {
+		password = m.AdminPassword
+	}
+	db, err := m.open(addr, m.admin(), password)
 	if err != nil || m.admin() == "root" {
 		return db, err
 	}
 	// An instance made before #1993 has no MySQLAdminUser until its next
-	// start makes one (sqlinstances.go); until then, root, which it could
-	// not delete, still signs in.
+	// start makes one (sqlinstances.go), and one made before #2208 has it
+	// with its creation password until then; until then that, or root,
+	// which it could not delete, still signs in.
 	ctx, cancel := context.WithTimeout(context.Background(), engineTimeout)
 	defer cancel()
 	perr := db.PingContext(ctx)
@@ -506,18 +515,23 @@ func (m *MySQL) db() (*sql.DB, error) {
 	if perr == nil || !asMySQL(perr, &me) || me.Number != 1045 {
 		return db, nil
 	}
-	if rdb, rerr := m.open(addr, "root"); rerr == nil && rdb.PingContext(ctx) == nil {
-		db.Close()
-		return rdb, nil
-	} else if rerr == nil {
-		rdb.Close()
+	for _, user := range []string{m.admin(), "root"} {
+		if user == m.admin() && password == m.RootPassword {
+			continue
+		}
+		if rdb, rerr := m.open(addr, user, m.RootPassword); rerr == nil && rdb.PingContext(ctx) == nil {
+			db.Close()
+			return rdb, nil
+		} else if rerr == nil {
+			rdb.Close()
+		}
 	}
 	return db, nil
 }
 
-func (m *MySQL) open(addr, user string) (*sql.DB, error) {
+func (m *MySQL) open(addr, user, password string) (*sql.DB, error) {
 	cfg := mysql.NewConfig()
-	cfg.User, cfg.Passwd, cfg.Net, cfg.Addr = user, m.RootPassword, "tcp", addr
+	cfg.User, cfg.Passwd, cfg.Net, cfg.Addr = user, password, "tcp", addr
 	cfg.Timeout = engineTimeout
 	db, err := sql.Open("mysql", cfg.FormatDSN())
 	if err != nil {
