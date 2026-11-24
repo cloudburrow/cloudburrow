@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -771,15 +772,41 @@ func short(v string) string {
 
 // create makes the container again on To from its own configuration.
 // dockerDesktopLabel reports a label Docker Desktop adds to a container it
-// makes (desktop.docker.io/ports/6443/tcp: the address it publishes a port
-// on, in its own VM's terms; hidden from the container's inspect, kept in a
-// committed image). It describes that Docker alone and is carried empty:
-// kind reads the ports label before the bindings, so a node
-// carried from a Mac to a Linux VM would name a wrong API server address
-// (Docker Desktop lists a binding twice there: "127.0.0.1:52220,127.0.0.1:52220").
-// A Docker Desktop target adds its own.
+// makes (desktop.docker.io/ports/6443/tcp: the address a port is published
+// on; hidden from the container's inspect, kept in a committed image).
 func dockerDesktopLabel(k string) bool {
 	return strings.HasPrefix(k, "desktop.docker.io/")
+}
+
+// desktopPortLabels is, for each desktop.docker.io/ports/<port> label in
+// labels, the address the container's own binding of that port publishes
+// it on (127.0.0.1:52220), or "" (kind then reads the bindings) for a port
+// it does not publish. A Mac's value carried to a Linux VM (Docker Desktop
+// lists a binding twice: "127.0.0.1:52220,127.0.0.1:52220") would be a
+// wrong API server address, and an empty one carried back to Docker
+// Desktop, which keeps a value given at create, too.
+func desktopPortLabels(bindings map[string][]portBinding, labels map[string]string) map[string]string {
+	const prefix = "desktop.docker.io/ports/"
+	out := map[string]string{}
+	for k := range labels {
+		port, ok := strings.CutPrefix(k, prefix)
+		if !ok {
+			continue
+		}
+		out[k] = ""
+		for _, b := range bindings[port] {
+			if b.HostPort == "" {
+				continue
+			}
+			ip := b.HostIP
+			if ip == "" || ip == "0.0.0.0" {
+				ip = "127.0.0.1"
+			}
+			out[k] = net.JoinHostPort(ip, b.HostPort)
+			break
+		}
+	}
+	return out
 }
 
 // publishSpecs is a container's port bindings as --publish values, each
@@ -823,28 +850,33 @@ func (c *Carry) create(ctx context.Context, ct containerInfo, image string) erro
 	}
 	// Docker Desktop hides its own labels from a container's inspect, but
 	// `docker commit` writes them into the image, which the new container
-	// inherits: each is emptied (kind skips an empty one).
-	desktop := map[string]bool{}
+	// inherits. kind trusts desktop.docker.io/ports/<port> over the
+	// bindings, and Docker Desktop keeps a value given at create: each is
+	// set from the container's own bindings, right on either Docker.
+	desktop := map[string]string{}
 	if out, err := c.run(ctx, c.o.To, "image", "inspect", "--format", "{{json .Config.Labels}}", image); err == nil {
 		var labels map[string]string
 		if json.Unmarshal([]byte(strings.TrimSpace(out)), &labels) == nil {
-			for k := range labels {
+			for k, v := range labels {
 				if dockerDesktopLabel(k) {
-					desktop[k] = true
+					desktop[k] = v
 				}
 			}
 		}
 	}
-	for k := range ct.Config.Labels {
+	for k, v := range ct.Config.Labels {
 		if dockerDesktopLabel(k) {
-			desktop[k] = true
+			desktop[k] = v
 		}
 	}
+	for k, v := range desktopPortLabels(ct.HostConfig.PortBindings, desktop) {
+		desktop[k] = v
+	}
 	for _, k := range sortedKeys(desktop) {
-		args = append(args, "--label", k+"=")
+		args = append(args, "--label", k+"="+desktop[k])
 	}
 	for _, k := range sortedKeys(ct.Config.Labels) {
-		if !desktop[k] {
+		if _, ok := desktop[k]; !ok {
 			args = append(args, "--label", k+"="+ct.Config.Labels[k])
 		}
 	}

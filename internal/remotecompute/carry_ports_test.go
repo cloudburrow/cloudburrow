@@ -34,3 +34,26 @@ func TestDockerDesktopLabelsAreRecognised(t *testing.T) {
 		}
 	}
 }
+
+// A Docker Desktop port label is the container's own binding, once, on
+// either Docker: never a Mac's doubled value, never empty for a published
+// port (Docker Desktop keeps the value given at create).
+func TestDesktopPortLabelsFollowTheBindings(t *testing.T) {
+	got := desktopPortLabels(map[string][]portBinding{
+		"6443/tcp":  {{HostIP: "127.0.0.1", HostPort: "52220"}, {HostIP: "127.0.0.1", HostPort: "52220"}},
+		"31080/tcp": {{HostPort: "23180"}},
+	}, map[string]string{
+		"desktop.docker.io/ports/6443/tcp":  "127.0.0.1:52220,127.0.0.1:52220",
+		"desktop.docker.io/ports/31080/tcp": "",
+		"desktop.docker.io/ports/9/tcp":     "127.0.0.1:9",
+		"desktop.docker.io/ports.scheme":    "v2",
+	})
+	want := map[string]string{
+		"desktop.docker.io/ports/6443/tcp":  "127.0.0.1:52220",
+		"desktop.docker.io/ports/31080/tcp": "127.0.0.1:23180",
+		"desktop.docker.io/ports/9/tcp":     "",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("desktopPortLabels = %v, want %v", got, want)
+	}
+}
