@@ -326,7 +326,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			buildWorkerPoolsProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
 			// Cloud Build's Dashboard, Repositories and Settings (#1854).
 			buildDashboardProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
-			buildRepositoriesProvider{ssm: sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}}},
+			buildRepositoriesProvider{ssm: sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
+				secretsAddr: runAddrOf(d.secrets)},
 			buildSettingsProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}, registry: d.projects},
 			// Secure Source Manager's instances and repositories (#1527).
 			sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
