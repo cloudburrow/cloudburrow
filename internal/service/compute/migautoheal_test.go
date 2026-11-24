@@ -30,7 +30,7 @@ func (h *healLB) InstanceAddr(_ context.Context, vm VMSpec, port int) (string, e
 	}
 	return h.good, nil
 }
-func (h *healLB) Ingress() string           { return "" }
+func (h *healLB) Ingress() string            { return "" }
 func (h *healLB) LocalAPI(api string) string { return "" }
 
 func (h *healLB) setBad(name string, bad bool) {

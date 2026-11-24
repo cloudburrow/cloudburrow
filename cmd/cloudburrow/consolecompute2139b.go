@@ -212,7 +212,8 @@ func (p computeGroupsProvider) groupActions(project string, g, mgr map[string]an
 		if onPage {
 			acts = append(acts,
 				p.updateVMsAction(project, mgr),
-				p.autoscalingAction(a))
+				p.autoscalingAction(a),
+				p.autohealingAction(project, mgr))
 		}
 	} else {
 		zone := zoneOf(vpcStr(g, "zone"))
@@ -465,21 +466,21 @@ func (computeGroupsProvider) CreateTitle() string  { return "Create instance gro
 func (computeGroupsProvider) CreateLayout() string { return console.CreateLayoutPage }
 
 func (p computeGroupsProvider) CreateForm() (string, []console.Field) {
-	return "Create instance group", p.groupFields(nil, nil)
+	return "Create instance group", p.groupFields(nil, nil, nil)
 }
 
 func (p computeGroupsProvider) CreateFormFor(ctx context.Context, project string) []console.Field {
 	if p.api() == nil || project == "" {
-		return p.groupFields(nil, nil)
+		return p.groupFields(nil, nil, nil)
 	}
-	return p.groupFields(p.templateOptions(project), p.networkNames(ctx, project))
+	return p.groupFields(p.templateOptions(project), p.networkNames(ctx, project), p.healthCheckOptions(project))
 }
 
 // targetShapes are the Target distribution shape choices, Google's
 // (compute/docs/instance-groups/regional-mig-distribution-shape).
 var targetShapes = []string{"EVEN", "BALANCED", "ANY", "ANY_SINGLE_ZONE"}
 
-func (p computeGroupsProvider) groupFields(templates, networks []string) []console.Field {
+func (p computeGroupsProvider) groupFields(templates, networks, healthChecks []string) []console.Field {
 	managed := map[string]string{"kind": groupManaged}
 	unmanaged := map[string]string{"kind": groupUnmanaged}
 	tpl := selectOrText(console.Field{Name: "template", Label: "Instance template", Required: true, VisibleWhen: managed,
@@ -508,7 +509,10 @@ func (p computeGroupsProvider) groupFields(templates, networks []string) []conso
 	fields = append(fields, autoscalingFields(nil, "Autoscaling", managed)...)
 	fields = append(fields,
 		console.Field{Name: "size", Label: "Number of instances", Type: "text", Default: "1", Pattern: `^[0-9]{1,3}$`, VisibleWhen: managed,
-			ShowWhen: "autoscaling=" + autoscaleOff, Section: "Autoscaling"},
+			ShowWhen: "autoscaling=" + autoscaleOff, Section: "Autoscaling"})
+	// Autohealing (#2225).
+	fields = append(fields, autohealingFields(nil, healthChecks, "Autohealing", managed)...)
+	fields = append(fields,
 		namedPortsField(nil, "Port mapping"),
 		nw,
 		console.Field{Name: "instances", Label: "VM instances", Type: "text", VisibleWhen: unmanaged, Help: "Optional, comma-separated names of VMs in the zone."},
@@ -558,6 +562,13 @@ func (p computeGroupsProvider) Create(ctx context.Context, project string, value
 		}
 		// The group starts at its minimum; the autoscaler takes it from there.
 		size = int(pol["minNumReplicas"].(float64))
+	}
+	healing, err := autohealingPolicies(values)
+	if err != nil {
+		return "", err
+	}
+	if len(healing) > 0 {
+		b["autoHealingPolicies"] = healing
 	}
 	b["instanceTemplate"] = templateBase([]string{loc, tpl})
 	b["baseInstanceName"] = name
@@ -647,7 +658,7 @@ func (p computeGroupsProvider) Detail(ctx context.Context, project string, path 
 		// A managed group's VMs are its managed instances, those it is
 		// still making (or failing to make, and retrying) included, with
 		// Google's current action and last error (#2220).
-		vms.Columns = []string{"Zone", "Status", "Current action", "Template", "Internal IP", "Last error"}
+		vms.Columns = []string{"Zone", "Status", "Current action", "Health check status", "Template", "Internal IP", "Last error"}
 		vms.SelectActions = groupVMSelectActions()
 		if l, err := p.call("POST", project, scope+"/instanceGroupManagers/"+path[1]+"/listManagedInstances", nil, map[string]any{}); err == nil {
 			for _, it := range vmMaps(l, "managedInstances") {
@@ -664,9 +675,10 @@ func (p computeGroupsProvider) Detail(ctx context.Context, project string, path 
 				}
 				vms.Items = append(vms.Items, console.Resource{Name: vpcLast(ir), Selectable: true,
 					Fields: map[string]string{"Zone": zone, "Status": vpcDash(vpcStr(it, "instanceStatus")),
-						"Current action": migActionLabel(vpcStr(it, "currentAction")),
-						"Template":       vpcDash(vpcLast(vpcStr(vmMap(it, "version"), "instanceTemplate"))),
-						"Internal IP":    vpcDash(ip), "Last error": vpcDash(strings.Join(lastErr, "; "))}})
+						"Current action":      migActionLabel(vpcStr(it, "currentAction")),
+						"Health check status": healthStatusLabel(it),
+						"Template":            vpcDash(vpcLast(vpcStr(vmMap(it, "version"), "instanceTemplate"))),
+						"Internal IP":         vpcDash(ip), "Last error": vpcDash(strings.Join(lastErr, "; "))}})
 			}
 		}
 		errorsSection = p.groupErrorsSection(project, scope+"/instanceGroupManagers/"+path[1])
@@ -704,7 +716,8 @@ func (p computeGroupsProvider) Detail(ctx context.Context, project string, path 
 			console.Property{Label: "Target size", Value: strconv.Itoa(int(vpcNum(mgr, "targetSize")))},
 			console.Property{Label: "Base instance name", Value: vpcStr(mgr, "baseInstanceName")},
 			console.Property{Label: "Status", Value: migStatusLabel(mgr)})
-		groups = append(groups, console.PropertyGroup{Heading: "Autoscaling", Properties: p.autoscalingProps(p.autoscalerOf(project, mgr))})
+		groups = append(groups, console.PropertyGroup{Heading: "Autoscaling", Properties: p.autoscalingProps(p.autoscalerOf(project, mgr))},
+			console.PropertyGroup{Heading: "Autohealing", Properties: autohealingProps(mgr)})
 	}
 	props = append(props, console.Property{Label: "Named ports", Value: vpcDash(strings.Join(ports, ", "))},
 		console.Property{Label: "Description", Value: vpcDash(vpcStr(g, "description"))},
@@ -954,6 +967,8 @@ func (p computeGroupsProvider) ActAt(ctx context.Context, project string, path [
 			return errors.New("an unmanaged group is not autoscaled")
 		}
 		return p.setAutoscaling(project, path[0], path[1], mgr, p.autoscalerOf(project, mgr), values)
+	case "editautohealing":
+		return p.setAutohealing(project, mg, values)
 	case "editports":
 		ports, err := parseNamedPorts(values["namedPorts"])
 		if err != nil {

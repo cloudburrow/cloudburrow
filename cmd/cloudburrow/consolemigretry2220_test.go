@@ -77,7 +77,7 @@ func TestConsoleMIGCreationRetries2220(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	vms := section(d, "overview").Listing
-	if strings.Join(vms.Columns, ",") != "Zone,Status,Current action,Template,Internal IP,Last error" || len(vms.Items) != 1 {
+	if strings.Join(vms.Columns, ",") != "Zone,Status,Current action,Health check status,Template,Internal IP,Last error" || len(vms.Items) != 1 {
 		t.Fatalf("VMs = %+v", vms)
 	}
 	vm := vms.Items[0]
