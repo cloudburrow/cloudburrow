@@ -653,7 +653,7 @@ func subnets(n networkInfo) string {
 	return strings.Join(s, ",")
 }
 
-func sortedKeys(m map[string]string) []string {
+func sortedKeys[V any](m map[string]V) []string {
 	k := make([]string, 0, len(m))
 	for key := range m {
 		k = append(k, key)
@@ -772,8 +772,9 @@ func short(v string) string {
 // create makes the container again on To from its own configuration.
 // dockerDesktopLabel reports a label Docker Desktop adds to a container it
 // makes (desktop.docker.io/ports/6443/tcp: the address it publishes a port
-// on, in its own VM's terms). It describes that Docker alone and is not
-// carried: kind reads the ports label before the bindings, so a node
+// on, in its own VM's terms; hidden from the container's inspect, kept in a
+// committed image). It describes that Docker alone and is carried empty:
+// kind reads the ports label before the bindings, so a node
 // carried from a Mac to a Linux VM would name a wrong API server address
 // (Docker Desktop lists a binding twice there: "127.0.0.1:52220,127.0.0.1:52220").
 // A Docker Desktop target adds its own.
@@ -820,11 +821,32 @@ func (c *Carry) create(ctx context.Context, ct containerInfo, image string) erro
 	if ct.Config.Hostname != "" && ct.Config.Hostname != ct.ID[:12] {
 		args = append(args, "--hostname", ct.Config.Hostname)
 	}
-	for _, k := range sortedKeys(ct.Config.Labels) {
-		if dockerDesktopLabel(k) {
-			continue
+	// Docker Desktop hides its own labels from a container's inspect, but
+	// `docker commit` writes them into the image, which the new container
+	// inherits: each is emptied (kind skips an empty one).
+	desktop := map[string]bool{}
+	if out, err := c.run(ctx, c.o.To, "image", "inspect", "--format", "{{json .Config.Labels}}", image); err == nil {
+		var labels map[string]string
+		if json.Unmarshal([]byte(strings.TrimSpace(out)), &labels) == nil {
+			for k := range labels {
+				if dockerDesktopLabel(k) {
+					desktop[k] = true
+				}
+			}
 		}
-		args = append(args, "--label", k+"="+ct.Config.Labels[k])
+	}
+	for k := range ct.Config.Labels {
+		if dockerDesktopLabel(k) {
+			desktop[k] = true
+		}
+	}
+	for _, k := range sortedKeys(desktop) {
+		args = append(args, "--label", k+"=")
+	}
+	for _, k := range sortedKeys(ct.Config.Labels) {
+		if !desktop[k] {
+			args = append(args, "--label", k+"="+ct.Config.Labels[k])
+		}
 	}
 	if ct.Config.User != "" {
 		args = append(args, "--user", ct.Config.User)

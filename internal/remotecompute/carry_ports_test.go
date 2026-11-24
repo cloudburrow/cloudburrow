@@ -20,9 +20,9 @@ func TestPublishSpecsOncePerBinding(t *testing.T) {
 	}
 }
 
-// Docker Desktop's own labels describe its VM's ports and are not carried;
+// Docker Desktop's own labels describe its VM's ports and are carried empty;
 // the instance's and kind's are.
-func TestDockerDesktopLabelsStay(t *testing.T) {
+func TestDockerDesktopLabelsAreRecognised(t *testing.T) {
 	for k, want := range map[string]bool{
 		"desktop.docker.io/ports/6443/tcp": true,
 		"desktop.docker.io/binds/0/Source": true,
