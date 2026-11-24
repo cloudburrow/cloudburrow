@@ -56,7 +56,7 @@ func TestVertexAITrainingThroughThePages(t *testing.T) {
 	}
 	img := os.Getenv("CLOUDBURROW_TEST_PIPELINE_IMAGE")
 	if img == "" {
-		img = "python:3-alpine"
+		img = "docker.io/library/python:3-alpine" // fully qualified: the cluster pulls the model's container, a short name being dev.local
 	}
 	if err := exec.Command("docker", "image", "inspect", img).Run(); err != nil {
 		t.Skipf("the task image %s is not on this machine's Docker", img)

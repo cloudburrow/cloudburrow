@@ -1,7 +1,7 @@
 """Google Cloud Pipeline Components on Agent Platform Pipelines, against a
 CloudBurrow instance (#2210): TestPythonGCPC runs this in a container on an
 internal Docker network whose only routes are relays to the instance's
-Vertex AI port (host.docker.internal) and its Cloud Run port (cb-run),
+Vertex AI port (host.docker.internal) and its Cloud Run port (cb-run.localhost, a .localhost name the host guard accepts),
 which serves Artifact Registry's KFP repositories.
 
 With the pinned SDKs (google-cloud-pipeline-components, kfp,
@@ -18,9 +18,9 @@ google-cloud-aiplatform 1.x), as Google's guides use them:
   - training: aiplatform.CustomContainerTrainingJob(...).run(), a
     TrainingPipeline whose custom job uploads a Model.
 
-The SDK reaches https://LOCATION-kfp.pkg.dev through the cb-run relay: the
+The SDK reaches https://LOCATION-kfp.pkg.dev through the cb-run.localhost relay: the
 URL is rewritten to the instance's path form
-(http://cb-run:PORT/LOCATION-kfp.pkg.dev/...), as the Go tests reach it,
+(http://cb-run.localhost:PORT/LOCATION-kfp.pkg.dev/...), as the Go tests reach it,
 and nothing else is rewritten. The credential is the instance's ADC
 fixture in the universe cloudburrow.localhost (docs/security.md).
 

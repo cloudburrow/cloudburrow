@@ -1980,7 +1980,22 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return true
 	}
-	client := jobText{query: q.Query}
+	// The job's statistics are a model statement's, as BigQuery answers
+	// them and Google Cloud Pipeline Components' BigqueryCreateModelJobOp
+	// reads them (statementType CREATE_MODEL, ddlTargetTable the model,
+	// #2210).
+	ddl := &ownDDL{statementType: "CREATE_MODEL", operation: "CREATE", target: tableRef{ProjectID: project, DatasetID: dataset, TableID: id}}
+	switch {
+	case d.drop && !had:
+		ddl.statementType, ddl.operation = "DROP_MODEL", "SKIP"
+	case d.drop:
+		ddl.statementType, ddl.operation = "DROP_MODEL", "DROP"
+	case had && d.ifNotExists:
+		ddl.operation = "SKIP"
+	case had:
+		ddl.operation = "REPLACE"
+	}
+	client := jobText{query: q.Query, ddl: ddl}
 	q.Query = noop
 	rec := newRecorder()
 	f.serveQuery(rec, r, q, insert)

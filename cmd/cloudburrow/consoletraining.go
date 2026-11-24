@@ -364,7 +364,7 @@ func (trainingPipelinesProvider) CreateForm() (string, []console.Field) {
 		trainWhen = append(trainWhen, console.ConditionalOptions{When: "framework=" + f, Options: tw})
 		predWhen = append(predWhen, console.ConditionalOptions{When: "predFramework=" + f, Options: pw})
 	}
-	return "Start training", []console.Field{
+	return "Create", []console.Field{
 		{Name: "dataset", Label: "Dataset", Type: "select", Section: "Training method", Options: []string{"none"}, Default: "none",
 			OptionLabels: map[string]string{"none": "No managed dataset"}},
 		{Name: "method", Label: "Training method", Type: "radio", Section: "Training method", Options: []string{"custom"}, Default: "custom",

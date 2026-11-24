@@ -196,12 +196,12 @@ func TestPythonGCPC(t *testing.T) {
 		t.Fatal(err)
 	}
 	network := internalNetwork(t, ctx, gcpcPyImage, port)
-	extraRelay(t, ctx, network, "cb-run", gcpcPyImage, runPort)
+	extraRelay(t, ctx, network, "cb-run.localhost", gcpcPyImage, runPort)
 	run := exec.CommandContext(ctx, "docker", "run", "--rm", "--network", network,
 		"-v", filepath.Join(moduleRoot(t), "testdata", "gcpcpy", "flow.py")+":/flow/flow.py:ro",
 		"-v", creds+":/creds/adc.json:ro",
 		"-e", "CB_ENDPOINT=http://host.docker.internal:"+port,
-		"-e", "CB_RUN_ENDPOINT=http://cb-run:"+runPort,
+		"-e", "CB_RUN_ENDPOINT=http://cb-run.localhost:"+runPort,
 		"-e", "CB_PROJECT="+project, "-e", "CB_LOCATION=us-central1",
 		"-e", "CB_CREDENTIALS=/creds/adc.json", "-e", "CB_TASK_IMAGE="+gcpcPyImage,
 		"-e", "CB_KFP_REPO="+repoID,
