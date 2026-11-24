@@ -3483,7 +3483,7 @@
         "platforms": [
           "linux/amd64"
         ],
-        "notes": "Published for amd64 only; on arm64 it runs under emulation and produces an amd64 image."
+        "notes": "Google publishes it for linux/amd64 only (its choice; CloudBurrow keeps it, #1578): on an arm64 host Docker runs it under amd64 emulation and it produces an amd64 image."
       },
       "buildpacksPHPFunctionBuilder": {
         "image": "us-docker.pkg.dev/serverless-runtimes/google-22-full/builder/php",
