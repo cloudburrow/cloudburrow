@@ -332,11 +332,17 @@ func TestExportModelRefusals(t *testing.T) {
 	if _, code, msg := f.exportModel(ctx, md, "", 3, true); code != 400 || !strings.Contains(msg, "TRIAL_ID") {
 		t.Errorf("TRIAL_ID: %d %q", code, msg)
 	}
-	md.Transform = []string{"x AS x"}
-	if _, code, _ := f.exportModel(ctx, md, "", 0, false); code != 501 {
-		t.Errorf("TRANSFORM: %d", code)
+	// A TRANSFORM compiles (modelexporttransform.go); its SavedModel needs
+	// the converter.
+	md.Transform, md.Inputs = []string{"x * 2 AS x2"}, []mlColumn{{Name: "x", Type: "FLOAT"}}
+	if _, code, msg := f.exportModel(ctx, md, "", 0, false); code != 501 || !strings.Contains(msg, "--tfconvert") {
+		t.Errorf("TRANSFORM: %d %q", code, msg)
 	}
-	md.Transform = nil
+	md.Transform = []string{"y AS y2"}
+	if _, code, msg := f.exportModel(ctx, md, "", 0, false); code != 400 || !strings.Contains(msg, "not one of the model's input columns") {
+		t.Errorf("TRANSFORM of a column it does not read: %d %q", code, msg)
+	}
+	md.Transform, md.Inputs = nil, nil
 	md.Trained.Features = []mlFeature{{Name: "a", Type: "ARRAY<FLOAT64>"}}
 	if _, code, msg := f.exportModel(ctx, md, "", 0, false); code != 400 || !strings.Contains(msg, "ARRAY") {
 		t.Errorf("ARRAY: %d %q", code, msg)

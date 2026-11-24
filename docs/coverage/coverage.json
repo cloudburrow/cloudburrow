@@ -6822,7 +6822,7 @@
         "method": "google.cloud.aiplatform.v1.JobService/CancelHyperparameterTuningJob",
         "status": "Verified",
         "tests": [
-          "test/compat/hptuning2210_test.go:64 TestVertexAIHyperparameterTuning"
+          "test/compat/hptuning2210_test.go:65 TestVertexAIHyperparameterTuning"
         ]
       },
       {
@@ -6853,7 +6853,8 @@
         "method": "google.cloud.aiplatform.v1.JobService/CreateHyperparameterTuningJob",
         "status": "Verified",
         "tests": [
-          "test/compat/hptuning2210_test.go:64 TestVertexAIHyperparameterTuning"
+          "test/compat/hptuning2210_test.go:304 TestVertexAIHyperparameterTuningStopping",
+          "test/compat/hptuning2210_test.go:65 TestVertexAIHyperparameterTuning"
         ]
       },
       {
@@ -6889,7 +6890,7 @@
         "method": "google.cloud.aiplatform.v1.JobService/DeleteHyperparameterTuningJob",
         "status": "Verified",
         "tests": [
-          "test/compat/hptuning2210_test.go:64 TestVertexAIHyperparameterTuning"
+          "test/compat/hptuning2210_test.go:65 TestVertexAIHyperparameterTuning"
         ]
       },
       {
@@ -6925,7 +6926,8 @@
         "method": "google.cloud.aiplatform.v1.JobService/GetHyperparameterTuningJob",
         "status": "Verified",
         "tests": [
-          "test/compat/hptuning2210_test.go:64 TestVertexAIHyperparameterTuning"
+          "test/compat/hptuning2210_test.go:304 TestVertexAIHyperparameterTuningStopping",
+          "test/compat/hptuning2210_test.go:65 TestVertexAIHyperparameterTuning"
         ]
       },
       {
@@ -6966,7 +6968,7 @@
         "method": "google.cloud.aiplatform.v1.JobService/ListHyperparameterTuningJobs",
         "status": "Verified",
         "tests": [
-          "test/compat/hptuning2210_test.go:64 TestVertexAIHyperparameterTuning"
+          "test/compat/hptuning2210_test.go:65 TestVertexAIHyperparameterTuning"
         ]
       },
       {
@@ -13258,7 +13260,8 @@
           "test/compat/bigqueryloadtable_test.go:30 TestBigQueryLoadMakesItsTableWithItsProperties",
           "test/compat/bigqueryloadvariants_test.go:34 TestBigQueryHivePartitionedAndGeoJSONLoads",
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
-          "test/compat/bigquerymlexport_test.go:28 TestBigQueryMLExportModel",
+          "test/compat/bigquerymlexport_test.go:163 TestBigQueryMLExportModelTransform",
+          "test/compat/bigquerymlexport_test.go:37 TestBigQueryMLExportModel",
           "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel",
           "test/compat/bigquerymlxgb_test.go:38 TestBigQueryMLImportedXGBoostModel",
           "test/compat/bigqueryorcload_test.go:88 TestBigQueryLoadORC",
@@ -13448,7 +13451,8 @@
           "test/compat/bigquerymlarima_test.go:314 TestBigQueryMLArimaPlusETS",
           "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
           "test/compat/bigquerymlexplain_test.go:19 TestBigQueryMLExplain",
-          "test/compat/bigquerymlexport_test.go:28 TestBigQueryMLExportModel",
+          "test/compat/bigquerymlexport_test.go:163 TestBigQueryMLExportModelTransform",
+          "test/compat/bigquerymlexport_test.go:37 TestBigQueryMLExportModel",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
           "test/compat/bigquerymlimage_test.go:42 TestBigQueryMLImageFunctions",
           "test/compat/bigquerymlmf_test.go:21 TestBigQueryMLMatrixFactorization",
@@ -13727,7 +13731,8 @@
           "test/compat/bigquerymlcontrib_test.go:26 TestBigQueryMLContributionAnalysis",
           "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
           "test/compat/bigquerymlexplain_test.go:19 TestBigQueryMLExplain",
-          "test/compat/bigquerymlexport_test.go:28 TestBigQueryMLExportModel",
+          "test/compat/bigquerymlexport_test.go:163 TestBigQueryMLExportModelTransform",
+          "test/compat/bigquerymlexport_test.go:37 TestBigQueryMLExportModel",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
           "test/compat/bigquerymlholiday_test.go:34 TestBigQueryMLCustomHolidays",
           "test/compat/bigquerymlholidayregion_test.go:31 TestBigQueryMLHolidayRegion",
@@ -13898,7 +13903,7 @@
           "test/compat/bigquerymlautoml_test.go:29 TestBigQueryMLAutoML",
           "test/compat/bigquerymlcontrib_test.go:26 TestBigQueryMLContributionAnalysis",
           "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
-          "test/compat/bigquerymlexport_test.go:28 TestBigQueryMLExportModel",
+          "test/compat/bigquerymlexport_test.go:37 TestBigQueryMLExportModel",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
           "test/compat/bigquerymlholiday_test.go:34 TestBigQueryMLCustomHolidays",
           "test/compat/bigquerymlholidayregion_test.go:31 TestBigQueryMLHolidayRegion",

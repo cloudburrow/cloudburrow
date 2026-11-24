@@ -41,6 +41,8 @@ export:  BigQuery ML's EXPORT MODEL of a model BigQuery ML trained (#2210):
          files, the categorical features' vocabularies) whose
          serving_default signature takes each feature as a [batch] tensor of
          its name and answers the model's predictions; or /out/error.json.
+         A spec of {"transform": ...} is a TRANSFORM's preprocessing
+         SavedModel instead (transform.py).
 """
 
 import json
@@ -493,6 +495,11 @@ def export():
     import tensorflow as tf
 
     spec = json.load(open("/spec/spec.json"))
+    if "transform" in spec:
+        # -I leaves the script's folder off the path: transform.py is next to it.
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import transform
+        return transform.export(spec["transform"], fail)
     dtypes = {"float64": tf.float64, "int64": tf.int64, "string": tf.string, "bool": tf.bool}
     module = tf.Module()
     assets = "/tmp/assets"

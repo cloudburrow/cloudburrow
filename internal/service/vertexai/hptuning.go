@@ -58,9 +58,11 @@ package vertexai
 // (DISPLAY_NAME-trial-ID); how a DISCRETE value is written in the
 // argument (Go's shortest decimal form); the failed job's error message.
 //
-// Not run (UNIMPLEMENTED, naming why): the automated stopping specs and
-// study_stopping_config, which stop trials early from their intermediate
-// measurements; trial_job_spec's persistent resources and reserved IPs.
+// The median, decay curve and convex automated stopping specs and
+// study_stopping_config stop trials and the study early (hpstopping.go).
+//
+// Not run (UNIMPLEMENTED, naming why): trial_job_spec's persistent
+// resources and reserved IPs.
 
 import (
 	"bufio"
@@ -279,14 +281,7 @@ func checkStudySpec(field string, ss *aiplatformpb.StudySpec) error {
 			return err
 		}
 	}
-	switch ss.GetAutomatedStoppingSpec().(type) {
-	case *aiplatformpb.StudySpec_DecayCurveStoppingSpec, *aiplatformpb.StudySpec_MedianAutomatedStoppingSpec_, *aiplatformpb.StudySpec_ConvexAutomatedStoppingSpec_:
-		return apierror.Unimplemented("%s's automated stopping spec is not run on this instance: trials are not stopped early from their intermediate measurements", field)
-	}
-	if ss.StudyStoppingConfig != nil {
-		return apierror.Unimplemented("%s.study_stopping_config is not run on this instance: the study is not stopped early", field)
-	}
-	return nil
+	return checkStopping(field, ss)
 }
 
 // checkHPSpec validates a HyperparameterTuningJob's (or a tuning task's)
@@ -1021,8 +1016,77 @@ func (s *Server) runHPJob(ctx context.Context, e *hpJobEntry, parent string, onE
 			_ = s.cancelCustomJob(cj)
 		}
 	}
+	// Automated stopping (hpstopping.go).
+	dirs := map[string]string{}         // trial id -> its metrics folder
+	earlyStopped := map[string]string{} // trial id -> why the service stopped it
+	reported := map[string]int{}        // trial id -> measurements recorded
+	// The convex rule's added last measurement of each trial it stopped,
+	// and, for update_all_stopped_trials, the trials it stopped with what
+	// they reported.
+	added := map[string]*aiplatformpb.Measurement{}
+	convexStopped := map[string][]*aiplatformpb.Measurement{}
+	var completedCurves [][]*aiplatformpb.Measurement
+	studyStopped := false
+	asap := ss.GetStudyStoppingConfig().GetShouldStopAsap().GetValue()
+	jobStart := st.now()
+	bestY, bestAt, sinceBest := math.Inf(-1), jobStart, 0
+	progress := func(trials int) studyProgress {
+		return studyProgress{start: jobStart, now: st.now(), completed: succeeded, trials: trials, sinceBest: sinceBest, bestAt: bestAt}
+	}
+	stopTrial := func(id, why string) {
+		if _, done := earlyStopped[id]; done {
+			return
+		}
+		earlyStopped[id] = why
+		setTrial(id, func(t *aiplatformpb.Trial) { t.State = aiplatformpb.Trial_STOPPING })
+		_ = s.cancelCustomJob(running[id])
+	}
+	stopStudy := func(why string) {
+		studyStopped = true
+		if asap {
+			for id := range running {
+				stopTrial(id, "The study stopped ("+why+") and should_stop_asap interrupted the trial.")
+			}
+		}
+	}
+	var tick <-chan time.Time
+	if ss.GetAutomatedStoppingSpec() != nil || ss.GetStudyStoppingConfig() != nil {
+		tk := time.NewTicker(hpPollInterval)
+		defer tk.Stop()
+		tick = tk.C
+	}
+	poll := func() {
+		if ss.GetAutomatedStoppingSpec() != nil {
+			for id, cj := range running {
+				if _, done := earlyStopped[id]; done {
+					continue
+				}
+				ms := readHypertune(dirs[id], ss.GetMetrics(), s.customJobStart(cj, jobStart))
+				sortMeasurements(ms)
+				if len(ms) != reported[id] {
+					reported[id] = len(ms)
+					setTrial(id, func(t *aiplatformpb.Trial) { t.Measurements = ms })
+				}
+				if halt, why, last := shouldStopTrial(ss, completedCurves, ms); halt {
+					stopTrial(id, "The service stopped the trial early: "+why+".")
+					if last != nil {
+						added[id] = last
+					}
+				}
+			}
+		}
+		if !studyStopped {
+			if halt, why := studyShouldStop(ss, progress(started)); halt {
+				stopStudy(why)
+			}
+		}
+	}
 	for {
-		for !stop && !exhausted && ctx.Err() == nil && len(running) < parallel && started < maxTrials {
+		for !stop && !studyStopped && !exhausted && ctx.Err() == nil && len(running) < parallel && started < maxTrials {
+			if halt, why := studyShouldStop(ss, progress(started+1)); halt {
+				stopStudy(why)
+				break
+			}
 			vals, ok := sug.suggest(obs)
 			if !ok {
 				exhausted = true
@@ -1065,6 +1129,7 @@ func (s *Server) runHPJob(ctx context.Context, e *hpJobEntry, parent string, onE
 				continue
 			}
 			running[id] = cj.GetName()
+			dirs[id] = dir
 			setTrial(id, func(t *aiplatformpb.Trial) { t.CustomJob = cj.GetName() })
 		}
 		if len(running) == 0 {
@@ -1073,21 +1138,46 @@ func (s *Server) runHPJob(ctx context.Context, e *hpJobEntry, parent string, onE
 		var r trialDone
 		select {
 		case r = <-results:
+		case <-tick:
+			if ctx.Err() == nil {
+				poll()
+			}
+			continue
 		case <-ctx.Done():
 			cancelRunning()
 			r = <-results
 		}
 		delete(running, r.id)
+		delete(dirs, r.id)
+		why, early := earlyStopped[r.id]
+		delete(earlyStopped, r.id)
 		var start time.Time
 		if r.job.GetStartTime() != nil {
 			start = r.job.GetStartTime().AsTime()
 		}
 		ms := readHypertune(r.dir, ss.GetMetrics(), start)
+		sortMeasurements(ms)
 		_ = os.RemoveAll(r.dir)
+		if m := added[r.id]; early && m != nil {
+			// The convex rule's last measurement, at max_step_count; only
+			// what the trial reported before it stopped is its curve.
+			var before []*aiplatformpb.Measurement
+			for _, x := range ms {
+				if x.GetStepCount() < m.GetStepCount() || m.GetStepCount() == 0 && x.GetElapsedDuration().AsDuration() < m.GetElapsedDuration().AsDuration() {
+					before = append(before, x)
+				}
+			}
+			convexStopped[r.id] = before
+			ms = append(before, m)
+		}
+		delete(added, r.id)
 		final := finalMeasurement(ss, ms)
-		ok := r.job.GetState() == aiplatformpb.JobState_JOB_STATE_SUCCEEDED && final != nil
+		ok := (early || r.job.GetState() == aiplatformpb.JobState_JOB_STATE_SUCCEEDED) && final != nil
 		reason := ""
 		switch {
+		case early && final == nil:
+			reason = fmt.Sprintf("%s It had reported no %s, so it has no final measurement.", why, ss.GetMetrics()[0].GetMetricId())
+		case early:
 		case r.job.GetState() == aiplatformpb.JobState_JOB_STATE_CANCELLED:
 			reason = "The trial's custom job " + r.job.GetName() + " was cancelled."
 		case r.job.GetState() != aiplatformpb.JobState_JOB_STATE_SUCCEEDED:
@@ -1108,11 +1198,32 @@ func (s *Server) runHPJob(ctx context.Context, e *hpJobEntry, parent string, onE
 		if ctx.Err() != nil {
 			continue
 		}
+		if early && !ok {
+			// Stopped by the service before it reported: not a failure.
+			continue
+		}
 		if firstEnded == nil {
 			firstEnded = &ok
 		}
 		if ok {
 			succeeded++
+			completedCurves = append(completedCurves, ms)
+			if cv, isConvex := ss.GetAutomatedStoppingSpec().(*aiplatformpb.StudySpec_ConvexAutomatedStoppingSpec_); isConvex && !early &&
+				cv.ConvexAutomatedStoppingSpec.GetUpdateAllStoppedTrials() {
+				// update_all_stopped_trials: the trials stopped before get
+				// their last measurement predicted again, at what the
+				// completed trials now learn.
+				for id, before := range convexStopped {
+					s.updateConvexStopped(e, ss, cv.ConvexAutomatedStoppingSpec, completedCurves, id, before)
+				}
+			}
+			if y, has := objective(ss, final); has {
+				if y > bestY {
+					bestY, bestAt, sinceBest = y, st.now(), 0
+				} else {
+					sinceBest++
+				}
+			}
 			st.mu.Lock()
 			var tp *aiplatformpb.Trial
 			for _, t := range e.Job.GetTrials() {
@@ -1486,4 +1597,15 @@ func (s *Server) runHPTraining(ctx context.Context, e *trainingEntry, parent str
 			_, _, t.ModelId, _, _ = parseModelName("model", uploaded.GetName())
 		}
 	})
+}
+
+// customJobStart is when custom job name started, or def.
+func (s *Server) customJobStart(name string, def time.Time) time.Time {
+	st := s.notebooks()
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if e, err := st.customJob(name); err == nil && e.Job.GetStartTime() != nil {
+		return e.Job.GetStartTime().AsTime()
+	}
+	return def
 }

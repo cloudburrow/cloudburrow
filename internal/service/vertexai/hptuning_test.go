@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // hypertuneRunner is a fakePipelineRunner whose containers act as a
@@ -148,9 +149,15 @@ func TestHyperparameterTuningValidation(t *testing.T) {
 			h.StudySpec.Parameters = append(h.StudySpec.Parameters, c)
 		}, codes.InvalidArgument},
 		"no trial job spec": {func(h *aiplatformpb.HyperparameterTuningJob) { h.TrialJobSpec = nil }, codes.InvalidArgument},
-		"early stopping": {func(h *aiplatformpb.HyperparameterTuningJob) {
-			h.StudySpec.AutomatedStoppingSpec = &aiplatformpb.StudySpec_MedianAutomatedStoppingSpec_{MedianAutomatedStoppingSpec: &aiplatformpb.StudySpec_MedianAutomatedStoppingSpec{}}
-		}, codes.Unimplemented},
+		"convex min above max steps": {func(h *aiplatformpb.HyperparameterTuningJob) {
+			h.StudySpec.AutomatedStoppingSpec = &aiplatformpb.StudySpec_ConvexAutomatedStoppingSpec_{ConvexAutomatedStoppingSpec: &aiplatformpb.StudySpec_ConvexAutomatedStoppingSpec{MaxStepCount: 5, MinStepCount: 6}}
+		}, codes.InvalidArgument},
+		"negative max_num_trials": {func(h *aiplatformpb.HyperparameterTuningJob) {
+			h.StudySpec.StudyStoppingConfig = &aiplatformpb.StudySpec_StudyStoppingConfig{MaxNumTrials: wrapperspb.Int32(-1)}
+		}, codes.InvalidArgument},
+		"max below min trials": {func(h *aiplatformpb.HyperparameterTuningJob) {
+			h.StudySpec.StudyStoppingConfig = &aiplatformpb.StudySpec_StudyStoppingConfig{MinNumTrials: wrapperspb.Int32(3), MaxNumTrials: wrapperspb.Int32(2)}
+		}, codes.InvalidArgument},
 	} {
 		h := hpJob(0, 4, 2, lrParam(0))
 		c.job(h)

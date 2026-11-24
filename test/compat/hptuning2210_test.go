@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // hpTrainScript is a trial's training code in the busybox trainer: it
@@ -274,6 +275,129 @@ func TestVertexAIHyperparameterTuning(t *testing.T) {
 	}
 	if _, err := jc.GetHyperparameterTuningJob(ctx, &aiplatformpb.GetHyperparameterTuningJobRequest{Name: job.GetName()}); grpcCode(err) != codes.NotFound {
 		t.Errorf("get after delete = %v", err)
+	}
+}
+
+// hpStepScript reports loss at steps 1 to 8, one a second, as
+// cloudml-hypertune appends its reports: 0.1/step for --opt=good, 5/step
+// for --opt=bad.
+const hpStepScript = `opt=good
+for a in "$@"; do case "$a" in --opt=*) opt=${a#--opt=};; esac; done
+base=0.1; [ "$opt" = bad ] && base=5
+mkdir -p /tmp/hypertune
+for s in 1 2 3 4 5 6 7 8; do
+  loss=$(awk -v b="$base" -v s="$s" 'BEGIN { printf "%.12g", b / s }')
+  printf '{"checkpoint_path": "", "global_step": "%s", "loss": "%s", "timestamp": %s, "trial": "%s"}\n' "$s" "$loss" "$(date +%s)" "$CLOUD_ML_TRIAL_ID" >> /tmp/hypertune/output.metrics
+  sleep 1
+done`
+
+// TestVertexAIHyperparameterTuningStopping (#2210), with the official Go
+// client, as the StudySpec reference documents automated stopping: with
+// median_automated_stopping_spec, a GRID_SEARCH job runs --opt=good to
+// its end and then stops --opt=bad early, its best objective below the
+// completed trial's: the stopped trial SUCCEEDS with the measurements it
+// reported so far (fewer than 8) and its custom job is CANCELLED; with
+// study_stopping_config max_num_trials 2, a job of max_trial_count 5 ends
+// after 2 trials; with convex_automated_stopping_spec, the bad trial
+// stops with a last measurement at max_step_count.
+// covers: google.cloud.aiplatform.v1.JobService/CreateHyperparameterTuningJob, google.cloud.aiplatform.v1.JobService/GetHyperparameterTuningJob
+func TestVertexAIHyperparameterTuningStopping(t *testing.T) {
+	h := New(t)
+	endpoint := runShardEndpoint(h, envRunLocalAI, EnvPrediction)
+	scaleShardEndpoint(h, envScaleRun, EnvRun)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
+	gcs := dataformStorage(t, h)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	trainer := pushTrainer(t, ctx, h)
+	jc, err := aiplatform.NewJobClient(ctx, vertexOpts(endpoint)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer jc.Close()
+	parent := runParent(h)
+	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+	bucket := "vx-hpstop-" + suffix
+	dataformBucket(ctx, t, gcs, h.Project(), bucket)
+	metrics := []*aiplatformpb.StudySpec_MetricSpec{{MetricId: "loss", Goal: aiplatformpb.StudySpec_MetricSpec_MINIMIZE}}
+	opt := &aiplatformpb.StudySpec_ParameterSpec{ParameterId: "opt", ParameterValueSpec: &aiplatformpb.StudySpec_ParameterSpec_CategoricalValueSpec_{
+		CategoricalValueSpec: &aiplatformpb.StudySpec_ParameterSpec_CategoricalValueSpec{Values: []string{"good", "bad"}}}}
+	spec := func(prefix string) *aiplatformpb.CustomJobSpec {
+		pool := hpTrainerPool(trainer)
+		pool.GetContainerSpec().Command = []string{"sh", "-c", hpStepScript, "sh"}
+		return &aiplatformpb.CustomJobSpec{BaseOutputDirectory: &aiplatformpb.GcsDestination{OutputUriPrefix: "gs://" + bucket + "/" + prefix},
+			WorkerPoolSpecs: []*aiplatformpb.WorkerPoolSpec{pool}}
+	}
+	run := func(j *aiplatformpb.HyperparameterTuningJob) *aiplatformpb.HyperparameterTuningJob {
+		created, err := jc.CreateHyperparameterTuningJob(ctx, &aiplatformpb.CreateHyperparameterTuningJobRequest{Parent: parent, HyperparameterTuningJob: j})
+		if err != nil {
+			t.Fatalf("CreateHyperparameterTuningJob %s: %v", j.GetDisplayName(), err)
+		}
+		var got *aiplatformpb.HyperparameterTuningJob
+		waitTrainJob(t, ctx, func() (aiplatformpb.JobState, error) {
+			got, err = jc.GetHyperparameterTuningJob(ctx, &aiplatformpb.GetHyperparameterTuningJobRequest{Name: created.GetName()})
+			return got.GetState(), err
+		})
+		return got
+	}
+
+	// Convex stopping: two trials of --opt=good and --opt=fine complete
+	// (min_measurement_count 1 needs 2), and --opt=bad, whose loss 5/step
+	// extrapolated from its slope to step 8 stays worse than 0.1/8, stops
+	// with a last measurement at step 8, the completed trials' longest.
+	cat := &aiplatformpb.StudySpec_ParameterSpec{ParameterId: "opt", ParameterValueSpec: &aiplatformpb.StudySpec_ParameterSpec_CategoricalValueSpec_{
+		CategoricalValueSpec: &aiplatformpb.StudySpec_ParameterSpec_CategoricalValueSpec{Values: []string{"fine", "good", "bad"}}}}
+	got := run(&aiplatformpb.HyperparameterTuningJob{DisplayName: "compat-hpconvex-" + suffix, MaxTrialCount: 3, ParallelTrialCount: 1,
+		StudySpec: &aiplatformpb.StudySpec{Metrics: metrics, Parameters: []*aiplatformpb.StudySpec_ParameterSpec{cat}, Algorithm: aiplatformpb.StudySpec_GRID_SEARCH,
+			AutomatedStoppingSpec: &aiplatformpb.StudySpec_ConvexAutomatedStoppingSpec_{ConvexAutomatedStoppingSpec: &aiplatformpb.StudySpec_ConvexAutomatedStoppingSpec{MinMeasurementCount: 1}}},
+		TrialJobSpec: spec("convex")})
+	if got.GetState() != aiplatformpb.JobState_JOB_STATE_SUCCEEDED || len(got.GetTrials()) != 3 {
+		t.Fatalf("the convex-stopping job = %v %v, %d trials", got.GetState(), got.GetError(), len(got.GetTrials()))
+	}
+	for _, tr := range got.GetTrials() {
+		v := tr.GetParameters()[0].GetValue().GetStringValue()
+		ms := tr.GetMeasurements()
+		switch {
+		case tr.GetState() != aiplatformpb.Trial_SUCCEEDED:
+			t.Errorf("convex: trial --opt=%s = %v %s", v, tr.GetState(), tr.GetInfeasibleReason())
+		case v != "bad" && len(ms) != 8:
+			t.Errorf("convex: trial --opt=%s was stopped: %d measurements", v, len(ms))
+		case v == "bad" && (len(ms) < 2 || len(ms) > 8 || ms[len(ms)-1].GetStepCount() != 8 || ms[len(ms)-2].GetStepCount() >= 7 ||
+			tr.GetFinalMeasurement().GetStepCount() != 8):
+			t.Errorf("convex: trial --opt=bad was not stopped early with a last measurement at step 8: %v, final %v", ms, tr.GetFinalMeasurement())
+		}
+	}
+
+	// Median stopping.
+	got = run(&aiplatformpb.HyperparameterTuningJob{DisplayName: "compat-hpmedian-" + suffix, MaxTrialCount: 2, ParallelTrialCount: 1,
+		StudySpec: &aiplatformpb.StudySpec{Metrics: metrics, Parameters: []*aiplatformpb.StudySpec_ParameterSpec{opt}, Algorithm: aiplatformpb.StudySpec_GRID_SEARCH,
+			AutomatedStoppingSpec: &aiplatformpb.StudySpec_MedianAutomatedStoppingSpec_{MedianAutomatedStoppingSpec: &aiplatformpb.StudySpec_MedianAutomatedStoppingSpec{}}},
+		TrialJobSpec: spec("median")})
+	if got.GetState() != aiplatformpb.JobState_JOB_STATE_SUCCEEDED || len(got.GetTrials()) != 2 {
+		t.Fatalf("the median-stopping job = %v %v, %d trials", got.GetState(), got.GetError(), len(got.GetTrials()))
+	}
+	good, bad := got.GetTrials()[0], got.GetTrials()[1]
+	if good.GetState() != aiplatformpb.Trial_SUCCEEDED || len(good.GetMeasurements()) != 8 || good.GetFinalMeasurement().GetStepCount() != 8 {
+		t.Errorf("the good trial = %v, %d measurements, final %v", good.GetState(), len(good.GetMeasurements()), good.GetFinalMeasurement())
+	}
+	if bad.GetState() != aiplatformpb.Trial_SUCCEEDED || len(bad.GetMeasurements()) == 0 || len(bad.GetMeasurements()) >= 8 || bad.GetFinalMeasurement() == nil {
+		t.Errorf("the bad trial was not stopped early: %v, %d measurements, final %v", bad.GetState(), len(bad.GetMeasurements()), bad.GetFinalMeasurement())
+	}
+	if cj, err := jc.GetCustomJob(ctx, &aiplatformpb.GetCustomJobRequest{Name: bad.GetCustomJob()}); err != nil || cj.GetState() != aiplatformpb.JobState_JOB_STATE_CANCELLED {
+		t.Errorf("the stopped trial's custom job = %v %v", cj.GetState(), err)
+	}
+
+	// The study stops at max_num_trials.
+	lr := &aiplatformpb.StudySpec_ParameterSpec{ParameterId: "lr", ScaleType: aiplatformpb.StudySpec_ParameterSpec_UNIT_LINEAR_SCALE,
+		ParameterValueSpec: &aiplatformpb.StudySpec_ParameterSpec_DoubleValueSpec_{DoubleValueSpec: &aiplatformpb.StudySpec_ParameterSpec_DoubleValueSpec{MinValue: 0.01, MaxValue: 1}}}
+	quick := spec("max")
+	quick.WorkerPoolSpecs[0].GetContainerSpec().Command = []string{"sh", "-c", hpTrainScript, "sh"}
+	got = run(&aiplatformpb.HyperparameterTuningJob{DisplayName: "compat-hpmax-" + suffix, MaxTrialCount: 5, ParallelTrialCount: 1,
+		StudySpec: &aiplatformpb.StudySpec{Metrics: metrics, Parameters: []*aiplatformpb.StudySpec_ParameterSpec{lr}, Algorithm: aiplatformpb.StudySpec_RANDOM_SEARCH,
+			StudyStoppingConfig: &aiplatformpb.StudySpec_StudyStoppingConfig{MaxNumTrials: wrapperspb.Int32(2)}},
+		TrialJobSpec: quick})
+	if got.GetState() != aiplatformpb.JobState_JOB_STATE_SUCCEEDED || len(got.GetTrials()) != 2 {
+		t.Errorf("the max_num_trials job = %v %v, %d trials", got.GetState(), got.GetError(), len(got.GetTrials()))
 	}
 }
 

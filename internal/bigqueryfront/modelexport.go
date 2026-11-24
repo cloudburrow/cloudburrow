@@ -54,10 +54,10 @@ import (
 // predicted_<rating>). GCPC's BigqueryExportModelJobOp adds
 // add_serving_default_signature=True, which the export always has.
 //
-// Not exported (501, naming why): a model with a TRANSFORM clause, and
-// TRANSFORM_ONLY, whose transform/ SavedModel needs each TRANSFORM SQL
-// function in TensorFlow; AutoML models, which BigQuery exports in AutoML's
-// own TF 2.1.0 format.
+// A model with a TRANSFORM clause also has its preprocessing SavedModel in
+// transform/, and a TRANSFORM_ONLY model is that SavedModel alone
+// (modelexporttransform.go). Not exported (501, naming why): AutoML
+// models, which BigQuery exports in AutoML's own TF 2.1.0 format.
 
 // exportDDL is an EXPORT MODEL statement.
 type exportDDL struct {
@@ -179,12 +179,44 @@ func (f front) exportModel(ctx context.Context, md bqModel, format string, trial
 	if format != own {
 		return nil, 400, fmt.Sprintf("Model %s of type %s cannot be exported in destination format %s; its format is %s", name, typ, format, own)
 	}
-	switch {
-	case strings.HasPrefix(typ, "AUTOML_"):
+	if strings.HasPrefix(typ, "AUTOML_") {
 		return nil, 501, "Not implemented here: EXPORT MODEL of an AutoML model, which BigQuery exports in AutoML's own TF SavedModel (TF 2.1.0). Nothing was written."
-	case len(md.Transform) > 0 || typ == "TRANSFORM_ONLY":
-		return nil, 501, "Not implemented here: EXPORT MODEL of a model with a TRANSFORM clause, whose transform/ SavedModel needs the TRANSFORM's SQL functions in TensorFlow. Nothing was written."
 	}
+	if len(md.Transform) == 0 && typ == "TRANSFORM_ONLY" {
+		return nil, 500, "cloudburrow: the TRANSFORM_ONLY model keeps no TRANSFORM"
+	}
+	// The preprocessing SavedModel of the TRANSFORM (modelexporttransform.go):
+	// the model's export itself for TRANSFORM_ONLY, its transform/ folder for
+	// any other model.
+	var pre map[string]any
+	if len(md.Transform) > 0 {
+		spec, code, msg := transformSpec(md)
+		if code != 0 {
+			return nil, code, msg
+		}
+		if typ == "TRANSFORM_ONLY" {
+			return f.tfExport(ctx, spec)
+		}
+		pre = spec
+	}
+	files, code, msg := f.exportTrained(ctx, md, typ, name)
+	if code != 0 || pre == nil {
+		return files, code, msg
+	}
+	tfiles, code, msg := f.tfExport(ctx, pre)
+	if code != 0 {
+		return nil, code, msg
+	}
+	for _, fl := range tfiles {
+		fl.name = "transform/" + fl.name
+		files = append(files, fl)
+	}
+	return files, 0, ""
+}
+
+// exportTrained makes the files of the export of md, a trained model of
+// type typ, without its TRANSFORM.
+func (f front) exportTrained(ctx context.Context, md bqModel, typ, name string) ([]exportFile, int, string) {
 	for _, ft := range md.Trained.Features {
 		switch ft.Type {
 		case "INT64", "FLOAT64", "NUMERIC", "BIGNUMERIC", "STRING", "BOOL":
@@ -198,13 +230,18 @@ func (f front) exportModel(ctx context.Context, md bqModel, format string, trial
 	if typ == "TENSORFLOW" {
 		return f.importedSavedModel(ctx, md)
 	}
-	ex, ok := f.tfconvert.(tfExporter)
-	if f.tfconvert == nil || !ok {
-		return nil, 501, "Not implemented here: EXPORT MODEL to a TF SavedModel: this BigQuery front was given no TensorFlow converter (--tfconvert), which `cloudburrow up` serves with BigQuery enabled. Nothing was written."
-	}
 	spec, code, msg := exportSpec(md)
 	if code != 0 {
 		return nil, code, msg
+	}
+	return f.tfExport(ctx, spec)
+}
+
+// tfExport runs the converter's export of spec: the SavedModel's files.
+func (f front) tfExport(ctx context.Context, spec map[string]any) ([]exportFile, int, string) {
+	ex, ok := f.tfconvert.(tfExporter)
+	if f.tfconvert == nil || !ok {
+		return nil, 501, "Not implemented here: EXPORT MODEL to a TF SavedModel: this BigQuery front was given no TensorFlow converter (--tfconvert), which `cloudburrow up` serves with BigQuery enabled. Nothing was written."
 	}
 	b, _ := json.Marshal(spec)
 	got, err := ex.Export(ctx, b)

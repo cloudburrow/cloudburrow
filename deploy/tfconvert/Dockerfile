@@ -14,7 +14,7 @@ FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb
 
 RUN pip install --no-cache-dir tensorflow==2.20.0
 
-COPY convert.py /opt/cloudburrow/convert.py
+COPY convert.py transform.py /opt/cloudburrow/
 
 # No network when it runs: the converter reads /model and writes /out.
 USER 65534:65534

@@ -15,7 +15,8 @@ google-cloud-aiplatform 1.x), as Google's guides use them:
     into a destination table), BigqueryCreateModelJobOp (a linear
     regression) and, on its model, BigqueryEvaluateModelJobOp,
     BigqueryPredictModelJobOp and BigqueryExportModelJobOp (EXPORT MODEL
-    to CB_EXPORT_DIR);
+    to CB_EXPORT_DIR); and a model with a TRANSFORM clause, exported to
+    CB_EXPORT_DIR-transform;
   - training: aiplatform.CustomContainerTrainingJob(...).run(), a
     TrainingPipeline whose custom job uploads a Model.
 
@@ -145,6 +146,20 @@ def components(project: str, bq_project: str, dataset: str, model_dir: str):
     BigqueryExportModelJobOp(
         project=bq_project, location="US", model=model.outputs["model"], model_destination_path=os.environ["CB_EXPORT_DIR"],
     ).set_display_name("export-model")
+    # A model with a TRANSFORM clause exports its preprocessing SavedModel
+    # in transform/.
+    tmodel = BigqueryCreateModelJobOp(
+        project=bq_project,
+        location="US",
+        query="CREATE OR REPLACE MODEL `" + os.environ["CB_BQ_PROJECT"] + "." + os.environ["CB_BQ_DATASET"] + ".lint` "
+        "TRANSFORM(ML.STANDARD_SCALER(x) OVER () AS xs, y) "
+        "OPTIONS(model_type='linear_reg', input_label_cols=['y']) AS SELECT x, y FROM `"
+        + os.environ["CB_BQ_PROJECT"] + "." + os.environ["CB_BQ_DATASET"] + ".train`",
+    ).set_display_name("create-transform-model")
+    BigqueryExportModelJobOp(
+        project=bq_project, location="US", model=tmodel.outputs["model"],
+        model_destination_path=os.environ["CB_EXPORT_DIR"] + "-transform",
+    ).set_display_name("export-transform-model")
 
 
 def run(path, root, params, template_path=None):

@@ -263,7 +263,7 @@ func TestPythonGCPC(t *testing.T) {
 	if comp.GetState() != aiplatformpb.PipelineState_PIPELINE_STATE_SUCCEEDED {
 		t.Fatalf("the components run = %v %v\n%s", comp.GetState(), comp.GetError(), out)
 	}
-	for _, name := range []string{"custom-job", "query", "create-model", "evaluate", "predict", "export-model"} {
+	for _, name := range []string{"custom-job", "query", "create-model", "evaluate", "predict", "export-model", "create-transform-model", "export-transform-model"} {
 		if d := gcpcTask(t, comp, name); d != nil && d.GetState() != aiplatformpb.PipelineTaskDetail_SUCCEEDED {
 			t.Errorf("task %s = %v %v", name, d.GetState(), d.GetError())
 		}
@@ -310,6 +310,19 @@ func TestPythonGCPC(t *testing.T) {
 	}
 	if !saved["saved_model.pb"] || !saved["variables/variables.index"] {
 		t.Errorf("EXPORT MODEL wrote %v under gs://%s/exported/, want a TF SavedModel", saved, bucket)
+	}
+	// The TRANSFORM model's export: the model's SavedModel, and its
+	// preprocessing SavedModel in transform/.
+	saved = map[string]bool{}
+	for objs := gcs.Bucket(bucket).Objects(ctx, &storage.Query{Prefix: "exported-transform/"}); ; {
+		o, err := objs.Next()
+		if err != nil {
+			break
+		}
+		saved[strings.TrimPrefix(o.Name, "exported-transform/")] = true
+	}
+	if !saved["saved_model.pb"] || !saved["transform/saved_model.pb"] || !saved["transform/variables/variables.index"] {
+		t.Errorf("EXPORT MODEL of the TRANSFORM model wrote %v under gs://%s/exported-transform/, want a SavedModel and transform/", saved, bucket)
 	}
 	it := bq.Dataset(dataset).Table("predicted").Read(ctx)
 	rows := 0
