@@ -949,8 +949,10 @@ EOF2
 # for the probes after the restart.
 compat_setup_exports() {
   case "$1" in
-    served)  export CLOUDBURROW_TEST_KMS_PROBE="$2/kms-probe.json" \
-               CLOUDBURROW_TEST_GKE_LOGS_PROBE="$2/gke-logs-probe.json" ;;
+    served)  export CLOUDBURROW_TEST_KMS_PROBE="$2/kms-probe.json" ;;
+    # The gke shard runs TestGKELogsRestartSetup since #2221 split it off
+    # served's tests (main run 45422957668, attempt 2: it skipped there).
+    gke)     export CLOUDBURROW_TEST_GKE_LOGS_PROBE="$2/gke-logs-probe.json" ;;
     storage) export CLOUDBURROW_TEST_SECRETS_PROBE="$2/secrets-probe.json" \
                CLOUDBURROW_TEST_TASKS_PROBE="$2/tasks-probe.json" \
                CLOUDBURROW_TEST_SCHEDULER_PROBE="$2/scheduler-probe.json" \
