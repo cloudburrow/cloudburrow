@@ -8,8 +8,8 @@
 // (a GQL RETURN ... ORDER BY's order, PROPERTY_EXISTS and the other
 // documented graph predicates, COUNT of a group variable, ANY CHEAPEST), and
 // the CLI embeds one archive per Linux architecture, named by Version. `up`
-// writes the one matching the cluster's nodes onto the distroless base
-// upstream's own image uses, pinned by digest, builds it with docker and
+// writes the one matching the cluster's nodes onto a distroless base,
+// pinned by digest, builds it with docker and
 // loads it into kind. Its tag is the content hash of the archive and the
 // Dockerfile, so the same CLI always yields the same image.
 //
@@ -49,10 +49,13 @@ const PatchHash = "7c2530f5a64e"
 // Version names a build: the upstream release and the patches.
 const Version = Upstream + "-cb." + PatchHash
 
-// Base is the image the build is layered on: the distroless base upstream's
-// release stage uses (glibc, no shell), pinned by digest
-// (dependencies.json, build.spannerEmulatorBase).
-const Base = "gcr.io/distroless/cc-debian12@sha256:e5d81ddde149641e2a9ba55be4545bc125c67de07508b03ba4c22e6eb0ded5aa"
+// Base is the image the build is layered on, pinned by digest
+// (dependencies.json, build.spannerEmulatorBase): distroless cc (glibc and
+// libstdc++, no shell), as upstream's release stage uses, but Debian 13's,
+// whose libstdc++ (GCC 14's) has every symbol the GCC 13 build needs, where
+// upstream copies GCC 13's libstdc++ over Debian 12's. So the CLI embeds
+// no library of the compiler's.
+const Base = "gcr.io/distroless/cc-debian13@sha256:dac90a25ffe03ebaace90cda886b081e61ab6cd77ac47eda51f7bcc15c320765"
 
 // Repository is the local registry prefix the image is tagged under, one
 // kubelet never tries to pull (see internal/images).
@@ -62,9 +65,7 @@ const Repository = "dev.local/cloudburrow-spanner-emulator"
 var Arches = storageimage.Arches
 
 // Files are what an archive holds, all of it: the emulator, the gateway
-// that starts it, and the licence bundle. The emulator links libstdc++
-// statically (third_party/spanner-emulator/Dockerfile.tail), where
-// upstream's image carries the shared library.
+// that starts it, and the licence bundle; libstdc++ is Base's.
 var Files = []string{"emulator_main", "gateway_main", "licenses.txt.gz"}
 
 //go:embed bin/*

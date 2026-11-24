@@ -4,8 +4,7 @@ CloudBurrow's Spanner runs **Google's Cloud Spanner emulator**. Since #2029 it i
 release built from its source with patches**, shipped the way the patched BigQuery emulator is:
 each release builds it once per architecture (`.github/workflows/release.yml`, job
 `spanner-emulator`), every CLI embeds both builds (`internal/spannerimage`), and `up` builds the
-image from the one for the cluster's nodes on the distroless base upstream's image uses, pinned
-by digest, and loads it into kind. A CLI built without them (`go build`, or `make build`, which
+image from the one for the cluster's nodes on a distroless base, pinned by digest, and loads it into kind. A CLI built without them (`go build`, or `make build`, which
 does not run the hours-long C++ build) runs Google's prebuilt image, pinned by digest
 (`internal/components.SpannerImage`, dependencies.json `spannerEmulator`), and `up` warns that
 it returns a GQL `RETURN ... ORDER BY` out of order and refuses the graph features below. This
@@ -22,9 +21,11 @@ is committed here: only the pins and the patches.
 Every other dependency is the emulator's own choice in its MODULE.bazel, fetched by Bazel as it
 pins them. The build's `licenses.txt.gz` (written as the emulator's Dockerfile writes it) carries
 their licences; the image has it where upstream's has it, and each release archive has it as
-`LICENSES-spanner-emulator.txt`. Unlike upstream's image, the build links libstdc++ statically
-(`BAZEL_LINKLIBS`, [Dockerfile.tail](Dockerfile.tail)), so no GPL-licensed file is embedded or
-shipped: only object code under the GCC Runtime Library Exception.
+`LICENSES-spanner-emulator.txt`. Upstream's image copies the build image's GCC 13 libstdc++ over
+distroless Debian 12's older one; CloudBurrow's uses distroless `cc-debian13`, whose libstdc++
+(GCC 14) has every symbol the build needs, so no library of the compiler's is embedded or
+shipped. (Linking libstdc++ statically, `BAZEL_LINKLIBS=-l%:libstdc++.a`, broke the link of
+ICU's build tools through rules_foreign_cc: measured.)
 
 ## The patches
 

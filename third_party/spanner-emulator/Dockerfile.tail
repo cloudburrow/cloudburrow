@@ -17,13 +17,6 @@ COPY . .
 RUN find third_party/spanner_pg -name "nodes.h" -exec sed -i 's/enum NodeTag : int/enum NodeTag/g' {} +
 
 ENV EXTRA_BAZEL_ARGS="--tool_java_runtime_version=local_jdk"
-# libstdc++ linked statically (Bazel's documented BAZEL_LINKLIBS switch for
-# its autoconfigured toolchain), where upstream's image ships the shared
-# library beside the binaries: the CLI that embeds the build then carries no
-# GPL-licensed file, only object code the GCC Runtime Library Exception
-# covers, and the image needs nothing of the compiler's.
-ENV BAZEL_LINKLIBS="-l%:libstdc++.a"
-ENV BAZEL_LINKOPTS="-lm"
 ARG BAZEL_JOBS=4
 RUN --mount=type=cache,id=cloudburrow-spanner-emulator-bazel,target=/root/.cache/bazel \
     bazel build -c opt --jobs=${BAZEL_JOBS} \

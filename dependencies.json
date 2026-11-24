@@ -323,7 +323,7 @@
           "commit": "a081a7e71aba5f4d05fc8c6b21ef1a269dcbac28",
           "license": "Apache-2.0",
           "googlesql": {"source": "https://github.com/google/googlesql", "tag": "2026.7.2", "license": "Apache-2.0"},
-          "redistribution": "embedded: each CLI embeds gzip-compressed linux/amd64 and linux/arm64 archives of emulator_main and gateway_main (libstdc++ linked statically, under the GCC Runtime Library Exception) and the licence files of every Bazel dependency linked into them (internal/spannerimage); `up` builds the image dev.local/cloudburrow-spanner-emulator from them on build.spannerEmulatorBase and loads it into kind. Release archives carry the licences as LICENSES-spanner-emulator.txt."
+          "redistribution": "embedded: each CLI embeds gzip-compressed linux/amd64 and linux/arm64 archives of emulator_main and gateway_main and the licence files of every Bazel dependency linked into them (internal/spannerimage); `up` builds the image dev.local/cloudburrow-spanner-emulator from them on build.spannerEmulatorBase and loads it into kind. Release archives carry the licences as LICENSES-spanner-emulator.txt."
         },
         "redistribution": "not-redistributed",
         "redistributionPlan": "Pulled from Google's registry by digest at run time. Nothing is vendored or re-hosted.",
@@ -1299,8 +1299,8 @@
         "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       },
       "spannerEmulatorBase": {
-        "image": "gcr.io/distroless/cc-debian12",
-        "digest": "sha256:e5d81ddde149641e2a9ba55be4545bc125c67de07508b03ba4c22e6eb0ded5aa",
+        "image": "gcr.io/distroless/cc-debian13",
+        "digest": "sha256:dac90a25ffe03ebaace90cda886b081e61ab6cd77ac47eda51f7bcc15c320765",
         "license": "Apache-2.0",
         "redistribution": "pull-only",
         "updateFeed": "gcr-tag-list",
@@ -1309,7 +1309,7 @@
           "linux/amd64",
           "linux/arm64"
         ],
-        "notes": "The base of the patched Spanner emulator image `up` builds locally from the embedded build (#2029): the base upstream's own release stage uses (glibc, no shell). internal/spannerimage.Base duplicates it.",
+        "notes": "The base of the patched Spanner emulator image `up` builds locally from the embedded build (#2029): distroless cc as upstream's own release stage uses, but Debian 13's, whose libstdc++ (GCC 14) covers the GCC 13 build, where upstream copies GCC 13's libstdc++ over Debian 12's; so the CLI embeds no library of the compiler's. internal/spannerimage.Base duplicates it.",
         "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       },
       "storageServerBase": {
