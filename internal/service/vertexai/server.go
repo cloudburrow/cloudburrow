@@ -28,10 +28,10 @@ type Server struct {
 
 	// aliases maps a requested model ID to the generator's model. It is empty
 	// by default: an unconfigured alias is an error, never a substitution.
-	mu      sync.RWMutex
+	mu sync.RWMutex
 	// alertNotifier delivers Model Monitoring's alerts (monitoralerts.go).
 	alertNotifier AlertNotifier
-	aliases map[string]string
+	aliases       map[string]string
 
 	// embedders serve :predict and :embedContent, by embedding model ID
 	// (EmbeddingGemma and EmbeddingGemma 2, #1454); a model with none
