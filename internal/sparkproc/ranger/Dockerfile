@@ -43,7 +43,7 @@
 # (-C), and the web UI's npm packages by its package-lock.json integrity
 # hashes, as Ranger's build does; the Maven repository is a BuildKit cache
 # mount, so a rebuild reuses it.
-FROM maven@sha256:e3c149f44c95b0e9dd131862b3df67b3f061f7f6f3898a87b170564b3a943611 AS build
+FROM maven:3.9.11-eclipse-temurin-8@sha256:e3c149f44c95b0e9dd131862b3df67b3f061f7f6f3898a87b170564b3a943611 AS build
 ADD --checksum=sha256:069ed1550160ac0da87980411c346d1e607466cb823720c73458a7b3b95b34aa \
     https://archive.apache.org/dist/ranger/2.8.0/apache-ranger-2.8.0.tar.gz /src/apache-ranger-2.8.0.tar.gz
 RUN apt-get update && apt-get install -y --no-install-recommends python3 git && rm -rf /var/lib/apt/lists/* && \
@@ -66,7 +66,7 @@ RUN --mount=type=cache,id=cloudburrow-ranger-2.8.0-m2,target=/root/.m2 \
     mkdir /out && for p in admin hdfs-plugin hive-plugin yarn-plugin solr_audit_conf; do \
       cp target/ranger-2.8.0-$p.tar.gz /out/ || exit 1; done && rm -rf /src
 
-FROM maven@sha256:e3c149f44c95b0e9dd131862b3df67b3f061f7f6f3898a87b170564b3a943611
+FROM maven:3.9.11-eclipse-temurin-8@sha256:e3c149f44c95b0e9dd131862b3df67b3f061f7f6f3898a87b170564b3a943611
 RUN apt-get update && apt-get install -y --no-install-recommends python3 procps bc && rm -rf /var/lib/apt/lists/* && \
     mkdir -p /opt/ranger /usr/share/java /var/log/ranger /var/run/ranger
 ADD --checksum=sha256:a00ccdf537ff50e50067b989108c2235197ffb65e197149bbb669db843cd1c3e \

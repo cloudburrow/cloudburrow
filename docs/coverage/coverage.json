@@ -7570,6 +7570,7 @@
         "tests": [
           "test/compat/workbench2173_test.go:58 TestWorkbenchInstances",
           "test/compat/workbench2198_test.go:180 TestWorkbenchJupyterLab",
+          "test/compat/workbench2198b_test.go:366 TestIAMEnforcementWorkbenchProxyBearer",
           "test/compat/workbench2198b_test.go:94 TestWorkbenchJupyterLabBearerAndIdentity"
         ]
       },

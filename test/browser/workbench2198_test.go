@@ -125,11 +125,14 @@ func TestWorkbenchJupyterLabFromTheConsole(t *testing.T) {
 	lab.waitForWithin(`(() => { const p = document.querySelector("#jp-left-stack > .lm-Widget:not(.lm-mod-hidden)"); return !!p && /Google Cloud Storage/.test(p.innerText) && !/error/i.test(p.innerText); })()`, time.Minute)
 	lab.run(chromedp.Click(chromedp.CSS(`.jp-SideBar [data-id="filebrowser"]`)))
 	lab.eval(`(() => { const b = document.querySelector('[data-command="launcher:create"], .jp-ToolbarButtonComponent[title="New Launcher"]'); if (b) b.click(); return true; })()`, nil)
-	lab.waitFor(`document.querySelector(".jp-Launcher:not(.lm-mod-hidden) .jp-LauncherCard[data-category=\"Notebook\"]") !== null`)
+	// The new Launcher's notebook card is the one shown (offsetParent: the
+	// hidden tabs' cards have none).
+	const shownCard = `[...document.querySelectorAll('.jp-LauncherCard[data-category="Notebook"]')].filter((c) => c.offsetParent !== null).pop()`
+	lab.waitFor(shownCard + ` !== undefined`)
 
 	// The Launcher's Python 3 notebook; a cell querying the instance's
 	// BigQuery with Google's client, run with Shift+Enter.
-	lab.run(chromedp.Click(chromedp.CSS(`.jp-Launcher:not(.lm-mod-hidden) .jp-LauncherCard[data-category="Notebook"]`)))
+	lab.eval(shownCard+`.click(), true`, nil)
 	lab.waitForWithin(`document.querySelector(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .cm-content") !== null`, 2*time.Minute)
 	// The kernel is idle before the cell is run: the toolbar's kernel
 	// name shows it, and its status no longer reads starting or busy.

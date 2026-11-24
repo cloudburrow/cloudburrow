@@ -353,3 +353,69 @@ except Exception as e:
 		t.Errorf("a stopped runtime's proxy_uri = %q, %v", got.GetProxyUri(), err)
 	}
 }
+
+// covers: google.cloud.notebooks.v2.NotebookService/CreateInstance
+//
+// TestIAMEnforcementWorkbenchProxyBearer (#2198): with enforcement on, an
+// instance's proxy_uri takes a bearer token only from a principal with
+// notebooks.instances.use on the instance (Google's Workbench proxy
+// admits "users with the notebooks.instances.use permission"): a
+// principal with no role, and one with Notebooks Viewer (which lacks it),
+// are refused with 403; Notebooks Editor (which has it) reaches the
+// instance's Jupyter Server.
+func TestIAMEnforcementWorkbenchProxyBearer(t *testing.T) {
+	h := New(t)
+	_, clients := workbenchClients(t, h)
+	h.Endpoint(EnvResourceManager)
+	h.Endpoint(EnvMetadata)
+	requireIAMEnforcement(t)
+	c := clients["grpc"]
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	t.Cleanup(cancel)
+	project := iamProject(t, h, "iewbp-")
+	id := "wb-use-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+	op, err := c.CreateInstance(ctx, &nbpb.CreateInstanceRequest{Parent: "projects/" + project + "/locations/us-central1-a", InstanceId: id,
+		Instance: &nbpb.Instance{Infrastructure: &nbpb.Instance_GceSetup{GceSetup: &nbpb.GceSetup{}}}})
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	in, err := op.Wait(ctx)
+	if err != nil {
+		t.Fatalf("the create operation: %v", err)
+	}
+	t.Cleanup(func() {
+		if op, err := c.DeleteInstance(context.Background(), &nbpb.DeleteInstanceRequest{Name: in.GetName()}); err == nil {
+			_ = op.Wait(context.Background())
+		}
+	})
+	m := proxyURIRE.FindStringSubmatch(in.GetProxyUri())
+	if m == nil {
+		t.Fatalf("proxy_uri %q", in.GetProxyUri())
+	}
+	p := newIAMPrincipal(t, h, project, "iewbp")
+	status := func() int {
+		req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+m[2]+"/api/status", nil)
+		req.Host = in.GetProxyUri()
+		req.Header.Set("Authorization", "Bearer "+p.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := status(); code != http.StatusForbidden {
+		t.Errorf("a bearer token with no role = %d, want 403", code)
+	}
+	p.grant("roles/notebooks.viewer")
+	if code := status(); code != http.StatusForbidden {
+		t.Errorf("a bearer token with Notebooks Viewer = %d, want 403", code)
+	}
+	p.grant("roles/notebooks.editor")
+	waitGranted(t, "the proxy with Notebooks Editor", func() error {
+		if code := status(); code != http.StatusOK {
+			return fmt.Errorf("status %d", code)
+		}
+		return nil
+	})
+}
