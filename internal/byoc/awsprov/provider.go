@@ -357,7 +357,7 @@ func (p *Provider) Create(ctx context.Context, spec byoc.MachineSpec, progress b
 		_, e := c.DeleteSecurityGroup(ctx, &ec2.DeleteSecurityGroupInput{GroupId: aws.String(ids["sg"])})
 		return e
 	}})
-	if spec.SourceCIDR != "" {
+	if spec.ConnectMode != byoc.ConnectSSM && spec.SourceCIDR != "" {
 		if _, err = c.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{
 			GroupId: aws.String(ids["sg"]),
 			IpPermissions: []ec2types.IpPermission{{
@@ -370,6 +370,21 @@ func (p *Provider) Create(ctx context.Context, spec byoc.MachineSpec, progress b
 		progress.Report("firewall", byoc.StepDone, "Created the security group %s: SSH from %s only, nothing else inbound", ids["sg"], spec.SourceCIDR)
 	} else {
 		progress.Report("firewall", byoc.StepDone, "Created the security group %s: nothing inbound", ids["sg"])
+	}
+
+	var profile *ec2types.IamInstanceProfileSpecification
+	if spec.ConnectMode == byoc.ConnectSSM {
+		name, roleUndos, rerr := p.createInstanceRole(ctx, spec.Instance, progress)
+		for _, u := range roleUndos {
+			undos = append(undos, undo{"the role " + roleName(spec.Instance), u})
+		}
+		if rerr != nil {
+			err = rerr
+			progress.Report("role", byoc.StepFailed, "%s", err)
+			return byoc.Machine{}, err
+		}
+		ids["role"] = name
+		profile = &ec2types.IamInstanceProfileSpecification{Name: aws.String(name)}
 	}
 
 	progress.Report("image", byoc.StepRunning, "Finding Canonical's Ubuntu 24.04 image")
@@ -399,8 +414,8 @@ func (p *Provider) Create(ctx context.Context, spec byoc.MachineSpec, progress b
 	progress.Report("image", byoc.StepDone, "Using %s (%s)", aws.ToString(img.Name), ids["ami"])
 
 	progress.Report("vm", byoc.StepRunning, "Creating the VM (%s) with a %d GiB encrypted gp3 disk", spec.Size, disk)
-	run, err := c.RunInstances(ctx, &ec2.RunInstancesInput{
-		ImageId: aws.String(ids["ami"]), InstanceType: ec2types.InstanceType(spec.Size),
+	run, err := p.runInstancesRetrying(ctx, c, &ec2.RunInstancesInput{
+		ImageId: aws.String(ids["ami"]), InstanceType: ec2types.InstanceType(spec.Size), IamInstanceProfile: profile,
 		MinCount: aws.Int32(1), MaxCount: aws.Int32(1),
 		UserData:                          aws.String(base64.StdEncoding.EncodeToString([]byte(spec.UserData))),
 		InstanceInitiatedShutdownBehavior: ec2types.ShutdownBehaviorStop,
@@ -442,6 +457,7 @@ func (p *Provider) Create(ctx context.Context, spec byoc.MachineSpec, progress b
 		Instance: spec.Instance, Cloud: byoc.AWS, Connection: p.conn.ID, Region: spec.Region,
 		Size: spec.Size, Preset: spec.Preset, DiskGiB: disk, AutoStopMinutes: spec.AutoStopMinutes,
 		SSHUser: spec.SSHUser, SSHPort: 22, IDs: ids, CreatedAt: now, UpdatedAt: now,
+		ConnectMode: spec.ConnectMode, SourceCIDR: spec.SourceCIDR,
 	}
 	if m.Preset == "" {
 		m.Preset = presetOf(spec.Size)
@@ -707,7 +723,11 @@ func (p *Provider) ListResources(ctx context.Context, instance, region string) (
 	for _, v := range vpcs.Vpcs {
 		add("ec2:vpc", aws.ToString(v.VpcId), string(v.State))
 	}
-	return out, nil
+	roles, err := p.instanceRoleResources(ctx, instance)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, roles...), nil
 }
 
 // Delete removes every resource in region tagged with the instance, in
@@ -818,6 +838,11 @@ func (p *Provider) Delete(ctx context.Context, instance, region string, progress
 				note("ec2:DeleteVpc", "the VPC "+aws.ToString(v.VpcId), err)
 			}
 		}
+	}
+
+	for _, err := range p.deleteInstanceRole(ctx, instance) {
+		problems = append(problems, "the role: "+err.Error())
+		progress.Report("delete", byoc.StepFailed, "Could not delete the role %s: %s", roleName(instance), err)
 	}
 
 	progress.Report("verify", byoc.StepRunning, "Checking that nothing tagged %s=%s is left in %s", byoc.TagKey, instance, region)

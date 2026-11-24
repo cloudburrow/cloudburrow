@@ -208,16 +208,7 @@ func (p *Provider) Create(ctx context.Context, spec byoc.MachineSpec, progress b
 	step("firewall", "Creating network security group "+nsgName+": inbound SSH from "+orNone(spec.SourceCIDR)+" only")
 	nsg := armnetwork.SecurityGroup{Location: to.Ptr(spec.Region), Tags: tags(spec.Instance), Properties: &armnetwork.SecurityGroupPropertiesFormat{}}
 	if spec.SourceCIDR != "" {
-		nsg.Properties.SecurityRules = []*armnetwork.SecurityRule{{
-			Name: to.Ptr("cloudburrow-ssh"),
-			Properties: &armnetwork.SecurityRulePropertiesFormat{
-				Protocol: to.Ptr(armnetwork.SecurityRuleProtocolTCP), Access: to.Ptr(armnetwork.SecurityRuleAccessAllow),
-				Direction: to.Ptr(armnetwork.SecurityRuleDirectionInbound), Priority: to.Ptr[int32](100),
-				SourceAddressPrefix: to.Ptr(spec.SourceCIDR), SourcePortRange: to.Ptr("*"),
-				DestinationAddressPrefix: to.Ptr("*"), DestinationPortRange: to.Ptr("22"),
-				Description: to.Ptr("CloudBurrow's SSH tunnel, from your own address only"),
-			},
-		}}
+		nsg.Properties.SecurityRules = []*armnetwork.SecurityRule{sshRule(spec.SourceCIDR)}
 	}
 	np, err := p.nsgs.BeginCreateOrUpdate(ctx, rg, nsgName, nsg, nil)
 	if err != nil {
@@ -774,6 +765,7 @@ var need = []byoc.Permission{
 	{Action: "Microsoft.Network/virtualNetworks/delete", Why: "to delete the virtual network"},
 	{Action: "Microsoft.Network/virtualNetworks/subnets/join/action", Why: "to attach the VM's network interface to the subnet"},
 	{Action: "Microsoft.Network/networkSecurityGroups/write", Why: "to create the firewall that lets SSH in from your address only"},
+	{Action: "Microsoft.Network/networkSecurityGroups/read", Why: "to move the firewall's SSH rule to your address when it changes"},
 	{Action: "Microsoft.Network/networkSecurityGroups/delete", Why: "to delete the firewall"},
 	{Action: "Microsoft.Network/publicIPAddresses/write", Why: "to give the VM an address CloudBurrow can reach"},
 	{Action: "Microsoft.Network/publicIPAddresses/delete", Why: "to delete the address"},
@@ -897,4 +889,52 @@ func glob(p, s string) bool {
 		p, s = p[1:], s[1:]
 	}
 	return s == ""
+}
+
+// sshRule is the network security group's one inbound rule: SSH from
+// cidr only.
+func sshRule(cidr string) *armnetwork.SecurityRule {
+	return &armnetwork.SecurityRule{
+		Name: to.Ptr("cloudburrow-ssh"),
+		Properties: &armnetwork.SecurityRulePropertiesFormat{
+			Protocol: to.Ptr(armnetwork.SecurityRuleProtocolTCP), Access: to.Ptr(armnetwork.SecurityRuleAccessAllow),
+			Direction: to.Ptr(armnetwork.SecurityRuleDirectionInbound), Priority: to.Ptr[int32](100),
+			SourceAddressPrefix: to.Ptr(cidr), SourcePortRange: to.Ptr("*"),
+			DestinationAddressPrefix: to.Ptr("*"), DestinationPortRange: to.Ptr("22"),
+			Description: to.Ptr("CloudBurrow's SSH tunnel, from your own address only"),
+		},
+	}
+}
+
+// UpdateSourceAddress implements byoc.Provider: the network security
+// group's SSH rule now admits cidr, and nothing else.
+func (p *Provider) UpdateSourceAddress(ctx context.Context, m byoc.Machine, cidr string) (byoc.Machine, error) {
+	if cidr == "" {
+		return m, errors.New("an address is required")
+	}
+	rg := ResourceGroup(m.Instance)
+	got, err := p.nsgs.Get(ctx, rg, nsgName, nil)
+	if err != nil {
+		return m, mapError("reading network security group "+nsgName, err)
+	}
+	nsg := got.SecurityGroup
+	if nsg.Properties == nil {
+		nsg.Properties = &armnetwork.SecurityGroupPropertiesFormat{}
+	}
+	var rules []*armnetwork.SecurityRule
+	for _, r := range nsg.Properties.SecurityRules {
+		if r != nil && str(r.Name) != "cloudburrow-ssh" {
+			rules = append(rules, r)
+		}
+	}
+	nsg.Properties.SecurityRules = append(rules, sshRule(cidr))
+	poller, err := p.nsgs.BeginCreateOrUpdate(ctx, rg, nsgName, nsg, nil)
+	if err == nil {
+		_, err = wait(ctx, p.opts, poller)
+	}
+	if err != nil {
+		return m, mapError("updating network security group "+nsgName, err)
+	}
+	m.SourceCIDR = cidr
+	return m, nil
 }

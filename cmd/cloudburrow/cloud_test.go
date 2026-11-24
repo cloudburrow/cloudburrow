@@ -212,3 +212,71 @@ func TestCloudHelpAndParseAutoStop(t *testing.T) {
 		}
 	}
 }
+
+// TestCloudCLIConnectModesAndSettings: AWS defaults to Session Manager
+// with nothing inbound; --connect ssh opens SSH to the user's address,
+// which allow-my-ip moves; set changes auto-stop after create.
+func TestCloudCLIConnectModesAndSettings(t *testing.T) {
+	f := newCloudFixture(t)
+	if out, err := cloudRun(t, "connect", "aws", "--start-url", "https://d-1234567890.awsapps.com/start", "--sso-region", "us-east-1"); err != nil {
+		t.Fatalf("connect: %v\n%s", err, out)
+	}
+	out, err := cloudRun(t, "create", "--yes")
+	if err != nil || !strings.Contains(out, "Connect: AWS Systems Manager Session Manager, nothing inbound open") {
+		t.Fatalf("create: %v\n%s", err, out)
+	}
+	for _, r := range f.aws.Live() {
+		if r.Kind == "security-group" && len(r.Ingress) != 0 {
+			t.Errorf("SSM mode opened %v", r.Ingress)
+		}
+	}
+	if out, err = cloudRun(t, "status"); err != nil || !strings.Contains(out, "Connect: Session Manager; nothing inbound is open") ||
+		!strings.Contains(out, "Auto-stop: after 1 hour idle") {
+		t.Fatalf("status: %v\n%s", err, out)
+	}
+	if out, err = cloudRun(t, "allow-my-ip"); err == nil || !strings.Contains(err.Error(), "nothing inbound") {
+		t.Fatalf("allow-my-ip on SSM: %v\n%s", err, out)
+	}
+	// Auto-stop on a stopped VM: recorded, applied at the next start.
+	if out, err = cloudRun(t, "stop"); err != nil {
+		t.Fatalf("stop: %v\n%s", err, out)
+	}
+	if out, err = cloudRun(t, "set", "byoc-cli", "--auto-stop", "2h"); err != nil || !strings.Contains(out, "auto-stop after 2 hours idle") ||
+		!strings.Contains(out, "next starts") {
+		t.Fatalf("set: %v\n%s", err, out)
+	}
+	if out, err = cloudRun(t, "set", "--auto-stop", "soon"); err == nil {
+		t.Fatalf("a bad duration was accepted:\n%s", out)
+	}
+	if out, err = cloudRun(t, "set"); err == nil || !strings.Contains(err.Error(), "--auto-stop") {
+		t.Fatalf("set without a setting: %v\n%s", err, out)
+	}
+	if out, err = cloudRun(t, "delete", "--yes"); err != nil {
+		t.Fatalf("delete: %v\n%s", err, out)
+	}
+	if live := f.aws.Live(); len(live) != 0 {
+		t.Fatalf("left in the fake (the role too?): %+v", live)
+	}
+	// SSH mode: the rule admits the user's address only.
+	if out, err = cloudRun(t, "create", "--connect", "ssh", "--yes"); err != nil || !strings.Contains(out, "Connect: SSH") {
+		t.Fatalf("create --connect ssh: %v\n%s", err, out)
+	}
+	var ingress []string
+	for _, r := range f.aws.Live() {
+		if r.Kind == "security-group" {
+			ingress = r.Ingress
+		}
+	}
+	if len(ingress) != 1 || ingress[0] != "tcp 22-22 203.0.113.50/32" {
+		t.Fatalf("ingress %v", ingress)
+	}
+	if out, err = cloudRun(t, "allow-my-ip"); err != nil || !strings.Contains(out, "SSH is open to 203.0.113.50/32 only") {
+		t.Fatalf("allow-my-ip: %v\n%s", err, out)
+	}
+	if out, err = cloudRun(t, "create", "--connect", "telnet", "--yes"); err == nil {
+		t.Fatalf("a bad mode was accepted:\n%s", out)
+	}
+	if out, err = cloudRun(t, "delete", "--yes"); err != nil {
+		t.Fatalf("delete: %v\n%s", err, out)
+	}
+}

@@ -612,3 +612,30 @@ type badCred struct{}
 func (badCred) GetToken(context.Context, policy.TokenRequestOptions) (azcore.AccessToken, error) {
 	return azcore.AccessToken{Token: "not-a-token", ExpiresOn: time.Now().Add(time.Hour)}, nil
 }
+
+// TestUpdateSourceAddressFollowsTheUser: the network security group's SSH
+// rule moves to the user's new address, and admits only it.
+func TestUpdateSourceAddressFollowsTheUser(t *testing.T) {
+	f := fake(t)
+	p := open(t, f)
+	m, err := p.Create(ctx(t), spec("moves"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := p.UpdateSourceAddress(ctx(t), m, "198.51.100.77/32")
+	if err != nil || got.SourceCIDR != "198.51.100.77/32" {
+		t.Fatalf("UpdateSourceAddress = %+v %v", got, err)
+	}
+	rules, _ := f.Resource(m.IDs["nsg"])["properties"].(map[string]any)["securityRules"].([]any)
+	if len(rules) != 1 {
+		t.Fatalf("rules %v, want one", rules)
+	}
+	props := rules[0].(map[string]any)["properties"].(map[string]any)
+	if props["sourceAddressPrefix"] != "198.51.100.77/32" || props["destinationPortRange"] != "22" || props["access"] != "Allow" {
+		t.Errorf("the SSH rule is %v", props)
+	}
+	f.Deny("Microsoft.Network/networkSecurityGroups/write")
+	if _, err := p.UpdateSourceAddress(ctx(t), m, "192.0.2.9/32"); err == nil {
+		t.Error("a refused update succeeded")
+	}
+}

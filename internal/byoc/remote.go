@@ -19,6 +19,20 @@ type RemoteTarget struct {
 	// HostKey is the VM's host key in authorized_keys form; the engine
 	// refuses any other.
 	HostKey string
+	// Via is how Host:Port reaches the VM's sshd: ConnectSSH (the VM's
+	// address) or ConnectSSM (a Session Manager tunnel on 127.0.0.1).
+	Via string
+	// BeforeConnect, when set, runs before each connection and reconnection
+	// attempt: in SSH mode it moves the firewall to the user's current
+	// address.
+	BeforeConnect func(context.Context) error `json:"-"`
+}
+
+// RemoteRunner is an engine that runs a shell command on the VM over its
+// SSH connection, connecting for the call when the instance is not
+// connected from this process.
+type RemoteRunner interface {
+	Run(ctx context.Context, t RemoteTarget, command string) (string, error)
 }
 
 // RemoteStatus is the engine's view of one instance's connection.

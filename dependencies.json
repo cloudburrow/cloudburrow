@@ -1210,7 +1210,7 @@
         "source": "https://github.com/aws/aws-sdk-go-v2",
         "license": "Apache-2.0",
         "verification": "go.sum",
-        "notes": "Bring your own cloud (#2209): internal/byoc/awsprov drives EC2, IAM (SimulatePrincipalPolicy, GetRole), STS, the Price List API, and IAM Identity Center's SSO OIDC device flow and portal (service/ec2, iam, sts, pricing, ssooidc, sso, with aws/smithy-go). The aws.Config is built by hand: the config package, which reads ~/.aws and the environment, is not imported. AWS's own SDK; Google publishes none for AWS."
+        "notes": "Bring your own cloud (#2209): internal/byoc/awsprov drives EC2, IAM (SimulatePrincipalPolicy, GetRole, and the VM's Session Manager role and instance profile), STS, the Price List API, Systems Manager (StartSession, TerminateSession and DescribeInstanceInformation, for Session Manager port forwarding) and IAM Identity Center's SSO OIDC device flow and portal (service/ec2, iam, sts, pricing, ssm, ssooidc, sso, with aws/smithy-go; aws/signer/v4 signs the Session Manager stream URL). The aws.Config is built by hand: the config package, which reads ~/.aws and the environment, is not imported. AWS's own SDK; Google publishes none for AWS."
       },
       "goAzureSDK": {
         "module": "github.com/Azure/azure-sdk-for-go/sdk/azcore",
@@ -1219,6 +1219,22 @@
         "license": "MIT",
         "verification": "go.sum",
         "notes": "Bring your own cloud (#2209): internal/byoc/azureprov drives Azure Resource Manager through azcore and the resourcemanager modules compute/armcompute/v7, network/armnetwork/v7, resources/armresources, resources/armsubscriptions and authorization/armauthorization/v2; sign-in is Microsoft's MSAL for Go (github.com/AzureAD/microsoft-authentication-library-for-go, MIT), the library azidentity's InteractiveBrowserCredential is built on, used directly so its token cache can live in the OS keychain. DefaultAzureCredential and the Azure CLI credential, which read ~/.azure, are not used. Microsoft's own SDK; Google publishes none for Azure."
+      },
+      "goSmux": {
+        "module": "github.com/xtaci/smux",
+        "version": "v1.5.34",
+        "source": "https://github.com/xtaci/smux",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "Bring your own cloud (#2209): internal/byoc/awsprov/ssmtunnel multiplexes a Session Manager port session's TCP connections with smux, as AWS's session-manager-plugin (Apache-2.0, whose protocol ssmtunnel implements in Go; no plugin code is copied) and the SSM agent do for agents after 3.0.196.0. v1.5.34 is the newest release without dependencies. Google publishes nothing for AWS Session Manager."
+      },
+      "goGorillaWebsocket": {
+        "module": "github.com/gorilla/websocket",
+        "version": "v1.5.4-0.20250319132907-e064f32e3674",
+        "source": "https://github.com/gorilla/websocket",
+        "license": "BSD-2-Clause",
+        "verification": "go.sum",
+        "notes": "Bring your own cloud (#2209): the Session Manager data channel's WebSocket (internal/byoc/awsprov/ssmtunnel), the library AWS's session-manager-plugin uses; already in the module graph indirectly, now a direct dependency."
       },
       "goKeyring": {
         "module": "github.com/zalando/go-keyring",

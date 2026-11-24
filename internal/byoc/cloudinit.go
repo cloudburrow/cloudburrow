@@ -41,8 +41,12 @@ type CloudInitOptions struct {
 	HostKeyPublic  string
 	GPU            bool
 	// AutoStopMinutes stops the VM after that long with no SSH connection
-	// (the remote engine's tunnel is one); 0 never.
+	// (the remote engine's tunnel is one); 0 never. It is the first value
+	// of AutoStopFile, which CloudBurrow rewrites over SSH to change it.
 	AutoStopMinutes int
+	// SSM makes sure the SSM agent runs (Ubuntu's AWS images ship it as a
+	// snap), for Session Manager connections; AWS only.
+	SSM bool
 }
 
 // RenderCloudInit is the VM's cloud-init user data.
@@ -85,13 +89,13 @@ func RenderCloudInit(o CloudInitOptions) (string, error) {
 	// Phase 1's reverse forwards bind the kind network's gateway, so
 	// workloads on the VM reach the CLI's listeners (docs/remote-compute.md).
 	file("/etc/ssh/sshd_config.d/60-cloudburrow.conf", "0644", "GatewayPorts clientspecified\nAllowTcpForwarding yes\nAllowStreamLocalForwarding yes\n")
-	if o.AutoStopMinutes > 0 {
-		file("/usr/local/sbin/cloudburrow-idle", "0755", idleScript(o))
-		file("/etc/systemd/system/cloudburrow-idle.service", "0644",
-			"[Unit]\nDescription=CloudBurrow auto-stop check\n\n[Service]\nType=oneshot\nExecStart=/usr/local/sbin/cloudburrow-idle\n")
-		file("/etc/systemd/system/cloudburrow-idle.timer", "0644",
-			"[Unit]\nDescription=CloudBurrow auto-stop check, every minute\n\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=1min\n\n[Install]\nWantedBy=timers.target\n")
-	}
+	// The idle check runs every minute whatever the setting: it reads its
+	// minutes from AutoStopFile, so auto-stop can be changed after create.
+	file("/usr/local/sbin/cloudburrow-idle", "0755", idleScript(o))
+	file("/etc/systemd/system/cloudburrow-idle.service", "0644",
+		"[Unit]\nDescription=CloudBurrow auto-stop check\n\n[Service]\nType=oneshot\nExecStart=/usr/local/sbin/cloudburrow-idle\n")
+	file("/etc/systemd/system/cloudburrow-idle.timer", "0644",
+		"[Unit]\nDescription=CloudBurrow auto-stop check, every minute\n\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=1min\n\n[Install]\nWantedBy=timers.target\n")
 	w("runcmd:")
 	w("  - [bash, -c, '/usr/local/sbin/cloudburrow-setup > /var/log/cloudburrow-setup.log 2>&1']")
 	return b.String(), nil
@@ -133,8 +137,15 @@ nvidia-ctk config --in-place --set accept-nvidia-visible-devices-as-volume-mount
 systemctl restart docker
 `)
 	}
-	if o.AutoStopMinutes > 0 {
-		b.WriteString("systemctl daemon-reload\nsystemctl enable --now cloudburrow-idle.timer\n")
+	// The auto-stop setting, owned by the login user so CloudBurrow can
+	// rewrite it over SSH without root.
+	fmt.Fprintf(&b, "printf '%%d\\n' %d > %s\nchown %s:%s %s\nchmod 0644 %s\n", o.AutoStopMinutes, AutoStopFile, o.User, o.User, AutoStopFile, AutoStopFile)
+	b.WriteString("systemctl daemon-reload\nsystemctl enable --now cloudburrow-idle.timer\n")
+	if o.SSM {
+		// Session Manager: the agent dials out to Systems Manager; nothing
+		// listens for it. Ubuntu's AWS images ship it as a snap.
+		b.WriteString("snap list amazon-ssm-agent >/dev/null 2>&1 || snap install amazon-ssm-agent --classic\n" +
+			"snap start --enable amazon-ssm-agent.amazon-ssm-agent\n")
 	}
 	b.WriteString("echo ready > /var/lib/cloudburrow/setup\n")
 	if o.GPU {
@@ -166,9 +177,13 @@ urllib.request.urlopen(req, timeout=30)
 EOF`
 	}
 	return fmt.Sprintf(`#!/bin/bash
-# CloudBurrow auto-stop (#2209): stop after %d idle minutes.
+# CloudBurrow auto-stop (#2209): stop after the minutes %s names (0
+# never) with no SSH connection. CloudBurrow rewrites it to change them.
 set -eu
-limit=%d
+minutes=$(cat %s 2>/dev/null || echo %d)
+case "$minutes" in ''|*[!0-9]*) minutes=%d ;; esac
+if [ "$minutes" -eq 0 ]; then exit 0; fi
+limit=$((minutes * 60))
 stamp=/var/lib/cloudburrow/last-active
 mkdir -p /var/lib/cloudburrow
 now=$(date +%%s)
@@ -182,7 +197,7 @@ if [ "$last" -lt "$boot" ]; then last=$boot; fi
 if [ $((now - last)) -lt "$limit" ]; then exit 0; fi
 logger -t cloudburrow-idle "no SSH connection for $((now - last))s: stopping"
 %s
-`, o.AutoStopMinutes, o.AutoStopMinutes*60, stop)
+`, AutoStopFile, AutoStopFile, o.AutoStopMinutes, o.AutoStopMinutes, stop)
 }
 
 func yamlQuote(s string) string {

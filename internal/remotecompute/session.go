@@ -75,6 +75,11 @@ type Options struct {
 	// (authorized_keys form): the one the provisioner made for the VM.
 	// Empty trusts the host's key on first use and refuses a change.
 	HostKey string
+	// BeforeConnect, when set, runs before the first connection and before
+	// each reconnection attempt: a provisioned VM's firewall follows the
+	// user's address with it. Its error is reported, not fatal: the
+	// connection says whether the host is still reachable.
+	BeforeConnect func(context.Context) error
 
 	// transport replaces the system ssh (tests).
 	transport transport
@@ -211,6 +216,7 @@ func Connect(ctx context.Context, opts Options) (*Session, error) {
 		}
 		s.tr = st
 	}
+	s.beforeConnect(ctx)
 	s.emit(StageConnecting, "Connecting to "+opts.Target.String(), nil)
 	installed, err := s.tr.Authorize(ctx)
 	if err != nil {
@@ -304,6 +310,7 @@ func (s *Session) supervise(ctx context.Context) {
 			case <-time.After(s.opts.backoff(attempt)):
 			}
 			s.emit(StageReconnecting, fmt.Sprintf("Reconnecting to %s (attempt %d)", s.opts.Target, attempt+1), nil)
+			s.beforeConnect(ctx)
 			if err := s.connectOnce(ctx); err != nil {
 				s.mu.Lock()
 				s.lastErr = err.Error()
@@ -341,6 +348,15 @@ func (s *Session) connectOnce(ctx context.Context) error {
 	s.mu.Unlock()
 	s.emit(StageConnected, "Reconnected to "+s.opts.Target.String(), nil)
 	return nil
+}
+
+func (s *Session) beforeConnect(ctx context.Context) {
+	if s.opts.BeforeConnect == nil {
+		return
+	}
+	if err := s.opts.BeforeConnect(ctx); err != nil {
+		s.emit(StageForward, "Could not update the host's firewall to this machine's address", err)
+	}
 }
 
 func (s *Session) emit(stage Stage, msg string, err error) {

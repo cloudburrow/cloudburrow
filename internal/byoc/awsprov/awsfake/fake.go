@@ -67,6 +67,10 @@ type resource struct {
 	shutdown                                            string
 	size                                                int
 	encrypted                                           bool
+	// profile is an instance's IAM instance profile; members are a role's
+	// attached policies or a profile's roles.
+	profile string
+	members []string
 }
 
 type perm struct {
@@ -117,6 +121,11 @@ type Server struct {
 	roleTTL    time.Duration
 	deviceTTL  time.Duration
 	lastDevice string
+
+	ssmTarget   string
+	ssmAgent    string
+	ssmSessions map[string]*ssmSession
+	ssmOffline  map[string]bool
 }
 
 // New starts the fake.
@@ -284,6 +293,10 @@ type Resource struct {
 	InstanceType, UserData, ShutdownBehavior string
 	VolumeSize                               int
 	Encrypted                                bool
+	// Profile is an instance's instance profile; Members a role's policies
+	// or a profile's roles.
+	Profile string
+	Members []string
 }
 
 // Resources is every resource that exists, terminated instances included.
@@ -293,7 +306,8 @@ func (s *Server) Resources() []Resource {
 	var out []Resource
 	for _, r := range s.res {
 		x := Resource{Kind: r.kind, ID: r.id, Region: r.region, State: r.state, Tags: copyTags(r.tags),
-			InstanceType: r.itype, UserData: r.userData, ShutdownBehavior: r.shutdown, VolumeSize: r.size, Encrypted: r.encrypted}
+			InstanceType: r.itype, UserData: r.userData, ShutdownBehavior: r.shutdown, VolumeSize: r.size, Encrypted: r.encrypted,
+			Profile: r.profile, Members: append([]string(nil), r.members...)}
 		for _, p := range r.ingress {
 			for _, c := range p.cidrs {
 				x.Ingress = append(x.Ingress, p.proto+" "+p.from+"-"+p.to+" "+c)
@@ -332,6 +346,14 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	case "/assignment/accounts", "/assignment/roles", "/federation/credentials":
 		s.portal(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/v1/data-channel/") {
+		s.dataChannel(w, r)
+		return
+	}
+	if t := r.Header.Get("X-Amz-Target"); strings.HasPrefix(t, "AmazonSSM.") {
+		s.ssm(w, r, strings.TrimPrefix(t, "AmazonSSM."))
 		return
 	}
 	if t := r.Header.Get("X-Amz-Target"); strings.HasPrefix(t, "AWSPriceListService.") {
@@ -802,6 +824,14 @@ func (s *Server) ec2(w http.ResponseWriter, r *http.Request, action string, form
 			g.ingress = append(g.ingress, perm{proto[0], form.Get(p + ".FromPort"), form.Get(p + ".ToPort"), cidrs})
 		}
 		ec2Reply(w, action, "<return>true</return>")
+	case "RevokeSecurityGroupIngress":
+		g := s.get(w, "security-group", form.Get("GroupId"), region)
+		if g == nil {
+			return
+		}
+		if s.revokeIngress(w, g, form) {
+			returnTrue(w, action)
+		}
 	case "DeleteSecurityGroup":
 		g := s.get(w, "security-group", form.Get("GroupId"), region)
 		if g == nil {
@@ -986,13 +1016,18 @@ func (s *Server) runInstances(w http.ResponseWriter, region string, form url.Val
 			return
 		}
 	}
+	profile := form.Get("IamInstanceProfile.Name")
+	if profile != "" && s.res["profile:"+profile] == nil {
+		queryError(w, "ec2", http.StatusBadRequest, "InvalidParameterValue", "Value ("+profile+") for parameter iamInstanceProfile.name is invalid. Invalid IAM Instance Profile name")
+		return
+	}
 	size, _ := strconv.Atoi(form.Get("BlockDeviceMapping.1.Ebs.VolumeSize"))
 	vol := s.add(&resource{kind: "volume", id: s.id("vol"), region: region, state: "in-use", size: size,
 		encrypted: form.Get("BlockDeviceMapping.1.Ebs.Encrypted") == "true", tags: tagSpecs(form, "volume")})
 	n := s.seq
 	inst := s.add(&resource{kind: "instance", id: s.id("i"), region: region, state: "pending", vpc: sn.vpc, subnet: sn.id,
 		itype: form.Get("InstanceType"), image: form.Get("ImageId"), userData: ud, groups: groups, volume: vol.id,
-		shutdown: form.Get("InstanceInitiatedShutdownBehavior"), privateIP: fmt.Sprintf("10.209.1.%d", 10+n%200),
+		shutdown: form.Get("InstanceInitiatedShutdownBehavior"), profile: profile, privateIP: fmt.Sprintf("10.209.1.%d", 10+n%200),
 		tags: tagSpecs(form, "instance")})
 	ec2Reply(w, "RunInstances", fmt.Sprintf("<reservationId>r-%s</reservationId><ownerId>%s</ownerId><groupSet/><instancesSet>%s</instancesSet>",
 		strings.TrimPrefix(inst.id, "i-"), DefaultAccount, s.instanceXML(inst)))
@@ -1111,6 +1146,9 @@ func (s *Server) instanceXML(i *resource) string {
 func (s *Server) iam(w http.ResponseWriter, action string, form url.Values) {
 	const ns = "https://iam.amazonaws.com/doc/2010-05-08/"
 	w.Header().Set("Content-Type", "text/xml")
+	if s.iamRoles(w, action, form) {
+		return
+	}
 	switch action {
 	case "GetRole":
 		name := form.Get("RoleName")

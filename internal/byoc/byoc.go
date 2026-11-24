@@ -188,7 +188,11 @@ type MachineSpec struct {
 	SSHUser      string `json:"ssh_user"`
 	SSHPublicKey string `json:"-"`
 	// SourceCIDR is the only address SSH is open to: the user's own, /32.
+	// Empty in ConnectSSM mode, where nothing inbound is open.
 	SourceCIDR string `json:"source_cidr"`
+	// ConnectMode is how CloudBurrow reaches the VM: ConnectSSM (AWS
+	// Systems Manager Session Manager, no inbound port) or ConnectSSH.
+	ConnectMode string `json:"connect_mode"`
 	// UserData is the rendered cloud-init (RenderCloudInit).
 	UserData string `json:"-"`
 }
@@ -223,8 +227,16 @@ type Machine struct {
 	State           State  `json:"state"`
 	PublicIP        string `json:"public_ip,omitempty"`
 	PrivateIP       string `json:"private_ip,omitempty"`
-	SSHUser         string `json:"ssh_user,omitempty"`
-	SSHPort         int    `json:"ssh_port,omitempty"`
+	// ConnectMode is ConnectSSM or ConnectSSH ("" is SSH, for a machine
+	// recorded before modes existed).
+	ConnectMode string `json:"connect_mode,omitempty"`
+	// SourceCIDR is the address the firewall lets SSH in from, in SSH mode;
+	// it follows the user's public address (Manager.FollowAddress).
+	SourceCIDR string `json:"source_cidr,omitempty"`
+	// SourceUpdatedAt is when the firewall's address last changed.
+	SourceUpdatedAt time.Time `json:"source_updated_at,omitempty"`
+	SSHUser         string    `json:"ssh_user,omitempty"`
+	SSHPort         int       `json:"ssh_port,omitempty"`
 	// HostKey is the VM's SSH host key (authorized_keys form), generated
 	// here and installed by cloud-init, so the first connection is verified.
 	HostKey string `json:"host_key,omitempty"`
@@ -302,6 +314,37 @@ type Provider interface {
 	Delete(ctx context.Context, instance, region string, progress Progress) error
 	// ListResources is every resource tagged with the instance.
 	ListResources(ctx context.Context, instance, region string) ([]Resource, error)
+	// UpdateSourceAddress makes the firewall let SSH in from cidr only,
+	// in place of m.SourceCIDR: the user's public address changed.
+	UpdateSourceAddress(ctx context.Context, m Machine, cidr string) (Machine, error)
+}
+
+// The ways CloudBurrow reaches a VM.
+const (
+	// ConnectSSM is AWS Systems Manager Session Manager port forwarding to
+	// the VM's sshd: the SSM agent on the VM dials out, and the security
+	// group allows nothing inbound.
+	ConnectSSM = "ssm"
+	// ConnectSSH is SSH to the VM's public address, the firewall open to
+	// the user's own address only.
+	ConnectSSH = "ssh"
+)
+
+// Tunnel is a local listener that carries connections to a VM's port.
+type Tunnel interface {
+	// Port is the listener's port on 127.0.0.1.
+	Port() int
+	// LastError is why the latest connection could not be carried.
+	LastError() error
+	Close() error
+}
+
+// Tunneler is a Provider that reaches a VM's port without an inbound rule
+// (AWS, through Session Manager).
+type Tunneler interface {
+	// OpenTunnel waits until the VM can be reached (its agent registered),
+	// then listens on 127.0.0.1 for connections to its port.
+	OpenTunnel(ctx context.Context, m Machine, port int, progress Progress) (Tunnel, error)
 }
 
 // Connection is one signed-in cloud account. It holds no secret: the

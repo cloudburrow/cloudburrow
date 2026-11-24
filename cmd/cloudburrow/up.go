@@ -1683,8 +1683,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		consoleSrv.SetCompute(consoleCompute{})
 		// Settings > Compute and Compute capacity (#2209): the same state and
 		// keychain items as `cloudburrow cloud`, behind the admin token.
-		if m, err := newCloudManager(cfg); err == nil {
+		if m, err := processCloudManager(cfg); err == nil {
 			consoleSrv.SetCloudCompute(m, cfg.Name, nil)
+			// SSH-mode VMs' firewalls follow this machine's public address
+			// while the instance runs (#2209).
+			go m.WatchAddresses(ctx, 3*time.Minute, func(format string, args ...any) { fmt.Fprintf(stderr, format+"\n", args...) })
 		} else {
 			fmt.Fprintf(stderr, "cloudburrow: Compute is not available in the console: %v\n", err)
 		}

@@ -119,6 +119,23 @@ var permissions = []byoc.Permission{
 	{Action: "ec2:DeleteInternetGateway", Why: "delete the VM's network"},
 	{Action: "ec2:DeleteVpc", Why: "delete the VM's network"},
 	{Action: "pricing:GetProducts", Why: "show the hourly price before you create or resize"},
+	{Action: "ec2:RevokeSecurityGroupIngress", Why: "move SSH's one allowed address to yours when it changes (SSH mode)"},
+	{Action: "iam:CreateRole", Why: "create the VM's role for Session Manager"},
+	{Action: "iam:TagRole", Why: "tag the VM's role with cloudburrow-instance"},
+	{Action: "iam:GetRole", Why: "find the VM's role"},
+	{Action: "iam:AttachRolePolicy", Why: "give the VM's role AmazonSSMManagedInstanceCore, so its SSM agent can register"},
+	{Action: "iam:DetachRolePolicy", Why: "delete the VM's role"},
+	{Action: "iam:DeleteRole", Why: "delete the VM's role"},
+	{Action: "iam:CreateInstanceProfile", Why: "attach the role to the VM"},
+	{Action: "iam:TagInstanceProfile", Why: "tag the VM's instance profile with cloudburrow-instance"},
+	{Action: "iam:GetInstanceProfile", Why: "find the VM's instance profile"},
+	{Action: "iam:AddRoleToInstanceProfile", Why: "attach the role to the VM"},
+	{Action: "iam:RemoveRoleFromInstanceProfile", Why: "delete the VM's instance profile"},
+	{Action: "iam:DeleteInstanceProfile", Why: "delete the VM's instance profile"},
+	{Action: "iam:PassRole", Why: "launch the VM with its role"},
+	{Action: "ssm:DescribeInstanceInformation", Why: "wait for the VM's SSM agent to register"},
+	{Action: "ssm:StartSession", Why: "connect to the VM through Session Manager, with no inbound port open"},
+	{Action: "ssm:TerminateSession", Why: "end CloudBurrow's Session Manager sessions"},
 }
 
 // Permissions is the IAM actions CloudBurrow needs, for docs and the
