@@ -24245,9 +24245,13 @@
         "tests": [
           "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount",
           "test/compat/dataflowbigtable2215_test.go:24 TestJavaDataflowBigtableRead",
-          "test/compat/dataflowjava2215_test.go:111 TestJavaDataflowWordCount",
+          "test/compat/dataflowgo2215_test.go:170 TestGoDataflowPubsub",
+          "test/compat/dataflowgo2215_test.go:258 TestGoDataflowBigQuery",
+          "test/compat/dataflowgo2215_test.go:333 TestGoDataflowBigQueryRead",
+          "test/compat/dataflowgo2215_test.go:97 TestGoDataflowWordCount",
+          "test/compat/dataflowjava2215_test.go:112 TestJavaDataflowWordCount",
           "test/compat/dataflowjavapubsub2215_test.go:27 TestJavaDataflowPubsub",
-          "test/compat/dataflowxlang2215_test.go:75 TestPythonDataflowBigtableRead"
+          "test/compat/dataflowxlang2215_test.go:77 TestPythonDataflowBigtableRead"
         ]
       },
       {
@@ -24255,7 +24259,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount",
-          "test/compat/dataflowjava2215_test.go:111 TestJavaDataflowWordCount"
+          "test/compat/dataflowgo2215_test.go:97 TestGoDataflowWordCount",
+          "test/compat/dataflowjava2215_test.go:112 TestJavaDataflowWordCount"
         ]
       },
       {
@@ -24278,6 +24283,7 @@
         "tests": [
           "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount",
           "test/compat/dataflow2215_test.go:363 TestPythonDataflowStreamingDrain",
+          "test/compat/dataflowgo2215_test.go:170 TestGoDataflowPubsub",
           "test/compat/dataflowjavapubsub2215_test.go:27 TestJavaDataflowPubsub"
         ]
       },
@@ -24299,7 +24305,9 @@
         "method": "google.dataflow.v1beta3.MetricsV1Beta3/GetJobMetrics",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount"
+          "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount",
+          "test/compat/dataflowgo2215_test.go:97 TestGoDataflowWordCount",
+          "test/compat/dataflowjava2215_test.go:112 TestJavaDataflowWordCount"
         ]
       },
       {
