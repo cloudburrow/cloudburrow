@@ -400,13 +400,19 @@ func TestRelayCarriesPrivateServiceConnect(t *testing.T) {
 	if a, err := netip.ParseAddr(host); err != nil || !netip.MustParsePrefix("192.168.9.0/24").Contains(a) {
 		t.Fatalf("the producer saw %q, want an address of the NAT subnet", got)
 	}
+	// The relay reads s.res under s.mu (relayResolve), so the test writes
+	// under it too.
+	s.mu.Lock()
 	s.res["projects/c/global/firewalls/no-psc"] = obj{"name": "no-psc", "network": nw, "direction": "EGRESS", "priority": 1000.0,
 		"destinationRanges": []any{"10.0.0.77"}, "denied": []any{map[string]any{"IPProtocol": "tcp", "ports": []any{"80"}}}}
+	s.mu.Unlock()
 	if got := send(); got != "" {
 		t.Fatalf("an egress deny to the endpoint was relayed: %q", got)
 	}
+	s.mu.Lock()
 	delete(s.res, "projects/c/global/firewalls/no-psc")
 	s.res[ep]["pscConnectionStatus"] = "PENDING"
+	s.mu.Unlock()
 	if got := send(); got != "" {
 		t.Fatalf("a PENDING endpoint was relayed: %q", got)
 	}
