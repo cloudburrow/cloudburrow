@@ -316,6 +316,9 @@ func (s *Server) newRegionDiskLocked(project, region string, b obj, field string
 		return nil, invalid("Invalid value for field '%s.sizeGb': '%d'. Disk size must be between %d GB and %d GB for regional %s.", field, size, minSize, lim.max, typ)
 	}
 	d["sizeGb"] = strconv.FormatInt(size, 10)
+	if err := applyDiskPerf(d, b, set, field); err != nil {
+		return nil, err
+	}
 	if pols := strs(b, "resourcePolicies"); len(pols) > 0 {
 		l, err := s.checkDiskPoliciesLocked(project, d, pols, field+".resourcePolicies")
 		if err != nil {
@@ -360,6 +363,7 @@ func (s *Server) regionDisks(c call, region string) (obj, error) {
 	coll := "projects/" + c.project + "/regions/" + region + "/disks"
 	scope := "regions/" + region
 	get, post, del := c.method == http.MethodGet, c.method == http.MethodPost, c.method == http.MethodDelete
+	patch := c.method == http.MethodPatch
 	switch {
 	case n == 3 && get:
 		return s.listOut("compute#diskList", coll, s.res, c.query)
@@ -377,7 +381,7 @@ func (s *Server) regionDisks(c call, region string) (obj, error) {
 	case n == 4 && post && p[3] == "stopGroupAsyncReplication":
 		return s.stopGroupAsyncReplication(c.project, scope, region, c.body)
 	}
-	if n < 4 || (n == 4 && !get && !del) || (n == 5 && !(post && regionDiskVerbs[p[4]])) || n > 5 {
+	if n < 4 || (n == 4 && !get && !del && !patch) || (n == 5 && !(post && regionDiskVerbs[p[4]])) || n > 5 {
 		return nil, unimplemented("%s on regionDisks/%s is not served (#2206)", c.method, strings.Join(p[3:], "/"))
 	}
 	rel := coll + "/" + p[3]
@@ -387,6 +391,9 @@ func (s *Server) regionDisks(c call, region string) (obj, error) {
 	}
 	if n == 4 && get {
 		return d, nil
+	}
+	if n == 4 && patch {
+		return s.updateDiskLocked(c, scope, rel, d)
 	}
 	if n == 4 && del {
 		return s.deleteDiskLocked(c.project, scope, rel, d)
@@ -481,6 +488,9 @@ func (s *Server) resizeDiskLocked(project, scope, rel string, d, b obj) (obj, er
 	}
 	if size > lim.max {
 		return nil, invalid("Invalid value for field 'sizeGb': '%d'. Disk size must be at most %d GB.", size, lim.max)
+	}
+	if err := s.noteSizeChange(d, rel); err != nil {
+		return nil, err
 	}
 	d["sizeGb"] = strconv.FormatInt(size, 10)
 	specs := []DiskSpec{s.diskSpecLocked(d)}

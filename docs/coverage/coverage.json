@@ -14962,8 +14962,8 @@
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
       "Implemented": 36,
-      "Unimplemented": 63,
-      "Verified": 104
+      "Unimplemented": 61,
+      "Verified": 106
     },
     "rows": [
       {
@@ -15136,8 +15136,10 @@
       },
       {
         "method": "compute.disks.update",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskupdate_test.go:26 TestComputeHyperdiskBalancedHAThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.firewalls.delete",
@@ -15924,8 +15926,10 @@
       },
       {
         "method": "compute.regionDisks.update",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskupdate_test.go:26 TestComputeHyperdiskBalancedHAThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.updateKmsKey",

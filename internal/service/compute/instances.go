@@ -127,7 +127,12 @@ func (s *Server) attachedDiskLocked(project, zone, instance, machineType string,
 			return nil, nil, invalid("Invalid value for field '%s.forceAttach': 'true'. Force-attach applies to regional disks only: '%s' is a zonal disk.", field, rel)
 		}
 		users := strs(d, "users")
+		if err := s.haAttachOK(d, rel, machineType, e, mode, boot, users, field); err != nil {
+			return nil, nil, err
+		}
 		switch {
+		case len(users) > 0 && mode == "READ_WRITE" && str(d, "accessMode") == rwMany && !force:
+			// Multi-writer: each instance keeps write access.
 		case len(users) > 0 && mode == "READ_WRITE" && force:
 			for _, u := range users {
 				if s.isBootOfLocked(u, rel) {
@@ -151,7 +156,8 @@ func (s *Server) attachedDiskLocked(project, zone, instance, machineType string,
 			}
 		}
 		b := obj{"name": name, "sourceImage": str(ip, "sourceImage"), "sourceSnapshot": str(ip, "sourceSnapshot"),
-			"type": str(ip, "diskType"), "sizeGb": ip["diskSizeGb"], "labels": ip["labels"], "description": str(ip, "description")}
+			"type": str(ip, "diskType"), "sizeGb": ip["diskSizeGb"], "labels": ip["labels"], "description": str(ip, "description"),
+			"provisionedIops": ip["provisionedIops"], "provisionedThroughput": ip["provisionedThroughput"]}
 		if boot && str(ip, "sourceImage") == "" && str(ip, "sourceSnapshot") == "" {
 			return nil, nil, required(field + ".initializeParams.sourceImage")
 		}
@@ -168,6 +174,12 @@ func (s *Server) attachedDiskLocked(project, zone, instance, machineType string,
 				return nil, nil, invalid("Invalid value for field '%s.initializeParams.replicaZones': the instance's zone %s must be one of the replica zones.", field, zone)
 			}
 			if err := regionalMachineOK(d, machineType, field); err != nil {
+				return nil, nil, err
+			}
+			if str(ip, "accessMode") == rwMany {
+				return nil, nil, invalid("Invalid value for field '%s.initializeParams.accessMode': '%s'. A Hyperdisk volume in multi-writer mode can't be created during instance creation: create it, then attach it.", field, rwMany)
+			}
+			if err := s.haAttachOK(d, str(d, "selfLink"), machineType, e, mode, boot, nil, field); err != nil {
 				return nil, nil, err
 			}
 		} else if d, err = s.newDiskLocked(project, zone, b, field+".initializeParams"); err != nil {

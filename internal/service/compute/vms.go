@@ -416,6 +416,7 @@ func (s *Server) disks(c call, zone string) (obj, error) {
 	coll := "projects/" + c.project + "/zones/" + zone + "/disks"
 	scope := "zones/" + zone
 	get, post, del := c.method == http.MethodGet, c.method == http.MethodPost, c.method == http.MethodDelete
+	patch := c.method == http.MethodPatch
 	switch {
 	case n == 3 && get:
 		return s.listOut("compute#diskList", coll, s.res, c.query)
@@ -445,7 +446,7 @@ func (s *Server) disks(c call, zone string) (obj, error) {
 	case n == 4 && post && p[3] == "stopGroupAsyncReplication":
 		return s.stopGroupAsyncReplication(c.project, scope, regionOfZone(zone), c.body)
 	}
-	if n < 4 || (n == 4 && !get && !del) || (n == 5 && !(post && regionDiskVerbs[p[4]])) || n > 5 {
+	if n < 4 || (n == 4 && !get && !del && !patch) || (n == 5 && !(post && regionDiskVerbs[p[4]])) || n > 5 {
 		return nil, unimplemented("%s on disks/%s is not served (#1963)", c.method, strings.Join(p[3:], "/"))
 	}
 	rel := coll + "/" + p[3]
@@ -458,6 +459,8 @@ func (s *Server) disks(c call, zone string) (obj, error) {
 		return d, nil
 	case n == 4 && del:
 		return s.deleteDiskLocked(c.project, scope, rel, d)
+	case n == 4 && patch:
+		return s.updateDiskLocked(c, scope, rel, d)
 	}
 	return s.diskVerbLocked(c, scope, rel, d)
 }

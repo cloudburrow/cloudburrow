@@ -799,6 +799,15 @@ func (p computeDisksProvider) diskActions(d map[string]any, onPage bool) []conso
 			{Name: "sizeGb", Label: "Size (GB)", Type: "text", Required: true, Default: vpcStr(d, "sizeGb"), Pattern: `^[0-9]{1,5}$`,
 				Help: "A disk can be made larger, never smaller."}}},
 	}
+	if vpcLast(vpcStr(d, "type")) == haDiskType {
+		// Google's Edit disk: performance and access mode, by disks.update.
+		edit := console.Action{ID: "edit", Label: "Edit performance", Submit: "Save", Fields: []console.Field{
+			{Name: "provisionedIops", Label: "Provisioned IOPS", Type: "text", Required: true, Default: vpcStr(d, "provisionedIops"), Pattern: `^[0-9]{1,6}$`, Help: haIopsHelp},
+			{Name: "provisionedThroughput", Label: "Provisioned throughput (MiB/s)", Type: "text", Required: true, Default: vpcStr(d, "provisionedThroughput"), Pattern: `^[0-9]{1,4}$`, Help: haTputHelp},
+			{Name: "accessMode", Label: "Access mode", Type: "select", Default: vpcStr(d, "accessMode"), Options: []string{"READ_WRITE_SINGLE", "READ_WRITE_MANY"},
+				OptionLabels: haModeLabels, Help: "The access mode changes only while the disk is detached from every instance."}}}
+		acts = append(acts, edit)
+	}
 	acts = append(acts, labelsAction(d))
 	acts = append(acts, asyncActions(d)...)
 	del := console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: onPage, Confirm: "Delete disk " + name + "?"}
@@ -826,12 +835,29 @@ func (p computeDisksProvider) CreateForm() (string, []console.Field) {
 			OptionLabels: imageFamilyLabels(), VisibleWhen: map[string]string{"source": "Image"}},
 		{Name: "snapshot", Label: "Source snapshot", Type: "text", Section: "Disk settings", VisibleWhen: map[string]string{"source": "Snapshot"},
 			Help: "The name of a snapshot on the Snapshots page."},
-		{Name: "type", Label: "Disk type", Type: "select", Section: "Disk settings", Default: "pd-balanced", Options: diskTypeNames(),
+		{Name: "type", Label: "Disk type", Type: "select", Section: "Disk settings", Default: "pd-balanced", Options: append(diskTypeNames(), haDiskType),
 			Help: "A regional disk is pd-balanced, pd-ssd, pd-standard (200 GB or more) or hyperdisk-balanced-high-availability."},
 		{Name: "sizeGb", Label: "Size (GB)", Type: "text", Section: "Disk settings", Default: "10", Pattern: `^[0-9]{1,5}$`},
+		{Name: "provisionedIops", Label: "Provisioned IOPS", Type: "text", Section: "Disk settings", Pattern: `^[0-9]{0,6}$`,
+			VisibleWhen: map[string]string{"type": haDiskType}, Help: haIopsHelp},
+		{Name: "provisionedThroughput", Label: "Provisioned throughput (MiB/s)", Type: "text", Section: "Disk settings", Pattern: `^[0-9]{0,4}$`,
+			VisibleWhen: map[string]string{"type": haDiskType}, Help: haTputHelp},
+		{Name: "accessMode", Label: "Access mode", Type: "select", Section: "Disk settings", Default: "READ_WRITE_SINGLE",
+			Options: []string{"READ_WRITE_SINGLE", "READ_WRITE_MANY"}, OptionLabels: haModeLabels,
+			VisibleWhen: map[string]string{"type": haDiskType}, Help: "Multi-writer volumes attach read-write to up to 8 C3, C3D, C4, C4A, M3, N4, N4A, N4D or Z3 instances."},
 		vmLabelsField(nil, "Disk settings"),
 	}
 }
+
+// Hyperdisk Balanced High Availability's performance and access mode
+// (#2206), as Google's Create disk and Edit disk pages show them.
+const (
+	haDiskType = "hyperdisk-balanced-high-availability"
+	haIopsHelp = "3,000 to 100,000, at most 500 per GiB (4 GiB: 2,000; 5 GiB: 2,500). Empty: the default for the size."
+	haTputHelp = "At least 140 and IOPS/256, at most 2,400 and IOPS/4. Empty: the default for the size."
+)
+
+var haModeLabels = map[string]string{"READ_WRITE_SINGLE": "Single VM read-write", "READ_WRITE_MANY": "Multiple VMs read-write"}
 
 func (p computeDisksProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
 	name := strings.TrimSpace(values["name"])
@@ -850,6 +876,16 @@ func (p computeDisksProvider) Create(ctx context.Context, project string, values
 	}
 	if s := strings.TrimSpace(values["sizeGb"]); s != "" {
 		b["sizeGb"] = s
+	}
+	if vpcOr(values["type"], "pd-balanced") == haDiskType {
+		for _, k := range []string{"provisionedIops", "provisionedThroughput"} {
+			if v := strings.TrimSpace(values[k]); v != "" {
+				b[k] = v
+			}
+		}
+		if m := values["accessMode"]; m != "" {
+			b["accessMode"] = m
+		}
 	}
 	if d := strings.TrimSpace(values["description"]); d != "" {
 		b["description"] = d
@@ -906,6 +942,12 @@ func (p computeDisksProvider) Detail(ctx context.Context, project string, path [
 			{Label: "Creation time", Value: vpcStr(d, "creationTimestamp")},
 		}}}}},
 	}
+	if vpcStr(d, "provisionedIops") != "" {
+		det.Sections[0].Groups = append(det.Sections[0].Groups, console.PropertyGroup{Heading: "Performance", Properties: []console.Property{
+			{Label: "Provisioned IOPS", Value: vpcStr(d, "provisionedIops")},
+			{Label: "Provisioned throughput", Value: vpcStr(d, "provisionedThroughput") + " MiB/s"},
+			{Label: "Access mode", Value: vpcOr(haModeLabels[vpcStr(d, "accessMode")], vpcDash(vpcStr(d, "accessMode")))}}})
+	}
 	if props := asyncProperties(d); len(props) > 0 {
 		det.Sections[0].Groups = append(det.Sections[0].Groups, console.PropertyGroup{Heading: "Asynchronous replication", Properties: props})
 	}
@@ -943,11 +985,35 @@ func (p computeDisksProvider) ActAt(ctx context.Context, project string, path []
 		_, err = p.call("POST", project, base+"/resize", nil, map[string]any{"sizeGb": strings.TrimSpace(values["sizeGb"])})
 	case "labels":
 		err = p.setLabels(project, base, values)
+	case "edit":
+		err = p.editDisk(project, base, values)
 	case "delete":
 		_, err = p.call("DELETE", project, base, nil, nil)
 	default:
 		err = fmt.Errorf("%s is not available on this resource", action)
 	}
+	return err
+}
+
+// editDisk sends disks.update (regionDisks.update) with the fields that
+// changed in its update mask.
+func (p computeDisksProvider) editDisk(project, base string, values map[string]string) error {
+	d, err := p.call("GET", project, base, nil, nil)
+	if err != nil {
+		return err
+	}
+	b := map[string]any{"name": vpcStr(d, "name")}
+	var paths []string
+	for _, k := range []string{"provisionedIops", "provisionedThroughput", "accessMode"} {
+		if v := strings.TrimSpace(values[k]); v != "" && v != vpcStr(d, k) {
+			b[k] = v
+			paths = append(paths, k)
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	_, err = p.call("PATCH", project, base, url.Values{"paths": paths}, b)
 	return err
 }
 
