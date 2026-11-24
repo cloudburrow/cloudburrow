@@ -87,6 +87,7 @@ var emulatorOnly = map[string]string{
 	"vertex-training-pipelines":   "training pipelines are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAITrainingThroughThePages drives the page)",
 	"vertex-custom-jobs":          "custom jobs are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAITrainingThroughThePages drives the page)",
 	"vertex-batch-predictions":    "batch predictions are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAITrainingThroughThePages drives the page)",
+	"vertex-datasets":             "datasets are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAIDatasetsThroughThePages drives the page)",
 	"workbench-instances":         "Workbench instances are read from the local AI endpoint over gRPC, which this test does not start (TestWorkbenchInstancesThroughThePages drives the page)",
 	"colab-schedules":             "schedules are read from the local AI endpoint over gRPC, which this test does not start (TestColabEnterpriseExecutionsThroughThePages drives the page)",
 	"vertex-endpoints":            "Endpoints are read from the local AI endpoint over gRPC, which this test does not start (TestModelRegistryAndEndpointsThroughThePages drives the page)",

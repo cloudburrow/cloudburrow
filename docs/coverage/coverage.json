@@ -6529,7 +6529,7 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Implemented": 10,
+      "Implemented": 29,
       "Unimplemented": 27,
       "Verified": 164
     },
@@ -6554,6 +6554,101 @@
         "tests": [
           "test/compat/colabexecutions2105_test.go:410 TestColabEnterpriseRuntimeTemplateIAM"
         ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/CreateDataset",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/CreateDatasetVersion",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/DeleteDataset",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/DeleteDatasetVersion",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/DeleteSavedQuery",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/ExportData",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/GetAnnotationSpec",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/GetDataset",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/GetDatasetVersion",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/ImportData",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/ListAnnotations",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/ListDataItems",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/ListDatasetVersions",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/ListDatasets",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/ListSavedQueries",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/RestoreDatasetVersion",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/SearchDataItems",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/UpdateDataset",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/UpdateDatasetVersion",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.EndpointService/CreateEndpoint",
@@ -7400,7 +7495,7 @@
           "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs",
           "test/compat/pipelines2205_test.go:283 TestVertexAIPipelineResolverAndLimits",
           "test/compat/pipelines2205_test.go:74 TestPythonKFPControlFlow",
-          "test/compat/pipelines2210_test.go:144 TestPythonGCPC"
+          "test/compat/pipelines2210_test.go:145 TestPythonGCPC"
         ]
       },
       {
@@ -7408,7 +7503,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining",
-          "test/compat/pipelines2210_test.go:144 TestPythonGCPC"
+          "test/compat/pipelines2210_test.go:145 TestPythonGCPC"
         ]
       },
       {
@@ -7432,7 +7527,7 @@
           "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs",
           "test/compat/pipelines2205_test.go:283 TestVertexAIPipelineResolverAndLimits",
           "test/compat/pipelines2205_test.go:74 TestPythonKFPControlFlow",
-          "test/compat/pipelines2210_test.go:144 TestPythonGCPC"
+          "test/compat/pipelines2210_test.go:145 TestPythonGCPC"
         ]
       },
       {
@@ -7440,7 +7535,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining",
-          "test/compat/pipelines2210_test.go:144 TestPythonGCPC"
+          "test/compat/pipelines2210_test.go:145 TestPythonGCPC"
         ]
       },
       {
@@ -13115,6 +13210,7 @@
           "test/compat/bigqueryloadtable_test.go:30 TestBigQueryLoadMakesItsTableWithItsProperties",
           "test/compat/bigqueryloadvariants_test.go:34 TestBigQueryHivePartitionedAndGeoJSONLoads",
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
+          "test/compat/bigquerymlexport_test.go:28 TestBigQueryMLExportModel",
           "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel",
           "test/compat/bigquerymlxgb_test.go:38 TestBigQueryMLImportedXGBoostModel",
           "test/compat/bigqueryorcload_test.go:88 TestBigQueryLoadORC",
@@ -13304,6 +13400,7 @@
           "test/compat/bigquerymlarima_test.go:314 TestBigQueryMLArimaPlusETS",
           "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
           "test/compat/bigquerymlexplain_test.go:19 TestBigQueryMLExplain",
+          "test/compat/bigquerymlexport_test.go:28 TestBigQueryMLExportModel",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
           "test/compat/bigquerymlimage_test.go:42 TestBigQueryMLImageFunctions",
           "test/compat/bigquerymlmf_test.go:21 TestBigQueryMLMatrixFactorization",
@@ -13582,6 +13679,7 @@
           "test/compat/bigquerymlcontrib_test.go:26 TestBigQueryMLContributionAnalysis",
           "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
           "test/compat/bigquerymlexplain_test.go:19 TestBigQueryMLExplain",
+          "test/compat/bigquerymlexport_test.go:28 TestBigQueryMLExportModel",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
           "test/compat/bigquerymlholiday_test.go:34 TestBigQueryMLCustomHolidays",
           "test/compat/bigquerymlholidayregion_test.go:31 TestBigQueryMLHolidayRegion",
@@ -13752,6 +13850,7 @@
           "test/compat/bigquerymlautoml_test.go:29 TestBigQueryMLAutoML",
           "test/compat/bigquerymlcontrib_test.go:26 TestBigQueryMLContributionAnalysis",
           "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
+          "test/compat/bigquerymlexport_test.go:28 TestBigQueryMLExportModel",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
           "test/compat/bigquerymlholiday_test.go:34 TestBigQueryMLCustomHolidays",
           "test/compat/bigquerymlholidayregion_test.go:31 TestBigQueryMLHolidayRegion",

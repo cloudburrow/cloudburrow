@@ -26,8 +26,13 @@ package vertexai
 // A hyperparameter tuning pipeline (hpTaskDefinition, hptuning.go) runs a
 // HyperparameterTuningJob and uploads the best trial's model.
 //
-// Not served (UNIMPLEMENTED, naming why): AutoML task definitions, and input_data_config (Vertex AI managed datasets,
-// which this instance does not serve).
+// input_data_config reads a Vertex AI managed dataset (datasets.go): its
+// data is split and exported before the CustomJob runs, and the job's
+// containers get AIP_DATA_FORMAT and AIP_{TRAINING,VALIDATION,TEST}_DATA_URI
+// (datasetsplit.go).
+//
+// Not served (UNIMPLEMENTED, naming why): AutoML task definitions (AutoML
+// trains Google's own models, docs/gaps.md).
 
 import (
 	"context"
@@ -111,13 +116,17 @@ func (s *Server) createTrainingPipeline(parent string, in *aiplatformpb.Training
 	switch {
 	case def == "":
 		return nil, apierror.InvalidArgument("training_pipeline.training_task_definition is required")
+	case strings.Contains(def, "/automl_"):
+		return nil, apierror.Unimplemented("%s", automlRefusal(def))
 	case def != customTaskDefinition && def != hpTaskDefinition:
 		return nil, apierror.Unimplemented("training_pipeline.training_task_definition %s is not served on this instance: only custom training (%s) and hyperparameter tuning (%s) are; "+
 			"AutoML pipelines are not run locally", def, customTaskDefinition, hpTaskDefinition)
 	}
-	if in.GetInputDataConfig() != nil {
-		return nil, apierror.Unimplemented("training_pipeline.input_data_config names a Vertex AI managed dataset, which this instance does not serve: " +
-			"pass the training data to the job's container (its args or environment) as Cloud Storage or BigQuery URIs")
+	if c := in.GetInputDataConfig(); c != nil {
+		// The managed dataset's data, exported for the job (datasetsplit.go).
+		if err := s.checkInputDataConfig(parent, c); err != nil {
+			return nil, err
+		}
 	}
 	var spec *aiplatformpb.CustomJobSpec
 	var hp *aiplatformpb.HyperparameterTuningJob
@@ -199,6 +208,7 @@ func (s *Server) runTrainingPipeline(ctx context.Context, e *trainingEntry, pare
 	st := s.notebooks()
 	st.mu.Lock()
 	tp := proto.Clone(e.TP).(*aiplatformpb.TrainingPipeline)
+	runner := st.pipelineRunner
 	st.mu.Unlock()
 	fail := func(code codes.Code, msg string) {
 		st.setTraining(e, func(t *aiplatformpb.TrainingPipeline) {
@@ -207,6 +217,16 @@ func (s *Server) runTrainingPipeline(ctx context.Context, e *trainingEntry, pare
 				t.State = aiplatformpb.PipelineState_PIPELINE_STATE_CANCELLED
 			}
 		})
+	}
+	if c := tp.GetInputDataConfig(); c != nil {
+		env, err := s.exportTrainingData(ctx, runner, parent, c, tp.GetCreateTime().AsTime())
+		if err != nil {
+			ae := apierror.From(err)
+			fail(ae.Code, "Exporting the training data from Dataset "+parent+"/datasets/"+c.GetDatasetId()+" failed: "+ae.Message)
+			return
+		}
+		spec = proto.Clone(spec).(*aiplatformpb.CustomJobSpec)
+		withDataEnv(spec, env)
 	}
 	job, err := s.createCustomJob(parent, &aiplatformpb.CustomJob{DisplayName: tp.GetDisplayName() + "-custom-job", JobSpec: spec,
 		Labels: tp.GetLabels(), EncryptionSpec: tp.GetEncryptionSpec()}, nil)

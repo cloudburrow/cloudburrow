@@ -38,7 +38,7 @@ func init() {
 		}
 	}
 	// Colab Enterprise (#2105), v1 only as served.
-	for _, s := range []string{"NotebookService", "ScheduleService", "PipelineService", "MetadataService", "JobService"} {
+	for _, s := range []string{"NotebookService", "ScheduleService", "PipelineService", "MetadataService", "JobService", "DatasetService"} {
 		Services["google.cloud.aiplatform.v1."+s] = VertexAI
 	}
 	Services["google.cloud.documentai.v1.DocumentProcessorService"] = DocumentAI
@@ -199,6 +199,29 @@ func colabMethods() map[string]Method {
 			"CreateTrainingPipeline": {"aiplatform.trainingPipelines.create", "parent"}, "GetTrainingPipeline": {"aiplatform.trainingPipelines.get", "name"},
 			"ListTrainingPipelines": {"aiplatform.trainingPipelines.list", "parent"}, "DeleteTrainingPipeline": {"aiplatform.trainingPipelines.delete", "name"},
 			"CancelTrainingPipeline": {"aiplatform.trainingPipelines.cancel", "name"},
+		},
+		// Managed datasets (#2210): each method's REST reference page
+		// (read 2026-11-24): aiplatform.datasets.P on the dataset (create
+		// and list on the parent); savedQueries.list aiplatform.datasets.get
+		// and savedQueries.delete aiplatform.datasets.delete;
+		// searchDataItems and dataItems.list aiplatform.dataItems.list;
+		// annotations.list aiplatform.annotations.list on the data item;
+		// datasetVersions.P on the version (create and list on the
+		// dataset). UNVERIFIED (re-read 2026-11-24): datasetVersions.patch's page names no
+		// permission, and Google's index has no
+		// aiplatform.datasetVersions.update; aiplatform.datasetVersions.create
+		// guards it.
+		p + "DatasetService/": {
+			"CreateDataset": {"aiplatform.datasets.create", "parent"}, "GetDataset": {"aiplatform.datasets.get", "name"},
+			"ListDatasets": {"aiplatform.datasets.list", "parent"}, "UpdateDataset": {"aiplatform.datasets.update", "dataset.name"},
+			"DeleteDataset": {"aiplatform.datasets.delete", "name"}, "ImportData": {"aiplatform.datasets.import", "name"},
+			"ExportData": {"aiplatform.datasets.export", "name"}, "ListDataItems": {"aiplatform.dataItems.list", "parent"},
+			"SearchDataItems": {"aiplatform.dataItems.list", "dataset"}, "ListSavedQueries": {"aiplatform.datasets.get", "parent"},
+			"DeleteSavedQuery": {"aiplatform.datasets.delete", "name"}, "GetAnnotationSpec": {"aiplatform.annotationSpecs.get", "name"},
+			"ListAnnotations": {"aiplatform.annotations.list", "parent"}, "CreateDatasetVersion": {"aiplatform.datasetVersions.create", "parent"},
+			"GetDatasetVersion": {"aiplatform.datasetVersions.get", "name"}, "ListDatasetVersions": {"aiplatform.datasetVersions.list", "parent"},
+			"UpdateDatasetVersion": {"aiplatform.datasetVersions.create", "dataset_version.name"}, "DeleteDatasetVersion": {"aiplatform.datasetVersions.delete", "name"},
+			"RestoreDatasetVersion": {"aiplatform.datasetVersions.restore", "name"},
 		},
 		// CustomJobs and BatchPredictionJobs (#2210): each method's REST
 		// page names aiplatform.customJobs.P and

@@ -1410,6 +1410,7 @@ func (s *Server) runHPTraining(ctx context.Context, e *trainingEntry, parent str
 	st.mu.Lock()
 	tp := proto.Clone(e.TP).(*aiplatformpb.TrainingPipeline)
 	in := proto.Clone(e.hp).(*aiplatformpb.HyperparameterTuningJob)
+	runner := st.pipelineRunner
 	st.mu.Unlock()
 	fail := func(code codes.Code, msg string) {
 		st.setTraining(e, func(t *aiplatformpb.TrainingPipeline) {
@@ -1418,6 +1419,17 @@ func (s *Server) runHPTraining(ctx context.Context, e *trainingEntry, parent str
 				t.State = aiplatformpb.PipelineState_PIPELINE_STATE_CANCELLED
 			}
 		})
+	}
+	if c := tp.GetInputDataConfig(); c != nil {
+		// A managed dataset's data, exported once for every trial
+		// (datasetsplit.go), as for a custom training pipeline.
+		env, err := s.exportTrainingData(ctx, runner, parent, c, tp.GetCreateTime().AsTime())
+		if err != nil {
+			ae := apierror.From(err)
+			fail(ae.Code, "Exporting the training data from Dataset "+parent+"/datasets/"+c.GetDatasetId()+" failed: "+ae.Message)
+			return
+		}
+		withDataEnv(in.GetTrialJobSpec(), env)
 	}
 	in.DisplayName, in.Labels, in.EncryptionSpec = truncateUTF8(tp.GetDisplayName()+"-hyperparameter-tuning-job", 128), tp.GetLabels(), tp.GetEncryptionSpec()
 	job, err := s.createHPJob(parent, in, nil)

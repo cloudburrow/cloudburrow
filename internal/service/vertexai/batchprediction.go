@@ -33,7 +33,7 @@ package vertexai
 //     the instances per request; model_parameters are each request's
 //     parameters.
 //
-// UNVERIFIED (searched again 2026-11-24 for #2210:
+// UNVERIFIED (re-read 2026-11-24 for #2210:
 // https://docs.cloud.google.com/vertex-ai/docs/predictions/get-batch-predictions,
 // the REST reference projects.locations.batchPredictionJobs and a search
 // of docs.cloud.google.com for prediction.errors_stats, which finds
@@ -46,7 +46,7 @@ package vertexai
 // but its predictions name is not the guide's, so neither is taken as the
 // errors file of a custom model's job; CloudBurrow keeps the guide's
 // pattern for both. The errors table's columns beyond instance and error
-// are UNVERIFIED too.
+// are UNVERIFIED too (re-read 2026-11-24).
 
 import (
 	"context"

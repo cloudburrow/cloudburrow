@@ -42,7 +42,7 @@ import (
 // GEOGRAPHY feature types", and "the BigQuery dataset and the Cloud
 // Storage bucket must be in the same location".
 //
-// UNVERIFIED (neither page says): BigQuery's messages for a model type it
+// UNVERIFIED (re-read 2026-11-24, neither page says): BigQuery's messages for a model type it
 // does not export, a feature type it does not export, a destination format
 // the model has no export in, a bucket of another location and TRIAL_ID of
 // a model with no trials; the job's statistics beyond statementType

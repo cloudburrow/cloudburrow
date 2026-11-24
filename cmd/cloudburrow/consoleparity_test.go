@@ -2582,6 +2582,21 @@ var parityRows = []parityRow{
 			"(File on Cloud Storage, Files on Cloud Storage (other), BigQuery path), Destination path, Enable feature attributions, Number of compute nodes, " +
 			"Machine type, Accelerator type and count; Create), a job's page (source, destination, output location, completion stats), Cancel and Delete",
 		Tests: []string{"TestVertexAITrainingThroughThePages"}},
+	// Vertex AI managed datasets (#2210).
+	{Resource: "Vertex AI datasets", Service: "vertexai",
+		Methods: []string{"DatasetService/CreateDataset", "DatasetService/GetDataset", "DatasetService/ListDatasets", "DatasetService/DeleteDataset",
+			"DatasetService/ImportData", "DatasetService/ExportData", "DatasetService/ListDataItems", "DatasetService/ListAnnotations"},
+		Provider: "vertex-datasets", Offers: "Datasets: a Region menu, Create (Create dataset: Dataset name, the data type (Image, Tabular, Text, Video) " +
+			"and its objective, then Select an import file from Cloud Storage, or a tabular dataset's Select CSV files from Cloud Storage or Select a table " +
+			"or view from BigQuery; Create), a dataset's page (Browse: its data items with their labels and ML use; Details; a tabular dataset's Source), " +
+			"Import, Export and Delete",
+		Tests: []string{"TestVertexAIDatasetsThroughThePages"}},
+	{Resource: "Vertex AI datasets: versions, saved queries, search and annotation specs", Service: "vertexai",
+		Methods: []string{"DatasetService/UpdateDataset", "DatasetService/CreateDatasetVersion", "DatasetService/GetDatasetVersion", "DatasetService/ListDatasetVersions",
+			"DatasetService/UpdateDatasetVersion", "DatasetService/DeleteDatasetVersion", "DatasetService/RestoreDatasetVersion", "DatasetService/ListSavedQueries",
+			"DatasetService/DeleteSavedQuery", "DatasetService/SearchDataItems", "DatasetService/GetAnnotationSpec"},
+		Excluded: "the dataset pages Google documents (image-data/classification/create-dataset, tabular-data/classification-regression/create-dataset, " +
+			"read 2026-11-24) do not describe editing a dataset, its versions, annotation sets, search or annotation specs; the API and the Vertex AI SDK do"},
 	// Vertex ML Metadata (#2205).
 	{Resource: "Vertex ML Metadata: artifacts", Service: "vertexai",
 		Methods:  []string{"MetadataService/ListArtifacts", "MetadataService/GetArtifact", "MetadataService/QueryArtifactLineageSubgraph", "MetadataService/DeleteArtifact"},
