@@ -214,6 +214,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	runSrv.CloudBuild().Register(srv)
 	runSrv.SecureSourceManager(func() string { return "" }).Register(srv)
 	runSrv.DeveloperConnect().Register(srv)
+	runSrv.Builds(nil, nil).RepositoryManager().Register(srv) // #2197
 	grafeas.NewServer(grafeas.NewStore(nil)).Register(srv)
 	// FunctionService alone: its IAM and Locations mixins are KMS's above;
 	// and Cloud Functions v1 (#1428) over the same functions.

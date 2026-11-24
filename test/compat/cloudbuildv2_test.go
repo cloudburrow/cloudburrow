@@ -8,16 +8,18 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	cloudbuildv2 "cloud.google.com/go/cloudbuild/apiv2"
 	cb2pb "cloud.google.com/go/cloudbuild/apiv2/cloudbuildpb"
-	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	securesourcemanager "cloud.google.com/go/securesourcemanager/apiv1"
 	ssmpb "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/google/uuid"
 	cb2rest "google.golang.org/api/cloudbuild/v2"
 	"google.golang.org/api/iterator"
@@ -236,9 +238,10 @@ func TestCloudBuildRepositories2ndGen(t *testing.T) {
 	}
 
 	// A 2nd-gen trigger on the repository, and one in another region.
-	sa := "projects/" + project + "/serviceAccounts/builder@" + project + ".iam.gserviceaccount.com"
+	// The Compute Engine default account, which needs no IAM on this shard.
+	sa := "projects/" + project + "/serviceAccounts/" + strconv.FormatInt(resource.ProjectNumber(project), 10) + "-compute@developer.gserviceaccount.com"
 	build := &cbpb.Build{Steps: []*cbpb.BuildStep{{Name: "busybox", Args: []string{"sh", "-c", "test -f hello.txt && echo $_VIA $REPO_NAME $BRANCH_NAME"}}},
-		Substitutions: map[string]string{"_VIA": "v2"}}
+		Substitutions: map[string]string{"_VIA": "v2"}, Options: &cbpb.BuildOptions{Logging: cbpb.BuildOptions_CLOUD_LOGGING_ONLY}}
 	if _, err := cb.CreateBuildTrigger(ctx, &cbpb.CreateBuildTriggerRequest{Parent: "projects/" + project + "/locations/europe-west1",
 		ProjectId: project, Trigger: &cbpb.BuildTrigger{Name: "far-" + suffix, ServiceAccount: sa, BuildTemplate: &cbpb.BuildTrigger_Build{Build: build},
 			RepositoryEventConfig: &cbpb.RepositoryEventConfig{Repository: repo.GetName(),
@@ -319,8 +322,9 @@ func TestCloudBuildRepositories2ndGen(t *testing.T) {
 			}
 		}
 	}
-	if got == nil || got.GetStatus() != cbpb.Build_SUCCESS || got.GetSubstitutions()["REPO_NAME"] != "app-"+suffix ||
-		got.GetSubstitutions()["BRANCH_NAME"] != "main" || got.GetSource().GetGitSource().GetUrl() != repo.GetRemoteUri() {
+	// The step's arguments carry the substitutions, built-in ones too.
+	if got == nil || got.GetStatus() != cbpb.Build_SUCCESS || len(got.GetSteps()) != 1 ||
+		!strings.HasSuffix(got.GetSteps()[0].GetArgs()[2], "echo v2 app-"+suffix+" main") || got.GetSource().GetGitSource().GetUrl() != repo.GetRemoteUri() {
 		t.Fatalf("the push's build = %v; want SUCCESS at %s with the repository's substitutions", got, sha)
 	}
 

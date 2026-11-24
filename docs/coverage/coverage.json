@@ -1617,6 +1617,120 @@
     ]
   },
   {
+    "Key": "cloudbuildv2",
+    "Title": "Cloud Build repositories (2nd gen)",
+    "counts": {
+      "Verified": 14
+    },
+    "rows": [
+      {
+        "method": "google.devtools.cloudbuild.v2.RepositoryManager/BatchCreateRepositories",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildv2_test.go:50 TestCloudBuildRepositories2ndGen"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v2.RepositoryManager/CreateConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildv2_test.go:50 TestCloudBuildRepositories2ndGen",
+          "test/compat/terraform_cloudbuildv2_test.go:30 TestTerraformCloudBuildV2"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v2.RepositoryManager/CreateRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildv2_test.go:50 TestCloudBuildRepositories2ndGen",
+          "test/compat/terraform_cloudbuildv2_test.go:30 TestTerraformCloudBuildV2"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v2.RepositoryManager/DeleteConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildv2_test.go:50 TestCloudBuildRepositories2ndGen",
+          "test/compat/terraform_cloudbuildv2_test.go:30 TestTerraformCloudBuildV2"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v2.RepositoryManager/DeleteRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildv2_test.go:50 TestCloudBuildRepositories2ndGen",
+          "test/compat/terraform_cloudbuildv2_test.go:30 TestTerraformCloudBuildV2"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v2.RepositoryManager/FetchGitRefs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildv2_test.go:50 TestCloudBuildRepositories2ndGen"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v2.RepositoryManager/FetchLinkableRepositories",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildv2_test.go:50 TestCloudBuildRepositories2ndGen"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v2.RepositoryManager/FetchReadToken",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildv2_test.go:50 TestCloudBuildRepositories2ndGen"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v2.RepositoryManager/FetchReadWriteToken",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildv2_test.go:50 TestCloudBuildRepositories2ndGen"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v2.RepositoryManager/GetConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildv2_test.go:50 TestCloudBuildRepositories2ndGen",
+          "test/compat/terraform_cloudbuildv2_test.go:30 TestTerraformCloudBuildV2"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v2.RepositoryManager/GetRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildv2_test.go:50 TestCloudBuildRepositories2ndGen",
+          "test/compat/terraform_cloudbuildv2_test.go:30 TestTerraformCloudBuildV2"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v2.RepositoryManager/ListConnections",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildv2_test.go:50 TestCloudBuildRepositories2ndGen"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v2.RepositoryManager/ListRepositories",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildv2_test.go:50 TestCloudBuildRepositories2ndGen"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v2.RepositoryManager/UpdateConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildv2_test.go:50 TestCloudBuildRepositories2ndGen",
+          "test/compat/terraform_cloudbuildv2_test.go:30 TestTerraformCloudBuildV2"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "securesourcemanager",
     "Title": "Secure Source Manager",
     "counts": {
