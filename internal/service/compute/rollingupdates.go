@@ -236,8 +236,15 @@ func (s *Server) patchManagerLocked(c call, l igLoc, rel string, m obj) (obj, er
 			return nil, err
 		}
 	}
-	if len(listOf(b["autoHealingPolicies"])) > 0 {
-		return nil, unimplemented("autohealing is not served: health checks are not")
+	var healing []any
+	if _, ok := b["autoHealingPolicies"]; ok {
+		// Autohealing (#2225): the policy given replaces the group's; an
+		// empty list clears it.
+		h, err := s.checkAutoHealingPoliciesLocked(c.project, l.region, b["autoHealingPolicies"])
+		if err != nil {
+			return nil, err
+		}
+		healing = h
 	}
 	for _, f := range []string{"name", "zone", "region", "baseInstanceName", "instanceGroup"} {
 		if v, ok := b[f]; ok && v != nil && str(b, f) != "" && lastSeg(str(b, f)) != lastSeg(str(m, f)) {
@@ -313,6 +320,13 @@ func (s *Server) patchManagerLocked(c call, l igLoc, rel string, m obj) (obj, er
 		}
 	}
 	m["updatePolicy"] = norm(up)
+	if _, ok := b["autoHealingPolicies"]; ok {
+		if len(healing) == 0 {
+			delete(m, "autoHealingPolicies")
+		} else {
+			m["autoHealingPolicies"] = healing
+		}
+	}
 	m["fingerprint"] = newFingerprint()
 	if _, err := s.rollManagerLocked(l.project, rel, m); err != nil {
 		return nil, err
@@ -574,7 +588,9 @@ func (s *Server) rollManagerLocked(project, rel string, m obj) (bool, error) {
 			replace = append(replace, vm)
 		}
 	}
-	budget := unav
+	// A VM its autohealing health check has yet to find HEALTHY is not
+	// available (#2225).
+	budget := max(0, unav-s.unhealthyYetLocked(rel, m))
 	for _, vm := range restart {
 		if budget == 0 {
 			break
@@ -693,6 +709,10 @@ func (s *Server) rollOnce() {
 	defer s.mu.Unlock()
 	// Retry the VMs groups failed to make (#2220).
 	changed := s.retryManagersLocked()
+	// Autohealing (#2225).
+	if s.autohealLocked() {
+		changed = true
+	}
 	for k, m := range s.res {
 		if !strings.Contains(k, "/instanceGroupManagers/") {
 			continue

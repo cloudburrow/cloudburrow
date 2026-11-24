@@ -366,6 +366,11 @@ func (s *Server) lbUsersLocked(rel string) []string {
 			out = append(out, k)
 			continue
 		}
+		if strings.Contains(k, "/instanceGroupManagers/") && linksTo(o["autoHealingPolicies"], rel, false) {
+			// A managed instance group's autohealing health check (#2225).
+			out = append(out, k)
+			continue
+		}
 		if k == rel || !isLBRecord(o) {
 			continue
 		}

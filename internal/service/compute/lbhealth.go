@@ -54,6 +54,10 @@ type hcState struct {
 	probeKey  string
 	allowed   bool
 	lastError string
+	// decided is whether a threshold has been reached, and unreachable
+	// whether the last failure was a connection's or a timeout's (not a
+	// response's): autohealing's detailedHealthState (#2225).
+	decided, unreachable bool
 	// ep is the endpoint as the last sync saw it: an instance that was
 	// still starting when its probe began is running by now.
 	ep lbEndpoint
@@ -220,7 +224,8 @@ func (s *Server) wantedProbesLocked() []lbProbeTask {
 			}
 		}
 	}
-	return out
+	// Managed instance groups' autohealing health checks (#2225).
+	return append(out, s.autohealProbesLocked()...)
 }
 
 // sync starts the probes newly wanted and stops the others.
@@ -285,15 +290,17 @@ func (h *lbHealthState) run(ctx context.Context, s *Server, t lbProbeTask) {
 			if err == nil {
 				st.ok, st.fail = st.ok+1, 0
 				if st.ok >= t.probe.healthy {
-					st.healthy = true
+					st.healthy, st.decided = true, true
 				}
 				st.lastError = ""
 			} else {
 				st.fail, st.ok = st.fail+1, 0
 				if st.fail >= t.probe.unhealthy {
-					st.healthy = false
+					st.healthy, st.decided = false, true
 				}
 				st.lastError = err.Error()
+				_, bad := err.(hcBadResponse)
+				st.unreachable = !bad
 			}
 		}
 		h.mu.Unlock()
@@ -304,6 +311,10 @@ func (h *lbHealthState) run(ctx context.Context, s *Server, t lbProbeTask) {
 		}
 	}
 }
+
+// hcBadResponse is a probe failure of an endpoint that answered, but not
+// as the health check requires (UNHEALTHY rather than TIMEOUT).
+type hcBadResponse struct{ error }
 
 // dialEndpoint is a host address that reaches an instance or hybrid
 // endpoint's port.
@@ -375,10 +386,10 @@ func (s *Server) probeOnce(ctx context.Context, t lbProbeTask) error {
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("HTTP %d", resp.StatusCode)
+			return hcBadResponse{fmt.Errorf("HTTP %d", resp.StatusCode)}
 		}
 		if p.response != "" && !strings.HasPrefix(string(body), p.response) {
-			return fmt.Errorf("the response does not start with %q", p.response)
+			return hcBadResponse{fmt.Errorf("the response does not start with %q", p.response)}
 		}
 		return nil
 	case "TCP", "SSL":
@@ -403,7 +414,7 @@ func (s *Server) probeOnce(ctx context.Context, t lbProbeTask) error {
 		if p.response != "" {
 			buf := make([]byte, len(p.response))
 			if _, err := io.ReadFull(bufio.NewReader(c), buf); err != nil || string(buf) != p.response {
-				return fmt.Errorf("the response is not %q", p.response)
+				return hcBadResponse{fmt.Errorf("the response is not %q", p.response)}
 			}
 		}
 		return nil
@@ -422,7 +433,7 @@ func (s *Server) probeOnce(ctx context.Context, t lbProbeTask) error {
 			return err
 		}
 		if r.GetStatus() != healthpb.HealthCheckResponse_SERVING {
-			return fmt.Errorf("gRPC status %s", r.GetStatus())
+			return hcBadResponse{fmt.Errorf("gRPC status %s", r.GetStatus())}
 		}
 		return nil
 	}

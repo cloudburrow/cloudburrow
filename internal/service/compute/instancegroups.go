@@ -434,6 +434,9 @@ func (s *Server) instanceGroupManagers(c call, l igLoc) (obj, error) {
 			if la := lastAttemptOf(pendingEntry(m, vm)); la != nil {
 				mi["lastAttempt"] = la
 			}
+			if ih := s.instanceHealthLocked(m, vm); ih != nil {
+				mi["instanceHealth"] = ih
+			}
 			items = append(items, mi)
 		}
 		// The VMs the group has yet to make: no id or status while they
@@ -528,8 +531,19 @@ func (s *Server) targetsInLocked(c call, rel string, live []string) ([]string, e
 	return targets, nil
 }
 
-// currentActionLocked is a managed VM's currentAction.
+// currentActionLocked is a managed VM's currentAction: VERIFYING during
+// its autohealing initial delay (#2225).
 func (s *Server) currentActionLocked(vm string, o obj) string {
+	a := s.baseActionLocked(vm, o)
+	if a == "NONE" && o["_ahVerifying"] == true {
+		return "VERIFYING"
+	}
+	return a
+}
+
+// baseActionLocked is a managed VM's currentAction, autohealing's
+// verification aside.
+func (s *Server) baseActionLocked(vm string, o obj) string {
 	if s.queued[vm] == 0 && s.res[vm] != nil {
 		delete(o, "_mgrAction")
 	}
@@ -588,8 +602,9 @@ func (s *Server) insertManager(c call, l igLoc) (obj, error) {
 	if r := lastSeg(str(s.res[t], "region")); r != "" && r != l.region {
 		return nil, invalid("Invalid value for field 'resource.instanceTemplate': '%s'. A regional instance template makes VMs of its region only.", tref)
 	}
-	if _, ok := b["autoHealingPolicies"]; ok && len(listOf(b["autoHealingPolicies"])) > 0 {
-		return nil, unimplemented("autohealing is not served: health checks are not")
+	healing, err := s.checkAutoHealingPoliciesLocked(c.project, l.region, b["autoHealingPolicies"])
+	if err != nil {
+		return nil, err
 	}
 	base := str(b, "baseInstanceName")
 	if base == "" {
@@ -636,6 +651,9 @@ func (s *Server) insertManager(c call, l igLoc) (obj, error) {
 	}
 	if d := str(b, "description"); d != "" {
 		m["description"] = d
+	}
+	if len(healing) > 0 {
+		m["autoHealingPolicies"] = healing
 	}
 	g := obj{"kind": "compute#instanceGroup", "id": newID(), "name": name, locKey: locVal, "selfLink": group,
 		"creationTimestamp": s.stamp(), "size": size, "fingerprint": newFingerprint(), "_manager": rel}
@@ -835,7 +853,8 @@ func (s *Server) refreshManagerLocked(m obj) {
 		"abandoning": 0.0, "creatingWithoutRetries": 0.0, "refreshing": 0.0, "resuming": 0.0, "starting": 0.0,
 		"stopping": 0.0, "suspending": 0.0}
 	key := map[string]string{"NONE": "none", "CREATING": "creating", "DELETING": "deleting", "RECREATING": "recreating",
-		"STARTING": "starting", "STOPPING": "stopping", "SUSPENDING": "suspending", "RESUMING": "resuming"}
+		"STARTING": "starting", "STOPPING": "stopping", "SUSPENDING": "suspending", "RESUMING": "resuming",
+		"VERIFYING": "verifying", "RESTARTING": "restarting", "REFRESHING": "refreshing", "ABANDONING": "abandoning"}
 	stable := true
 	rel := str(m, "selfLink")
 	vms := s.managedLocked(rel)
@@ -849,8 +868,9 @@ func (s *Server) refreshManagerLocked(m obj) {
 		if a != "DELETING" {
 			live++
 		}
-		k := key[a]
-		acts[k] = acts[k].(float64) + 1
+		if k := key[a]; k != "" {
+			acts[k] = acts[k].(float64) + 1
+		}
 	}
 	// The VMs it is still making, or re-making (#2220).
 	for vm, v := range pendingOf(m) {
@@ -907,6 +927,14 @@ func (s *Server) recreateManagedFromLocked(project, mgr string, m obj, vm string
 		mgrAction(o, "RECREATING")
 		return nil
 	}
+	return s.remakeManagedLocked(project, mgr, m, vm, o, tpl)
+}
+
+// remakeManagedLocked deletes a managed VM and makes it again, by the same
+// name, from template tpl: a pending member, listed RECREATING, until it is
+// made (its creation retried while it fails, #2220). Autohealing recreates
+// VMs this way (#2225).
+func (s *Server) remakeManagedLocked(project, mgr string, m obj, vm string, o obj, tpl string) error {
 	zone, name := lastSeg(str(o, "zone")), str(o, "name")
 	op, err := s.deleteInstance(project, "zones/"+zone, vm, o)
 	if err != nil {
