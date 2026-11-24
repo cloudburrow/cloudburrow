@@ -26,7 +26,7 @@ import (
 // keyboard subtest fills Create a schedule's start schedule and opens Add
 // instances to schedule by keys alone.
 func TestComputeInstanceSchedulesThroughTheBrowser(t *testing.T) {
-	needService(t, "compute-instanceschedules")
+	needService(t, "compute-instance-schedules")
 	project := uniqueProject(t)
 	q := "?project=" + url.QueryEscape(project)
 	type row struct {
@@ -67,9 +67,9 @@ func TestComputeInstanceSchedulesThroughTheBrowser(t *testing.T) {
 	vmPath := "zones/us-central1-a/instances/" + vm
 	t.Cleanup(func() {
 		b, _ := json.Marshal(map[string]any{"Path": []string{"us-central1", sched}, "Action": "remove", "Values": map[string]string{"instance": vmPath}})
-		consoleDo(t, http.MethodPost, "/api/actions/compute-instanceschedules"+q, string(b))
+		consoleDo(t, http.MethodPost, "/api/actions/compute-instance-schedules"+q, string(b))
 		b, _ = json.Marshal(map[string]any{"Path": []string{"us-central1", sched}, "Action": "delete"})
-		consoleDo(t, http.MethodPost, "/api/actions/compute-instanceschedules"+q, string(b))
+		consoleDo(t, http.MethodPost, "/api/actions/compute-instance-schedules"+q, string(b))
 		b, _ = json.Marshal(map[string]any{"Path": []string{"us-central1-a", vm}, "Action": "delete"})
 		consoleDo(t, http.MethodPost, "/api/actions/compute-instances"+q, string(b))
 	})
@@ -85,7 +85,7 @@ func TestComputeInstanceSchedulesThroughTheBrowser(t *testing.T) {
 	p.waitFor(`document.querySelector("#f-name") !== null`)
 	p.submitForm(map[string]string{"name": sched, "region": "us-central1", "startSchedule": "0 9 * * 1-5", "stopSchedule": "0 18 * * 1-5",
 		"timeZone": "Europe/Paris"}, "name")
-	waitRow("compute-instanceschedules", sched, func(r *row) bool {
+	waitRow("compute-instance-schedules", sched, func(r *row) bool {
 		return r.Fields["Start schedule"] == "0 9 * * 1-5" && r.Fields["Time zone"] == "Europe/Paris"
 	})
 	waitRow("compute-instances", vm, func(r *row) bool { return true })
@@ -94,7 +94,7 @@ func TestComputeInstanceSchedulesThroughTheBrowser(t *testing.T) {
 	p.navigate("/compute/instanceSchedules/us-central1/" + sched + q)
 	p.waitFor(`document.querySelector("#view").textContent.includes("Stop schedule")`)
 	p.pageAction("Add instances to schedule", map[string]string{"instance": vmPath}, "")
-	waitRow("compute-instanceschedules", sched, func(r *row) bool { return r.Fields["In use by"] == "1 VM instances" })
+	waitRow("compute-instance-schedules", sched, func(r *row) bool { return r.Fields["In use by"] == "1 VM instances" })
 	code, body := consoleDo(t, http.MethodGet, "/api/detail/compute-instances"+q+"&name=us-central1-a&name="+vm, "")
 	if code != http.StatusOK || !strings.Contains(body, sched) {
 		t.Errorf("the VM's page does not name its schedule: %d %.600s", code, body)
@@ -142,11 +142,11 @@ func TestComputeInstanceSchedulesThroughTheBrowser(t *testing.T) {
 	p.navigate("/compute/instanceSchedules/us-central1/" + sched + q)
 	p.waitFor(`document.querySelector("#view").textContent.includes("Stop schedule")`)
 	p.pageAction("Remove instances from schedule", map[string]string{"instance": vmPath}, "")
-	waitRow("compute-instanceschedules", sched, func(r *row) bool { return r.Fields["In use by"] == "0 VM instances" })
+	waitRow("compute-instance-schedules", sched, func(r *row) bool { return r.Fields["In use by"] == "0 VM instances" })
 	p.navigate("/compute/instanceSchedules" + q)
 	vmRowMenu(p, sched, "Delete", nil, sched)
 	gone := time.Now().Add(time.Minute)
-	for find("compute-instanceschedules", sched) != nil {
+	for find("compute-instance-schedules", sched) != nil {
 		if time.Now().After(gone) {
 			t.Fatal("the instance schedule was never deleted")
 		}

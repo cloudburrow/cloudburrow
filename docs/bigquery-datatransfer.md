@@ -55,7 +55,7 @@ it, and the schedules that fall due run within a second.
 
 BigQuery > **Data transfers** lists every transfer config, and **Scheduled queries** those of
 `scheduled_query`. Create transfer, a transfer's Run history and Configuration, Run transfer now,
-Disable and Enable transfer, and Delete call the service's own methods.
+Disable, Enable and Delete call the service's own methods.
 
 ## Not served
 

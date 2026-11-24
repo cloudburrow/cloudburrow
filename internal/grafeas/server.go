@@ -469,6 +469,14 @@ func (s *Server) DeleteOccurrence(_ context.Context, req *pb.DeleteOccurrenceReq
 	return &emptypb.Empty{}, nil
 }
 
+// v1beta1Names are a Note's Grafeas v1beta1 field names that UpdateNote's
+// mask still accepts for their v1 fields (#1578): hashicorp/google's
+// google_container_analysis_note sends its attestation hint as v1's
+// `attestation` with updateMask=attestationAuthority, v1beta1's name
+// (resource_container_analysis_note.go, 8.4.0 to 8.12.0), and its update
+// succeeds against Google, so Google's server maps the old name.
+var v1beta1Names = map[string]string{"attestation_authority": "attestation", "attestationAuthority": "attestation"}
+
 // applyMask copies the masked top-level fields of src into dst; with no
 // mask, every field src sets.
 func applyMask(dst, src proto.Message, mask *fieldmaskpb.FieldMask) error {
@@ -483,6 +491,9 @@ func applyMask(dst, src proto.Message, mask *fieldmaskpb.FieldMask) error {
 	}
 	for _, p := range mask.GetPaths() {
 		top := strings.SplitN(p, ".", 2)[0]
+		if alias, ok := v1beta1Names[top]; ok && sr.Descriptor().FullName() == "grafeas.v1.Note" {
+			top = alias
+		}
 		fd := fields.ByName(protoreflect.Name(top))
 		if fd == nil {
 			fd = fields.ByJSONName(top)

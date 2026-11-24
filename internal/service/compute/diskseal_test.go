@@ -3,11 +3,14 @@ package compute
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"net/http/httptest"
@@ -16,40 +19,29 @@ import (
 	"testing"
 )
 
-func TestSealOpen(t *testing.T) {
+func TestCryptHeaderAndKey(t *testing.T) {
 	key := bytes.Repeat([]byte{7}, 32)
-	for _, n := range []int{0, 1, sealChunk - 1, sealChunk, sealChunk + 1, 3*sealChunk + 17} {
-		pt := make([]byte, n)
-		_, _ = rand.Read(pt)
-		var sealed bytes.Buffer
-		if err := Seal(&sealed, bytes.NewReader(pt), key); err != nil {
-			t.Fatal(err)
-		}
-		if n > 64 && bytes.Contains(sealed.Bytes(), pt[:64]) {
-			t.Fatalf("%d bytes: the plaintext is in the sealed file", n)
-		}
-		var out bytes.Buffer
-		if err := Open(&out, bytes.NewReader(sealed.Bytes()), key); err != nil || !bytes.Equal(out.Bytes(), pt) {
-			t.Fatalf("%d bytes: Open = %v, equal %v", n, err, bytes.Equal(out.Bytes(), pt))
-		}
-		wrong := bytes.Repeat([]byte{8}, 32)
-		if err := Open(&bytes.Buffer{}, bytes.NewReader(sealed.Bytes()), wrong); !errors.Is(err, ErrSealed) {
-			t.Errorf("%d bytes, wrong key: %v", n, err)
-		}
-		if sealed.Len() > 30 {
-			trunc := sealed.Bytes()[:sealed.Len()-5]
-			if err := Open(&bytes.Buffer{}, bytes.NewReader(trunc), key); !errors.Is(err, ErrSealed) {
-				t.Errorf("%d bytes, truncated: %v", n, err)
-			}
-		}
+	h, err := CryptHeader(key)
+	if err != nil || len(h) >= CryptHeaderSize || !strings.HasPrefix(h, "CBCRYPT1 aes-xts-plain64 ") {
+		t.Fatalf("CryptHeader = %q, %v", h, err)
 	}
-	// A whole last chunk dropped is caught too.
-	pt := make([]byte, 2*sealChunk+10)
-	var sealed bytes.Buffer
-	_ = Seal(&sealed, bytes.NewReader(pt), key)
-	cut := len(sealMagic) + 8 + 2*(4+sealChunk+16)
-	if err := Open(&bytes.Buffer{}, bytes.NewReader(sealed.Bytes()[:cut]), key); !errors.Is(err, ErrSealed) {
-		t.Errorf("last chunk dropped: %v", err)
+	if err := CheckCryptHeader(h, key); err != nil {
+		t.Errorf("the header of its own key: %v", err)
+	}
+	wrong := bytes.Repeat([]byte{8}, 32)
+	if err := CheckCryptHeader(h, wrong); !errors.Is(err, ErrSealed) {
+		t.Errorf("a wrong key: %v", err)
+	}
+	if err := CheckCryptHeader("", key); !errors.Is(err, ErrSealed) {
+		t.Errorf("no header: %v", err)
+	}
+	k1, _ := CryptKey(key)
+	k2, _ := CryptKey(wrong)
+	if len(k1) != 128 || k1 == k2 || strings.Contains(h, k1) {
+		t.Errorf("CryptKey: %d hex digits, distinct %v, in the header %v", len(k1), k1 != k2, strings.Contains(h, k1))
+	}
+	if _, err := CryptKey(key[:16]); err == nil {
+		t.Error("a 16-byte data key was taken")
 	}
 }
 
@@ -67,6 +59,50 @@ func newSealVMs() *sealVMs {
 	return &sealVMs{plain: map[string]string{}, sealed: map[string][]byte{}, starts: map[string]VMSpec{}}
 }
 
+// fakeSeal and fakeOpen stand in for the dm-crypt image: its header, then
+// the contents under AES-GCM with the disk's derived key.
+func fakeSeal(pt string, key []byte) ([]byte, error) {
+	h, err := CryptHeader(key)
+	if err != nil {
+		return nil, err
+	}
+	g, err := fakeGCM(key)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, g.NonceSize())
+	return append([]byte(h+"\n"), g.Seal(nonce, nonce, []byte(pt), nil)...), nil
+}
+
+func fakeOpen(b, key []byte) (string, error) {
+	line, rest, ok := bytes.Cut(b, []byte("\n"))
+	if !ok {
+		return "", ErrSealed
+	}
+	if err := CheckCryptHeader(string(line), key); err != nil {
+		return "", err
+	}
+	g, err := fakeGCM(key)
+	if err != nil {
+		return "", err
+	}
+	pt, err := g.Open(nil, rest[:g.NonceSize()], rest[g.NonceSize():], nil)
+	return string(pt), err
+}
+
+func fakeGCM(key []byte) (cipher.AEAD, error) {
+	hk, err := CryptKey(key)
+	if err != nil {
+		return nil, err
+	}
+	k, _ := hex.DecodeString(hk)
+	blk, err := aes.NewCipher(k[:32])
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(blk)
+}
+
 func (f *sealVMs) copyLocked(src, dst string) {
 	delete(f.plain, dst)
 	delete(f.sealed, dst)
@@ -82,12 +118,12 @@ func (f *sealVMs) rekeyLocked(k string, from, to []byte) error {
 		if from == nil {
 			return errors.New("sealed without a key")
 		}
-		var out bytes.Buffer
-		if err := Open(&out, bytes.NewReader(b), from); err != nil {
+		pt, err := fakeOpen(b, from)
+		if err != nil {
 			return err
 		}
 		delete(f.sealed, k)
-		f.plain[k] = out.String()
+		f.plain[k] = pt
 	}
 	if to != nil {
 		return f.sealLocked(k, to)
@@ -99,11 +135,11 @@ func (f *sealVMs) sealLocked(k string, key []byte) error {
 	if _, ok := f.sealed[k]; ok {
 		return nil
 	}
-	var out bytes.Buffer
-	if err := Seal(&out, strings.NewReader(f.plain[k]), key); err != nil {
+	b, err := fakeSeal(f.plain[k], key)
+	if err != nil {
 		return err
 	}
-	f.sealed[k] = out.Bytes()
+	f.sealed[k] = b
 	delete(f.plain, k)
 	return nil
 }

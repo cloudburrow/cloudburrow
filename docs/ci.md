@@ -213,6 +213,17 @@ The compat job's `gke` shard runs on the `served` shard's instance again. It run
 client, gcloud and Terraform), which make kind clusters beside the instance's; the `served` shard
 skips them. Together they passed the served suite's 60-minute deadline in main runs 45023269046
 and 45047408927: no test hung, and the Kubernetes Engine tests took 2,828 s of it.
+It skips `COMPAT_GKE_UPGRADE_TESTS`, which the `gkeupgrade` shard runs.
+
+### The gkeupgrade shard
+
+The compat job's `gkeupgrade` shard runs on the `served` shard's instance again too. It runs only
+`COMPAT_GKE_UPGRADE_TESTS` from `scripts/compat-shards.sh` (named in `COMPAT_GKE_UPGRADE_TEST_NAMES`):
+Kubernetes Engine's upgrades, rollbacks and IP and credential rotations, through the client and
+gcloud. The `gke` shard reached go test's 60-minute deadline in main run 45382531465 once Landing
+168 (#2100) added them: its tests had run 3,558 s, 2,080 s of them these. `test/repo`'s
+`TestCompatGKEShardsSplitTheKubernetesEngineTests` fails unless each Kubernetes Engine test runs in
+exactly one of the two shards.
 
 ### The localaispeech shard
 
@@ -315,6 +326,16 @@ landings themselves) and stored as the annotated tag's message. `scripts/release
 tag's `## [X.Y.Z]` section of `CHANGELOG.md` when there is one, and otherwise the tag message, if it
 starts with the generated-notes marker. To publish hand-written notes instead, add the section to
 `CHANGELOG.md` on `main` first, or tag by hand.
+
+Generated notes open with a **What's new** section. It holds the `CHANGELOG.md` entries added under
+**Unreleased** between the previous tag and this one, then the issues the landings closed that no
+entry names: the issue of each `feat/N-...` and `fix/N-...` branch merged (not `fix/main-ci...`),
+and each `Closes #N` in a merge message. The issues are grouped by area, the part of the title
+before its first colon, with titles read through `gh` (`RELEASE_NOTES_REPO`, with `issues: read`).
+Issues labelled `workflow-red` and titles starting `CI:` are left out. The landing list, "Fix main
+CI" pull requests included, is folded into a collapsed **All landings** block. So the notes are only
+as good as the entries landings add ([CONTRIBUTING.md](../CONTRIBUTING.md#landings)). The jobs that
+render them check out the full history, so the previous tag is there.
 
 **Starting a release without the schedule.** Actions › Scheduled release › Run workflow:
 

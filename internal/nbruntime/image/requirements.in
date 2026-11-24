@@ -1,0 +1,12 @@
+google-cloud-bigquery==3.47.0
+bigquery-magics==0.15.2
+db-dtypes==1.9.0
+ipython==9.9.0
+pandas==2.3.3
+pyarrow==22.0.0
+matplotlib==3.10.7
+google-cloud-dataproc==5.32.0
+pyspark-client==4.0.1
+websockets==17.4
+tqdm==4.70.1
+packaging==26.3

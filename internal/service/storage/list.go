@@ -125,7 +125,12 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 			if emitItem {
 				need++
 			}
-			if len(items)+len(prefixes)+need > max {
+			// A name that is both a prefix and, with
+			// includeTrailingDelimiter, an item of it is never split
+			// across pages: a page of maxResults=1 that held neither
+			// resumed where it began, forever (the Cloud Storage
+			// connector for Hadoop's directory probes, #2162).
+			if n := len(items) + len(prefixes); n > 0 && n+need > max {
 				t, _ := json.Marshal(last)
 				next = base64.RawURLEncoding.EncodeToString(t)
 				break

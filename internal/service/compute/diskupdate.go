@@ -284,7 +284,7 @@ func (s *Server) updateDiskLocked(c call, scope, rel string, d obj) (obj, error)
 	set := map[string]bool{}
 	for _, p := range paths {
 		if p = strings.TrimSpace(p); p != "" {
-			set[camel(p)] = true
+			set[maskCamel(p)] = true
 		}
 	}
 	if len(set) == 0 {
@@ -471,7 +471,7 @@ func (s *Server) updateDiskLocked(c call, scope, rel string, d obj) (obj, error)
 
 // camel is a field mask path in the JSON (lowerCamelCase) form: an
 // updateMask may name provisioned_iops as well as provisionedIops.
-func camel(p string) string {
+func maskCamel(p string) string {
 	parts := strings.Split(p, "_")
 	for i := 1; i < len(parts); i++ {
 		if parts[i] != "" {

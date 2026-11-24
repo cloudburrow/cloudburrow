@@ -18,7 +18,9 @@ import (
 
 // runStoredSettings sets, on a template, the settings Google documents and
 // nothing here acts on (#1346).
-func runStoredSettings(h *Harness) (*runpb.VpcAccess, string) {
+func runStoredSettings(t *testing.T, h *Harness) (*runpb.VpcAccess, string) {
+	// With Compute Engine served, Cloud Run checks the connector (#2140).
+	ensureCompatConnector(t, h)
 	return &runpb.VpcAccess{Connector: "projects/" + h.Project() + "/locations/us-central1/connectors/compat",
 			Egress: runpb.VpcAccess_ALL_TRAFFIC},
 		"projects/" + h.Project() + "/locations/us-central1/keyRings/compat/cryptoKeys/run"
@@ -37,7 +39,7 @@ func TestRunServiceStoredSettingsAndSubPath(t *testing.T) {
 	c := runClient(t, h)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	t.Cleanup(cancel)
-	vpc, key := runStoredSettings(h)
+	vpc, key := runStoredSettings(t, h)
 	id := "compat-settings"
 	name := runParent(h) + "/services/" + id
 	op, err := c.CreateService(ctx, &runpb.CreateServiceRequest{Parent: runParent(h), ServiceId: id, Service: &runpb.Service{
@@ -112,7 +114,7 @@ func TestRunJobSubPathAndStoredSettings(t *testing.T) {
 	jc, _ := runJobClients(t, h)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	t.Cleanup(cancel)
-	vpc, key := runStoredSettings(h)
+	vpc, key := runStoredSettings(t, h)
 	id := "compat-job-subpath"
 	name := runParent(h) + "/jobs/" + id
 	job := shellJob(`echo ok > /sub/x && [ "$(cat /data/a/b/x)" = ok ] || { echo "the subPath is not a/b of the volume"; exit 1; }`, 1, nil)
@@ -172,7 +174,7 @@ func TestConsoleRunStoredSettings(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	t.Cleanup(cancel)
 	project := h.Project()
-	vpc, key := runStoredSettings(h)
+	vpc, key := runStoredSettings(t, h)
 	id := "console-settings"
 	name := runParent(h) + "/services/" + id
 	t.Cleanup(func() {

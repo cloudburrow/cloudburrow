@@ -21,8 +21,10 @@ import (
 const (
 	// BuilderImage is Google's buildpacks builder, pinned by digest.
 	//
-	// It is published for linux/amd64 only, which is the constraint that
-	// shapes everything below.
+	// Google publishes it for linux/amd64 only, by its own choice, and
+	// CloudBurrow keeps it (#1578): on an arm64 host Docker runs it under
+	// amd64 emulation and it builds an amd64 image. That constraint shapes
+	// everything below.
 	BuilderImage = "gcr.io/buildpacks/builder@sha256:12b6bbdd6890685a2a75ac59c2abe7868432bde292275ea92b20711c2432b429"
 	// PHPFunctionBuilderImage is Google's PHP builder for Cloud Run
 	// functions, pinned by digest, which builds a PHP function (#1319).

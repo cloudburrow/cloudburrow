@@ -126,12 +126,12 @@ func TestRepositoryKeys(t *testing.T) {
 	}
 }
 
-// TestExecutionMode: DEFAULT and ALL_EXCEPT_UNIT_TESTS are what every
-// invocation does; UNIT_TESTS_ONLY is refused.
+// TestExecutionMode: every execution mode is accepted (UNIT_TESTS_ONLY runs
+// the unit tests alone, pipelines_test.go).
 func TestExecutionMode(t *testing.T) {
 	for mode, want := range map[dfpb.InvocationConfig_ExecutionMode]codes.Code{
 		dfpb.InvocationConfig_DEFAULT: codes.OK, dfpb.InvocationConfig_ALL_EXCEPT_UNIT_TESTS: codes.OK,
-		dfpb.InvocationConfig_UNIT_TESTS_ONLY: codes.Unimplemented,
+		dfpb.InvocationConfig_UNIT_TESTS_ONLY: codes.OK,
 	} {
 		err := checkInvocationConfig(&dfpb.InvocationConfig{ExecutionMode: mode})
 		if got := codes.OK; err != nil {

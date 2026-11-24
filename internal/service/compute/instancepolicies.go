@@ -56,8 +56,8 @@ var compactSeries = map[string]bool{"n2": true, "n2d": true, "c3": true}
 
 var instanceCron = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
-// policyKind is a resource policy's type, by its field.
-func policyKind(po obj) string {
+// resourcePolicyKind is a resource policy's type, by its field.
+func resourcePolicyKind(po obj) string {
 	for _, k := range []string{"snapshotSchedulePolicy", "groupPlacementPolicy", "instanceSchedulePolicy", "diskConsistencyGroupPolicy", "workloadPolicy"} {
 		if po[k] != nil {
 			return k
@@ -284,7 +284,7 @@ func (s *Server) checkInstancePoliciesLocked(project string, o obj, add []string
 		if r := lastSeg(str(po, "region")); r != region {
 			return nil, invalid("Invalid value for field '%s': '%s'. The resource policy must be in the instance's region, %s.", f, rel, region)
 		}
-		kind := policyKind(po)
+		kind := resourcePolicyKind(po)
 		switch kind {
 		case "instanceSchedulePolicy", "groupPlacementPolicy":
 		case "workloadPolicy":
@@ -293,7 +293,7 @@ func (s *Server) checkInstancePoliciesLocked(project string, o obj, add []string
 			return nil, invalid("Invalid value for field '%s': '%s'. A %s resource policy applies to disks, not to instances.", f, rel, kind)
 		}
 		for _, c := range cur {
-			if cp, ok := s.res[c]; ok && policyKind(cp) == kind {
+			if cp, ok := s.res[c]; ok && resourcePolicyKind(cp) == kind {
 				// RESOURCE_POLICY_DUPLICATE_TYPE_UNSUPPORTED.
 				return nil, invalid("Can't apply resource policy '%s'. Multiple resource policies of the same type aren't supported on an instance.", rel)
 			}

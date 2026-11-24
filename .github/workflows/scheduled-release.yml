@@ -156,6 +156,8 @@ jobs:
       attestations: write
       checks: read
       actions: read
+      # release.yml reads closed issues for the notes (scripts/release-notes.sh).
+      issues: read
     uses: ./.github/workflows/release.yml
     with:
       release_tag: ${{ needs.plan.outputs.tag }}

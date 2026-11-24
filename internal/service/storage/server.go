@@ -15,10 +15,12 @@
 package storage
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -280,9 +282,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.observed(w, r, s.route)
 }
 
+// gunzipJSONBody decodes a JSON API request body sent with
+// Content-Encoding: gzip, as Cloud Storage accepts it: Google's HTTP
+// client for Java gzips request bodies (the Cloud Storage connector for
+// Hadoop's objects.rewrite, #2162). A JSON API body is never an object's
+// data (uploads are under /upload/), so the encoding is the transport's.
+func gunzipJSONBody(r *http.Request) {
+	if r.Body == nil || !strings.EqualFold(r.Header.Get("Content-Encoding"), "gzip") ||
+		!(strings.HasPrefix(r.URL.Path, "/storage/v1/") || strings.HasPrefix(r.URL.Path, "/batch/")) {
+		return
+	}
+	zr, err := gzip.NewReader(r.Body)
+	if err != nil {
+		return
+	}
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{zr, r.Body}
+	r.Header.Del("Content-Encoding")
+	r.ContentLength = -1
+}
+
 // route dispatches one request.
 func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.EscapedPath()
+	gunzipJSONBody(r)
 	if s.serveCORS(w, r) {
 		return
 	}

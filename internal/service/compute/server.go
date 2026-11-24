@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -39,6 +40,8 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/sysparams"
+	"github.com/cloudburrow/cloudburrow/internal/vmrelay"
+	"google.golang.org/grpc"
 )
 
 // Options configure a Server.
@@ -55,6 +58,9 @@ type Options struct {
 	// the Kubernetes Engine API's node pool instance group managers
 	// (#1913). It reports whether it answered.
 	Extra func(w http.ResponseWriter, r *http.Request) bool
+	// ExtraGroups are a zone's Kubernetes Engine node-pool instance group
+	// managers, listed beside the zone's own managed instance groups.
+	ExtraGroups func(project, zone string) map[string]map[string]any
 	// NetworkUsers names the resources of other services that use a
 	// network (projects/P/global/networks/N), which a network's deletion is
 	// refused while they exist, as Google refuses it.
@@ -62,6 +68,14 @@ type Options struct {
 	// VMs runs VM instances and keeps their disks (#1963); nil answers
 	// instances, disks and snapshots with 501.
 	VMs VMBackend
+	// ProjectOrganization is the organization a project is in ("" for a
+	// project outside any) and whether the project is known, for Shared
+	// VPC's organization rule (xpn.go); nil allows every project.
+	ProjectOrganization func(project string) (org string, known bool)
+	// ReadObject opens a Cloud Storage object of this instance and says its
+	// size, for image import (rawDisk.source, #2139); a missing bucket or
+	// object wraps ErrObjectNotFound. nil answers rawDisk with 501.
+	ReadObject func(ctx context.Context, bucket, object string) (io.ReadCloser, int64, error)
 	// MinFreeBytes is DefaultMinFreeBytes when zero.
 	MinFreeBytes uint64
 	// PrivateServices are the producer endpoints private services access
@@ -72,6 +86,70 @@ type Options struct {
 	// ServiceAttachment resolves a Private Service Connect endpoint's
 	// target (#2141); nil serves no endpoint.
 	ServiceAttachment ServiceAttachmentFunc
+	// CPU reads a running VM's CPU time in seconds since it booted, the
+	// autoscalers' load signal and compute.googleapis.com/instance/cpu/
+	// utilization's; nil uses VMs' CPUUsage when it has one (VMCPU).
+	CPU func(ctx context.Context, vm VMSpec) (float64, error)
+	// AutoscaleEvery is how often the VMs' CPU is read and the autoscalers
+	// run; 15 seconds when zero.
+	AutoscaleEvery time.Duration
+	// UpdateEvery is how often a managed instance group's PROACTIVE update
+	// takes its next step (#2139); 2s when zero.
+	UpdateEvery time.Duration
+	// LB reaches load balancers' backends (#2153, lbplane.go); nil
+	// reaches only those this package can itself.
+	LB LBBackends
+	// CertMaps is Certificate Manager, which target HTTPS and SSL proxies'
+	// certificate maps name (#2160, lbext.go); nil refuses certificateMap.
+	CertMaps CertificateMaps
+	// IAP is Identity-Aware Proxy, which a backend service's iap enforces
+	// (#2160, lbext.go); nil refuses every request through an IAP-enabled
+	// backend service.
+	IAP IAPGate
+	// NetSec is Network Security, which target HTTPS proxies'
+	// serverTlsPolicy and authorizationPolicy and backend services'
+	// securitySettings.clientTlsPolicy name, and whose authorization
+	// policies target forwarding rules (#2160, lbmtls.go); nil refuses
+	// those fields and authorizes every request.
+	NetSec NetworkSecurity
+	// XDSCredentialDir is where the xDS API's TLS bootstrap files are
+	// written: its CA and each project's workload credentials (#2160,
+	// lbxdssec.go); empty serves only the plaintext bootstrap.
+	XDSCredentialDir string
+	// AuthzExt are Service Extensions' authorization extensions, which a
+	// CUSTOM authorization policy calls (#2160, lbauthzext.go); nil answers
+	// 500 to a request such a policy delegates.
+	AuthzExt AuthzExtensions
+	// SourceTags are the permanent IDs of the tag values a resource carries
+	// (its effective tags), by full resource name
+	// (//compute.googleapis.com/projects/P/zones/Z/instances/ID); nil
+	// gives instances no tags.
+	SourceTags func(fullName string) []int64
+	// Gateways are Secure Web Proxy's gateways, which VMs reach at their
+	// VPC addresses through the relay (#2160, vmrelay.go); nil relays
+	// only load balancers.
+	Gateways RelayGateways
+	// RelayBind is the address the relay listens on, 127.0.0.1 when
+	// empty: where VMs' pods reach this machine (vmrelay.go).
+	RelayBind string
+	// FirewallLog writes a Firewall Rules Logging record to Cloud Logging
+	// (#2180, relayfirewall.go); nil logs nothing.
+	FirewallLog func(FirewallLogEntry)
+	// GuestReach is the address (IP:port) at which a VM's pod reaches the
+	// listener at loopback (127.0.0.1:port) on this machine, "" when it
+	// cannot: internal load balancers and Private Service Connect
+	// endpoints are carried from VMs to their listeners through it
+	// (vpcservices.go). nil carries neither.
+	GuestReach func(loopback string) string
+	// Tokens mints the access and identity tokens a VM's metadata server
+	// hands out for its service account (#2177, guestmetadata.go); nil
+	// answers them 503.
+	Tokens GuestTokens
+	// IntegrityEvents writes a Shielded VM's integrity monitoring event
+	// (#2179, vtpm.go), the jsonPayload of a
+	// compute.googleapis.com/shielded_vm_integrity entry of the
+	// instance's gce_instance resource; nil writes none.
+	IntegrityEvents func(ctx context.Context, project, zone, instanceID string, payload map[string]any)
 }
 
 // PrivateService is one private services access endpoint: its address and
@@ -83,6 +161,10 @@ type PrivateService struct {
 	Port       int
 	TargetIP   string
 	TargetPort int
+	// ExtraPorts are further ports of the endpoint, each sent on to the
+	// same port of the target: a Cloud SQL instance's managed connection
+	// pooler, on 6432 beside its server (#2141).
+	ExtraPorts []int
 }
 
 // obj is one resource, as its JSON is kept: link fields hold relative
@@ -92,6 +174,9 @@ type obj = map[string]any
 // Server is the Compute Engine API's VPC networking.
 type Server struct {
 	opts Options
+
+	xdsOnce sync.Once
+	xdsGRPC *grpc.Server
 
 	mu sync.Mutex
 	// kms is Cloud KMS, for disks' customer-managed keys (#2206).
@@ -114,6 +199,12 @@ type Server struct {
 	// automated are the forwarding rules service connectivity automation
 	// made (#2141), which are not deleted directly.
 	automated map[string]bool
+	// gateways are Cloud Run's ways onto VPC networks, by key
+	// (gateways.go).
+	gateways map[string]*runGateway
+	// bgpStates are what Cloud Router's speakers reported, by speaker key
+	// (bgpspeakers.go).
+	bgpStates map[string]BGPState
 	// waiters are the running operations, closed when each is done.
 	waiters map[string]chan struct{}
 	// queue is, by resource, the last operation started on it, closed when
@@ -127,9 +218,35 @@ type Server struct {
 	// pods are the pod IPs the running VMs' guests last reported (#1968),
 	// by instance.
 	pods map[string]podSeen
+	// natLow is, by NAT gateway key and VM IP, since when a VM of a gateway
+	// with dynamic port allocation has used few of its ports
+	// (natgateways.go), so its ports are halved after natShrinkAfter.
+	natLow map[string]time.Time
+
+	// stopLoop ends the schedules' runner (resourcepolicies.go) and the
+	// autoscalers' (autoscalers.go); loops is done once both have ended.
+	stopLoop context.CancelFunc
+	loops    sync.WaitGroup
+	// scale is the autoscalers' memory: the VMs' CPU readings and each
+	// autoscaler's recent recommendations and sizes (autoscalers.go).
+	scale scaleState
+	// lb is the load balancers' data plane (lbplane.go).
+	lb *lbPlane
 
 	srv *http.Server
 	ln  net.Listener
+	// relay is the listener VMs' guests relay their connections to load
+	// balancers and gateways through (vmrelay.go).
+	relay *vmrelay.Server
+	// relayAt is the relay's in-cluster address (UseRelayAddress).
+	relayAt func() string
+	// fwDenied is when each denied relayed 5-tuple was last logged
+	// (relayfirewall.go).
+	fwDenied map[string]time.Time
+	// ca issues the vTPMs' EK and AK certificates (vtpm.go).
+	ca *vtpmCA
+	// gaRate is each instance's guest attribute writes (guestmetadata.go).
+	gaRate map[string][]time.Time
 }
 
 // New returns a Server with its state restored.
@@ -139,7 +256,7 @@ func New(opts Options) (*Server, error) {
 	}
 	s := &Server{opts: opts, res: map[string]obj{}, ops: map[string]obj{},
 		defaultDeleted: map[string]bool{}, seeded: map[string]bool{}, automated: map[string]bool{}, waiters: map[string]chan struct{}{},
-		queue: map[string]chan struct{}{}, queued: map[string]int{}}
+		queue: map[string]chan struct{}{}, queued: map[string]int{}, lb: newLBPlane()}
 	if err := s.restore(); err != nil {
 		return nil, err
 	}
@@ -151,6 +268,16 @@ func (s *Server) Name() string { return "compute" }
 
 // Start listens on Options.Addr.
 func (s *Server) Start(context.Context) error {
+	if s.opts.VMs != nil && s.stopLoop == nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		s.stopLoop = cancel
+		s.loops.Add(3)
+		go func() { defer s.loops.Done(); s.RunSnapshotSchedules(ctx) }()
+		go func() { defer s.loops.Done(); s.autoscaleLoop(ctx) }()
+		go func() { defer s.loops.Done(); s.rollLoop(ctx) }()
+	}
+	s.lbStart()
+	s.startRelay()
 	if s.opts.Addr == "" {
 		return nil
 	}
@@ -158,6 +285,7 @@ func (s *Server) Start(context.Context) error {
 	if err != nil {
 		return fmt.Errorf("compute: %w", err)
 	}
+	ln = newMDSListener(s, ln)
 	s.ln = ln
 	s.srv = &http.Server{Handler: hostguard.Wrap(sysparams.Wrap(s, sysparams.Options{V1Errors: true})), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
@@ -166,6 +294,13 @@ func (s *Server) Start(context.Context) error {
 
 // Stop stops listening.
 func (s *Server) Stop(ctx context.Context) error {
+	if s.stopLoop != nil {
+		s.stopLoop()
+		s.stopLoop = nil
+		s.loops.Wait()
+	}
+	s.lbStop()
+	s.stopRelay()
 	if s.srv == nil {
 		return nil
 	}
@@ -360,7 +495,12 @@ func (s *Server) stamp() string {
 var linkKeys = map[string]bool{"selfLink": true, "network": true, "subnetwork": true, "region": true, "zone": true,
 	"targetLink": true, "nextHopGateway": true, "nextHopNetwork": true, "nextHopInstance": true, "nextHopVpnTunnel": true,
 	"subnetworks": true, "users": true, "zones": true, "machineType": true, "source": true, "sourceImage": true,
-	"sourceSnapshot": true, "sourceDisk": true, "type": true, "target": true, "replicaZones": true, "resourcePolicies": true,
+	"sourceSnapshot": true, "sourceDisk": true, "type": true, "resourcePolicies": true, "sourceInstance": true,
+	"sourceInstanceTemplate": true, "sourceMachineImage": true, "instanceTemplate": true, "instanceGroup": true,
+	"sourceSnapshotSchedulePolicy": true, "instance": true, "replacement": true, "replicaZones": true,
+	// Private Service Connect (#2140, psc.go).
+	"target": true, "targetService": true, "natSubnets": true, "endpoint": true, "consumerNetwork": true,
+	// Regional disks and consistency groups (#2206).
 	"disk": true, "consistencyGroupPolicy": true, "sourceConsistencyGroupPolicy": true}
 
 // renderNested makes the link fields of objects inside lists and objects

@@ -83,6 +83,10 @@ type Decision struct {
 	Owner bool `json:"owner,omitempty"`
 	// Unauthenticated is a bearer token the instance did not mint.
 	Unauthenticated bool `json:"unauthenticated,omitempty"`
+	// ScopeInsufficient is a token whose OAuth scopes do not cover the
+	// call (#2179): Google refuses it with ACCESS_TOKEN_SCOPE_INSUFFICIENT
+	// before any permission is checked.
+	ScopeInsufficient bool `json:"scopeInsufficient,omitempty"`
 	// Email is the caller's account, "" for an anonymous caller.
 	Email string `json:"email,omitempty"`
 	// Members are the caller's policy members (user:, serviceAccount:,

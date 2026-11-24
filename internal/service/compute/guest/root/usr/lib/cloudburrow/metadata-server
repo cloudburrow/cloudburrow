@@ -1,0 +1,170 @@
+#!/usr/bin/perl
+# This instance's metadata server (#2177), on 127.0.0.1:8169 and
+# [::1]:8169: the network script carries metadata.google.internal and
+# 169.254.169.254 port 80 here (the pod's hostAliases name the first, and a
+# DNAT of the guest's own connections takes the address's port 80 here, so
+# no port of the guest's own is taken), and fd20:ce::254 port 80 on an
+# instance with IPv6 (IPv6-only instances' address on Compute Engine); the
+# Ops Agent's units name 127.0.0.1:8169 itself (#2139). Every request is
+# carried, as it came (method, path, query, headers, body), to the
+# instance's own metadata on CloudBurrow's Compute Engine port
+# (CLOUDBURROW_GUEST_METADATA, http://HOST:PORT/cloudburrow/guest/TOKEN),
+# which answers the whole tree as Google's metadata server does: the
+# Metadata-Flavor rules, ETags and wait_for_change, guest attributes and
+# the service account's tokens (internal/service/compute/guestmetadata.go).
+# Port 443 (127.0.0.1:8170 and [::1]:8170, #2179), a Shielded VM's HTTPS
+# metadata server, is carried as it is, TLS and all, to the same Compute
+# port after one line naming the instance ("\0CBMDS TOKEN\n"): the
+# Compute port completes the handshake with the instance's own server
+# certificate and requires a client certificate of its root.
+# Nothing else is ever dialled. Only core Perl modules are used.
+use strict;
+use warnings;
+use IO::Socket::INET;
+use Socket qw(AF_INET6 SOCK_STREAM SOL_SOCKET SO_REUSEADDR inet_pton pack_sockaddr_in6);
+
+my $guest = $ENV{CLOUDBURROW_GUEST_METADATA} // '';
+my ($gh, $gp, $gprefix) = $guest =~ m{^http://([^/:]+):(\d+)(/.*?)/?$}
+  or die "CLOUDBURROW_GUEST_METADATA is not set: no metadata server\n";
+
+$SIG{CHLD} = 'IGNORE';
+$SIG{PIPE} = 'IGNORE';
+my %ls;    # "ADDRESS PORT" => listener
+
+sub listen4 {
+  my ($ip, $port) = @_;
+  return IO::Socket::INET->new(LocalAddr => $ip, LocalPort => $port, Listen => 128,
+    ReuseAddr => 1, Proto => 'tcp');
+}
+
+sub listen6 {
+  my ($ip, $port) = @_;
+  my $a = inet_pton(AF_INET6, $ip) or return;
+  socket(my $s, AF_INET6, SOCK_STREAM, 0) or return;
+  setsockopt($s, SOL_SOCKET, SO_REUSEADDR, 1);
+  bind($s, pack_sockaddr_in6($port, $a)) or return;
+  listen($s, 128) or return;
+  return $s;
+}
+
+sub reply {
+  my ($c, $code, $msg) = @_;
+  print $c "HTTP/1.0 $code $msg\r\nContent-Type: text/plain\r\nMetadata-Flavor: Google\r\n"
+    . "Content-Length: " . (length($msg) + 1) . "\r\nConnection: close\r\n\r\n$msg\n";
+}
+
+sub serve {
+  my ($c) = @_;
+  $c->autoflush(1);
+  local $SIG{ALRM} = sub { exit 0 };
+  alarm 30;
+  my $line = <$c>;
+  return unless defined $line;
+  my ($method, $target) = $line =~ m{^([A-Z]+) (/\S*) HTTP/1\.[01]\r?\n$}
+    or return reply($c, 400, 'Bad Request');
+  my @h;
+  my $len = 0;
+  while (my $l = <$c>) {
+    last if $l =~ /^\r?\n$/;
+    my ($k, $v) = $l =~ /^([^:\s]+):\s*(.*?)\r?\n$/ or next;
+    next if $k =~ /^(host|connection|keep-alive|proxy-.*|transfer-encoding|te|upgrade)$/i;
+    $len = $v if lc $k eq 'content-length' && $v =~ /^\d+$/;
+    push @h, "$k: $v";
+  }
+  return reply($c, 400, 'Bad Request') if $target =~ m{(^|/)\.\.(/|\?|$)};
+  return reply($c, 413, 'Request Entity Too Large') if $len > 512 * 1024;
+  my $body = '';
+  while (length($body) < $len) {
+    my $n = read($c, my $buf, $len - length($body));
+    last unless $n;
+    $body .= $buf;
+  }
+  alarm 0;
+  my $u = IO::Socket::INET->new(PeerAddr => $gh, PeerPort => $gp, Proto => 'tcp', Timeout => 10)
+    or return reply($c, 503, 'Service Unavailable');
+  $u->autoflush(1);
+  print $u "$method $gprefix$target HTTP/1.0\r\nHost: $gh:$gp\r\n" . join('', map { "$_\r\n" } @h)
+    . "Connection: close\r\n\r\n$body";
+  # The status line and headers, a redirect's Location given back without
+  # the Compute port's guest prefix (a directory named without its slash).
+  while (my $l = <$u>) {
+    $l =~ s{^(Location:\s*)(?:https?://[^/]+)?\Q$gprefix\E}{$1}i;
+    print $c $l;
+    last if $l =~ /^\r?\n$/;
+  }
+  my $buf;
+  while (read($u, $buf, 65536)) {
+    print $c $buf;
+  }
+  close $u;
+}
+
+# pipe carries a port 443 connection to the Compute port, after the line
+# that names the instance.
+sub pipe443 {
+  my ($c) = @_;
+  my ($token) = $gprefix =~ m{/([^/]+)$};
+  my $u = IO::Socket::INET->new(PeerAddr => $gh, PeerPort => $gp, Proto => 'tcp', Timeout => 10) or return;
+  syswrite($u, "\0CBMDS $token\n");
+  my ($cf, $uf) = (fileno($c), fileno($u));
+  while (1) {
+    my $rin = '';
+    vec($rin, $cf, 1) = 1;
+    vec($rin, $uf, 1) = 1;
+    my $n = select(my $rout = $rin, undef, undef, 300);
+    last unless $n && $n > 0;
+    for ([$c, $u, $cf], [$u, $c, $uf]) {
+      my ($from, $to, $ff) = @$_;
+      next unless vec($rout, $ff, 1);
+      my $r = sysread($from, my $buf, 65536);
+      return unless $r;
+      my $off = 0;
+      while ($off < length $buf) {
+        my $w = syswrite($to, $buf, length($buf) - $off, $off);
+        return unless $w;
+        $off += $w;
+      }
+    }
+  }
+}
+
+my @want = (['127.0.0.1', 8169, 4], ['::1', 8169, 6], ['127.0.0.1', 8170, 4], ['::1', 8170, 6]);
+my %tls;    # fileno of a port 443 listener
+while (1) {
+  # Bind what is not bound yet: ::1 only where the guest has IPv6 on lo.
+  for my $w (@want) {
+    my ($ip, $port, $fam) = @$w;
+    next if $ls{"$ip $port"};
+    my $s = $fam == 6 ? listen6($ip, $port) : listen4($ip, $port);
+    next unless $s;
+    $ls{"$ip $port"} = $s;
+    $tls{fileno($s)} = 1 if $port == 8170;
+  }
+  my $rin = '';
+  vec($rin, fileno($_), 1) = 1 for values %ls;
+  my $n = select(my $rout = $rin, undef, undef, 2);
+  next unless $n && $n > 0;
+  for my $l (values %ls) {
+    next unless vec($rout, fileno($l), 1);
+    accept(my $c, $l) or next;
+    my $pid = fork;
+    if (!defined $pid) {
+      close $c;
+      next;
+    }
+    if ($pid) {
+      close $c;
+      next;
+    }
+    my $is443 = $tls{fileno($l)};
+    close $_ for values %ls;
+    if ($is443) {
+      pipe443($c);
+      close $c;
+      exit 0;
+    }
+    serve($c);
+    close $c;
+    exit 0;
+  }
+}

@@ -259,7 +259,9 @@ func TestGKERotationLocationsAndUpgradeInfo(t *testing.T) {
 			`jsonpath={.items[*].status.containerStatuses[*].ready}`).CombinedOutput()
 		return err == nil && strings.Contains(string(out), "true") && !strings.Contains(string(out), "false")
 	}) {
-		t.Error("CoreDNS is not ready after the rotation")
+		out, _ := exec.Command("kubectl", "--kubeconfig", akc, "-n", "kube-system", "describe", "pods", "-l", "k8s-app=kube-dns").CombinedOutput()
+		logs, _ := exec.Command("kubectl", "--kubeconfig", akc, "-n", "kube-system", "logs", "-l", "k8s-app=kube-dns", "--tail", "20").CombinedOutput()
+		t.Errorf("CoreDNS is not ready after the rotation:\n%s\n%s", out, logs)
 	}
 
 	// Last, as it cuts the host off the cluster for a while:
@@ -292,8 +294,13 @@ func TestGKERotationLocationsAndUpgradeInfo(t *testing.T) {
 // control plane to the newer version and keeps the previous minor
 // version's behaviour (the API server reports the previous minor as its
 // emulated version), and FetchClusterUpgradeInfo reports the rollback-safe
-// status; CompleteControlPlaneUpgrade is step two, after which the API
-// server emulates nothing and the status is gone. A soak shorter than six
+// status and the release schedule's end-of-support dates; during the soak
+// a node upgrade past the emulated version is refused, and an upgrade to
+// the previous version rolls the control plane back (the API server and
+// the control plane's kubelet run it again, and the status is gone);
+// upgraded again, CompleteControlPlaneUpgrade is step two, after which
+// the API server emulates nothing, the status is gone and a downgrade is
+// refused. A soak shorter than six
 // hours is refused, and so is completing with nothing to complete.
 //
 // covers: google.container.v1.ClusterManager/CompleteControlPlaneUpgrade
@@ -372,6 +379,52 @@ func TestGKERollbackSafeUpgrade(t *testing.T) {
 		d[len(d)-1].GetState() != containerpb.UpgradeDetails_SUCCEEDED || d[len(d)-1].GetStartType() != containerpb.UpgradeDetails_MANUAL {
 		t.Errorf("upgrade details = %v", d)
 	}
+	// The support dates are the release schedule's for the version's minor.
+	if info.GetEndOfStandardSupportTimestamp() == "" || info.GetEndOfExtendedSupportTimestamp() == "" {
+		t.Errorf("end of support = %q, %q", info.GetEndOfStandardSupportTimestamp(), info.GetEndOfExtendedSupportTimestamp())
+	}
+	// During the soak a node pool goes no further than the emulated
+	// version, and the control plane back to no version but the exact
+	// previous one.
+	_, err = g.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{
+		DesiredNodeVersion: newer, DesiredNodePoolId: "default-pool"}})
+	wantPrivateCACode(t, "a node upgrade past the emulated version", err, codes.FailedPrecondition)
+	// The rollback: the control plane runs the previous version again.
+	op, err = g.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: older}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gkeWaitLong(t, g, project, zone, op, 10*time.Minute); got.GetOperationType() != containerpb.Operation_UPGRADE_MASTER || got.GetError() != nil {
+		t.Fatalf("the rollback: %v %v", got.GetOperationType(), got.GetError())
+	}
+	c, _ = g.GetCluster(ctx, &containerpb.GetClusterRequest{Name: name})
+	if c.GetCurrentMasterVersion() != older || c.GetCurrentEmulatedVersion() != older {
+		t.Errorf("after the rollback: master %s, emulated %s; want %s", c.GetCurrentMasterVersion(), c.GetCurrentEmulatedVersion(), older)
+	}
+	if got := emulation(); got != minorOf(older)+"/" && got != minorOf(older)+"/"+minorOf(older) {
+		t.Errorf("after the rollback the API server's minor/emulated minor = %s, want %s", got, minorOf(older))
+	}
+	cpKubelet := gkeKubectl(t, kc, "", "get", "nodes", "-l", "node-role.kubernetes.io/control-plane", "-o", "jsonpath={.items[0].status.nodeInfo.kubeletVersion}")
+	if !strings.HasPrefix(older, strings.TrimPrefix(cpKubelet, "v")) {
+		t.Errorf("after the rollback the control plane's kubelet is %s, want %s", cpKubelet, older)
+	}
+	info, _ = g.FetchClusterUpgradeInfo(ctx, &containerpb.FetchClusterUpgradeInfoRequest{Name: name})
+	if info.GetRollbackSafeUpgradeStatus() != nil {
+		t.Errorf("rollback-safe status after the rollback = %v", info.GetRollbackSafeUpgradeStatus())
+	}
+	if d := info.GetUpgradeDetails(); len(d) == 0 || d[len(d)-1].GetInitialVersion() != newer || d[len(d)-1].GetTargetVersion() != older ||
+		d[len(d)-1].GetState() != containerpb.UpgradeDetails_SUCCEEDED {
+		t.Errorf("upgrade details after the rollback = %v", d)
+	}
+	// Upgraded again, rollback-safe; then step two.
+	op, err = g.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{
+		DesiredMasterVersion: newer, DesiredRollbackSafeUpgrade: &containerpb.RollbackSafeUpgrade{ControlPlaneSoakDuration: durationpb.New(6 * time.Hour)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gkeWaitLong(t, g, project, zone, op, 15*time.Minute); got.GetError() != nil {
+		t.Fatalf("the second step one: %v", got.GetError())
+	}
 	op, err = g.CompleteControlPlaneUpgrade(ctx, &containerpb.CompleteControlPlaneUpgradeRequest{Name: name})
 	if err != nil {
 		t.Fatal(err)
@@ -388,6 +441,9 @@ func TestGKERollbackSafeUpgrade(t *testing.T) {
 	if info.GetRollbackSafeUpgradeStatus() != nil {
 		t.Errorf("rollback-safe status after step two = %v", info.GetRollbackSafeUpgradeStatus())
 	}
+	// No way back after step two.
+	_, err = g.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: older}})
+	wantPrivateCACode(t, "a downgrade after step two", err, codes.InvalidArgument)
 }
 
 // gkeWaitLong is gkeWait with a longer deadline.

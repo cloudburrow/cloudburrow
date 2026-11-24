@@ -446,6 +446,14 @@ type Field struct {
 	// "Containers, Volumes, Networking, Security" (#1852). The section's
 	// fields with no Tab are drawn above the strip.
 	Tab string `json:"tab,omitempty"`
+	// Subsection, inside a Section, draws the consecutive fields naming it
+	// as one titled group (a fieldset with its legend), with
+	// SubsectionNote, given on its first field, under the title: Google's
+	// Create an instance has Shielded VM inside its Security pane, "Turn
+	// on all settings for the most secure configuration." over its three
+	// checkboxes (#2181).
+	Subsection     string `json:"subsection,omitempty"`
+	SubsectionNote string `json:"subsectionNote,omitempty"`
 	// Immutable marks a field shown for context and refused on submit. An
 	// edit form that hides a resource's identity makes the operator guess
 	// which resource they are editing; one that accepts a change to it lies,
@@ -564,10 +572,17 @@ type Field struct {
 	// RemoveLabel names each row's remove button where Google's is not
 	// "Remove": Audit Logs' exempted principals have Delete (#2013).
 	RemoveLabel string `json:"removeLabel,omitempty"`
-	// DisabledOptions, on a "radio" field, are options drawn but not
-	// choosable: SQL Server on Cloud SQL's engine choice, which CloudBurrow
-	// does not run (#1860).
+	// DisabledOptions, on a "radio" or "select" field, are options drawn
+	// but not choosable: SQL Server on Cloud SQL's engine choice, which
+	// CloudBurrow does not run (#1860); a firewall rule's IPv6 ranges
+	// (#2140).
 	DisabledOptions []string `json:"disabledOptions,omitempty"`
+	// LabelsBy and LabelsFor, on a "radio" field, name its options by the
+	// value the field LabelsBy names holds: Protocols and ports reads Allow
+	// all or Deny all as the rule's Action on match is Allow or Deny
+	// (#2140). An option LabelsFor does not name keeps its OptionLabels.
+	LabelsBy  string                       `json:"labelsBy,omitempty"`
+	LabelsFor map[string]map[string]string `json:"labelsFor,omitempty"`
 	// Links are documents the field is about, drawn as links under its
 	// help: Microsoft's licence terms beside Cloud SQL for SQL Server's
 	// licence checkbox (#1916). Each opens in a new tab.
@@ -1720,6 +1735,10 @@ type DeleteWords struct {
 	Selected string
 	// Submit is the confirmation dialog's button.
 	Submit string
+	// Title is the confirmation dialog's title, where Google's names it
+	// ("In the Delete notebook dialog, click Confirm"); empty keeps
+	// "Delete NAME?".
+	Title string
 }
 
 // RowEditLeader is a RowEditor whose rows' menus begin with Edit, as
@@ -1840,7 +1859,9 @@ type Action struct {
 	// in (#1847). The action route never receives it. On a selection
 	// action, the checked rows go in the address as SelectionField's
 	// parameter, comma-separated: Roles' Create custom role from selection
-	// opens Create custom role with ?roles= (#2013).
+	// opens Create custom role with ?roles= (#2013). An absolute URL on
+	// another origin opens in a new window: Developer Connect's Connect
+	// your account opens the provider's consent page (#2105).
 	Href string `json:"href,omitempty"`
 	// Terminal, when set, makes the action Google's Run in Cloud Shell: it
 	// opens the console's terminal (#781) and runs this command line in its
@@ -2415,7 +2436,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
 			"deleteLabel": caps.DeleteLabel, "deleteConfirm": caps.DeleteConfirm,
-			"deleteSelected": caps.DeleteSelected, "deleteSubmit": caps.DeleteSubmit, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
+			"deleteSelected": caps.DeleteSelected, "deleteSubmit": caps.DeleteSubmit, "deleteTitle": caps.DeleteTitle, "editRow": caps.EditRow, "editRowFirst": caps.EditRowFirst,
 			"deleteIcon": caps.DeleteIcon, "rowMenuOrder": caps.RowMenuOrder, "page": caps.Page, "scope": caps.Scope, "filters": caps.Filters,
 		})
 	}
@@ -2611,6 +2632,7 @@ type capabilities struct {
 	// checked rows' Delete and the confirmation's button (#1848).
 	DeleteSelected string `json:"deleteSelected,omitempty"`
 	DeleteSubmit   string `json:"deleteSubmit,omitempty"`
+	DeleteTitle    string `json:"deleteTitle,omitempty"`
 	EditRow        string `json:"editRow,omitempty"`
 	// EditRowFirst puts the rows' Edit first in their menus (RowEditLeader).
 	EditRowFirst bool `json:"editRowFirst,omitempty"`
@@ -2818,7 +2840,7 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if dw, ok := p.(DeleteWorder); ok {
 		w := dw.DeleteWords()
-		c.DeleteSelected, c.DeleteSubmit = w.Selected, w.Submit
+		c.DeleteSelected, c.DeleteSubmit, c.DeleteTitle = w.Selected, w.Submit, w.Title
 	}
 	if rl, ok := p.(RowEditLeader); ok {
 		c.EditRowFirst = rl.RowEditFirst()

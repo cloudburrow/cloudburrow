@@ -57,6 +57,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		"Apache Spark in a local Spark container (#2104); empty: CREATE PROCEDURE … WITH CONNECTION … LANGUAGE is 501")
 	vertexai := fs.String("vertexai", "", "the instance's local Vertex AI endpoint (http://host:port), which BigQuery ML's remote models "+
 		"run on (#1760); empty: CREATE MODEL … REMOTE WITH CONNECTION is 501. Never Google's")
+	pubsubAddr := fs.String("pubsub", "", "the instance's Pub/Sub (host:port, gRPC), which continuous queries' EXPORT DATA "+
+		"format CLOUD_PUBSUB publishes to (#2193); empty: that export is 501. Never Google's")
+	bigtableAddr := fs.String("bigtable", "", "the instance's Bigtable (host:port, gRPC), which continuous queries' EXPORT DATA "+
+		"format CLOUD_BIGTABLE writes to (#2193); empty: that export is 501. Never Google's")
+	spannerAddr := fs.String("spanner", "", "the instance's Spanner (host:port, gRPC), which continuous queries' EXPORT DATA "+
+		"format CLOUD_SPANNER writes to (#2193); empty: that export is 501. Never Google's")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -104,6 +110,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		o.policies, o.hubs, o.resourceManager = policies, hubs, *resourceManager
 		o.cdcStreams = cdcs // storagewritecdc.go, #2003
 		o.vertexai = *vertexai
+		o.sinks = continuousSinks{pubsub: *pubsubAddr, bigtable: *bigtableAddr, spanner: *spannerAddr} // #2193
 		if *onnx != "" {
 			o.onnx = onnxrunner.NewClient(*onnx, nil)
 		}

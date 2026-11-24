@@ -24,6 +24,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -66,6 +67,11 @@ type monitoringService struct {
 	// servers are read for cloudsql.googleapis.com metrics (#2141).
 	sql     func() *sqladmin.Server
 	sqlStop chan struct{}
+	// computeCPU is the Compute Engine API, for its VMs' CPU utilization
+	// (#2139); nil when Compute Engine is not served. computeStop ends
+	// its sampling.
+	computeCPU  func() *compute.Server
+	computeStop chan struct{}
 	// pubsub is the instance's Pub/Sub tunnel, for Pub/Sub notification
 	// channels (#1964); nil, or nil from it, when Pub/Sub is not served.
 	pubsub func() *netfwd.Forwarder
@@ -77,6 +83,10 @@ type monitoringService struct {
 	gke *monitoring.GKEBuiltin
 	// inventory is the products whose resources are group members (#2146).
 	inventory *monitoringInventoryWiring
+	// prom holds the prometheus.googleapis.com metrics: Managed Service for
+	// Prometheus' and GKE's metric packages (#2100), recorded by the
+	// gkePromCollector or written by a collector.
+	prom *monitoring.PromBuiltin
 	// cancel stops alert evaluation and uptime checks.
 	cancel context.CancelFunc
 }
@@ -118,6 +128,15 @@ func (s *monitoringService) gkeMetrics() *monitoring.GKEBuiltin {
 	return s.gke
 }
 
+// promMetrics is where Prometheus metrics are recorded, made on first
+// use; called before Start.
+func (s *monitoringService) promMetrics() *monitoring.PromBuiltin {
+	if s.prom == nil {
+		s.prom = monitoring.NewPromBuiltin()
+	}
+	return s.prom
+}
+
 // Addr is the bound address.
 func (s *monitoringService) Addr() string {
 	if s == nil || s.server == nil {
@@ -146,6 +165,7 @@ func (s *monitoringService) Start(ctx context.Context) error {
 	if s.gke != nil {
 		api.AddBuiltin(s.gke)
 	}
+	api.SetPromBuiltin(s.promMetrics())
 	if s.firestore != nil {
 		api.AddBuiltin(monitoring.NewFirestoreBuiltin(monitoringFirestore{addr: s.firestore}))
 	}
@@ -178,6 +198,12 @@ func (s *monitoringService) Start(ctx context.Context) error {
 		go sampleRunMetrics(api, monitoringRun{kubeconfig: s.cfg.KubeconfigPath(), namespace: runadapter.WorkloadNamespace,
 			project: s.cfg.DefaultProject(), region: "us-central1"}, s.runStop)
 	}
+	if s.computeCPU != nil {
+		s.computeStop = make(chan struct{})
+		go sampleComputeMetrics(api, monitoringCompute{api: s.computeCPU}, s.computeStop)
+		// The load balancers' custom metrics, dry-run ones included (#2160).
+		go sampleLBMetrics(api, monitoringLB{api: s.computeCPU}, s.computeStop)
+	}
 	setRunMetricsEndpoint(s.Addr)
 	if s.reqs != nil {
 		// up's request history (#1866), which it samples itself, shared
@@ -191,7 +217,7 @@ func (s *monitoringService) Start(ctx context.Context) error {
 		// Cloud SQL's servers, sampled every 60 seconds on their own, as
 		// a sample reads the cluster and each server (#2141).
 		sm := monitoring.NewSQLBuiltin(monitoringSQL{srv: s.sql, kubeconfig: s.cfg.KubeconfigPath(),
-			namespace: s.cfg.Cluster.Namespace, project: s.cfg.DefaultProject()}, time.Now)
+			namespace: s.cfg.Cluster.Namespace, project: s.cfg.DefaultProject(), logs: newSQLPoolerLogs()}, time.Now)
 		api.AddBuiltin(sm)
 		s.sqlStop = make(chan struct{})
 		go func(stop chan struct{}) {
@@ -270,6 +296,10 @@ func (s *monitoringService) Stop(ctx context.Context) error {
 	if s.sqlStop != nil {
 		close(s.sqlStop)
 		s.sqlStop = nil
+	}
+	if s.computeStop != nil {
+		close(s.computeStop)
+		s.computeStop = nil
 	}
 	if s.server == nil {
 		return nil

@@ -41,7 +41,7 @@ func TestConsoleComputeDiskKeysAndSchedules(t *testing.T) {
 		t.Fatalf("Snapshot schedules: %+v %v", l.Items, err)
 	}
 	if _, err := disks.Create(ctx, project, map[string]string{"name": "enc", "zone": "us-central1-a", "sizeGb": "10", "type": "pd-balanced",
-		"encryption": "Cloud KMS key", "kmsKeyName": key, "snapshotSchedule": "nightly"}); err != nil {
+		"encryption": "Cloud KMS key", "kmsKeyName": key, "snapshotSchedule": "us-central1/nightly"}); err != nil {
 		t.Fatal(err)
 	}
 	settle(t, s, project)

@@ -19,7 +19,7 @@ import (
 // Remove instances from schedule and Delete.
 type computeInstanceSchedulesProvider struct{ computeScreen }
 
-func (computeInstanceSchedulesProvider) ID() string    { return "compute-instanceschedules" }
+func (computeInstanceSchedulesProvider) ID() string    { return "compute-instance-schedules" }
 func (computeInstanceSchedulesProvider) Title() string { return "Instance schedules" }
 
 // scheduleTimeZones are the time zones Create schedule offers first; any

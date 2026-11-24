@@ -213,3 +213,92 @@ func compatTestNames(t *testing.T) map[string]bool {
 	}
 	return names
 }
+
+// The gke and gkeupgrade shards split the Kubernetes Engine tests
+// (COMPAT_GKE_TESTS) between them, on the served shard's instance, which
+// skips them all: each runs in exactly one of the two, and every name
+// COMPAT_GKE_UPGRADE_TEST_NAMES lists is a Kubernetes Engine test.
+func TestCompatGKEShardsSplitTheKubernetesEngineTests(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is not on PATH")
+	}
+	script, err := filepath.Abs(filepath.Join("..", "..", "scripts", "compat-shards.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog := `set -eu; . "$1"; echo "ALL=$COMPAT_GKE_TESTS"; echo "NAMES=$(echo $COMPAT_GKE_UPGRADE_TEST_NAMES)"
+for s in served gke gkeupgrade; do compat_shard "$s"; echo "$s.RUN=$COMPAT_RUN"; echo "$s.SKIP=$COMPAT_SKIP"; done`
+	out, err := exec.Command(bash, "-c", prog, "bash", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("compat-shards.sh: %v\n%s", err, out)
+	}
+	v := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		k, val, _ := strings.Cut(line, "=")
+		v[k] = val
+	}
+	all := regexp.MustCompile(v["ALL"])
+	runs := func(shard, name string) bool {
+		if r := v[shard+".RUN"]; r != "" && !regexp.MustCompile(r).MatchString(name) {
+			return false
+		}
+		if s := v[shard+".SKIP"]; s != "" && regexp.MustCompile(s).MatchString(name) {
+			return false
+		}
+		return true
+	}
+	tests := compatTestNames(t)
+	for _, n := range strings.Fields(v["NAMES"]) {
+		if !tests["Test"+n] || !all.MatchString("Test"+n) {
+			t.Errorf("COMPAT_GKE_UPGRADE_TEST_NAMES names %s, which is not a Kubernetes Engine test in test/compat", n)
+		}
+	}
+	gkeUpgrade := 0
+	for name := range tests {
+		if !all.MatchString(name) {
+			continue
+		}
+		if runs("served", name) {
+			t.Errorf("the served shard runs %s, a Kubernetes Engine test", name)
+		}
+		g, u := runs("gke", name), runs("gkeupgrade", name)
+		if g == u {
+			t.Errorf("%s runs in gke: %v and gkeupgrade: %v; want exactly one", name, g, u)
+		}
+		if u {
+			gkeUpgrade++
+		}
+	}
+	if gkeUpgrade == 0 {
+		t.Error("the gkeupgrade shard runs no test")
+	}
+}
+
+// The compat job's log check and scripts/verify-local.sh's coverage list
+// every shard with a compat suite: the matrix but acceptance, whose
+// suites are test/e2e's and test/k8s's.
+func TestCompatShardLogListsNameEveryShard(t *testing.T) {
+	_, ci := workflowJobs(t, "ci.yml")
+	raw, err := os.ReadFile(filepath.Join("..", "..", "scripts", "verify-local.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []string
+	for _, s := range strings.Fields(compatShard(t, "")["COMPAT_SHARDS"]) {
+		if s != "acceptance" {
+			want = append(want, s)
+		}
+	}
+	list := strings.Join(want, " ")
+	var all strings.Builder
+	for _, body := range ci {
+		all.WriteString(body)
+	}
+	if !strings.Contains(all.String(), "for shard in "+list+"; do") {
+		t.Errorf("ci.yml's compat log check does not loop over %q", list)
+	}
+	if !strings.Contains(string(raw), "for s in "+list+"; do") {
+		t.Errorf("scripts/verify-local.sh does not loop over %q", list)
+	}
+}

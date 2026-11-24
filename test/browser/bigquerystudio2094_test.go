@@ -140,9 +140,11 @@ func TestDataformBigQueryStudioDataCanvasNodesThroughThePage(t *testing.T) {
 		t.Errorf("the assistant without a local model says %q", reply)
 	}
 
-	// The canvas's controls by keyboard: Tab reaches Clear canvas, Enter
-	// asks, Escape leaves the canvas as it was.
-	p.run(chromedp.Focus(chromedp.CSS(`.bq-canvas .bq-toolbar button:nth-child(5)`)), chromedp.KeyEvent(kb.Enter))
+	// The canvas's controls by keyboard: More actions opens on Enter with
+	// focus on Clear canvas, Enter asks, Escape leaves the canvas as it was.
+	p.run(chromedp.Focus(chromedp.CSS(`.bq-canvas .bq-toolbar .bq-menu-button[aria-label='More actions']`)), chromedp.KeyEvent(kb.Enter))
+	p.waitFor(`document.activeElement && document.activeElement.textContent === "Clear canvas"`)
+	p.run(chromedp.KeyEvent(kb.Enter))
 	p.waitFor(`document.querySelector(".modal") !== null`)
 	p.run(chromedp.KeyEvent(kb.Escape))
 	p.waitFor(`document.querySelector(".modal") === null && document.querySelectorAll(".bq-canvas-node").length > 0`)
@@ -163,7 +165,8 @@ func TestDataformBigQueryStudioDataCanvasNodesThroughThePage(t *testing.T) {
 
 	// Clear canvas, confirmed.
 	p.waitFor(`document.querySelector(".bq-canvas") !== null`)
-	press(".bq-canvas .bq-toolbar button", "Clear canvas")
+	p.eval(`document.querySelector(".bq-canvas .bq-toolbar .bq-menu-button[aria-label='More actions']").click(); true`, nil)
+	press(".bq-canvas .bq-toolbar .bq-menu-item", "Clear canvas")
 	p.waitFor(`document.querySelector(".modal") !== null`)
 	press(".modal .modal-actions button", "Clear")
 	p.waitFor(`document.querySelectorAll(".bq-canvas-node").length === 0`)

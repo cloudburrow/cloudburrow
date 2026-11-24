@@ -94,6 +94,70 @@ type Job struct {
 	KeyAgent string `json:"keyAgent,omitempty"`
 	// KeyOnly asks for the key's check alone: nothing is run.
 	KeyOnly bool `json:"keyOnly,omitempty"`
+
+	// Kind is "" for a stored procedure, or the Dataproc workload a job
+	// of Serverless for Apache Spark (#2156) runs: KindPySpark,
+	// KindSpark, KindSparkR or KindSparkSQL for a batch, KindConnect for
+	// a Spark Connect session (Docker.StartConnect).
+	Kind string `json:"kind,omitempty"`
+	// Args are a batch's application arguments, after its main file.
+	Args []string `json:"args,omitempty"`
+	// QueryVariables are a Spark SQL batch's query_variables, each set
+	// first as "SET name=\"value\";", as the API reference says they are.
+	QueryVariables map[string]string `json:"queryVariables,omitempty"`
+	// AppID is the workload ID a batch or session runs as, recorded in
+	// its event log as WorkloadProperty so its Spark UI is found by it
+	// ("" for none).
+	AppID string `json:"appId,omitempty"`
+	// Log names the Cloud Logging resource and logs the job's output is
+	// written to; nil is a procedure's bigquery.googleapis.com/SparkJob.
+	Log *LogTarget `json:"log,omitempty"`
+
+	// A Hive, Pig or Trino job's: ContinueOnFailure runs its remaining
+	// queries after one fails; OutputFormat and ClientTags are a Trino
+	// job's; SavepointURI a Flink job's savepoint to start from.
+	ContinueOnFailure bool     `json:"continueOnFailure,omitempty"`
+	OutputFormat      string   `json:"outputFormat,omitempty"`
+	ClientTags        []string `json:"clientTags,omitempty"`
+	SavepointURI      string   `json:"savepointUri,omitempty"`
+	// Kernel is a Jupyter session's kernel (PYTHON or SCALA): its Spark
+	// Connect server is joined by a Jupyter Server of the session's
+	// kernels (Connect.KernelAddr). "" for a Spark Connect session.
+	Kernel string `json:"kernel,omitempty"`
+	// IPython runs the job's driver with IPython on its PYTHONPATH
+	// (Docker.IPython): a notebook batch's, whose cells IPython runs.
+	IPython bool `json:"ipython,omitempty"`
+	// DriverNode is the driver node group instance a cluster job's
+	// driver runs on ("": a container of its own).
+	DriverNode string `json:"driverNode,omitempty"`
+}
+
+// The kinds of Dataproc workload (Job.Kind).
+const (
+	KindPySpark  = "pyspark"
+	KindSpark    = "spark"
+	KindSparkR   = "sparkr"
+	KindSparkSQL = "sparksql"
+	KindConnect  = "connect"
+	// A Dataproc cluster's jobs of its other engines (#2162), run by
+	// Cluster.Submit beside Spark's: Hadoop MapReduce, Hive, Pig, Trino
+	// (and Presto's API on it) and Flink.
+	KindHadoop = "hadoop"
+	KindHive   = "hive"
+	KindPig    = "pig"
+	KindTrino  = "trino"
+	KindFlink  = "flink"
+)
+
+// LogTarget is where a Dataproc workload's lines go: its monitored
+// resource (cloud_dataproc_batch or cloud_dataproc_session, with their
+// labels) and its logs, the driver's output in Output and Spark's own
+// log4j lines in Spark.
+type LogTarget struct {
+	Type   string            `json:"type"`
+	Labels map[string]string `json:"labels"`
+	Output string            `json:"output"`
+	Spark  string            `json:"spark"`
 }
 
 // File is one Cloud Storage object of a job, by its gs:// URI.
@@ -125,6 +189,12 @@ type Result struct {
 	// DriverOutput is the driver's output, its last MaxDriverOutput
 	// bytes, for the job's staging bucket.
 	DriverOutput string `json:"driverOutput,omitempty"`
+	// AppID is the application's ID on a cluster's master, read from the
+	// driver's output (Cluster.Submit), or "".
+	AppID string `json:"appId,omitempty"`
+	// YarnApps are the YARN applications a Hadoop MapReduce or Pig job
+	// ran on the cluster's YARN (Cluster.Submit).
+	YarnApps []YarnApp `json:"yarnApps,omitempty"`
 	// KeyRefused is why the job's KMSKey cannot be used, and KeyKind
 	// which way (invalid, notFound, unusable, permissionDenied,
 	// unavailable, noKMS); nothing was run.
@@ -155,3 +225,7 @@ func decodeUnavailable(b []byte) error {
 	u.Msg = m.Message
 	return &u
 }
+
+// WorkloadProperty is the Spark property a batch's or session's driver
+// carries its workload's application ID (Job.AppID) in.
+const WorkloadProperty = "spark.cloudburrow.workload"

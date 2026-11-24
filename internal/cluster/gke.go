@@ -205,13 +205,17 @@ func (g *GKE) Resize(ctx context.Context, kind, image, pool string, n int) error
 // join adds one node to kind's cluster, as kind adds a worker.
 func (g *GKE) join(ctx context.Context, kind, image, pool, name string) error {
 	r := g.runner()
-	if _, err := r.Run(ctx, "docker", "run", "--name", name, "--hostname", name,
-		"--label", "io.x-k8s.kind.cluster="+kind, "--label", "io.x-k8s.kind.role=worker", "--label", poolLabel+"="+pool,
+	machine := g.poolMachine(kind, pool)
+	args := []string{"run", "--name", name, "--hostname", name,
+		"--label", "io.x-k8s.kind.cluster=" + kind, "--label", "io.x-k8s.kind.role=worker", "--label", poolLabel + "=" + pool,
 		"--label", "cloudburrow.dev/owned=true",
 		"--privileged", "--security-opt", "seccomp=unconfined", "--security-opt", "apparmor=unconfined", "--security-opt", "label=disable",
 		"--tmpfs", "/tmp", "--tmpfs", "/run", "--volume", "/var", "--volume", "/lib/modules:/lib/modules:ro",
-		"-e", "KIND_EXPERIMENTAL_CONTAINERD_SNAPSHOTTER", "--cgroupns=private", "--restart=on-failure:1",
-		"--net", "kind", "--detach", "--tty", image); err != nil {
+		"-e", "KIND_EXPERIMENTAL_CONTAINERD_SNAPSHOTTER", "--cgroupns=private", "--restart=on-failure:1"}
+	// The machine type's vCPUs and memory (#2100).
+	args = append(args, machine.dockerLimits()...)
+	args = append(args, "--net", "kind", "--detach", "--tty", image)
+	if _, err := r.Run(ctx, "docker", args...); err != nil {
 		return fmt.Errorf("start node %s: %w", name, err)
 	}
 	fail := func(err error) error {
@@ -244,6 +248,13 @@ func (g *GKE) join(ctx context.Context, kind, image, pool, name string) error {
 	}
 	labels, taints := g.poolNodeConfig(kind, pool)
 	kubelet := g.poolKubelet(kind, pool)
+	if machine != nil {
+		milli, mib, err := g.hostCapacity(ctx, name)
+		if err != nil {
+			return fail(err)
+		}
+		kubelet = mergeKubelet(kubelet, machineKubelet(machine, milli, mib))
+	}
 	conf := joinConfig(kind, name, ip, strings.TrimSpace(token), pool+g.zoneLabels(kind, pool, name)+labels, kubelet, taints...)
 	if _, err := r.Run(ctx, "docker", "exec", name, "sh", "-c", `printf '%s' "$1" > /kind/kubeadm.conf`, "sh", conf); err != nil {
 		return fail(fmt.Errorf("write node %s's kubeadm configuration: %w", name, err))

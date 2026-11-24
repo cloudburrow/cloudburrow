@@ -64,7 +64,7 @@ func newVMShell(t *testing.T, computeAddr, project string) vmShell {
 	return sh
 }
 
-// TestComputeRegionalDisksThroughTheGoClient (#2206), the official
+// TestComputeRegionalDisksHAThroughTheGoClient (#2206), the official
 // compute/apiv1 REST client: regionDiskTypes and diskTypes.aggregatedList; a regional disk's documented
 // refusals (one replica zone, the same zone twice, regional pd-standard
 // under 200 GB); a regional disk attached to a VM in us-central1-a, a file
@@ -77,7 +77,7 @@ func newVMShell(t *testing.T, computeAddr, project string) vmShell {
 // secondary's data read back in a disk made from its snapshot; and the
 // deletes.
 // covers: compute.diskTypes.aggregatedList, compute.regionDiskTypes.list, compute.regionDiskTypes.get, compute.regionDisks.insert, compute.regionDisks.get, compute.regionDisks.list, compute.regionDisks.delete, compute.regionDisks.resize, compute.regionDisks.setLabels, compute.regionDisks.createSnapshot, compute.regionDisks.getIamPolicy, compute.regionDisks.setIamPolicy, compute.regionDisks.testIamPermissions, compute.regionDisks.addResourcePolicies, compute.regionDisks.removeResourcePolicies, compute.regionDisks.startAsyncReplication, compute.regionDisks.stopAsyncReplication, compute.regionDisks.stopGroupAsyncReplication, compute.regionDisks.bulkInsert, compute.resourcePolicies.insert, compute.resourcePolicies.get, compute.resourcePolicies.list, compute.resourcePolicies.delete, compute.resourcePolicies.aggregatedList, compute.instances.attachDisk, compute.regionOperations.get
-func TestComputeRegionalDisksThroughTheGoClient(t *testing.T) {
+func TestComputeRegionalDisksHAThroughTheGoClient(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h)
 	addr := h.Endpoint(EnvCompute)

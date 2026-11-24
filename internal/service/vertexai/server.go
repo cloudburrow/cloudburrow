@@ -75,6 +75,19 @@ type Server struct {
 	caches          *cacheStore
 	cacheRESTOnce   sync.Once
 	cacheTranscoder *rest.Transcoder
+
+	// nb is Colab Enterprise's runtime templates and runtimes
+	// (notebookruntimes.go, #2105), served over gRPC and nbTranscoder.
+	// Guarded by mu.
+	nb *notebookStore
+	// wb holds the Workbench instances (workbench.go, #2173).
+	wb           *workbenchStore
+	nbRESTOnce   sync.Once
+	nbTranscoder *rest.Transcoder
+	// schedStop ends the Colab Enterprise schedules' loop (schedules.go).
+	schedStop chan struct{}
+	// identity are the execution identity hooks (runas.go, #2173).
+	identity Identity
 }
 
 // NewServer returns a server. A nil generator is valid and makes every
@@ -135,6 +148,22 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("/"+v+"/projects/{project}/locations/{location}/cachedContents", http.HandlerFunc(s.serveCacheREST))
 		mux.Handle("/"+v+"/projects/{project}/locations/{location}/cachedContents/{id}", http.HandlerFunc(s.serveCacheREST))
 	}
+	// Colab Enterprise's runtime templates and runtimes, and their
+	// operations (notebookruntimes.go, #2105).
+	// Notebook executions, schedules and the templates' IAM policies
+	// (notebookjobs.go, schedules.go, notebookiam.go) too.
+	// Vertex AI pipeline jobs (pipelines.go, #2173) too.
+	for _, c := range []string{"notebookRuntimeTemplates", "notebookRuntimes", "notebookExecutionJobs", "schedules", "pipelineJobs"} {
+		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c, s.serveNotebookREST)
+		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
+	}
+	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/notebookRuntimes:assign", s.serveNotebookREST)
+	// Workbench instances, notebooks.googleapis.com v2 (#2173).
+	mux.HandleFunc("/v2/projects/{project}/locations/{location}/instances", s.serveNotebookREST)
+	mux.HandleFunc("/v2/projects/{project}/locations/{location}/instances/", s.serveNotebookREST)
+	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/pipelineJobs:batchDelete", s.serveNotebookREST)
+	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/pipelineJobs:batchCancel", s.serveNotebookREST)
+	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/notebookRuntimeTemplates:setDefault", s.setDefaultREST)
 	// Model Garden's OpenAI-compatible path on its endpoints (#1840).
 	mux.HandleFunc("POST /v1beta1/projects/{project}/locations/{location}/endpoints/{endpoint}/chat/completions", s.chatCompletionsREST)
 	// Everything else: Model Garden's Deploy, Endpoints, Models and

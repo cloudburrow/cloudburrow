@@ -144,4 +144,14 @@ func TestReleaseSmokeChecksTheInstalledPlatform(t *testing.T) {
 	if !strings.Contains(string(raw), `*", ${SMOKE_PLATFORM})")`) {
 		t.Error("smoke-release.sh must compare `cloudburrow version`'s platform with SMOKE_PLATFORM")
 	}
+
+	// darwin/arm64 ships the Apple GPU (Metal) runner: both install routes
+	// must put it where the CLI looks, or Gemma silently runs on CPU.
+	runner := "libexec/cloudburrow/litert-lm/cloudburrow_generate"
+	if !strings.Contains(string(raw), `"${SMOKE_PLATFORM:-}" = darwin/arm64`) || !strings.Contains(string(raw), runner) {
+		t.Errorf("smoke-release.sh must check install.sh installed %s on darwin/arm64", runner)
+	}
+	if !strings.Contains(smoke, `"${{ matrix.platform }}" = darwin/arm64`) || !strings.Contains(smoke, runner) {
+		t.Errorf("the Homebrew step must check the formula installed %s on darwin/arm64", runner)
+	}
 }

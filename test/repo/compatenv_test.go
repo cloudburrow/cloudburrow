@@ -23,6 +23,9 @@ import (
 // has a value for them: each is a test-mode switch or a fixture a job makes
 // for itself. Each must still be listed in test/compat/README.md.
 var compatEnvExceptions = map[string]string{
+	// The image Vertex AI Pipelines' tasks run (#2173), which must already
+	// be on the host's Docker; no instance reports what the host holds.
+	"CLOUDBURROW_TEST_PIPELINE_IMAGE": "opt-in: an image on the host's Docker for pipeline tasks (default python:3-alpine)",
 	// The instance under test is a `-tags onnx` build whose BigQuery
 	// imports ONNX models (#1711); no instance reports which build it is.
 	"CLOUDBURROW_TEST_ONNX": "opt-in switch: the instance is an onnx build run with ONNXRUNTIME_LIB",
@@ -43,6 +46,7 @@ var compatEnvExceptions = map[string]string{
 	"CLOUDBURROW_TEST_TASKS_PROBE":              "restart probe fixture file",
 	"CLOUDBURROW_TEST_SCHEDULER_PROBE":          "restart probe fixture file",
 	"CLOUDBURROW_TEST_WORKFLOWS_PROBE":          "restart probe fixture file",
+	"CLOUDBURROW_TEST_GKE_LOGS_PROBE":           "restart probe fixture file",
 	"CLOUDBURROW_TEST_STORAGE_RESTART_PROBE":    "restart probe mode and fixture file",
 	"CLOUDBURROW_TEST_STORAGE_VERSIONING_PROBE": "builtin storage-server restart probe mode and file",
 	"CLOUDBURROW_TEST_CLOUDSQL_SETUP":           "restart probe setup switch",
@@ -57,6 +61,9 @@ var compatEnvExceptions = map[string]string{
 	"CLOUDBURROW_TEST_TASKS_EXPECT":             "restart probe expectation (present or absent)",
 	"CLOUDBURROW_TEST_SCHEDULER_EXPECT":         "restart probe expectation (present or absent)",
 	"CLOUDBURROW_TEST_WORKFLOWS_EXPECT":         "restart probe expectation (present or absent)",
+	"CLOUDBURROW_TEST_GKE_LOGS_EXPECT":          "restart probe expectation (present or absent)",
+	"CLOUDBURROW_TEST_DATAPROC_HDFS_SETUP":      "restart probe setup switch",
+	"CLOUDBURROW_TEST_DATAPROC_HDFS_EXPECT":     "restart probe expectation (present)",
 	// The image the Cloud Build arbitrary-step tests run (#1382), when the
 	// default alpine:3.20 is not to be pulled; a host choice, not an
 	// instance's.
@@ -276,6 +283,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"CLOUDBURROW_WORKFLOWS_ENDPOINT":              "127.0.0.1:9038",
 		"CLOUDBURROW_PARAMETERMANAGER_ENDPOINT":       "127.0.0.1:9047",
 		"CLOUDBURROW_DATAFORM_ENDPOINT":               "127.0.0.1:9058",
+		"CLOUDBURROW_DATAPROC_ENDPOINT":               "127.0.0.1:9066",
 		"CLOUDBURROW_APPHUB_ENDPOINT":                 "127.0.0.1:9048",
 		"CLOUDBURROW_ALLOYDB_ENDPOINT":                "127.0.0.1:9063",
 		"CLOUDBURROW_ALLOYDB_CONNECTOR_ENDPOINT":      "127.0.0.1:55433",
@@ -409,6 +417,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"WORKFLOWS":                "127.0.0.1:9038",
 		"PARAMETERMANAGER":         "127.0.0.1:9047",
 		"DATAFORM":                 "127.0.0.1:9058",
+		"DATAPROC":                 "127.0.0.1:9066",
 		"APPHUB":                   "127.0.0.1:9048",
 		"ALLOYDB":                  "127.0.0.1:9063",
 		"ALLOYDB_CONNECTOR":        "127.0.0.1:55433",
@@ -440,10 +449,12 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"SQL_COMPUTE":              "127.0.0.1:9031",
 		"MEMORYSTORE_COMPUTE":      "127.0.0.1:9031",
 		"FILESTORE_BACKUPDR":       "127.0.0.1:9024",
+		"RUN_COMPUTE":              "127.0.0.1:9031",
 		"MEMORYSTORE_PRIVATECA":    "127.0.0.1:9028",
 		"CLOUDSQL_SECRETS":         "127.0.0.1:9006",
 		"NOPUBSUB_STORAGE":         "http://127.0.0.1:50003",
 		"SQL_LOGGING":              "127.0.0.1:9009",
+		"SQL_MONITORING":           "127.0.0.1:9033",
 		"APPENGINE_URL":            "http://127.0.0.1:18506",
 		"SCALE_RUN":                "127.0.0.1:50002",
 		"SCALE_SECRETS":            "127.0.0.1:9006",

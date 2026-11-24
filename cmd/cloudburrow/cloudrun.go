@@ -74,6 +74,9 @@ type runService struct {
 	env runadapter.Environment
 	// cloudSQL serves Cloud SQL volumes (#1346); nil refuses them.
 	cloudSQL runadapter.CloudSQL
+	// vpc checks VPC access against Compute Engine and Serverless VPC
+	// Access (#2140); nil without compute.
+	vpc runadapter.VPC
 	// events serves functions' event triggers (#1414); nil without
 	// Pub/Sub, which refuses them.
 	events *eventsConfig
@@ -99,6 +102,14 @@ func (r *runService) metadataAccount(label string) (string, bool) {
 		return "", false
 	}
 	return a.MetadataAccount(label)
+}
+
+// useVPC checks VPC access against v (#2140).
+func (r *runService) useVPC(v runadapter.VPC) {
+	if r == nil || v == nil {
+		return
+	}
+	r.vpc = v
 }
 
 // useCloudSQL enables Cloud SQL volumes.
@@ -174,6 +185,9 @@ func (r *runService) Start(ctx context.Context) error {
 	}
 	if r.cloudSQL != nil {
 		adapter = adapter.WithCloudSQL(r.cloudSQL)
+	}
+	if r.vpc != nil {
+		adapter = adapter.WithVPC(r.vpc)
 	}
 	r.adapter.Store(adapter)
 	// Artifact Registry's Docker registry (#1383): content-addressed in
@@ -330,7 +344,9 @@ func (r *runService) Start(ctx context.Context) error {
 	cloudBuild := builds.CloudBuild()
 	var jsonAPI http.Handler = runadapter.RegistryHandlerOr(runadapter.SourceManagerHandlerOr(ssm, cloudBuild,
 		func(g grpc.ServiceRegistrar) { ssm.Register(g); ops.Register(g) },
-		runadapter.DeveloperConnectHandlerOr(func(g grpc.ServiceRegistrar) { devConnect.Register(g); ops.Register(g) },
+		// An account connector's oauth start URI and the OAuth redirect
+		// URI (#2105), beside its JSON API.
+		devConnect.OAuthHandlerOr(runadapter.DeveloperConnectHandlerOr(func(g grpc.ServiceRegistrar) { devConnect.Register(g); ops.Register(g) },
 			// Eventarc (#1877) under /eventarc/v1/: its trigger paths are
 			// Cloud Build's.
 			runadapter.EventarcHandlerOr(func(g grpc.ServiceRegistrar) { functions.Eventarc().Register(g); ops.Register(g) },
@@ -338,7 +354,7 @@ func (r *runService) Start(ctx context.Context) error {
 				// /eventarcpublishing/v1/: its bus paths are Eventarc's.
 				runadapter.EventarcPublishingHandlerOr(functions.EventarcPublisher(),
 					functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
-						adapter.V1Handler(runadapter.NewRESTHandler(register)))))))))
+						adapter.V1Handler(runadapter.NewRESTHandler(register))))))))))
 	// Artifact Registry's own prefix (#1578): its Locations mixin, whose
 	// /v1/ path is Cloud Run v1's, and its other calls through the above.
 	jsonAPI = runadapter.ArtifactRegistryHandlerOr(jsonAPI)

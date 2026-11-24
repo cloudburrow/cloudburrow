@@ -104,7 +104,7 @@ func newVM(t *testing.T, s *Server, zone, name, mt string) {
 // types, attaching it in either replica zone only, the failover by
 // force-attach (the other VM fenced read-only, the data the same disk's),
 // a snapshot and a clone of it.
-func TestRegionalDisks(t *testing.T) {
+func TestRegionalDisksOfIssue2206(t *testing.T) {
 	vms := newDataVMs()
 	s, err := New(Options{VMs: vms})
 	if err != nil {

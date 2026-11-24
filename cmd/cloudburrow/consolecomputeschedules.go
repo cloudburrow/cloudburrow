@@ -19,7 +19,7 @@ import (
 // page with its disks, Attach to disk, Detach from disk and Delete.
 type computeSnapshotSchedulesProvider struct{ computeScreen }
 
-func (computeSnapshotSchedulesProvider) ID() string    { return "compute-snapshotschedules" }
+func (computeSnapshotSchedulesProvider) ID() string    { return "compute-snapshot-schedules" }
 func (computeSnapshotSchedulesProvider) Title() string { return "Snapshot schedules" }
 
 // scheduleText is a schedule's frequency as Google's list shows it.
@@ -192,7 +192,7 @@ func (p computeSnapshotSchedulesProvider) scheduleActions(pol map[string]any, in
 				loc = regionOfZone(vpcLast(vpcStr(d, "zone")))
 			}
 			b := diskBase(diskPathOf(vpcStr(d, "selfLink")))
-			labels[b] = vpcStr(d, "name") + " (" + diskLoc(d) + ")"
+			labels[b] = vpcStr(d, "name") + " (" + diskLocText(d) + ")"
 			if loc == region && !member[vpcStr(d, "selfLink")] {
 				attach = append(attach, b)
 			}
@@ -248,7 +248,7 @@ func (p computeSnapshotSchedulesProvider) Detail(ctx context.Context, project st
 	disks := console.Listing{Columns: []string{"Location", "Size"}, Noun: "disks"}
 	for _, d := range in {
 		disks.Items = append(disks.Items, console.Resource{Name: vpcStr(d, "name"),
-			Fields: map[string]string{"Location": diskLoc(d), "Size": vpcStr(d, "sizeGb") + " GB"}})
+			Fields: map[string]string{"Location": diskLocText(d), "Size": vpcStr(d, "sizeGb") + " GB"}})
 	}
 	disks.Total = len(disks.Items)
 	rp := vmMap(vmMap(pol, "snapshotSchedulePolicy"), "retentionPolicy")

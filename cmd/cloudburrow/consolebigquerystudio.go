@@ -55,6 +55,14 @@ type studioQuery struct {
 	DestinationTable   string `json:"destinationTable"`
 	WriteDisposition   string `json:"writeDisposition"`
 	DefaultDataset     string `json:"defaultDataset"`
+	// QueryMode is the Edit menu's Query mode (#2094): "" (neither),
+	// "optional" (Optional job creation) or "continuous" (Continuous
+	// query).
+	QueryMode string `json:"queryMode"`
+	// ServiceAccount is Query settings' Continuous query > Use service
+	// account (#2193): the continuous query runs as it, sent as the
+	// connection property service_account.
+	ServiceAccount string `json:"serviceAccount"`
 }
 
 type studioField struct {
@@ -77,7 +85,10 @@ type studioResult struct {
 	Rows           []map[string]any   `json:"rows,omitempty"`
 	TotalRows      uint64             `json:"totalRows"`
 	Message        string             `json:"message,omitempty"`
-	Stages         []map[string]any   `json:"stages"`
+	// QueryID is the query's ID when Optional job creation ran it without
+	// a job (#2094).
+	QueryID string           `json:"queryId,omitempty"`
+	Stages  []map[string]any `json:"stages"`
 }
 
 func (p bigqueryProvider) StudioCall(ctx context.Context, project, call string, body json.RawMessage) (any, error) {
@@ -97,6 +108,8 @@ func (p bigqueryProvider) StudioCall(ctx context.Context, project, call string, 
 	switch call {
 	case "explorer":
 		return p.studioExplorer(ctx, svc)
+	case "complete":
+		return p.studioComplete(ctx, svc, body)
 	case "query":
 		var q studioQuery
 		if err := json.Unmarshal(body, &q); err != nil {
@@ -244,6 +257,23 @@ func (p bigqueryProvider) studioRun(ctx context.Context, svc *bqv2.Service, q st
 			return nil, fmt.Errorf("unknown write preference %q", q.WriteDisposition)
 		}
 	}
+	switch q.QueryMode {
+	case "":
+	case "continuous":
+		cfg.Continuous = true
+		if sa := strings.TrimSpace(q.ServiceAccount); sa != "" {
+			cfg.ConnectionProperties = append(cfg.ConnectionProperties, &bqv2.ConnectionProperty{Key: "service_account", Value: sa})
+		}
+	case "optional":
+		// jobs.query, the only call that takes jobCreationMode; a
+		// destination table or batch priority needs a job's configuration,
+		// so such a query runs as a job.
+		if !q.DryRun && q.DestinationTable == "" && cfg.Priority == "" {
+			return p.studioRunOptional(ctx, svc, q, cfg)
+		}
+	default:
+		return nil, fmt.Errorf("unknown query mode %q: optional or continuous", q.QueryMode)
+	}
 	job := &bqv2.Job{
 		Configuration: &bqv2.JobConfiguration{Query: cfg, DryRun: q.DryRun},
 	}
@@ -274,6 +304,14 @@ func (p bigqueryProvider) studioRun(ctx context.Context, svc *bqv2.Service, q st
 	if ref == nil || ref.JobId == "" {
 		return nil, errors.New("BigQuery answered without a job reference")
 	}
+	if cfg.Continuous {
+		return p.studioContinuous(ctx, svc, res, ref)
+	}
+	return p.studioResults(ctx, svc, res, ref)
+}
+
+// studioResults reads the results and the job of a query job.
+func (p bigqueryProvider) studioResults(ctx context.Context, svc *bqv2.Service, res *studioResult, ref *bqv2.JobReference) (*studioResult, error) {
 	res.JobID, res.Location = ref.JobId, ref.Location
 	results, err := svc.Jobs.GetQueryResults(p.project, ref.JobId).Location(ref.Location).
 		MaxResults(int64(detailLimit)).TimeoutMs((dbTimeout - dbTimeout/4).Milliseconds()).Context(ctx).Do()

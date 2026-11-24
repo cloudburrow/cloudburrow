@@ -213,6 +213,24 @@ func (s registrySource) Tags(full string) ([]iamcond.Tag, bool) {
 	return out, true
 }
 
+// tokenCaller is the caller a bearer token names.
+func tokenCaller(creds *metadata.Credentials, bearer string) iameval.Caller {
+	email, ok := creds.TokenAccount(bearer, time.Now())
+	switch {
+	case !ok:
+		return iameval.Caller{Invalid: true}
+	case strings.EqualFold(email, creds.Email):
+		return iameval.Caller{Email: email, Owner: true}
+	}
+	if strings.HasPrefix(email, "principal://") {
+		// A federated subject (#1941) keeps its case: its
+		// identifier is case-sensitive, and Google's errors
+		// name it as it is.
+		return iameval.Caller{Email: email}
+	}
+	return iameval.Caller{Email: strings.ToLower(email)}
+}
+
 // newIAMEnforcer is the enforcer of cfg's instance.
 func newIAMEnforcer(cfg config.Config, creds *metadata.Credentials, reg func() *resourcemanager.Registry) *iameval.Enforcer {
 	on := cfg.IAMEnforced()
@@ -224,20 +242,13 @@ func newIAMEnforcer(cfg config.Config, creds *metadata.Credentials, reg func() *
 		Eval: &iameval.Evaluator{Source: registrySource{reg: reg}},
 		On:   func() bool { return on },
 		CallerOf: func(bearer string) iameval.Caller {
-			email, ok := creds.TokenAccount(bearer, time.Now())
-			switch {
-			case !ok:
-				return iameval.Caller{Invalid: true}
-			case strings.EqualFold(email, creds.Email):
-				return iameval.Caller{Email: email, Owner: true}
+			c := tokenCaller(creds, bearer)
+			if !c.Invalid {
+				// A token minted with scopes (a VM's, #2179) may call
+				// only what they cover.
+				c.Scopes, _ = creds.TokenScopes(bearer, time.Now())
 			}
-			if strings.HasPrefix(email, "principal://") {
-				// A federated subject (#1941) keeps its case: its
-				// identifier is case-sensitive, and Google's errors
-				// name it as it is.
-				return iameval.Caller{Email: email}
-			}
-			return iameval.Caller{Email: strings.ToLower(email)}
+			return c
 		},
 		Policies: map[string]iameval.PolicyGetter{
 			// A service account's own policy, which iam.serviceAccounts.actAs

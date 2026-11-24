@@ -2,9 +2,9 @@ package compute
 
 import "context"
 
-// encrypted are the instance's disks that have a data key: the boot disk
+// Encrypted are the instance's disks that have a data key: the boot disk
 // and the attached disks.
-func (vm VMSpec) encrypted() []DiskSpec {
+func (vm VMSpec) Encrypted() []DiskSpec {
 	var out []DiskSpec
 	if vm.BootDisk.DataKey != nil {
 		out = append(out, vm.BootDisk)

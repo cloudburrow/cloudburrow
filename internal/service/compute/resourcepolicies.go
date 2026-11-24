@@ -354,3 +354,15 @@ func (s *Server) bulkInsertDisks(project, scope, region string, b obj) (obj, err
 		}
 	})
 }
+
+func listOf(v any) []any {
+	l, _ := v.([]any)
+	return l
+}
+
+func vpcOrStr(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}

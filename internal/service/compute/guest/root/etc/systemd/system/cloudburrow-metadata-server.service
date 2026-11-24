@@ -1,0 +1,11 @@
+[Unit]
+Description=CloudBurrow: the metadata server (metadata.google.internal, 169.254.169.254) of this instance
+After=cloudburrow-network.service
+Before=network-online.target google-startup-scripts.service cloudburrow-guest-agent.service google-cloud-ops-agent.service google-cloud-ops-agent-fluent-bit.service google-cloud-ops-agent-opentelemetry-collector.service
+[Service]
+PassEnvironment=CLOUDBURROW_GUEST_METADATA
+ExecStart=/usr/lib/cloudburrow/metadata-server
+Restart=always
+RestartSec=2
+[Install]
+WantedBy=multi-user.target

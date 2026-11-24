@@ -309,7 +309,10 @@ func (p cloudSQLInstancesProvider) networkingAction(project string, in *sqladmin
 	}
 	fields := append([]console.Field{{Name: "publicIp", Label: "Public IP", Type: "checkbox", Default: public,
 		Help: "The instance's public address (ipv4Enabled)."}}, sqlPrivateIPFields("", nets, ranges, ic)...)
-	if sqlPoolable(in) {
+	switch {
+	case sqlPoolable(in) && strings.HasPrefix(in.DatabaseVersion, "MYSQL_"):
+		fields = append(fields, sqlMySQLPoolFields("", nil, in.Settings.ConnectionPoolConfig)...)
+	case sqlPoolable(in):
 		fields = append(fields, sqlPoolFields("", nil, in.Settings.ConnectionPoolConfig)...)
 	}
 	return console.Action{ID: "edit-networking", Label: "Edit", Title: "Networking", Submit: "Save", Fields: fields,

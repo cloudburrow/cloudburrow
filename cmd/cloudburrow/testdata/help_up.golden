@@ -20,6 +20,8 @@ Flags:
     	accept Microsoft's End-User Licensing Agreement for SQL Server (https://go.microsoft.com/fwlink/?LinkId=746388) yourself, for the Cloud SQL for SQL Server instances this instance creates: their servers run Microsoft's SQL Server image, which starts only once it is accepted; who accepted and when is recorded on each instance (also CLOUDBURROW_ACCEPT_MSSQL_EULA=Y)
   -allow-remote
     	permit binding a non-loopback address (unsafe)
+  -allow-unconfined-containers
+    	let the Dataproc DOCKER optional component run each node's Docker daemon with seccomp, AppArmor and the /proc and /sys masks unconfined, which weakens the isolation between those containers and this machine (unsafe; also CLOUDBURROW_ALLOW_UNCONFINED_CONTAINERS=true)
   -appengine-url string
     	base URL of a local HTTP server standing in for the App Engine app, such as http://localhost:8080: Cloud Tasks and Cloud Scheduler deliver App Engine targets there (default: none, and every App Engine attempt fails 404)
   -artifact-registry-cleanup-interval duration
@@ -102,6 +104,8 @@ Flags:
     	control port for health, readiness and admin (0 = OS-assigned)
   -port-dataform int
     	Dataform API host port (0 = OS-assigned; default 9058)
+  -port-dataproc int
+    	Dataproc API (Serverless for Apache Spark) host port (0 = OS-assigned; default 9066)
   -port-datastore int
     	Datastore emulator host port (0 = OS-assigned; default 9011)
   -port-datatransfer int
@@ -181,7 +185,7 @@ Flags:
   -seed-file string
     	seed document (the /admin/seed body) applied when up starts
   -services string
-    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr,privateca,gke,monitoring,compute,workflows,parametermanager,dataform,apphub,trace,alloydb,filestore)
+    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr,privateca,gke,monitoring,compute,workflows,parametermanager,dataform,apphub,trace,dataproc,alloydb,filestore)
   -shutdown-timeout duration
     	bounded time to drain on shutdown
   -state-dir string

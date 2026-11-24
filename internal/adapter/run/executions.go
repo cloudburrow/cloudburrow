@@ -86,6 +86,13 @@ metadata:
     spec:
       restartPolicy: Never
 `, taskCount, parallelismOf(et.GetParallelism(), taskCount), tt.GetMaxRetries(), labelRunJob, jobID)
+	if ve := vpcEgressAnnotation(spec.GetName(), tt.GetVpcAccess()); ve != "" {
+		// The tasks' VPC egress (#2140, vpcaccess.go), on their pods.
+		out := strings.Replace(b.String(), "    spec:\n      restartPolicy: Never\n",
+			fmt.Sprintf("      annotations:\n        %s: %q\n    spec:\n      restartPolicy: Never\n", annVPCEgress, ve), 1)
+		b.Reset()
+		b.WriteString(out)
+	}
 	if t := tt.GetTimeout(); t != nil {
 		secs := int64(t.AsDuration().Seconds())
 		fmt.Fprintf(&b, "      activeDeadlineSeconds: %d\n", max(secs, 1))

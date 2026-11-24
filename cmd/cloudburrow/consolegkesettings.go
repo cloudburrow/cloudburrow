@@ -189,11 +189,46 @@ func gkeLoggingText(c *containerpb.Cluster) string {
 	return strings.Join(on, ", ")
 }
 
+// gkeMonitoringComponents are the Edit Cloud Monitoring dialog's
+// components, in the order and words of Google's (System; the control
+// plane's; kube state's; cAdvisor/Kubelet; NVIDIA DCGM), with their field
+// names.
+var gkeMonitoringComponents = []struct {
+	field, label string
+	comp         containerpb.MonitoringComponentConfig_Component
+}{
+	{"system", "System", containerpb.MonitoringComponentConfig_SYSTEM_COMPONENTS},
+	{"apiserver", "API Server", containerpb.MonitoringComponentConfig_APISERVER},
+	{"scheduler", "Scheduler", containerpb.MonitoringComponentConfig_SCHEDULER},
+	{"controllermanager", "Controller Manager", containerpb.MonitoringComponentConfig_CONTROLLER_MANAGER},
+	{"storage", "Storage", containerpb.MonitoringComponentConfig_STORAGE},
+	{"pod", "Pod", containerpb.MonitoringComponentConfig_POD},
+	{"deployment", "Deployment", containerpb.MonitoringComponentConfig_DEPLOYMENT},
+	{"statefulset", "StatefulSet", containerpb.MonitoringComponentConfig_STATEFULSET},
+	{"daemonset", "DaemonSet", containerpb.MonitoringComponentConfig_DAEMONSET},
+	{"hpa", "HorizontalPodAutoscaler", containerpb.MonitoringComponentConfig_HPA},
+	{"jobset", "JobSet", containerpb.MonitoringComponentConfig_JOBSET},
+	{"cadvisor", "cAdvisor", containerpb.MonitoringComponentConfig_CADVISOR},
+	{"kubelet", "Kubelet", containerpb.MonitoringComponentConfig_KUBELET},
+	{"dcgm", "NVIDIA Data Center GPU Manager (DCGM)", containerpb.MonitoringComponentConfig_DCGM},
+}
+
 func gkeMonitoringText(c *containerpb.Cluster) string {
-	if gkeHas(c.GetMonitoringConfig().GetComponentConfig().GetEnableComponents(), containerpb.MonitoringComponentConfig_SYSTEM_COMPONENTS) {
-		return "System"
+	comps := c.GetMonitoringConfig().GetComponentConfig().GetEnableComponents()
+	var on []string
+	for _, m := range gkeMonitoringComponents {
+		if gkeHas(comps, m.comp) {
+			on = append(on, m.label)
+		}
 	}
-	return "Disabled"
+	if len(on) == 0 {
+		return "Disabled"
+	}
+	out := strings.Join(on, ", ")
+	if c.GetMonitoringConfig().GetManagedPrometheusConfig().GetEnabled() {
+		out += "; Managed Service for Prometheus enabled"
+	}
+	return out
 }
 
 func gkeTelemetryActions(c *containerpb.Cluster) []console.Action {
@@ -205,11 +240,28 @@ func gkeTelemetryActions(c *containerpb.Cluster) []console.Action {
 			{Name: "workloads", Label: "Workload logs", Type: "checkbox", Default: strconv.FormatBool(gkeHas(lc, containerpb.LoggingComponentConfig_WORKLOADS)),
 				Help: "Every other container's stdout and stderr, as k8s_container entries in Cloud Logging. Workload logs need system logs."},
 		}},
-		{ID: "monitoring", Label: "Edit Cloud Monitoring", Title: "Edit Cloud Monitoring", Submit: "Save changes", Fields: []console.Field{
-			{Name: "system", Label: "System metrics", Type: "checkbox", Default: strconv.FormatBool(gkeHas(c.GetMonitoringConfig().GetComponentConfig().GetEnableComponents(), containerpb.MonitoringComponentConfig_SYSTEM_COMPONENTS)),
-				Help: "The kubernetes.io container, pod and node metrics, read from each node's kubelet every minute."},
-		}},
+		{ID: "monitoring", Label: "Edit Cloud Monitoring", Title: "Edit Cloud Monitoring", Submit: "Save changes", Fields: gkeMonitoringFields(c)},
 	}
+}
+
+// gkeMonitoringFields are the Edit Cloud Monitoring dialog's: a checkbox
+// per component, and Managed Service for Prometheus.
+func gkeMonitoringFields(c *containerpb.Cluster) []console.Field {
+	comps := c.GetMonitoringConfig().GetComponentConfig().GetEnableComponents()
+	help := map[string]string{
+		"system":    "The kubernetes.io container, pod and node metrics, read from each node's kubelet every minute. Every other component needs it.",
+		"apiserver": "Control plane metrics, as prometheus.googleapis.com metrics on prometheus_target.",
+		"storage":   "Kube state metrics (needs Managed Service for Prometheus). System namespaces are not collected.",
+		"cadvisor":  "cAdvisor and Kubelet metrics (need Managed Service for Prometheus).",
+		"dcgm":      "GPU metrics of nodes with NVIDIA GPUs; a local cluster has none.",
+	}
+	var out []console.Field
+	for _, m := range gkeMonitoringComponents {
+		out = append(out, console.Field{Name: m.field, Label: m.label, Type: "checkbox", Default: strconv.FormatBool(gkeHas(comps, m.comp)), Help: help[m.field]})
+	}
+	return append(out, console.Field{Name: "managedPrometheus", Label: "Enable Managed Service for Prometheus", Type: "checkbox",
+		Default: strconv.FormatBool(c.GetMonitoringConfig().GetManagedPrometheusConfig().GetEnabled()),
+		Help:    "Managed collection: PodMonitoring and ClusterPodMonitoring resources' targets are scraped into Cloud Monitoring."})
 }
 
 // gkeUpgradeInfoText is the automatic upgrade status and its targets.
@@ -245,6 +297,20 @@ func gkeCompleteUpgradeAction(info *containerpb.ClusterUpgradeInfo) console.Acti
 	return console.Action{ID: "complete-upgrade", Label: "Complete control plane upgrade", Title: "Complete control plane upgrade", Submit: "Complete upgrade",
 		Fields: []console.Field{{Name: "note", Label: "What happens", Type: "textarea", Immutable: true,
 			Default: "The control plane stops emulating " + rs.GetPreviousVersion() + ". Afterwards you can no longer go back to the previous minor version."}}}
+}
+
+// gkeRollbackUpgradeAction rolls a soaking rollback-safe upgrade back to
+// the previous version, as gcloud's clusters upgrade --master
+// --cluster-version PREVIOUS does.
+func gkeRollbackUpgradeAction(info *containerpb.ClusterUpgradeInfo) console.Action {
+	rs := info.GetRollbackSafeUpgradeStatus()
+	if rs == nil {
+		return console.Action{ID: "rollback-upgrade", Label: "Roll back control plane upgrade",
+			Unavailable: "No rollback-safe control plane upgrade is soaking: only one can be rolled back, until it is completed."}
+	}
+	return console.Action{ID: "rollback-upgrade", Label: "Roll back control plane upgrade", Title: "Roll back control plane upgrade", Submit: "Roll back",
+		Fields: []console.Field{{Name: "note", Label: "What happens", Type: "textarea", Immutable: true,
+			Default: "The control plane goes back to " + rs.GetPreviousVersion() + ", the exact version it ran before the upgrade."}}}
 }
 
 // moreSettingsAct saves the zones, rotation, logging, monitoring and
@@ -284,11 +350,25 @@ func (p gkeClustersProvider) moreSettingsAct(ctx context.Context, name, act stri
 		return gkeStatusErr(err)
 	case "monitoring":
 		cfg := &containerpb.MonitoringComponentConfig{}
-		if on("system") {
-			cfg.EnableComponents = append(cfg.EnableComponents, containerpb.MonitoringComponentConfig_SYSTEM_COMPONENTS)
+		for _, m := range gkeMonitoringComponents {
+			if on(m.field) {
+				cfg.EnableComponents = append(cfg.EnableComponents, m.comp)
+			}
 		}
 		_, err := api.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{
-			DesiredMonitoringConfig: &containerpb.MonitoringConfig{ComponentConfig: cfg}}})
+			DesiredMonitoringConfig: &containerpb.MonitoringConfig{ComponentConfig: cfg,
+				ManagedPrometheusConfig: &containerpb.ManagedPrometheusConfig{Enabled: on("managedPrometheus")}}}})
+		return gkeStatusErr(err)
+	case "rollback-upgrade":
+		info, err := api.FetchClusterUpgradeInfo(ctx, &containerpb.FetchClusterUpgradeInfoRequest{Name: name})
+		if err != nil {
+			return gkeStatusErr(err)
+		}
+		rs := info.GetRollbackSafeUpgradeStatus()
+		if rs == nil {
+			return fmt.Errorf("no rollback-safe control plane upgrade is soaking")
+		}
+		_, err = api.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: rs.GetPreviousVersion()}})
 		return gkeStatusErr(err)
 	}
 	return fmt.Errorf("unknown action %s", act)

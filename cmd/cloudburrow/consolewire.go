@@ -114,6 +114,9 @@ type consoleDeps struct {
 	parameterManager *parameterManagerService
 	// dataform is Dataform (#2105), nil unless enabled.
 	dataform *dataformService
+	// dataproc is the Dataproc API's serverless surface (#2156), nil
+	// unless enabled.
+	dataproc *dataprocService
 	// appHub is App Hub (#2110), nil unless enabled.
 	appHub *appHubService
 	// alloyDB is AlloyDB for PostgreSQL (#2191), nil unless enabled.
@@ -284,6 +287,26 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}
 		providers = append(providers, vertexModelsProvider{api: api}, vertexEndpointsProvider{api: api})
 	}
+	if enabled[config.ServiceRun] || d.localAI != nil {
+		// Colab Enterprise's Runtimes and Runtime templates (#2105), on the
+		// local Vertex AI endpoint, whose runtimes are the instance's
+		// notebook runtimes.
+		var api vertexAPI
+		if d.localAI != nil {
+			api.addr = d.localAI.Addr
+		}
+		providers = append(providers, colabRuntimesProvider{api: api}, colabTemplatesProvider{api: api, enforced: d.cfg.IAMEnforced()},
+			// My notebooks, Executions and Schedules (consolecolabexec.go).
+			colabNotebooksProvider{api: api, df: d.dataform.API}, colabExecutionsProvider{api: api}, colabSchedulesProvider{api: api},
+			// Vertex AI Pipelines' Runs and Schedules (consolepipelines.go, #2173).
+			pipelineRunsProvider{api: api, storage: map[bool]string{true: storageAddr}[enabled[config.ServiceStorage]]}, pipelineSchedulesProvider{colabSchedulesProvider{api: api}})
+		// Vertex AI Workbench's Instances (consoleworkbench.go, #2173).
+		wb := workbenchProvider{api: api}
+		if d.localAI != nil {
+			wb.exec = d.localAI.WorkbenchExecute
+		}
+		providers = append(providers, wb)
+	}
 	if enabled[config.ServiceRun] {
 		// Two screens of one product: services, and jobs with their
 		// executions (#785).
@@ -334,6 +357,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			buildSettingsProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}, registry: d.projects},
 			// Secure Source Manager's instances and repositories (#1527).
 			sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
+			// Developer Connect's Account connectors (#2105).
+			devConnectAccountsProvider{ssm: sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}}},
 			// Artifact Registry's repositories are served on the Run port (#1347).
 			artifactRegistryProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)},
 			// Its Settings page (#1855).
@@ -387,6 +412,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// App Hub (#2110), in process: Applications, Services and workloads,
 	// Settings.
+	if enabled[config.ServiceDataproc] && d.dataproc != nil {
+		providers = append(providers, dataprocBatchesProvider{svc: d.dataproc}, dataprocSessionsProvider{svc: d.dataproc}, dataprocTemplatesProvider{svc: d.dataproc},
+			dataprocClustersProvider{svc: d.dataproc}, dataprocJobsProvider{svc: d.dataproc}, dataprocWorkflowsProvider{svc: d.dataproc}, dataprocPoliciesProvider{svc: d.dataproc})
+	}
 	// AlloyDB for PostgreSQL (#2191), in process: Clusters, a cluster's
 	// Overview, Backups, Users and Databases.
 	if enabled[config.ServiceAlloyDB] && d.alloyDB != nil {
@@ -439,7 +468,35 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceCompute] && d.compute != nil {
 		screen := computeScreen{svc: d.compute}
 		providers = append(providers, computeNetworksProvider{screen}, computeFirewallsProvider{screen},
-			computeRoutesProvider{screen}, computeAddressesProvider{screen}, computePSCProvider{screen}, ncPoliciesProvider{screen},
+			computeRoutesProvider{screen}, computeAddressesProvider{screen},
+			// The 2026-11-22 parity round (#2140): Subnets in current
+			// project, and VPC network peering.
+			computeSubnetsProvider{screen}, computePeeringProvider{screen},
+			// Cloud Router and Cloud NAT (#2140).
+			computeRoutersProvider{screen}, computeNATProvider{screen}, computeSharedVPCProvider{screen},
+			computePSCEndpointsProvider{screen}, computePSCPublishedProvider{screen},
+			// Private Service Connect's Connection Policies tab (#2141).
+			ncPoliciesProvider{screen},
+			// Cloud Load Balancing (#2153, consolecomputelb2153.go).
+			computeLBProvider{screen}, computeLBBackendsProvider{screen}, computeLBFrontendsProvider{screen},
+			computeHealthChecksProvider{screen}, computeNEGsProvider{screen}, computeLBCertsProvider{screen},
+			// Cloud Armor, Cloud CDN, IAP and Certificate Manager (#2160).
+			computeArmorProvider{screen}, computeCDNProvider{screen}, iapProvider{screen}, iapTCPProvider{screen},
+			armorEdgeServicesProvider{screen}, armorWAFProvider{screen}, grpcRoutingProvider{screen},
+			ccmCertsProvider{ccmScreen{screen}}, ccmMapsProvider{ccmScreen{screen}}, ccmDNSAuthProvider{ccmScreen{screen}}, ccmIssuanceProvider{ccmScreen{screen}},
+			// Trust configs and Client Authentication (#2160, consoletrustconfig2160.go).
+			ccmTrustProvider{ccmScreen{screen}}, netsecClientAuthProvider{ccmScreen{screen}},
+			newNetsecProvider(screen, "netsecurity-clienttls"), newNetsecProvider(screen, "netsecurity-meshauthz"), newNetsecProvider(screen, "netsecurity-authz"),
+			// Address groups and Backend Authentication (#2160, consolenetsec2160b.go).
+			netsecAddressGroupsProvider{ccmScreen{screen}}, netsecBackendAuthProvider{ccmScreen{screen}},
+			// Secure Web Proxy (#2160, consoleswp2160.go).
+			swpProxiesProvider{swpScreen{ccmScreen{screen}}}, swpPoliciesProvider{swpScreen{ccmScreen{screen}}},
+			swpURLListsProvider{swpScreen{ccmScreen{screen}}}, swpTLSProvider{swpScreen{ccmScreen{screen}}},
+			// Serverless VPC Access (#2140), on the same port.
+			vpcAccessProvider{screen},
+			computeInternalAddressesProvider{computeAddressesProvider{screen}}, computeEffectiveRoutesProvider{screen},
+			computeInstanceSchedulesProvider{screen}, computeSnapshotSchedulesProvider{screen}, computeTemplatesProvider{screen},
+			computeGroupsProvider{screen}, computeMachineImagesProvider{screen}, computeSSHKeysProvider{computeMetadataProvider{screen}},
 			// Compute Engine (#1965): VM instances, disks, snapshots,
 			// images and machine types, over the same API.
 			computeInstancesProvider{screen}, computeDisksProvider{screen}, computeSnapshotsProvider{screen},
@@ -571,6 +628,20 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		// Job history, BigQuery's second screen (#993).
 		{config.ServiceBigQuery, func(a string) console.Provider {
 			return bigqueryJobsProvider{bq: bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}}
+		}},
+		// Capacity management: slot reservations and commitments (#2193).
+		{config.ServiceBigQuery, func(a string) console.Provider {
+			return bqCapacityProvider{bq: bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}}
+		}},
+		{config.ServiceBigQuery, func(a string) console.Provider {
+			return bqCommitmentsProvider{bq: bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}}
+		}},
+		{config.ServiceBigQuery, func(a string) console.Provider {
+			return bqReservationGroupsProvider{bq: bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}}
+		}},
+		// BI Engine's page (#2193), its BI reservations.
+		{config.ServiceBigQuery, func(a string) console.Provider {
+			return bqBIEngineProvider{bq: bigqueryProvider{endpoint: a, project: d.cfg.DefaultProject()}}
 		}},
 	} {
 		if !enabled[db.service] {
@@ -868,6 +939,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceWorkflows:        "Workflows",
 	config.ServiceParameterManager: "Parameter Manager",
 	config.ServiceDataform:         "Dataform",
+	config.ServiceDataproc:         "Serverless for Apache Spark",
 	config.ServiceAppHub:           "App Hub",
 	config.ServiceAlloyDB:          "AlloyDB",
 	config.ServiceFilestore:        "Filestore",

@@ -35,8 +35,8 @@ func diskPathOf(link string) []string {
 	return nil
 }
 
-// diskLoc is a disk path's location, its replica zones for a regional disk.
-func diskLoc(d map[string]any) string {
+// diskLocText is a disk path's location, its replica zones for a regional disk.
+func diskLocText(d map[string]any) string {
 	if r := vpcStr(d, "region"); r != "" {
 		var zs []string
 		for _, z := range vpcStrs(d, "replicaZones") {
@@ -239,12 +239,12 @@ func (p computeAsyncReplicationProvider) List(ctx context.Context, project strin
 		path := diskPathOf(vpcStr(d, "selfLink"))
 		ploc := "—"
 		if pd := byLink[vpcStr(ap, "disk")]; pd != nil {
-			ploc = diskLoc(pd)
+			ploc = diskLocText(pd)
 		}
 		listing.Items = append(listing.Items, console.Resource{Name: vpcStr(d, "name"), Opens: path, Target: path,
 			Actions: asyncActions(d), Info: computePermissionsTab(),
 			Fields: map[string]string{"Primary disk": vpcLast(vpcStr(ap, "disk")), "Primary location": ploc,
-				"Secondary location": diskLoc(d), "Replication state": secondaryState(d)}})
+				"Secondary location": diskLocText(d), "Replication state": secondaryState(d)}})
 	}
 	listing.Total = len(listing.Items)
 	return listing, nil
@@ -386,7 +386,7 @@ func (p computeConsistencyGroupsProvider) groupActions(pol map[string]any, in, a
 				loc = regionOfZone(vpcLast(vpcStr(d, "zone")))
 			}
 			b := diskBase(diskPathOf(vpcStr(d, "selfLink")))
-			labels[b] = vpcStr(d, "name") + " (" + diskLoc(d) + ")"
+			labels[b] = vpcStr(d, "name") + " (" + diskLocText(d) + ")"
 			if loc == region && !member[vpcStr(d, "selfLink")] && len(vpcStrs(d, "resourcePolicies")) == 0 {
 				assign = append(assign, b)
 			}
@@ -438,7 +438,7 @@ func (p computeConsistencyGroupsProvider) Detail(ctx context.Context, project st
 			}
 		}
 		members.Items = append(members.Items, console.Resource{Name: vpcStr(d, "name"),
-			Fields: map[string]string{"Location": diskLoc(d), "Size": vpcStr(d, "sizeGb") + " GB", "Replication state": state}})
+			Fields: map[string]string{"Location": diskLocText(d), "Size": vpcStr(d, "sizeGb") + " GB", "Replication state": state}})
 	}
 	members.Total = len(members.Items)
 	return console.Detail{Title: path[1], Sections: []console.Section{

@@ -128,6 +128,7 @@ func (s *Server) mixedHandler(g *grpc.Server) http.Handler {
 
 // Stop shuts the endpoint down.
 func (s *Server) Stop(ctx context.Context) error {
+	s.stopScheduler()
 	s.lis.mu.Lock()
 	srv, g, done := s.lis.srv, s.lis.grpc, s.lis.done
 	s.lis.srv, s.lis.grpc = nil, nil

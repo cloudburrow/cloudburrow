@@ -57,7 +57,10 @@ cloudburrow version
 **Install script.** It detects your OS and architecture, verifies the SHA-256 against
 `checksums.txt`, and verifies the attestation too when the GitHub CLI (`gh`) is installed. It
 installs to `~/.local/bin`, or to `<dir>/bin` with `--prefix <dir>`. **It refuses to install an
-archive whose checksum does not match, or that has no entry in `checksums.txt`.**
+archive whose checksum does not match, or that has no entry in `checksums.txt`.** On a Mac with
+Apple silicon it also installs the archive's Apple GPU (Metal) runner for Gemma generation to
+`~/.local/libexec/cloudburrow/litert-lm` (`<dir>/libexec/cloudburrow/litert-lm`), the layout
+Homebrew uses and where the CLI looks by default, so no variable is needed.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cloudburrow/cloudburrow/main/scripts/install.sh | sh
@@ -501,6 +504,7 @@ service.
 | Memorystore | **Yes**: a key on the default server; a created Redis instance, READY at its own address with the same AUTH string, with its key with RDB persistence and **empty** without (#1911); Redis clusters and Valkey instances with persistence keep their keys, and come back **empty** without it, as on Google | `TestMemorystoreAcrossRestart`, `TestMemorystoreCreatedAcrossRestart`, `TestMemorystoreRDBAcrossRestart`, `TestMemorystoreClustersAcrossRestart` |
 | Cloud SQL for PostgreSQL | **Yes**: a table's row | `TestCloudSQLAcrossRestart` |
 | Cloud SQL for MySQL | **Yes**: a table's row | `TestCloudSQLMySQLAcrossRestart` |
+| Kubernetes Engine's logs | **Yes**: a cluster keeps running, and its in-cluster logging agent ships every line a pod writes while the CLI is stopped once it is back, each once (the entries shipped before the stop are held in Cloud Logging's memory, so they are not) | `TestGKELogsAcrossRestart` |
 | **Pub/Sub** | **No**, as `cloudburrow status` says: Google's emulator loses its state on restart even when given `--data-dir`, which we measured | none |
 | **Spanner** | **No**: the emulator is in memory, and a restart of it loses a row | none; `TestSpannerStateDoesNotSurviveARestart` restarts the emulator alone |
 | **BigQuery** | **No**: the emulator keeps its data in memory, and a restart of it loses a dataset | none; `TestBigQueryEmulatorRestartsPromptly` restarts the emulator alone |
@@ -852,6 +856,7 @@ and `--state-dir` it was started with.
    ```sh
    brew uninstall cloudburrow && brew untap cloudburrow/tap   # Homebrew
    rm "$HOME/.local/bin/cloudburrow"                          # install.sh, or <prefix>/bin with --prefix
+   rm -r "$HOME/.local/libexec/cloudburrow"                   # install.sh on Apple silicon: the GPU runner
    ```
 
 4. **Host-side state**, including any directory you passed as `--state-dir`. It also holds the

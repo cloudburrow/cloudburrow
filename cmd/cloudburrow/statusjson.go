@@ -29,7 +29,8 @@ import (
 //
 // 2 added the services' in-cluster addresses (#575).
 // 3 added cluster.versions and cluster.pinned (#601).
-// 4 added iam_enforcement (#1879).
+// 4 added iam_enforcement (#1879). allow_unconfined_containers (#2162) is
+// a new field, which keeps the version.
 const statusSchemaVersion = 4
 
 // Exit statuses of `status --format json`. 2 is a usage error, as for every
@@ -48,7 +49,10 @@ type statusReport struct {
 	// IAMEnforcement is "off" or "on" (#1879): the running instance's, else
 	// this invocation's configuration.
 	IAMEnforcement string `json:"iam_enforcement"`
-	Bind           string `json:"bind"`
+	// AllowUnconfinedContainers is --allow-unconfined-containers (#2162):
+	// the running instance's, else this invocation's configuration.
+	AllowUnconfinedContainers bool   `json:"allow_unconfined_containers"`
+	Bind                      string `json:"bind"`
 	// State is not_running, starting, ready or failed.
 	State      string          `json:"state"`
 	ControlURL string          `json:"control_url,omitempty"`
@@ -178,6 +182,10 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 	r.State = "not_running"
 	if live != nil && live.info.IAMEnforcement != "" {
 		r.IAMEnforcement = live.info.IAMEnforcement
+	}
+	r.AllowUnconfinedContainers = cfg.AllowUnconfinedContainers
+	if live != nil {
+		r.AllowUnconfinedContainers = live.info.AllowUnconfinedContainers
 	}
 	if live != nil {
 		if a := live.info.Endpoints["control"]; a != "" {

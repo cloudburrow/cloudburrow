@@ -3,7 +3,9 @@
 // Authorization header and its data, and GET /events answers them as JSON.
 // PROBE_STDOUT and PROBE_STDERR, when set, are written to standard output
 // and standard error as it starts: the Kubernetes Engine logging test's
-// lines (#2100).
+// lines (#2100). PROBE_TICK, when set, is written to standard output as
+// PROBE_TICK-1, PROBE_TICK-2, ... every half second from then on: the
+// lines the logging agent must ship across a CLI restart.
 package main
 
 import (
@@ -16,6 +18,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 type event struct {
@@ -35,6 +38,14 @@ func main() {
 	}
 	if v := os.Getenv("PROBE_STDERR"); v != "" {
 		fmt.Fprintln(os.Stderr, v)
+	}
+	if v := os.Getenv("PROBE_TICK"); v != "" {
+		go func() {
+			for n := 1; ; n++ {
+				fmt.Fprintf(os.Stdout, "%s-%d\n", v, n)
+				time.Sleep(500 * time.Millisecond)
+			}
+		}()
 	}
 	var mu sync.Mutex
 	var events []event

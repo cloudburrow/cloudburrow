@@ -247,7 +247,10 @@ func TestRollbackSafeUpgrade(t *testing.T) {
 }
 
 // upgradingFake upgrades too.
-type upgradingFake struct{ *rotatingFake }
+type upgradingFake struct {
+	*rotatingFake
+	rolledBack string
+}
 
 func (*upgradingFake) UpgradeControlPlane(context.Context, string, string) error { return nil }
 func (*upgradingFake) PoolNodes(context.Context, string, string) ([]Node, error) { return nil, nil }
@@ -259,3 +262,79 @@ func (*upgradingFake) UncordonNode(context.Context, string, string) error   { re
 func (*upgradingFake) DrainNode(context.Context, string, string) error      { return nil }
 func (*upgradingFake) ForceDrainNode(context.Context, string, string) error { return nil }
 func (*upgradingFake) RemoveNode(context.Context, string, string) error     { return nil }
+
+func (u *upgradingFake) RollbackControlPlane(_ context.Context, _, image string) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.rolledBack = image
+	return nil
+}
+
+// TestRollbackSafeRollback: during the soak the control plane goes back to
+// the exact previous version, and nowhere else; nodes are upgraded no
+// further than the emulated version; after the rollback there is no
+// rollback-safe status, and a downgrade is refused.
+func TestRollbackSafeRollback(t *testing.T) {
+	f := &rotatingFake{fakeBackend: newFake(), zones: map[string][]string{}}
+	b := &upgradingFake{rotatingFake: f}
+	s, err := NewServer(b, Options{Instance: "cloudburrow-t", AutoUpgradeInterval: -1, AutoscaleInterval: -1,
+		Versions: []Version{{GKE: "1.36.4-gke.0", Image: "new"}, {GKE: "1.35.3-gke.0", Image: "old3"}, {GKE: "1.35.2-gke.0", Image: "old"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	ctx := context.Background()
+	parent := "projects/p1/locations/us-central1-a"
+	name := parent + "/clusters/c1"
+	op, err := s.CreateCluster(ctx, &containerpb.CreateClusterRequest{Parent: parent, Cluster: &containerpb.Cluster{Name: "c1", InitialClusterVersion: "1.35.2-gke.0",
+		NodePools: []*containerpb.NodePool{{Name: "pool", InitialNodeCount: 1}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait(t, s, "p1", "us-central1-a", op)
+	op, err = s.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: "1.36.4-gke.0",
+		DesiredRollbackSafeUpgrade: &containerpb.RollbackSafeUpgrade{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait(t, s, "p1", "us-central1-a", op)
+	_, err = s.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: "1.35.3-gke.0"}})
+	wantCode(t, "rolling back to another patch", err, codes.InvalidArgument)
+	_, err = s.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredNodeVersion: "1.36.4-gke.0", DesiredNodePoolId: "pool"}})
+	wantCode(t, "a node upgrade past the emulated version", err, codes.FailedPrecondition)
+	op, err = s.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: "1.35.2-gke.0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op.GetOperationType() != containerpb.Operation_UPGRADE_MASTER {
+		t.Errorf("the rollback is %s", op.GetOperationType())
+	}
+	wait(t, s, "p1", "us-central1-a", op)
+	c, _ := s.GetCluster(ctx, &containerpb.GetClusterRequest{Name: name})
+	if c.GetCurrentMasterVersion() != "1.35.2-gke.0" || c.GetCurrentEmulatedVersion() != "1.35.2-gke.0" || b.rolledBack != "old" {
+		t.Errorf("after the rollback: master %s, emulated %s, backend %q", c.GetCurrentMasterVersion(), c.GetCurrentEmulatedVersion(), b.rolledBack)
+	}
+	info, _ := s.FetchClusterUpgradeInfo(ctx, &containerpb.FetchClusterUpgradeInfoRequest{Name: name})
+	if info.GetRollbackSafeUpgradeStatus() != nil {
+		t.Errorf("a rollback-safe status after the rollback: %v", info.GetRollbackSafeUpgradeStatus())
+	}
+	if d := info.GetUpgradeDetails(); len(d) != 2 || d[1].GetInitialVersion() != "1.36.4-gke.0" || d[1].GetTargetVersion() != "1.35.2-gke.0" {
+		t.Errorf("upgrade details %v", d)
+	}
+	_, err = s.CompleteControlPlaneUpgrade(ctx, &containerpb.CompleteControlPlaneUpgradeRequest{Name: name})
+	wantCode(t, "completing after a rollback", err, codes.FailedPrecondition)
+	// Upgraded again, then completed: no way back.
+	op, err = s.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: "1.36.4-gke.0",
+		DesiredRollbackSafeUpgrade: &containerpb.RollbackSafeUpgrade{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait(t, s, "p1", "us-central1-a", op)
+	op, err = s.CompleteControlPlaneUpgrade(ctx, &containerpb.CompleteControlPlaneUpgradeRequest{Name: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait(t, s, "p1", "us-central1-a", op)
+	_, err = s.UpdateCluster(ctx, &containerpb.UpdateClusterRequest{Name: name, Update: &containerpb.ClusterUpdate{DesiredMasterVersion: "1.35.2-gke.0"}})
+	wantCode(t, "a downgrade after step two", err, codes.InvalidArgument)
+}

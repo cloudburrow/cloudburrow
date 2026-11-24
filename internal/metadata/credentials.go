@@ -230,6 +230,13 @@ func (c *Credentials) MintIDToken(audience string, now time.Time, ttl time.Durat
 // account it runs as (#1388). It is signed with the same key, so it
 // verifies against /certs as the instance's own does.
 func (c *Credentials) MintIDTokenFor(email, audience string, now time.Time, ttl time.Duration) (string, error) {
+	return c.MintIDTokenWithClaims(email, audience, nil, now, ttl)
+}
+
+// MintIDTokenWithClaims is MintIDTokenFor with extra claims: a Compute
+// Engine VM's identity token in format=full carries
+// google.compute_engine (#2177).
+func (c *Credentials) MintIDTokenWithClaims(email, audience string, extra map[string]any, now time.Time, ttl time.Duration) (string, error) {
 	header := map[string]any{"alg": "RS256", "typ": "JWT", "kid": c.KeyID}
 	claims := map[string]any{
 		"iss":            "https://accounts.google.com",
@@ -241,6 +248,11 @@ func (c *Credentials) MintIDTokenFor(email, audience string, now time.Time, ttl 
 		"exp":            now.Add(ttl).Unix(),
 		// Named so that anything logging the token makes its origin obvious.
 		"cloudburrow": "local-development-token",
+	}
+	for k, v := range extra {
+		if _, set := claims[k]; !set {
+			claims[k] = v
+		}
 	}
 
 	signingInput, err := joinSegments(header, claims)

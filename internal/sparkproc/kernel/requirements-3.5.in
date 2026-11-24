@@ -1,0 +1,9 @@
+jupyter_server==2.14.2
+ipykernel==6.29.5
+pandas==2.2.3
+pyarrow==17.0.0
+grpcio==1.62.3
+grpcio-status==1.62.3
+protobuf==4.25.5
+googleapis-common-protos==1.63.2
+numpy<2

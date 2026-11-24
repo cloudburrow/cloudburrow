@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -39,19 +40,27 @@ type computeVMs struct {
 	installer *components.Installer
 	bg        context.Context
 	// guestBase is the in-cluster URL of the Compute port, which the guest
-	// reads its metadata under; metadataHost the metadata server's
-	// in-cluster host:port (GCE_METADATA_HOST).
-	guestBase    func() string
-	metadataHost func() string
+	// reads its metadata under: the guest's metadata server relay carries
+	// metadata.google.internal and 169.254.169.254 there (#2177).
+	guestBase func() string
+	// opsAgentHosts are the Ops Agent's Logging and Monitoring addresses
+	// (#2139, computeopsagent.go); nil or "" when not served.
+	opsAgentHosts func() (logging, monitoring string)
 
 	mu     sync.Mutex
 	built  map[string]bool
 	tunnel map[string]*netfwd.Forwarder
-	build  sync.Mutex
+	// lbTunnels are load balancers' tunnels to instances' ports (#2153,
+	// computelb.go), by instance key and port.
+	lbTunnels map[string]*netfwd.Forwarder
+	// cryptNodes are the kind nodes the open encrypted disks are mounted
+	// on (computeseal.go), by claim.
+	cryptNodes map[string]string
+	build      sync.Mutex
 }
 
 func newComputeVMs(cfg config.Config, bg context.Context) *computeVMs {
-	return &computeVMs{cfg: cfg, bg: bg, built: map[string]bool{}, tunnel: map[string]*netfwd.Forwarder{},
+	return &computeVMs{cfg: cfg, bg: bg, built: map[string]bool{}, tunnel: map[string]*netfwd.Forwarder{}, lbTunnels: map[string]*netfwd.Forwarder{},
 		installer: &components.Installer{Kubeconfig: cfg.KubeconfigPath(), Namespace: cfg.Cluster.Namespace, Instance: cfg.Name}}
 }
 
@@ -147,7 +156,7 @@ func (b *computeVMs) CopyDisk(ctx context.Context, src, dst compute.DiskSpec) er
 	if err := b.copyPVCCmd(ctx, src.Key, dst.Key, "find /dst -mindepth 1 -delete && cp -a /src/. /dst/ && sync"); err != nil {
 		return err
 	}
-	return b.rekey(ctx, dst.Key, src.DataKey, dst.DataKey)
+	return b.rekey(ctx, dst.Key, dst.SizeGb, src.DataKey, dst.DataKey)
 }
 
 func (b *computeVMs) copyPVCCmd(ctx context.Context, src, dst, script string) error {
@@ -189,20 +198,28 @@ func (b *computeVMs) CreateDisk(ctx context.Context, d compute.DiskSpec) error {
 		if err := b.copyPVC(ctx, d.SourceSnapshot, d.Key); err != nil {
 			return err
 		}
-		return b.rekey(ctx, d.Key, d.SourceDataKey, d.DataKey)
+		return b.rekey(ctx, d.Key, d.SizeGb, d.SourceDataKey, d.DataKey)
 	}
-	return b.rekey(ctx, d.Key, nil, d.DataKey)
+	return b.rekey(ctx, d.Key, d.SizeGb, nil, d.DataKey)
 }
 
 func (b *computeVMs) DeleteDisk(ctx context.Context, d compute.DiskSpec) error {
+	if d.DataKey != nil {
+		if node := b.cryptNode(d.Key); node != "" {
+			_ = closeCrypt(ctx, node, b.cryptName(d.Key), b.cryptMount(d.Key))
+		}
+	}
 	_, err := b.kubectl(ctx, "delete", "pvc", d.Key, "--ignore-not-found", "--wait=true", "--timeout=2m")
 	return err
 }
 
-// ResizeDisk records the new size on the claim's request where the storage
-// class allows expansion; kind's local-path class neither enforces sizes nor
-// expands, so the disk's directory already has the machine's free space.
+// ResizeDisk: kind's local-path class neither enforces sizes nor expands,
+// so a disk's directory already has the machine's free space; an
+// encrypted disk's image (computeseal.go) is grown, with its file system.
 func (b *computeVMs) ResizeDisk(ctx context.Context, d compute.DiskSpec) error {
+	if d.DataKey != nil {
+		return b.growCrypt(ctx, d)
+	}
 	return nil
 }
 
@@ -215,7 +232,7 @@ func (b *computeVMs) Snapshot(ctx context.Context, d compute.DiskSpec, key strin
 	}
 	// A snapshot of an encrypted disk is sealed with its data key, which
 	// the snapshot keeps (wrapped) too.
-	return b.rekey(ctx, key, d.DataKey, d.DataKey)
+	return b.rekey(ctx, key, d.SizeGb, d.DataKey, d.DataKey)
 }
 
 func (b *computeVMs) DeleteSnapshot(ctx context.Context, key string) error {
@@ -234,15 +251,24 @@ func (b *computeVMs) podManifest(vm compute.VMSpec, ref string) string {
 		mounts = append(mounts, map[string]any{"name": "boot", "mountPath": "/" + d, "subPath": d})
 	}
 	mounts = append(mounts, map[string]any{"name": "run", "mountPath": "/run"}, map[string]any{"name": "tmp", "mountPath": "/tmp"})
+	boot := map[string]any{"name": "boot", "persistentVolumeClaim": map[string]any{"claimName": vm.BootDisk.Key}}
+	if vm.BootDisk.DataKey != nil {
+		// An encrypted disk: the node's mount of its decrypted device.
+		boot = b.cryptVolume("boot", vm.BootDisk)
+	}
 	volumes := []any{
-		map[string]any{"name": "boot", "persistentVolumeClaim": map[string]any{"claimName": vm.BootDisk.Key}},
+		boot,
 		map[string]any{"name": "run", "emptyDir": map[string]any{"medium": "Memory"}},
 		map[string]any{"name": "tmp", "emptyDir": map[string]any{}},
 	}
 	for i, d := range vm.Disks {
 		vn := "disk" + strconv.Itoa(i)
 		mounts = append(mounts, map[string]any{"name": vn, "mountPath": "/mnt/disks/" + d.DeviceName, "readOnly": d.ReadOnly})
-		volumes = append(volumes, map[string]any{"name": vn, "persistentVolumeClaim": map[string]any{"claimName": d.Disk.Key, "readOnly": d.ReadOnly}})
+		if d.Disk.DataKey != nil {
+			volumes = append(volumes, b.cryptVolume(vn, d.Disk))
+		} else {
+			volumes = append(volumes, map[string]any{"name": vn, "persistentVolumeClaim": map[string]any{"claimName": d.Disk.Key, "readOnly": d.ReadOnly}})
+		}
 	}
 	guest := ""
 	if b.guestBase != nil {
@@ -250,17 +276,16 @@ func (b *computeVMs) podManifest(vm compute.VMSpec, ref string) string {
 			guest = base + compute.GuestPrefix + vm.GuestToken
 		}
 	}
-	meta := ""
-	if b.metadataHost != nil {
-		meta = b.metadataHost()
-	}
 	env := []any{
 		map[string]string{"name": "container", "value": "docker"},
 		map[string]string{"name": "CLOUDBURROW_GUEST_METADATA", "value": guest},
 		map[string]string{"name": "CLOUDBURROW_INTERNAL_IP", "value": vm.InternalIP},
-		map[string]string{"name": "GCE_METADATA_HOST", "value": meta},
+		// The metadata server's name on Compute Engine (#2177): the
+		// guest's relay answers it at 169.254.169.254.
+		map[string]string{"name": "GCE_METADATA_HOST", "value": "metadata.google.internal"},
 		map[string]string{"name": "GOOGLE_CLOUD_PROJECT", "value": vm.Project},
 	}
+	env = append(env, b.opsAgentEnv()...)
 	host := vm.Hostname
 	if i := strings.Index(host, "."); i > 0 {
 		host = host[:i]
@@ -284,6 +309,20 @@ func (b *computeVMs) podManifest(vm compute.VMSpec, ref string) string {
 				"resources": map[string]any{"limits": map[string]string{"cpu": strconv.Itoa(cpu), "memory": strconv.Itoa(mem) + "Mi"},
 					"requests": map[string]string{"cpu": "50m", "memory": "64Mi"}}}},
 			"volumes": volumes}}
+	// A Shielded VM's vTPM (#2179, computevtpm.go).
+	spec := pod["spec"].(map[string]any)
+	// An encrypted disk is open on one node: the VM runs there.
+	for _, d := range vm.Encrypted() {
+		if n := b.cryptNode(d.Key); n != "" {
+			spec["nodeName"] = n
+		}
+	}
+	vmc := spec["containers"].([]any)[0].(map[string]any)
+	vmc["volumeMounts"] = vtpmPod(vm, ref, spec, mounts)
+	// metadata.google.internal (and metadata, under the google.internal
+	// search domain) is the metadata server, as on Compute Engine (#2177).
+	pod["spec"].(map[string]any)["hostAliases"] = []any{map[string]any{"ip": "169.254.169.254",
+		"hostnames": []string{"metadata.google.internal", "metadata"}}}
 	svc := map[string]any{"apiVersion": "v1", "kind": "Service",
 		"metadata": map[string]any{"name": vm.Key, "namespace": b.ns(), "labels": labels},
 		"spec": map[string]any{"selector": map[string]string{"cloudburrow.dev/vm": vm.Key},
@@ -304,16 +343,18 @@ func (b *computeVMs) Start(ctx context.Context, vm compute.VMSpec) error {
 	if err := b.installer.Apply(ctx, pvcManifest(b.ns(), vm.BootDisk.Key, vm.BootDisk.SizeGb, "disk")); err != nil {
 		return err
 	}
+	if err := b.ensureVTPMClaim(ctx, vm); err != nil {
+		return err
+	}
 	if err := b.installer.Apply(ctx, b.podManifest(vm, ref)); err != nil {
 		return err
 	}
 	if _, err := b.kubectl(ctx, "wait", "--for=condition=Ready", "pod/"+vm.Key, "--timeout=10m"); err != nil {
 		return fmt.Errorf("boot %s: %w", vm.Name, err)
 	}
-	f := netfwd.New(netfwd.Target{Name: vm.Key, Namespace: b.ns(), ServicePort: 22, Label: "ssh-" + vm.Key},
-		b.cfg.KubeconfigPath(), b.cfg.BindAddress)
-	if err := f.Start(b.bg); err != nil {
-		return fmt.Errorf("forward %s's SSH port: %w", vm.Name, err)
+	f, err := b.forwardSSH(ctx, vm)
+	if err != nil {
+		return err
 	}
 	b.mu.Lock()
 	old := b.tunnel[vm.Key]
@@ -325,6 +366,37 @@ func (b *computeVMs) Start(ctx context.Context, vm compute.VMSpec) error {
 	return nil
 }
 
+// vmSSHWait bounds how long a started instance's sshd may take to listen.
+// A pod is Ready once its container starts, while the guest is still
+// booting systemd: on a loaded machine (CI's run shard, main run
+// 45382531465) sshd listened more than netfwd's 15 s start wait after
+// that, the start failed, and the instance's insert was undone, which
+// left a managed instance group one VM short.
+var vmSSHWait = 5 * time.Minute
+
+// forwardSSH starts the tunnel to the instance's port 22, starting it
+// again while the guest's sshd does not listen yet, for up to vmSSHWait.
+func (b *computeVMs) forwardSSH(ctx context.Context, vm compute.VMSpec) (*netfwd.Forwarder, error) {
+	deadline := time.Now().Add(vmSSHWait)
+	for {
+		f := netfwd.New(netfwd.Target{Name: vm.Key, Namespace: b.ns(), ServicePort: 22, Label: "ssh-" + vm.Key},
+			b.cfg.KubeconfigPath(), b.cfg.BindAddress)
+		err := f.Start(b.bg)
+		if err == nil {
+			return f, nil
+		}
+		_ = f.Stop(context.Background())
+		if !errors.Is(err, netfwd.ErrForwardFailed) || time.Now().After(deadline) {
+			return nil, fmt.Errorf("forward %s's SSH port: %w", vm.Name, err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("forward %s's SSH port: %w", vm.Name, ctx.Err())
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
 func (b *computeVMs) Stop(ctx context.Context, vm compute.VMSpec) error {
 	b.mu.Lock()
 	f := b.tunnel[vm.Key]
@@ -333,6 +405,7 @@ func (b *computeVMs) Stop(ctx context.Context, vm compute.VMSpec) error {
 	if f != nil {
 		_ = f.Stop(context.Background())
 	}
+	b.stopLBTunnels(ctx, vm)
 	// A suspended guest is thawed first, so it can shut down.
 	_ = b.freeze(ctx, vm, false)
 	if _, err := b.kubectl(ctx, "delete", "pod,service", vm.Key, "--ignore-not-found", "--wait=true", "--timeout=2m"); err != nil {
@@ -370,6 +443,31 @@ func (b *computeVMs) Suspend(ctx context.Context, vm compute.VMSpec) error {
 }
 func (b *computeVMs) Resume(ctx context.Context, vm compute.VMSpec) error {
 	return b.freeze(ctx, vm, false)
+}
+
+// CPUUsage implements compute.VMCPU: the CPU seconds the VM's container
+// has used, its cgroup's cpu.stat usage_usec (the container has its own
+// cgroup namespace, so /sys/fs/cgroup is the VM's whole cgroup).
+func (b *computeVMs) CPUUsage(ctx context.Context, vm compute.VMSpec) (float64, error) {
+	out, err := b.kubectl(ctx, "exec", vm.Key, "-c", "vm", "--", "cat", "/sys/fs/cgroup/cpu.stat")
+	if err != nil {
+		return 0, err
+	}
+	return cpuStatSeconds(out)
+}
+
+// cpuStatSeconds is cpu.stat's usage_usec in seconds.
+func cpuStatSeconds(stat string) (float64, error) {
+	for _, line := range strings.Split(stat, "\n") {
+		if f := strings.Fields(line); len(f) == 2 && f[0] == "usage_usec" {
+			us, err := strconv.ParseUint(f[1], 10, 64)
+			if err != nil {
+				return 0, err
+			}
+			return float64(us) / 1e6, nil
+		}
+	}
+	return 0, fmt.Errorf("no usage_usec in cpu.stat")
 }
 
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]|\x1b[MD78]|\r`)
@@ -416,5 +514,9 @@ func (b *computeVMs) stopAll() {
 	for k, f := range b.tunnel {
 		_ = f.Stop(context.Background())
 		delete(b.tunnel, k)
+	}
+	for k, f := range b.lbTunnels {
+		_ = f.Stop(context.Background())
+		delete(b.lbTunnels, k)
 	}
 }

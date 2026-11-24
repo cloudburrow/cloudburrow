@@ -162,6 +162,31 @@ func (s Subprocess) Stream(ctx context.Context, args ...string) (io.ReadCloser, 
 	return out, cmd.Wait, nil
 }
 
+// Duplexer is an Invoker that can also start kubectl with both its stdin
+// and its stdout on pipes, for a long-lived exec that carries a protocol
+// both ways: a VM's UDP relay or its vTPM's command channel. Subprocess is
+// one; a test Invoker that is not makes Duplex fail with ErrCannotStream.
+type Duplexer interface {
+	Duplex(ctx context.Context, args ...string) (stdin io.WriteCloser, stdout io.ReadCloser, wait func() error, err error)
+}
+
+// Duplex starts kubectl with its stdin and stdout on pipes.
+func (s Subprocess) Duplex(ctx context.Context, args ...string) (io.WriteCloser, io.ReadCloser, func() error, error) {
+	cmd := s.command(ctx, args)
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, nil, err
+	}
+	return in, out, cmd.Wait, nil
+}
+
 type process struct{ cmd *exec.Cmd }
 
 func (p process) Wait() error { return p.cmd.Wait() }
@@ -342,6 +367,18 @@ func (r *Runner) Stream(ctx context.Context, args ...string) (io.ReadCloser, fun
 		return nil, nil, ErrCannotStream
 	}
 	return s.Stream(ctx, r.global(args...)...)
+}
+
+// Duplex starts kubectl [globals] ARGS with its stdin and stdout on pipes
+// and returns them, and wait, which reaps kubectl once the caller is done
+// with both. kubectl ends when ctx does. A failure to start is the
+// Invoker's error, unclassified.
+func (r *Runner) Duplex(ctx context.Context, args ...string) (io.WriteCloser, io.ReadCloser, func() error, error) {
+	d, ok := r.inv.(Duplexer)
+	if !ok {
+		return nil, nil, nil, ErrCannotStream
+	}
+	return d.Duplex(ctx, r.global(args...)...)
 }
 
 // Reason is the Kubernetes API status reason a failure carried, or "" when

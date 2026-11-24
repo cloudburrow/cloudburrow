@@ -204,13 +204,15 @@ SHA-256, `localai.bazelisk`). Every option in §2 behaves the same: the compat t
 
 | Build | Where the runner is |
 |---|---|
-| A release's darwin/arm64 archive (and Homebrew) | `litert-lm/` beside `cloudburrow` (Homebrew: `libexec/cloudburrow/litert-lm`), with the two prebuilt dylibs it loads (`libwebgpu_dawn`, `libGemmaModelConstraintProvider`) and their licences; signed and notarized with the CLI |
+| A release's darwin/arm64 archive (Homebrew and `install.sh` too) | `litert-lm/` beside `cloudburrow` (Homebrew and `install.sh`: `libexec/cloudburrow/litert-lm` beside `bin/`), with the two prebuilt dylibs it loads (`libwebgpu_dawn`, `libGemmaModelConstraintProvider`) and their licences; signed and notarized with the CLI |
 | A checkout | `deploy/litert-lm/build-macos.sh <work-dir> <out.tar.gz>` (about 15 minutes cold on an M4 Max, 6 GB of Bazel output, removed at the end); unpack it and set `CLOUDBURROW_LITERT_LM_DIR` to the directory |
 
 At startup a one-token generation probes the GPU. When the GPU delegate fails, `up` logs
 `local AI: the Apple GPU (LiteRT-LM's GPU delegate) failed for <model>, generating on CPU as a
 host process instead: <the runner's error>` and uses the same runner with `--backend=cpu`. With
-no macOS runner installed it logs why and uses the runtime image on CPU, as before.
+no macOS runner installed it logs a one-line `local AI: warning: the Apple GPU (Metal) runner is not
+installed, so generation runs on CPU in the runtime container; ...` with where it looked, and
+uses the runtime image on CPU.
 `--local-ai-accelerator cpu` always uses the image. Startup prints which:
 
 ```

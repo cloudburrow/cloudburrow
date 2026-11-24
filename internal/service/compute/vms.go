@@ -216,6 +216,12 @@ func (s *Server) zonal(c call, zone string) (obj, error) {
 		return s.instances(c, zone)
 	case "disks":
 		return s.disks(c, zone)
+	case "instanceGroups":
+		return s.instanceGroups(c, zoneLoc(c.project, zone))
+	case "instanceGroupManagers":
+		return s.instanceGroupManagers(c, zoneLoc(c.project, zone))
+	case "autoscalers":
+		return s.autoscalers(c, zoneLoc(c.project, zone))
 	}
 	return nil, unimplemented("zones/%s/%s is not served (#1963)", zone, c.parts[2])
 }
@@ -277,6 +283,17 @@ func (s *Server) diskSpecLocked(d obj) DiskSpec {
 			sp.SourceDataKey = s.specKeyLocked(so)
 		}
 	}
+	// A disk made from a custom image, a machine image or another disk
+	// (#2139): a copy of that storage, running the public image it came
+	// from.
+	if k := str(d, "_seedKey"); k != "" {
+		sp.SourceSnapshot = k
+	}
+	if si := str(d, "_seedImage"); si != "" && sp.Image == nil {
+		if img, err := LookupImage(si); err == nil {
+			sp.Image = &img
+		}
+	}
 	return sp
 }
 
@@ -320,20 +337,28 @@ func (s *Server) newDiskLocked(project, zone string, b obj, field string) (obj, 
 	}
 	switch {
 	case str(b, "sourceImage") != "":
-		img, err := LookupImage(str(b, "sourceImage"))
+		img, custom, err := s.imageSeedLocked(str(b, "sourceImage"), project)
 		if err != nil {
 			return nil, err
 		}
+		imgSize := int64(img.DiskSizeGb)
 		d["sourceImage"], d["sourceImageId"] = imageRel(img), stableID(imageRel(img))
+		if custom != nil {
+			d["sourceImage"], d["sourceImageId"], d["_seedImage"] = str(custom, "selfLink"), custom["id"], imageRel(img)
+			if k := str(custom, "_storageKey"); k != "" {
+				d["_seedKey"] = k
+			}
+			imgSize, _, _ = sizeGb(custom["diskSizeGb"])
+		}
 		d["licenses"] = []any{"projects/" + img.Project + "/global/licenses/" + img.Family}
-		if int64(img.DiskSizeGb) > minSize {
-			minSize = int64(img.DiskSizeGb)
+		if imgSize > minSize {
+			minSize = imgSize
 		}
 		if !set {
-			size = int64(img.DiskSizeGb)
+			size = imgSize
 		}
-		if size < int64(img.DiskSizeGb) {
-			return nil, invalid("Invalid value for field '%s.sizeGb': '%d'. Requested disk size cannot be smaller than the image size (%d GB)", field, size, img.DiskSizeGb)
+		if size < imgSize {
+			return nil, invalid("Invalid value for field '%s.sizeGb': '%d'. Requested disk size cannot be smaller than the image size (%d GB)", field, size, imgSize)
 		}
 	case str(b, "sourceSnapshot") != "":
 		ss := Rel(str(b, "sourceSnapshot"), project)
@@ -373,6 +398,11 @@ func (s *Server) newDiskLocked(project, zone string, b obj, field string) (obj, 
 			return nil, errf(http.StatusBadRequest, "resourceNotReady", "The resource '%s' is not ready", src)
 		}
 		d["sourceDisk"], d["sourceDiskId"] = src, so["id"]
+		// The clone runs the public image its source came from; its
+		// storage is a copy of the source's (insertDiskLocked).
+		if si := s.diskImageLocked(so); si != "" {
+			d["_seedImage"] = si
+		}
 		if l, ok := so["licenses"]; ok {
 			d["licenses"] = l
 		}
@@ -398,6 +428,19 @@ func (s *Server) newDiskLocked(project, zone string, b obj, field string) (obj, 
 		}
 		d["asyncPrimaryDisk"] = obj{"disk": prel, "diskId": pd["id"]}
 		d["resourceStatus"] = obj{"asyncPrimaryDisk": obj{"state": "CREATED"}}
+	}
+	if k := str(b, "_seedKey"); k != "" && d["sourceImage"] == nil && d["sourceSnapshot"] == nil && d["sourceDisk"] == nil {
+		// A machine image's saved disk (templates.go), copied.
+		d["_seedKey"] = k
+		if si := str(b, "_seedImage"); si != "" {
+			d["_seedImage"] = si
+			if img, err := LookupImage(si); err == nil {
+				d["licenses"] = []any{"projects/" + img.Project + "/global/licenses/" + img.Family}
+				if !set && size < int64(img.DiskSizeGb) {
+					size = int64(img.DiskSizeGb)
+				}
+			}
+		}
 	}
 	if !set && size == 0 {
 		size = 100
@@ -490,6 +533,9 @@ func (s *Server) diskVerbLocked(c call, scope, rel string, d obj) (obj, error) {
 	return nil, unimplemented("%s on %s/%s is not served (#2206)", c.method, rel, c.parts[4])
 }
 
+var servedDiskVerbs = map[string]bool{"resize": true, "setLabels": true, "createSnapshot": true,
+	"addResourcePolicies": true, "removeResourcePolicies": true}
+
 // setLabelsAsync is setLabels answered with a zonal operation.
 func (s *Server) setLabelsAsync(project, scope, rel string, b obj) (obj, error) {
 	return s.setLabels(project, scope, rel, b)
@@ -529,6 +575,25 @@ func (s *Server) createSnapshot(project, diskRel string, b obj, scope string) (o
 		"storageBytesStatus": "UP_TO_DATE", "storageLocations": []any{diskRegion(d)},
 		"creationTimestamp": s.stamp(), "architecture": arch(), "snapshotType": "STANDARD",
 		"labelFingerprint": labelFingerprint(nil)}
+	// Snapshot type and location (#2139, compute/docs/disks/create-snapshots):
+	// an archive snapshot is kept as a standard one is.
+	switch st := str(b, "snapshotType"); st {
+	case "", "STANDARD", "ARCHIVE":
+		if st != "" {
+			snap["snapshotType"] = st
+		}
+	default:
+		return nil, invalid("Invalid value for field 'resource.snapshotType': '%s'. Must be STANDARD or ARCHIVE.", st)
+	}
+	if locs := strsAny(b["storageLocations"]); len(locs) > 0 {
+		if len(locs) > 1 {
+			return nil, invalid("Invalid value for field 'resource.storageLocations': a snapshot has one storage location.")
+		}
+		snap["storageLocations"] = toAny(locs)
+	}
+	if l, ok := b["labels"].(map[string]any); ok && len(l) > 0 {
+		snap["labels"], snap["labelFingerprint"] = l, labelFingerprint(l)
+	}
 	if desc := str(b, "description"); desc != "" {
 		snap["description"] = desc
 	}

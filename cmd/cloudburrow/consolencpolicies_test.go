@@ -100,6 +100,29 @@ func TestSQLPoolingAndEndpointFields(t *testing.T) {
 	if in.Settings.Edition = "ENTERPRISE"; sqlPoolable(in) {
 		t.Error("an Enterprise instance pools")
 	}
+	// MySQL's thread pool (#2141): max_pool_size alone, sent when set.
+	my := sqlPoolConfig(map[string]string{"engine": sqlEngineMySQL, "mysqlConnectionPooling": "true", "mysql_pool_max_pool_size": "4",
+		"connectionPooling": "false"})
+	if !my.ConnectionPoolingEnabled || len(my.Flags) != 1 || my.Flags[0].Name != "max_pool_size" || my.Flags[0].Value != "4" {
+		t.Errorf("MySQL connectionPoolConfig %+v", my)
+	}
+	if pg := sqlPoolConfig(map[string]string{"engine": sqlEnginePostgres, "mysqlConnectionPooling": "true", "connectionPooling": "false"}); pg.ConnectionPoolingEnabled {
+		t.Errorf("a PostgreSQL create page took MySQL's fields: %+v", pg)
+	}
+	if my := sqlPoolConfig(map[string]string{"mysqlConnectionPooling": "true"}); !my.ConnectionPoolingEnabled || len(my.Flags) != 0 {
+		t.Errorf("MySQL's Edit without max_pool_size: %+v", my)
+	}
+	mf := sqlMySQLPoolFields("", nil, nil)
+	if len(mf) != 2 || mf[0].Label != "Enable Managed Connection Pool" || mf[1].Label != "max_pool_size" || mf[1].Panel != "Advanced pooling options" {
+		t.Errorf("MySQL fields %+v", mf)
+	}
+	if !sqlPoolable(&sqladminapi.DatabaseInstance{DatabaseVersion: "MYSQL_8_4", Settings: &sqladminapi.Settings{}}) {
+		t.Error("MySQL 8.4 (Enterprise Plus by default) cannot pool")
+	}
+	if p := sqlPoolingProperty(&sqladminapi.DatabaseInstance{DatabaseVersion: "MYSQL_8_4", Settings: &sqladminapi.Settings{
+		ConnectionPoolConfig: &sqladminapi.ConnectionPoolConfig{ConnectionPoolingEnabled: true}}}); len(p) != 1 || !strings.Contains(p[0].Value, "thread pool on port 3306") {
+		t.Errorf("MySQL's Overview line %+v", p)
+	}
 	rows, err := sqlAutoEndpointRows(`[{"project":"cons","network":"vpc-a"},{"project":"cons","network":"projects/host/global/networks/shared"}]`)
 	if err != nil || len(rows) != 2 || rows[0].ConsumerNetwork != "projects/cons/global/networks/vpc-a" || rows[1].ConsumerNetwork != "projects/host/global/networks/shared" ||
 		rows[1].ConsumerProject != "cons" {

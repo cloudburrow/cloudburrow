@@ -64,24 +64,55 @@ func TestExecutionResumesAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for hits.Load() < 1 && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
+	// Stop the server once the sleep is under way: its end is journaled,
+	// and a second of it has passed. Waiting on the journal rather than on
+	// a fixed delay after the first call keeps a loaded machine from
+	// stopping the execution before it reached the sleep, which would
+	// rightly sleep in full after the restart.
+	sleeping := func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		er := s.execs[ex.GetName()]
+		if er == nil || er.m == nil {
+			return false
+		}
+		for _, e := range er.m.Journal() {
+			if e.Kind == "sleep" {
+				return true
+			}
+		}
+		return false
 	}
-	time.Sleep(300 * time.Millisecond)
+	deadline := time.Now().Add(10 * time.Second)
+	for !sleeping() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !sleeping() {
+		t.Fatal("the execution never reached its sleep")
+	}
+	time.Sleep(time.Second)
 	stoppedAt := time.Now()
 	s.Close()
 	s.mu.Lock()
 	j := s.execs[ex.GetName()].journal
 	st := s.execs[ex.GetName()].Ex.GetState()
 	s.mu.Unlock()
-	if st != executionspb.Execution_ACTIVE || len(j) < 3 {
+	if st != executionspb.Execution_ACTIVE || len(j) < 4 {
 		t.Fatalf("after stop: %v, journal %v", st, j)
 	}
 	var t0 string
+	var sleepEnd time.Time
 	for _, e := range j {
-		if e.Kind == "now" {
+		switch e.Kind {
+		case "now":
 			t0 = string(e.Value)
+		case "sleep":
+			v, err := decodeTyped(e.Value)
+			end, ok := v.(int64)
+			if err != nil || !ok {
+				t.Fatalf("sleep journal %s: %v", e.Value, err)
+			}
+			sleepEnd = time.Unix(0, end)
 		}
 	}
 
@@ -100,8 +131,11 @@ func TestExecutionResumesAfterRestart(t *testing.T) {
 	if got.GetState() != executionspb.Execution_SUCCEEDED {
 		t.Fatalf("resumed execution %v", got)
 	}
-	if took := time.Since(stoppedAt); took > 3*time.Second {
+	if took := time.Since(stoppedAt); took >= 3*time.Second {
 		t.Errorf("the resumed sleep took %v: it slept again in full", took)
+	}
+	if early := time.Until(sleepEnd); sleepEnd.IsZero() || early > 0 {
+		t.Errorf("the resumed execution ended %v before its sleep did", early)
 	}
 	var res map[string]any
 	_ = json.Unmarshal([]byte(got.GetResult()), &res)

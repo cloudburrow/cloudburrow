@@ -67,6 +67,8 @@ go.work.sum
 node_modules/
 # The embedded Linux storage-server binaries (#514); built by make storage-binaries.
 /internal/storageimage/bin/cloudburrow-storage-*
+# The embedded Linux Kubernetes Engine logging agent (#2100); built by make logging-agent-binaries.
+/internal/logagentimage/bin/cloudburrow-logging-agent-*
 
 # Python bytecode, written wherever the compat-python suite runs.
 __pycache__/

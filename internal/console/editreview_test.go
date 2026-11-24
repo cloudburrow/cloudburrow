@@ -30,9 +30,10 @@ func TestEditFormReviewIsSentAndDrawn(t *testing.T) {
 			t.Errorf("console.js lacks %q", want)
 		}
 	}
-	// Both edit forms, the dialog and a tab's own, review first.
-	if n := strings.Count(src, "await reviewChanges(spec, initial"); n != 2 {
-		t.Errorf("%d edit forms review their changes; want the dialog's and the tab's", n)
+	// Every edit form, the dialog, a tab's own and an edit page (a load
+	// balancer's Review and finalize, #2160), reviews first.
+	if n := strings.Count(src, "await reviewChanges(spec, initial"); n != 3 {
+		t.Errorf("%d edit forms review their changes; want the dialog's, the tab's and the edit page's", n)
 	}
 }
 

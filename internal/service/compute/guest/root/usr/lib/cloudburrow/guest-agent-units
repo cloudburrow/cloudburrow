@@ -1,0 +1,18 @@
+#!/bin/sh
+# At image build (#2179): Google's guest agent's units as CloudBurrow runs
+# them. The plugin manager (or, with an older agent, the agent itself) is
+# enabled behind the fence; the compatibility manager, the workload
+# certificate timer and Google's shutdown-script unit are masked, since
+# CloudBurrow's own units run the guest's scripts and keys.
+set -e
+if [ -e /lib/systemd/system/google-guest-agent-manager.service ] || [ -e /usr/lib/systemd/system/google-guest-agent-manager.service ]; then
+  systemctl enable google-guest-agent-manager.service
+  systemctl mask google-guest-agent.service google-guest-compat-manager.service
+else
+  mkdir -p /etc/systemd/system/google-guest-agent.service.d
+  cp /etc/systemd/system/google-guest-agent-manager.service.d/zz-cloudburrow.conf /etc/systemd/system/google-guest-agent.service.d/
+  systemctl enable google-guest-agent.service
+fi
+for u in gce-workload-cert-refresh.timer google-shutdown-scripts.service google-oslogin-cache.timer; do
+  systemctl mask "$u" 2> /dev/null || true
+done

@@ -2,14 +2,17 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"regexp"
 
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/service/apikeys"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
+	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
 )
 
@@ -28,12 +31,23 @@ type iamEnforced8 struct {
 
 func (s iamEnforced8) use(e *iameval.Enforcer) {
 	if s.localAI != nil {
-		svcs := []*iameval.Service{iameval.VertexAI, iameval.DocumentAI, iameval.Speech}
+		// Workbench instances (#2173) are served beside them.
+		svcs := []*iameval.Service{iameval.VertexAI, iameval.DocumentAI, iameval.Speech, iameval.Workbench}
 		var unary []grpc.UnaryServerInterceptor
 		var wraps []func(http.Handler) http.Handler
 		for _, svc := range svcs {
 			unary = append(unary, e.Interceptor(svc))
-			wraps = append(wraps, jsonEnforcer(e, svc, nil))
+			var mixins []*annotations.HttpRule
+			if svc == iameval.VertexAI {
+				// Colab Enterprise's runtime templates' IAM methods (#2105).
+				mixins = vertexai.NotebookIAMMixins()
+			}
+			wraps = append(wraps, jsonEnforcer(e, svc, mixins))
+		}
+		// A runtime template keeps its own policy (#2105).
+		ai := s.localAI
+		e.Policies[iameval.VertexAI.Name] = func(_ context.Context, resource string) *iampolicy.Stored {
+			return ai.NotebookTemplatePolicy(resource)
 		}
 		s.localAI.UseIAM(unary, []grpc.StreamServerInterceptor{e.StreamInterceptor(svcs...)}, func(next http.Handler) http.Handler {
 			h := e.HTTPPaths(iameval.VertexAI, iameval.AIJSON,
@@ -57,6 +71,8 @@ func (s iamEnforced8) use(e *iameval.Enforcer) {
 			}
 			return h
 		}
+		// A subnet's own policy and its answers (#2140, iamenforcexpn.go).
+		useComputeSubnetIAM(e, s.compute)
 	}
 	if s.apiKeys != nil {
 		prev := s.apiKeys.Wrap

@@ -14,6 +14,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
 // serviceIPFresh is how long a Service's cluster IP is used before it is
@@ -95,7 +96,8 @@ func (s *computeService) privateServices(network string) []compute.PrivateServic
 			continue
 		}
 		port := sqlEnginePort(ep.DatabaseVersion)
-		out = append(out, compute.PrivateService{Name: "cloudsql " + ep.Instance, IP: ep.IP, Port: port, TargetIP: ip, TargetPort: port})
+		out = append(out, compute.PrivateService{Name: "cloudsql " + ep.Instance, IP: ep.IP, Port: port, TargetIP: ip, TargetPort: port,
+			ExtraPorts: poolerPorts(ep)})
 	}
 	return out
 }
@@ -136,5 +138,15 @@ func (s *computeService) serviceAttachment(link, consumer string) (compute.Priva
 	}
 	port := sqlEnginePort(ep.DatabaseVersion)
 	return compute.PrivateService{Name: "cloudsql " + ep.Instance, Port: port, TargetPort: port,
-		TargetIP: s.svcIPs.get(components.SQLInstancePrefix + ep.Server)}, accepted, true
+		TargetIP: s.svcIPs.get(components.SQLInstancePrefix + ep.Server), ExtraPorts: poolerPorts(ep)}, accepted, true
+}
+
+// poolerPorts are the ports an instance's private endpoints serve beside
+// its server's: its managed connection pooler's, 6432, as Google's
+// private IP and Private Service Connect endpoints do (#2141).
+func poolerPorts(ep sqladmin.PrivateEndpoint) []int {
+	if ep.PoolerPort == 0 {
+		return nil
+	}
+	return []int{ep.PoolerPort}
 }

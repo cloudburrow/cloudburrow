@@ -1,0 +1,47 @@
+#!/bin/sh
+# A Shielded VM's firmware and vTPM in the guest (#2179), before Google's
+# guest agent starts (cloudburrow-firmware.service):
+#
+#   - the vTPM: swtpm's command socket, which the vTPM container beside
+#     the guest serves at /run/vtpm/tpm.sock, is named /dev/tpm0 and
+#     /dev/tpmrm0 (go-tpm and tpm2-tss open a Unix socket TPM there);
+#   - the HTTPS metadata server's root certificate, which Compute Engine
+#     hands a Shielded VM in the Google UEFI variable
+#     InstanceRootCACertificate-a2858e46-a37f-456a-8c79-0c1fe48b65ff
+#     (https://docs.cloud.google.com/compute/docs/metadata/overview#https-mds):
+#     read from the instance's own metadata on the Compute port and written
+#     under /sys/firmware/efi/efivars (a tmpfs over the container's
+#     read-only firmware directory), the four attribute bytes
+#     (non-volatile, boot service and runtime access) first.
+set -u
+GUID=a2858e46-a37f-456a-8c79-0c1fe48b65ff
+log() { echo "$*" | /usr/lib/cloudburrow/console cloudburrow-firmware; }
+
+if [ -S /run/vtpm/tpm.sock ]; then
+  ln -sf /run/vtpm/tpm.sock /dev/tpm0
+  ln -sf /run/vtpm/tpm.sock /dev/tpmrm0
+  log "vTPM: /dev/tpm0"
+else
+  # No vTPM: not a Shielded VM, no HTTPS metadata server.
+  exit 0
+fi
+[ -n "${CLOUDBURROW_GUEST_METADATA:-}" ] || exit 0
+root=$(curl -fsS --max-time 20 --retry 5 -H 'Metadata-Flavor: Google' "$CLOUDBURROW_GUEST_METADATA/cloudburrow/firmware/InstanceRootCACertificate") || {
+  log "no HTTPS metadata server root certificate"
+  exit 0
+}
+dir=/sys/firmware/efi/efivars
+if ! mkdir -p "$dir" 2> /dev/null || ! touch "$dir/.cloudburrow" 2> /dev/null; then
+  mkdir -p /run/cloudburrow-firmware
+  mount -t tmpfs -o mode=0755 cloudburrow-firmware /sys/firmware 2> /dev/null || mount -t tmpfs -o mode=0755 cloudburrow-firmware /sys/firmware/efi 2> /dev/null || {
+    log "cannot make $dir"
+    exit 0
+  }
+  mkdir -p "$dir"
+fi
+rm -f "$dir/.cloudburrow"
+{
+  printf '\007\000\000\000'
+  printf '%s\n' "$root"
+} > "$dir/InstanceRootCACertificate-$GUID"
+log "HTTPS metadata server root certificate in UEFI variable InstanceRootCACertificate-$GUID"

@@ -217,6 +217,15 @@ func (s *Server) RegisterAPI(g grpc.ServiceRegistrar) {
 	ncpb.RegisterDataTransferServiceServer(g, dataTransfer{})
 }
 
+// HasOperation reports whether name is one of this API's operations, for
+// a port whose gRPC surface serves other APIs' operations beside them.
+func (s *Server) HasOperation(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.ops[name]
+	return ok
+}
+
 // Operations is the operations server, for a gRPC server that serves
 // another API's operations beside these (Compute's port has none).
 func (s *Server) Operations() longrunningpb.OperationsServer { return &operations{s: s} }
@@ -247,6 +256,35 @@ func NewRESTHandler(s *Server) http.Handler {
 	return t
 }
 
-// IsPath is whether r is a request of this API's JSON surface: /v1/...,
-// which Compute Engine's (/compute/v1/...) never is.
-func IsPath(r *http.Request) bool { return strings.HasPrefix(r.URL.Path, "/v1/") }
+// colls are the collections networkconnectivity.googleapis.com's JSON
+// API serves under /v1/projects/P/locations/L/.
+var colls = map[string]bool{"hubs": true, "spokes": true, "internalRanges": true, "policyBasedRoutes": true,
+	"serviceClasses": true, "serviceConnectionMaps": true, "serviceConnectionPolicies": true,
+	"serviceConnectionTokens": true, "multicloudDataTransferConfigs": true,
+	"multicloudDataTransferSupportedServices": true}
+
+// Handles is whether a request on the Compute Engine port is this API's
+// JSON surface: a path under one of its collections or one of its
+// operations. Serverless VPC Access, Certificate Manager, Network Security,
+// Network Services and IAP serve /v1/projects/P/locations paths on the
+// same port (Serverless VPC Access answers the locations), so every other
+// /v1/ path is theirs (main run 45371505851: /v1/.../connectors was
+// answered here, with no method bound).
+func (s *Server) Handles(r *http.Request) bool {
+	path := r.URL.Path
+	if !strings.HasPrefix(path, "/v1/projects/") {
+		return false
+	}
+	p := strings.Split(strings.TrimPrefix(path, "/v1/"), "/")
+	if len(p) < 5 || p[2] != "locations" {
+		return false
+	}
+	c := strings.SplitN(p[4], ":", 2)[0]
+	if colls[c] {
+		return true
+	}
+	if c == "operations" && len(p) >= 6 {
+		return s.HasOperation(strings.Join(p[:5], "/") + "/" + strings.SplitN(p[5], ":", 2)[0])
+	}
+	return false
+}

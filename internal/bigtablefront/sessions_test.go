@@ -67,8 +67,35 @@ func classicCalls(f *Front, seq uint64, method, resource string) int {
 // deadline (#1824; fixed upstream after v1.58.0 by
 // googleapis/google-cloud-go#20832). The error is raised before the
 // client sends the vRPC, so the front never saw the call.
+//
+// A warm pool loses wake-ups too (v1.58.0 and v1.58.1): Session.
+// routeVRPCFrame hands a vRPC's result to its caller before its
+// onSlotDrained hook puts the session back on its AFE's idle queue and
+// signals a waiter. A caller's next call can find the queue still empty
+// and, before it parks, miss that signal; it then waits beside the idle
+// session until its deadline (main CI after Landing 168, a ReadRow
+// straight after a ReadRow).
 func lostWakeup(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "bigtable: no sessions available")
+}
+
+// sessionCall runs one call of the session client with a short deadline,
+// and once more if the client lost its own wake-up (lostWakeup): by then
+// the session it missed is idle on its queue, so the retry's fast path
+// takes it. The retry must succeed, so a front that never answers a vRPC
+// (its session stays busy, and the retry waits too) still fails.
+func sessionCall(t *testing.T, ctx context.Context, what string, call func(context.Context) error) error {
+	t.Helper()
+	for try := 0; ; try++ {
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := call(cctx)
+		cancel()
+		if lostWakeup(err) && try == 0 {
+			t.Logf("%s: the client lost its session wake-up; retrying once: %v", what, err)
+			continue
+		}
+		return err
+	}
 }
 
 // TestSessionsServeTheGoClient (#1523): the official client, dialling the
@@ -77,16 +104,14 @@ func lostWakeup(err error) bool {
 // reads and writes through OpenTable sessions; they read and write the
 // table the classic calls do.
 //
-// The first session call warms the table's session pool. It runs with a
-// short deadline and, if the client lost its own wake-up on the cold pool
-// (lostWakeup), runs once more: the retry must succeed, so a front that
-// never opens or never answers a session still fails here. Every later
-// call is sequential on a warm pool, where the client's fast path finds
-// the idle session and the race cannot arise, so it gets no retry.
+// Each session call runs through sessionCall: if the client lost its
+// own wake-up (lostWakeup), on the cold pool or a warm one, it runs once
+// more, and the retry must succeed, so a front that never opens or never
+// answers a session still fails here.
 func TestSessionsServeTheGoClient(t *testing.T) {
 	t.Setenv("CBT_FORCE_SESSION", "true")
 	addr, f := serveFront(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	ac, err := bigtable.NewAdminClient(ctx, "p", "i", option.WithGRPCConn(dial(t, addr)))
 	if err != nil {
@@ -106,20 +131,19 @@ func TestSessionsServeTheGoClient(t *testing.T) {
 	}
 	tbl := c.Open("t")
 	name := "projects/p/instances/i/tables/t"
+	readRow := func(row string, opts ...bigtable.ReadOption) (r bigtable.Row, err error) {
+		err = sessionCall(t, ctx, "ReadRow "+row, func(cctx context.Context) error {
+			r, err = tbl.ReadRow(cctx, row, opts...)
+			return err
+		})
+		return r, err
+	}
 	// Until the client's first poll lands its writes are classic.
-	retried := false
 	for i := 0; ; i++ {
 		seq := lastSeq(f)
 		m := bigtable.NewMutation()
 		m.Set("f", "q", bigtable.Timestamp(1000), []byte("v1"))
-		actx, acancel := context.WithTimeout(ctx, 10*time.Second)
-		err := tbl.Apply(actx, "r1", m)
-		acancel()
-		if lostWakeup(err) && !retried {
-			t.Logf("the client lost its cold-pool wake-up (#1824); retrying once: %v", err)
-			retried = true
-			continue
-		}
+		err := sessionCall(t, ctx, "Apply", func(cctx context.Context) error { return tbl.Apply(cctx, "r1", m) })
 		if err != nil {
 			t.Fatalf("Apply: %v", err)
 		}
@@ -132,19 +156,19 @@ func TestSessionsServeTheGoClient(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	seq := lastSeq(f)
-	r, err := tbl.ReadRow(ctx, "r1")
+	r, err := readRow("r1")
 	if err != nil || len(r["f"]) != 1 || string(r["f"][0].Value) != "v1" || r["f"][0].Timestamp != 1000 {
 		t.Errorf("ReadRow = %v, %v", r, err)
 	}
-	if r, err := tbl.ReadRow(ctx, "missing"); err != nil || r != nil {
+	if r, err := readRow("missing"); err != nil || r != nil {
 		t.Errorf("ReadRow of a missing row = %v, %v, want none", r, err)
 	}
 	m := bigtable.NewMutation()
 	m.Set("f", "q2", bigtable.Timestamp(2000), []byte("v2"))
-	if err := tbl.Apply(ctx, "r1", m); err != nil {
+	if err := sessionCall(t, ctx, "Apply", func(cctx context.Context) error { return tbl.Apply(cctx, "r1", m) }); err != nil {
 		t.Fatal(err)
 	}
-	r, err = tbl.ReadRow(ctx, "r1", bigtable.RowFilter(bigtable.ColumnFilter("q2")))
+	r, err = readRow("r1", bigtable.RowFilter(bigtable.ColumnFilter("q2")))
 	if err != nil || len(r["f"]) != 1 || string(r["f"][0].Value) != "v2" {
 		t.Errorf("ReadRow with a filter = %v, %v", r, err)
 	}

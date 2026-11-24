@@ -59,8 +59,9 @@ func diskStorage(t *testing.T, diskID uint64, marker string) (names string, foun
 
 // TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient (#2206),
 // the official compute/apiv1 REST clients, on one VM:
-//   - a disk with a Cloud KMS key, attached and written over SSH: once
-//     the VM stops, its storage holds only the sealed file, without the
+//   - a disk with a Cloud KMS key, attached and written over SSH: while
+//     the VM runs and once it stops, its storage holds only the dm-crypt
+//     image, ciphertext, without the
 //     data; with the key version disabled the VM does not start, and with
 //     it enabled again it starts and reads the data back;
 //   - a disk with a customer-supplied key (rawKey): only its sha256 is
@@ -187,13 +188,20 @@ func TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient(t *testing.T
 	}
 	marker := "cmek-secret-" + sfx
 	write("cmek", marker)
+	// While the VM runs, the disk's storage is the dm-crypt image alone,
+	// and the data written is nowhere in its bytes.
+	if d, err := disks.Get(ctx, &computepb.GetDiskRequest{Project: p, Zone: za, Disk: cmek}); err != nil {
+		t.Fatal(err)
+	} else if names, found, ok := diskStorage(t, d.GetId(), marker); ok && (names != ".cloudburrow-crypt" || found) {
+		t.Errorf("the running VM's CMEK disk holds %q (the data in the clear: %v), want only the encrypted image", names, found)
+	}
 	stop()
 	cd, err := disks.Get(ctx, &computepb.GetDiskRequest{Project: p, Zone: za, Disk: cmek})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if names, found, ok := diskStorage(t, cd.GetId(), marker); ok && (names != ".cloudburrow-sealed" || found) {
-		t.Errorf("the stopped VM's CMEK disk holds %q (the data in the clear: %v), want only the sealed file", names, found)
+	if names, found, ok := diskStorage(t, cd.GetId(), marker); ok && (names != ".cloudburrow-crypt" || found) {
+		t.Errorf("the stopped VM's CMEK disk holds %q (the data in the clear: %v), want only the encrypted image", names, found)
 	}
 	v1 := keys[region] + "/cryptoKeyVersions/1"
 	setState(v1, kmspb.CryptoKeyVersion_DISABLED)

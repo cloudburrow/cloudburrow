@@ -86,6 +86,18 @@ type changeFunc struct {
 // changeFuncs returns the calls of APPENDS and CHANGES in sql, and false
 // when one cannot be read.
 func changeFuncs(sql, project, defaultDataset string) ([]changeFunc, bool) {
+	return scanChangeFuncs(sql, project, defaultDataset, false)
+}
+
+// changeCalls is changeFuncs for a continuous query's parser
+// (continuoussql.go, #2193), which resolves each call's table itself: a
+// table in any project, or with no dataset, is a call all the same, its
+// dataset and table left empty.
+func changeCalls(sql string) ([]changeFunc, bool) {
+	return scanChangeFuncs(sql, "", "", true)
+}
+
+func scanChangeFuncs(sql, project, defaultDataset string, anyTable bool) ([]changeFunc, bool) {
 	up := strings.ToUpper(sql)
 	if !strings.Contains(up, "APPENDS") && !strings.Contains(up, "CHANGES") {
 		return nil, true
@@ -108,7 +120,7 @@ func changeFuncs(sql, project, defaultDataset string) ([]changeFunc, bool) {
 			parts = []string{defaultDataset, parts[0]}
 		}
 		dataset, table, named := resolve(parts, project)
-		if !named {
+		if !named && !anyTable {
 			return nil, false
 		}
 		c := changeFunc{name: strings.ToUpper(t.text), pos: t.pos, dataset: dataset, table: table}

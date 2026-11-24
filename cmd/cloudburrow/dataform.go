@@ -30,9 +30,11 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/cmek"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/nbruntime"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
+	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -70,6 +72,20 @@ type dataformService struct {
 	runAddr func() string
 	// keys are the customer-managed keys (the instance's Cloud KMS).
 	keys cmek.Keys
+	// storage is Cloud Storage's tunnel, for notebook outputs and
+	// repository snapshots; notebooks are the notebook runtimes notebook
+	// actions run on (dataformpipelines.go).
+	storage   func() *netfwd.Forwarder
+	notebooks *nbruntime.Manager
+	// runtimeTemplates resolves a Colab Enterprise runtime template's
+	// options (#2105, colabenterprise.go); nil without Vertex AI.
+	runtimeTemplates func(name string) (nbruntime.Options, error)
+	// accountToken is a Developer Connect account connector user's token
+	// (Cloud Run's Developer Connect), for personal authentication.
+	accountToken func(ctx context.Context, connector, user string) (string, error)
+	// identity are strict act-as and the invocations' run identities
+	// (#2173, runidentity.go).
+	identity vertexai.Identity
 
 	server *grpctransport.Server
 	api    *dataform.Server
@@ -135,6 +151,14 @@ func (s *dataformService) Start(ctx context.Context) error {
 	if s.runAddr != nil {
 		opts.LinkToken = s.linkToken
 	}
+	if s.storage != nil {
+		opts.Storage = dataformStorage{tunnel: s.storage}
+	}
+	if s.notebooks != nil {
+		opts.Notebooks = dataformNotebooks{m: s.notebooks, templates: s.runtimeTemplates}
+	}
+	opts.AccountToken = s.accountToken
+	opts.ActAs, opts.RunAs = s.identity.ActAs, s.identity.Mint
 	if s.secrets != nil {
 		opts.AccessSecret = s.accessSecret
 	}
@@ -389,7 +413,7 @@ func (b dataformBigQuery) client(ctx context.Context, project string) (*bigquery
 	if f == nil || f.HostAddr() == "" {
 		return nil, errors.New("BigQuery is not served on this instance")
 	}
-	return bigquery.NewClient(ctx, project, option.WithEndpoint("http://"+f.HostAddr()), option.WithoutAuthentication())
+	return bigquery.NewClient(ctx, project, option.WithEndpoint("http://"+f.HostAddr()), dataformRunAuth(ctx))
 }
 
 func (b dataformBigQuery) EnsureDataset(ctx context.Context, project, dataset, location string) error {
@@ -464,6 +488,9 @@ func (b dataformBigQuery) query(ctx context.Context, project, location, sql stri
 	defer c.Close()
 	q := c.Query(sql)
 	q.Location = location
+	if dataform.BatchPriority(ctx) {
+		q.Priority = bigquery.BatchPriority
+	}
 	// The job's ID is chosen here, so a cancelled invocation can stop the
 	// job even when jobs.insert had not answered yet.
 	q.JobID = "dataform_" + strconv.FormatInt(time.Now().UnixNano(), 36)

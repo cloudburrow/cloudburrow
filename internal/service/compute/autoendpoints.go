@@ -113,7 +113,7 @@ func (s *Server) DeleteAutoEndpoint(rel string) error {
 	if _, ok := s.res[rel]; !ok {
 		return s.saveLocked()
 	}
-	_, err := s.deleteForwardingRule(p[1], p[3], p[5])
+	_, err := s.deleteForwardingRule(p[1], "regions/"+p[3], rel)
 	return err
 }
 

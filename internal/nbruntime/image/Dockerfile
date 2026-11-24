@@ -9,19 +9,29 @@
 # (%%bigquery), with pydata-google-auth (Apache-2.0). Third-party, pinned,
 # BSD or Apache licensed, installed here and never part of the CLI: IPython
 # and ipykernel (the cells' shell), pandas, pyarrow and db-dtypes (query
-# results as DataFrames), matplotlib (inline plots). The base is the Docker
+# results as DataFrames), matplotlib (inline plots), and for Spark
+# notebooks websockets (BSD-3-Clause), tqdm (MPL-2.0 and MIT) and
+# packaging (Apache-2.0 or BSD-2-Clause). The base is the Docker
 # official python image, pinned by its multi-arch index digest
 # (dependencies.json's bigquery.notebookRuntimeBase).
 FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 
-RUN pip install --no-cache-dir \
-      google-cloud-bigquery==3.47.0 \
-      bigquery-magics==0.15.2 \
-      db-dtypes==1.9.0 \
-      ipython==9.9.0 \
-      pandas==2.3.3 \
-      pyarrow==22.0.0 \
-      matplotlib==3.10.7
+# Every package, with every dependency, from the full hashed lock
+# (requirements.txt, generated from requirements.in by uv pip compile
+# --generate-hashes): pip checks each wheel's SHA-256, installs nothing
+# the lock does not list (--no-deps) and builds only pyspark-client, an
+# sdist alone, with the lock's own setuptools (--no-build-isolation, so
+# no build requirement is fetched beside the lock), installed first.
+# An Apache Spark notebook's DataprocSparkSession (#2156): Google's
+# dataproc-spark-connect (Apache-2.0) is in the lock without its
+# pyspark[connect] requirement, whose full pyspark (Spark's jars) a Spark
+# Connect client does not use: pyspark-client 4.0.1 (Apache-2.0) is the
+# same client alone, the version of the runtime 3.0 sessions' Spark.
+COPY requirements.txt /opt/cloudburrow/requirements.txt
+COPY build-requirements.txt /opt/cloudburrow/build-requirements.txt
+RUN pip install --no-cache-dir --require-hashes --no-deps --only-binary :all: -r /opt/cloudburrow/build-requirements.txt && \
+    pip install --no-cache-dir --require-hashes --no-deps --no-build-isolation --only-binary :all: --no-binary pyspark-client \
+      -r /opt/cloudburrow/requirements.txt
 
 COPY kernel.py relay.py /opt/cloudburrow/
 

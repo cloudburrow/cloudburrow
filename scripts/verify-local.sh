@@ -17,7 +17,7 @@
 #
 # Options:
 #   --shards A,B,...  the shards to run, in order; default every one:
-#                     storage,served,gke,run,crossservice,scale,emulators,memorystore,sql,
+#                     storage,served,gke,gkeupgrade,run,crossservice,scale,emulators,memorystore,sql,
 #                     sqlreplicas,acceptance,iam,localai,localaispeech
 #                     (localai and localaispeech, #1985, need make build-onnx's CLI, which it builds
 #                     unless --no-build, ONNXRUNTIME_LIB, and the pinned
@@ -519,8 +519,8 @@ browser_suite() {  # <shard> <dir> <flags...>
   BROWSER_ENV=$(scripts/compat-env.sh --only "$BROWSER_VARS" --cli "$CLI" -- "$@" 2>/dev/null)
   (
     eval "$BROWSER_ENV"
-    # As in CI: 30m in run, crossservice, storage (#2080) and sql (AlloyDB's
-    # clusters, #2191), 20m in served, 10m elsewhere.
+    # As in CI: 30m in run, crossservice, storage (#2080) and sql (AlloyDB's clusters,
+    # #2191), 20m in served, 10m elsewhere.
     local timeout=10m
     case "$shard" in served) timeout=20m ;; run|crossservice|storage|sql) timeout=30m ;; esac
     # As in CI: what the restarted instance needs before its tests (#1985).
@@ -584,7 +584,7 @@ done
 # from ci.yml so the two cannot drift.
 compat_coverage() {
   local s never none
-  for s in storage served gke run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
+  for s in storage served gke gkeupgrade run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
     case " ${SHARD_LIST[*]} " in *" $s "*) ;; *) return 0 ;; esac
   done
   SUITES="$WORK/coverage.suites" CHECKS="$WORK/coverage.checks"
@@ -593,7 +593,7 @@ compat_coverage() {
   go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > "$WORK/all.txt"
   # A shard without restart probes has no probe-*.log, and cat's exit 1
   # for the unmatched glob would end the script under set -e.
-  for s in storage served gke run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
+  for s in storage served gke gkeupgrade run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
     cat "$LOGS/$s"/compat.log "$LOGS/$s"/probe-*.log 2>/dev/null || true
   done | grep -oE -- '^--- (PASS|FAIL): Test[A-Za-z0-9_]+' | awk '{print $3}' | sort -u > "$WORK/ran.txt"
   none=$(comm -23 "$WORK/all.txt" "$WORK/ran.txt" | grep -vE "${never:-^$}" || true)

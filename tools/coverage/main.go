@@ -53,6 +53,7 @@ import (
 	gcs "github.com/cloudburrow/cloudburrow/internal/service/storage"
 	bqv2 "google.golang.org/api/bigquery/v2"
 	bqconnection "google.golang.org/api/bigqueryconnection/v1"
+	bqreservation "google.golang.org/api/bigqueryreservation/v1"
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
 	observabilityv1 "google.golang.org/api/observability/v1"
 	runv1 "google.golang.org/api/run/v1"
@@ -81,12 +82,14 @@ import (
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	_ "cloud.google.com/go/billing/apiv1/billingpb"
 	_ "cloud.google.com/go/billing/budgets/apiv1/budgetspb"
+	_ "cloud.google.com/go/certificatemanager/apiv1/certificatemanagerpb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	_ "cloud.google.com/go/container/apiv1/containerpb"
 	_ "cloud.google.com/go/dataform/apiv1/dataformpb"
 	_ "cloud.google.com/go/dataform/apiv1beta1/dataformpb"
+	_ "cloud.google.com/go/dataproc/v2/apiv1/dataprocpb"
 	_ "cloud.google.com/go/datastore/admin/apiv1/adminpb"
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
@@ -103,6 +106,7 @@ import (
 	_ "cloud.google.com/go/iam/apiv1/iampb"
 	_ "cloud.google.com/go/iam/apiv2/iampb"
 	_ "cloud.google.com/go/iam/apiv3/iampb"
+	_ "cloud.google.com/go/iap/apiv1/iappb"
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
 	_ "cloud.google.com/go/kms/inventory/apiv1/inventorypb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
@@ -110,6 +114,9 @@ import (
 	_ "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	_ "cloud.google.com/go/monitoring/dashboard/apiv1/dashboardpb"
 	_ "cloud.google.com/go/networkconnectivity/apiv1/networkconnectivitypb"
+	_ "cloud.google.com/go/networksecurity/apiv1/networksecuritypb"
+	_ "cloud.google.com/go/networkservices/apiv1/networkservicespb"
+	_ "cloud.google.com/go/notebooks/apiv2/notebookspb"
 	_ "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	_ "cloud.google.com/go/redis/apiv1/redispb"
@@ -127,6 +134,7 @@ import (
 	_ "cloud.google.com/go/speech/apiv2/speechpb"
 	_ "cloud.google.com/go/trace/apiv1/tracepb"
 	_ "cloud.google.com/go/trace/apiv2/tracepb"
+	_ "cloud.google.com/go/vpcaccess/apiv1/vpcaccesspb"
 	_ "cloud.google.com/go/workflows/apiv1/workflowspb"
 	_ "cloud.google.com/go/workflows/executions/apiv1/executionspb"
 	_ "google.golang.org/genproto/googleapis/cloud/location"
@@ -237,7 +245,20 @@ var areas = []area{
 		// countTokens and computeTokens (#1937).
 		"google.cloud.aiplatform.v1.LlmUtilityService",
 		// Context caching (#2107).
-		"google.cloud.aiplatform.v1.GenAiCacheService"}},
+		"google.cloud.aiplatform.v1.GenAiCacheService",
+		// Colab Enterprise's runtime templates and runtimes (#2105), and
+		// its schedules of notebook executions.
+		"google.cloud.aiplatform.v1.NotebookService", "google.cloud.aiplatform.v1.ScheduleService",
+		// Vertex AI Pipelines' pipeline jobs (#2173).
+		"google.cloud.aiplatform.v1.PipelineService"},
+		// The runtime templates' IAM policies (#2105): the IAMPolicy mixin,
+		// whose keys the kms area holds, so named by their discovery IDs.
+		Extra: []string{"aiplatform.projects.locations.notebookRuntimeTemplates.getIamPolicy",
+			"aiplatform.projects.locations.notebookRuntimeTemplates.setIamPolicy",
+			"aiplatform.projects.locations.notebookRuntimeTemplates.testIamPermissions"}},
+	// Vertex AI Workbench instances (#2173), notebooks.googleapis.com v2 on
+	// the same port.
+	{Key: "workbench", Title: "Vertex AI Workbench", Own: true, Services: []string{"google.cloud.notebooks.v2.NotebookService"}},
 	// v1beta1's PredictionService, for ChatCompletions on those endpoints
 	// (#1840) and v1's methods bridged (#1937): a page of its own, since
 	// its method names repeat v1's.
@@ -367,6 +388,14 @@ var areas = []area{
 	// Dataform v1beta1 (#2105), on the same port over the v1 server; a page
 	// of its own, since its service has v1's name.
 	{Key: "dataformv1beta1", Title: "Dataform (v1beta1)", Own: true, Services: []string{"google.cloud.dataform.v1beta1.Dataform"}},
+	// Serverless for Apache Spark (#2156): the Dataproc API's batch,
+	// session and session template controllers, and Dataproc on Compute
+	// Engine's (#2162) clusters, node groups, jobs, workflow templates and
+	// autoscaling policies, CloudBurrow's own.
+	{Key: "dataproc", Title: "Dataproc (v1): clusters, jobs, workflow templates, autoscaling policies and Serverless for Apache Spark", Own: true, Services: []string{
+		"google.cloud.dataproc.v1.ClusterController", "google.cloud.dataproc.v1.JobController", "google.cloud.dataproc.v1.WorkflowTemplateService",
+		"google.cloud.dataproc.v1.AutoscalingPolicyService", "google.cloud.dataproc.v1.NodeGroupController",
+		"google.cloud.dataproc.v1.BatchController", "google.cloud.dataproc.v1.SessionController", "google.cloud.dataproc.v1.SessionTemplateController"}},
 	// App Hub (#2110): CloudBurrow's own, gRPC and JSON on one port; its
 	// Locations, Operations and IAM mixins are other areas' rows.
 	{Key: "apphub", Title: "App Hub (v1)", Own: true, Services: []string{"google.cloud.apphub.v1.AppHub"}},
@@ -381,6 +410,30 @@ var areas = []area{
 	// one port, beside OTLP's ingestion (not a googleapis service).
 	{Key: "trace", Title: "Cloud Trace API (v1 and v2)", Own: true,
 		Services: []string{"google.devtools.cloudtrace.v1.TraceService", "google.devtools.cloudtrace.v2.TraceService"}},
+	// Serverless VPC Access (#2140): CloudBurrow's own, JSON on the Compute
+	// Engine port; its Locations and Operations mixins are other areas'
+	// rows.
+	{Key: "vpcaccess", Title: "Serverless VPC Access (v1)", Own: true, Services: []string{"google.cloud.vpcaccess.v1.VpcAccessService"}},
+	// Certificate Manager and Identity-Aware Proxy (#2160): CloudBurrow's
+	// own, JSON on the Compute Engine port; Certificate Manager's Locations
+	// and Operations mixins are other areas' rows.
+	{Key: "certificatemanager", Title: "Certificate Manager (v1)", Own: true, Services: []string{"google.cloud.certificatemanager.v1.CertificateManager"}},
+	// Network Security (#2160): CloudBurrow's own, JSON on the Compute
+	// Engine port, gRPC and JSON; the parts Cloud Load Balancing, Cloud
+	// Armor and Secure Web Proxy read (TLS policies, authorization
+	// policies, backend authentication configs, address groups, gateway
+	// security policies). Its Locations and Operations mixins are other
+	// areas' rows.
+	{Key: "networksecurity", Title: "Network Security (v1)", Own: true, Services: []string{"google.cloud.networksecurity.v1.NetworkSecurity",
+		"google.cloud.networksecurity.v1.AddressGroupService", "google.cloud.networksecurity.v1.OrganizationAddressGroupService"}},
+	// Network Services (#2160): CloudBurrow's own, JSON on the Compute
+	// Engine port; Secure Web Proxy's gateways and Service Extensions'
+	// authorization extensions. Its Locations and Operations mixins are
+	// other areas' rows.
+	{Key: "networkservices", Title: "Network Services (v1)", Own: true,
+		Services: []string{"google.cloud.networkservices.v1.NetworkServices", "google.cloud.networkservices.v1.DepService"}},
+	{Key: "iap", Title: "Identity-Aware Proxy (v1)", Own: true,
+		Services: []string{"google.cloud.iap.v1.IdentityAwareProxyAdminService", "google.cloud.iap.v1.IdentityAwareProxyOAuthService"}},
 	{Key: "workflows", Title: "Workflows and Workflow Executions (v1)", Own: true,
 		Services: []string{"google.cloud.workflows.v1.Workflows", "google.cloud.workflows.executions.v1.Executions"}},
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON
@@ -595,6 +648,8 @@ func bigqueryMethods() []string {
 	// The BigQuery Connection API (#1755), served on the BigQuery
 	// front's port, by its discovery IDs.
 	out = append(out, discoveryMethods("bigqueryconnection", reflect.TypeOf(bqconnection.Service{}))...)
+	// The BigQuery Reservation API (#2193), on the same port.
+	out = append(out, discoveryMethods("bigqueryreservation", reflect.TypeOf(bqreservation.Service{}))...)
 	sort.Strings(out)
 	return out
 }

@@ -30,7 +30,7 @@ import (
 // keyboard subtest reaches Disk type's select and Encryption's radios by
 // keys alone and opens Edit performance from the keyboard.
 func TestComputeDiskPerformanceKeysAndSchedulesThroughTheBrowser(t *testing.T) {
-	needService(t, "compute-snapshotschedules")
+	needService(t, "compute-snapshot-schedules")
 	project := uniqueProject(t)
 	q := "?project=" + url.QueryEscape(project)
 	type row struct {
@@ -70,9 +70,9 @@ func TestComputeDiskPerformanceKeysAndSchedulesThroughTheBrowser(t *testing.T) {
 	const disk, sched = "browser-hdha", "browser-sched"
 	t.Cleanup(func() {
 		b, _ := json.Marshal(map[string]any{"Path": []string{"us-central1", sched}, "Action": "detach", "Values": map[string]string{"disk": "regions/us-central1/disks/" + disk}})
-		consoleDo(t, http.MethodPost, "/api/actions/compute-snapshotschedules"+q, string(b))
+		consoleDo(t, http.MethodPost, "/api/actions/compute-snapshot-schedules"+q, string(b))
 		b, _ = json.Marshal(map[string]any{"Path": []string{"us-central1", sched}, "Action": "delete"})
-		consoleDo(t, http.MethodPost, "/api/actions/compute-snapshotschedules"+q, string(b))
+		consoleDo(t, http.MethodPost, "/api/actions/compute-snapshot-schedules"+q, string(b))
 		b, _ = json.Marshal(map[string]any{"Path": []string{"us-central1", disk}, "Action": "delete"})
 		consoleDo(t, http.MethodPost, "/api/actions/compute-disks"+q, string(b))
 	})
@@ -136,15 +136,15 @@ func TestComputeDiskPerformanceKeysAndSchedulesThroughTheBrowser(t *testing.T) {
 	chooseRadio(p, "frequency", "Hourly")
 	p.waitFor(`document.querySelector("#f-hours").getClientRects().length > 0`)
 	p.submitForm(map[string]string{"name": sched, "region": "us-central1", "hours": "6", "startTime": "02:00", "retentionDays": "7"}, "name")
-	waitRow("compute-snapshotschedules", sched, func(r *row) bool { return r.Fields["Frequency"] == "Every 6 hours from 02:00 UTC" })
+	waitRow("compute-snapshot-schedules", sched, func(r *row) bool { return r.Fields["Frequency"] == "Every 6 hours from 02:00 UTC" })
 	p.navigate("/compute/snapshotSchedules/us-central1/" + sched + q)
 	p.waitFor(`document.querySelector("#view").textContent.includes("Auto-delete snapshots after")`)
 	p.pageAction("Attach to disk", map[string]string{"disk": "regions/us-central1/disks/" + disk}, "")
-	waitRow("compute-snapshotschedules", sched, func(r *row) bool { return r.Fields["Disks"] == "1" })
+	waitRow("compute-snapshot-schedules", sched, func(r *row) bool { return r.Fields["Disks"] == "1" })
 	p.navigate("/compute/snapshotSchedules/us-central1/" + sched + q)
 	p.waitFor(`document.querySelector("#view").textContent.includes("Auto-delete snapshots after")`)
 	p.pageAction("Edit", map[string]string{"retentionDays": "30"}, "")
-	waitRow("compute-snapshotschedules", sched, func(r *row) bool { return r.Fields["Auto-delete snapshots after"] == "30 days" })
+	waitRow("compute-snapshot-schedules", sched, func(r *row) bool { return r.Fields["Auto-delete snapshots after"] == "30 days" })
 
 	t.Run("WCAG", func(t *testing.T) {
 		auditScreens(t, []a11yPage{
@@ -179,11 +179,11 @@ func TestComputeDiskPerformanceKeysAndSchedulesThroughTheBrowser(t *testing.T) {
 	p.navigate("/compute/snapshotSchedules/us-central1/" + sched + q)
 	p.waitFor(`document.querySelector("#view").textContent.includes("Auto-delete snapshots after")`)
 	p.pageAction("Detach from disk", map[string]string{"disk": "regions/us-central1/disks/" + disk}, "")
-	waitRow("compute-snapshotschedules", sched, func(r *row) bool { return r.Fields["Disks"] == "0" })
+	waitRow("compute-snapshot-schedules", sched, func(r *row) bool { return r.Fields["Disks"] == "0" })
 	p.navigate("/compute/snapshotSchedules" + q)
 	vmRowMenu(p, sched, "Delete", nil, sched)
 	gone := time.Now().Add(time.Minute)
-	for find("compute-snapshotschedules", sched) != nil {
+	for find("compute-snapshot-schedules", sched) != nil {
 		if time.Now().After(gone) {
 			t.Fatal("the snapshot schedule was never deleted")
 		}

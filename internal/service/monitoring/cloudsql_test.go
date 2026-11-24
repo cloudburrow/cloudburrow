@@ -126,3 +126,85 @@ func TestSQLBuiltinInsights(t *testing.T) {
 		t.Errorf("lock_time hw %v from %v", vals, starts)
 	}
 }
+
+// Managed connection pooling's metrics (#2163): MySQL's thread pool on
+// cloudsql_database (threads by status, pending connections, the
+// sample's average wait in ms), PostgreSQL's pooler on
+// cloudsql_instance_database by database (client and server connections
+// by status, pools, average wait in us, attempts and errors cumulative).
+func TestSQLBuiltinPooling(t *testing.T) {
+	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	my := SQLInstance{Project: "p", Instance: "my", Region: "us-central1", Engine: "MYSQL", Up: true, HasServer: true,
+		MySQLPool: &SQLMySQLPool{Active: 2, Idle: 0, Pending: 6, Waits: 10, WaitedUs: 50000}}
+	pg := SQLInstance{Project: "p", Instance: "pg", Region: "us-central1", Engine: "POSTGRES", Up: true, HasServer: true, HasPGPool: true,
+		PGPools: []SQLPGPool{{Database: "app", Pools: 1, ClientActive: 2, ClientWaiting: 6, ServerActive: 2, ServerIdle: 0, AvgWaitUs: 1500,
+			Attempts: 8, Errors: 1, Counted: true}}}
+	src := &fakeSQL{in: []SQLInstance{my, pg}}
+	b := NewSQLBuiltin(src, func() time.Time { return now })
+	b.Sample()
+	now = now.Add(time.Minute)
+	my.MySQLPool = &SQLMySQLPool{Active: 0, Idle: 2, Pending: 0, Waits: 30, WaitedUs: 50000 + 20*4000}
+	pg.PGPools[0].Attempts, pg.PGPools[0].ClientWaiting = 12, 0
+	src.in = []SQLInstance{my, pg}
+	b.Sample()
+	read := func(metric, status string) []int64 {
+		t.Helper()
+		ss, err := b.Series("p", metric, now.Add(-time.Hour), now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []int64
+		for _, s := range ss {
+			if status != "" && s.GetMetric().GetLabels()["status"] != status {
+				continue
+			}
+			if r := s.GetResource(); r.GetType() == "cloudsql_instance_database" &&
+				(r.GetLabels()["database"] != "app" || r.GetLabels()["resource_id"] != "p:pg") {
+				t.Errorf("%s resource %v", metric, r)
+			}
+			for _, p := range s.GetPoints() {
+				out = append(out, p.GetValue().GetInt64Value())
+			}
+		}
+		return out
+	}
+	eq := func(name string, got []int64, want ...int64) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Errorf("%s = %v, want %v", name, got, want)
+			return
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Errorf("%s = %v, want %v", name, got, want)
+			}
+		}
+	}
+	eq("threads active", read(SQLMySQLPoolThreads, "active"), 2, 0)
+	eq("threads idle", read(SQLMySQLPoolThreads, "idle"), 0, 2)
+	eq("pending_connections", read(SQLMySQLPoolPending, ""), 6, 0)
+	eq("avg_wait_time (ms)", read(SQLMySQLPoolAvgWait, ""), 5, 4)
+	eq("client_connections active", read(SQLPoolClientConns, "active"), 2, 2)
+	eq("client_connections waiting", read(SQLPoolClientConns, "waiting"), 6, 0)
+	eq("server_connections active", read(SQLPoolServerConns, "active"), 2, 2)
+	eq("num_pools", read(SQLPoolNumPools, ""), 1, 1)
+	eq("client_connections_avg_wait_time", read(SQLPoolClientAvgWait, ""), 1500, 1500)
+	eq("client_connections_attempts_count", read(SQLPoolClientAttempts, ""), 8, 12)
+	eq("client_connections_error_count", read(SQLPoolClientErrors, ""), 1, 1)
+	ss, _ := b.Series("p", SQLPoolClientAttempts, now.Add(-time.Hour), now)
+	if len(ss) != 1 || ss[0].GetMetricKind().String() != "CUMULATIVE" ||
+		!ss[0].GetPoints()[1].GetInterval().GetStartTime().AsTime().Equal(now.Add(-time.Minute)) {
+		t.Errorf("attempts_count is not cumulative from the first sample: %v", ss)
+	}
+	for _, d := range b.Descriptors("p") {
+		want := "cloudsql_database"
+		if d.GetType() == SQLPoolNumPools || d.GetType() == SQLPoolServerConns {
+			want = "cloudsql_instance_database"
+		}
+		if d.GetType() == SQLPoolNumPools || d.GetType() == SQLMySQLPoolThreads || d.GetType() == SQLPoolServerConns {
+			if got := d.GetMonitoredResourceTypes(); len(got) != 1 || got[0] != want {
+				t.Errorf("%s resource types %v, want %s", d.GetType(), got, want)
+			}
+		}
+	}
+}

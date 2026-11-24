@@ -697,8 +697,10 @@ func readOnlyBigQuery(statement string) error {
 		return errors.New("a statement is required")
 	}
 	first := strings.ToUpper(tokens[i])
-	if first != "SELECT" && first != "WITH" {
-		return fmt.Errorf("the BigQuery editor is read-only: only a SELECT or WITH … SELECT statement runs here, not %s. "+
+	// A pipe syntax query starts with FROM ("FROM t |> WHERE …"): it is a
+	// query, and a pipe has no operator that changes data.
+	if first != "SELECT" && first != "WITH" && first != "FROM" {
+		return fmt.Errorf("the BigQuery editor is read-only: only a SELECT, WITH … SELECT or FROM … |> query runs here, not %s. "+
 			"Switch it to Read-write to run DDL or a script", first)
 	}
 	for j, tok := range tokens {

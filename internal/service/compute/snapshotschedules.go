@@ -204,7 +204,7 @@ func (s *Server) patchResourcePolicy(c call, rel string, po obj) (obj, error) {
 	for _, p := range c.query["updateMask"] {
 		for _, f := range strings.Split(p, ",") {
 			if f = strings.TrimSpace(f); f != "" {
-				paths = append(paths, camel(f))
+				paths = append(paths, maskCamel(f))
 			}
 		}
 	}

@@ -55,6 +55,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/nbruntime"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/prefetch"
+	"github.com/cloudburrow/cloudburrow/internal/sparkproc"
 )
 
 // runUp loads configuration, starts the lifecycle coordinator, and blocks until
@@ -422,6 +423,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if dataformSvc != nil {
 		dataformSvc.secrets = secretsSvc
 		dataformSvc.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
+		dataformSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+		// v1beta1's account_connector (#2105): the caller's token from
+		// Developer Connect's account connector. A call without a principal
+		// is the instance's own user, as on Developer Connect's side.
+		dataformSvc.accountToken = func(ctx context.Context, connector, user string) (string, error) {
+			if user == "" || user == "developer@cloudburrow.local" {
+				user = creds.Email
+			}
+			return (&runadapter.DeveloperConnectServer{}).UserAccessToken(ctx, connector, user)
+		}
 		if runSvc != nil {
 			dataformSvc.gitBase = func() string {
 				if a := runSvc.Addr(); a != "" {
@@ -433,15 +444,31 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	dataformSvc.register(coord)
+	// The Dataproc API's serverless surface (#2156), in process; its
+	// workloads run on the Spark runner below, its files in Cloud Storage.
+	dataprocSvc := newDataprocService(cfg)
+	if dataprocSvc != nil {
+		dataprocSvc.live = boundAddrs
+		dataprocSvc.kms = kmsSvc
+	}
+	dataprocSvc.register(coord)
 	// The Kubernetes Engine API (#1913), in process; its clusters are
 	// kind clusters of their own.
 	gkeSvc := newGKEService(cfg)
+	if dataprocSvc != nil && gkeSvc != nil {
+		dataprocSvc.gke = gkeSvc.API
+	}
 	// The Compute Engine API's VPC networking (#1936), in process, before
 	// the services that check their networks against it.
 	computeSvc := newComputeService(cfg)
 	if computeSvc != nil {
+		// A VM's metadata server mints its service account's tokens (#2177).
+		computeSvc.tokens = creds
 		computeSvc.gke = gkeSvc
 		computeSvc.kms = kmsSvc
+		// Secure Web Proxy's TLS inspection issues its leaves from a CA
+		// pool of Certificate Authority Service (#2160).
+		computeSvc.privateca = privateCASvc
 		if gkeSvc != nil {
 			gkeSvc.networks = computeSvc.gkeNetworks
 		}
@@ -492,6 +519,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	dataTransfer.register(coord)
 	// The Memorystore admin API (#1302), over the Valkey server's tunnel.
+	// The storage image, built when first asked for by a service that
+	// runs a front from it.
+	storageImg := lazyStorageImage(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), cfg.Name, comps, stdout), comps)
 	memorystoreAdminSvc := newMemorystoreAdminService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "memorystore") })
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
@@ -506,7 +536,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		// A Redis before 6.0 with in-transit encryption is served TLS by
 		// a front from the storage image (#1768).
-		memorystoreAdminSvc.storageImage = lazyStorageImage(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), cfg.Name, comps, stdout), comps)
+		memorystoreAdminSvc.storageImage = storageImg
 		// IAM auth (#1614) checks a token against the tokens these
 		// credentials minted and the project's IAM policy.
 		memorystoreAdminSvc.creds = creds
@@ -546,14 +576,29 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		monitoringSvc.inventory = &monitoringInventoryWiring{cfg: cfg, compute: computeSvc, gke: gkeSvc,
 			storage: func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
 			pubsub:  func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }}
+		// Compute Engine VMs' CPU utilization, from the readings its
+		// autoscalers scale on (#2139).
+		if computeSvc != nil {
+			monitoringSvc.computeCPU = computeSvc.API
+		}
 	}
 	monitoringSvc.register(coord)
 	// Kubernetes Engine's container logs and system metrics, shipped to
 	// this instance's Cloud Logging and Cloud Monitoring while both sides
 	// are served, as GKE ships them (#2100).
+	if computeSvc != nil && loggingSvc != nil {
+		// Cloud NAT's flow logs (#2140, computenat.go).
+		computeSvc.natLogs = func(ctx context.Context, req *loggingpb.WriteLogEntriesRequest) error {
+			if loggingSvc.api == nil {
+				return fmt.Errorf("logging is not running")
+			}
+			_, err := loggingSvc.api.WriteLogEntries(ctx, req)
+			return err
+		}
+	}
 	if gkeSvc != nil {
-		newGKELogFeeder(gkeDir(cfg), gkeSvc, loggingSvc).register(coord)
 		newGKEMetricsSampler(gkeDir(cfg), gkeSvc, monitoringSvc).register(coord)
+		newGKEPromCollector(gkeDir(cfg), gkeSvc, monitoringSvc).register(coord)
 	}
 	if loggingSvc != nil {
 		// CopyLogEntries writes to the instance's Cloud Storage (#1394).
@@ -580,6 +625,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
 			return err
 		})
+		// Firewall Rules Logging of VMs' relayed connections (#2180).
+		if computeSvc != nil {
+			computeSvc.useFirewallLogging(func(ctx context.Context, e *loggingpb.LogEntry) error {
+				_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
+				return err
+			})
+		}
 		// Cloud Scheduler's execution logs (#1849).
 		schedulerSvc.useLogging(func(ctx context.Context, e *loggingpb.LogEntry) error {
 			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
@@ -591,6 +643,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	// A Cloud Build build's secrets (#1407).
 	runSvc.useBuildSecrets(secretsSvc, kmsSvc)
+	// VPC access is checked against Compute Engine's networks and
+	// Serverless VPC Access's connectors (#2140).
+	if computeSvc != nil {
+		runSvc.useVPC(computeRunVPC{svc: computeSvc})
+	}
 
 	// Admin routes must be mounted before the control server starts: it builds
 	// its mux at Start, so anything added afterwards is never routed.
@@ -606,6 +663,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if dataTransfer != nil {
 		dataTransfer.registry = func() *resourcemanager.Registry { return projectRegistry }
+	}
+	if computeSvc != nil {
+		// Shared VPC's organization rule (#2140).
+		computeSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
 	}
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.registry = func() *resourcemanager.Registry { return projectRegistry }
@@ -678,6 +739,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		workflows:        workflowsSvc,
 		parameterManager: parameterManagerSvc,
 		dataform:         dataformSvc,
+		dataproc:         dataprocSvc,
 		appHub:           appHubSvc,
 		alloyDB:          alloyDBSvc,
 		filestore:        filestoreSvc,
@@ -804,6 +866,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManagerSvc.interpose = append(parameterManagerSvc.interpose, grpctransport.LogInterceptor(logger, "parametermanager"), faults.Interceptor("parametermanager"))
 		parameterManagerSvc.requests = requestEvents(recorder, requestMetrics, "parametermanager")
 	}
+	if dataprocSvc != nil {
+		dataprocSvc.tracing = tracing
+		dataprocSvc.calls = callEvents(recorder, requestMetrics, "dataproc")
+		dataprocSvc.interpose = append(dataprocSvc.interpose, grpctransport.LogInterceptor(logger, "dataproc"), faults.Interceptor("dataproc"))
+		dataprocSvc.requests = requestEvents(recorder, requestMetrics, "dataproc")
+	}
 	if dataformSvc != nil {
 		dataformSvc.tracing = tracing
 		dataformSvc.calls = callEvents(recorder, requestMetrics, "dataform")
@@ -923,6 +991,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		iamEnforced{logging: loggingSvc, monitoring: monitoringSvc, memorystore: memorystoreAdminSvc, run: runSvc})
 	iamEnforced7{privateCA: privateCASvc, gke: gkeSvc, compute: computeSvc, run: runSvc}.use(iamEnforcer)
 	iamEnforced8{compute: computeSvc}.use(iamEnforcer)
+	computeSvc.useIAP(iamEnforcer, creds)
 	iamEnforced13{memorystore: memorystoreAdminSvc, gke: gkeSvc}.use(iamEnforcer)
 	useIAMEnforcement12Source(iamEnforcer, runSvc)
 	useIAMEnforcement12DataTransfer(iamEnforcer, dataTransfer)
@@ -933,6 +1002,18 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		parameterManagerSvc.keys = cmekKeys(kmsSvc, iamEnforcer)
 		parameterManagerSvc.interpose = append(parameterManagerSvc.interpose, iamEnforcer.Interceptor(iameval.ParameterManager))
 		parameterManagerSvc.wrapJSON = jsonEnforcer(iamEnforcer, iameval.ParameterManager, parametermanager.Mixins())
+	}
+	// A Dataproc resource's creator: the request's caller, or the
+	// instance's own account (#2156).
+	if dataprocSvc != nil {
+		dataprocSvc.caller = func(ctx context.Context) string {
+			if b := iameval.IncomingBearer(ctx); b != "" && iamEnforcer.CallerOf != nil {
+				if c := iamEnforcer.CallerOf(b); c.Email != "" {
+					return c.Email
+				}
+			}
+			return iamEnforcer.OwnerEmail
+		}
 	}
 	// Filestore's customer-managed keys (#2192).
 	if filestoreSvc != nil {
@@ -1146,7 +1227,20 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Google Auth Platform's app and OAuth clients (#2030), whose
 	// authorization code flow the metadata server's token endpoint serves.
 	authPlatformRef = authplatform.NewStore(projects.Backing(), resource.ProjectNumber)
-	metaSrv.WithOAuth(&authplatform.Endpoints{Store: authPlatformRef, User: creds.Email})
+	metaSrv.WithOAuth(&authplatform.Endpoints{Store: authPlatformRef, User: creds.Email, LocalRedirect: computeSvc.iapLocalRedirect})
+	// IAP's browser sign-in (#2160) is that authorization endpoint's.
+	computeSvc.useIAPSignIn(authPlatformRef, metaSrv.Addr)
+	// Developer Connect's account connectors (#2105) connect a user's
+	// account through that authorization server, as its GOOGLE provider,
+	// and hand out tokens the instance's credentials mint for the account.
+	runadapter.SetDeveloperConnectOAuth(runadapter.DeveloperConnectOAuth{Store: authPlatformRef,
+		AuthBase: func() string {
+			if a := metaSrv.Addr(); a != "" {
+				return hostURL(a)
+			}
+			return ""
+		},
+		Mint: func(email string) string { return creds.MintAccessTokenFor(email, metadata.TokenTTL) }, TTL: metadata.TokenTTL})
 	// IAM enforcement (#1879) of Resource Manager, IAM, deny and
 	// organization policies, on this port.
 	useIAMEnforcement11(iamEnforcer, rmSrv, func() *resourcemanager.Registry { return projects })
@@ -1215,6 +1309,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
+	// Cloud SQL for MySQL's managed connection pooling runs its thread
+	// pool from the storage image (#2141), built once an instance asks.
+	sqlThreadPoolImage = storageImg
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
 		sqlAdminRef = sqlAdminSrv
@@ -1391,8 +1488,45 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// them, so it cannot answer from a store of its own.
 	// BigQuery Studio's notebook runtimes (#2094), deleted when up stops.
 	notebooks := &nbruntime.Manager{Instance: cfg.Name,
-		Logf: func(format string, args ...any) { fmt.Fprintf(stdout, "cloudburrow: "+format+"\n", args...) }}
+		Logf: func(format string, args ...any) { fmt.Fprintf(stdout, "cloudburrow: "+format+"\n", args...) },
+		BigQuery: func() string {
+			if f := forwarderFor(forwarders, "bigquery"); f != nil {
+				return f.HostAddr()
+			}
+			return ""
+		}}
+	// An Apache Spark notebook's sessions are Serverless for Apache
+	// Spark's (#2156).
+	notebooks.Dataproc = dataprocSvc.Addr
 	defer notebooks.Close()
+	// Colab Enterprise's runtime templates and runtimes (#2105), on the
+	// local Vertex AI endpoint, run on them.
+	if localAISrv != nil {
+		localAISrv.SetNotebookRuntimes(colabHost{m: notebooks}, filepath.Join(cfg.StateDir, "vertexai", "notebookruntimes.json"))
+		// Vertex AI Workbench instances (#2173), each a notebook runtime too.
+		localAISrv.SetWorkbench(colabHost{m: notebooks}, filepath.Join(cfg.StateDir, "vertexai", "workbench.json"))
+		// Their notebook executions and schedules read and write Cloud
+		// Storage and Dataform's single-file notebook repositories.
+		colabExec := colabExecutor{m: notebooks,
+			storage:  func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
+			dataform: dataformSvc.API}
+		localAISrv.SetNotebookExecutor(colabExec)
+		// Vertex AI pipeline jobs and their schedules (#2173): each task's
+		// container on Docker, its artifacts in Cloud Storage.
+		localAISrv.SetPipelineRunner(colabPipelines{colabExecutor: colabExec, instance: cfg.Name})
+		// Executions, schedules and pipeline jobs run as the identity they
+		// name (#2173), with actAs checked on it.
+		localAISrv.SetIdentity(runIdentity(iamEnforcer, iameval.VertexAI, creds, func() *resourcemanager.Registry { return projectRegistry }))
+	}
+	// Dataform's notebook actions run on them too (#2105), on a runtime
+	// template's settings when one is named.
+	if dataformSvc != nil {
+		// Strict act-as and invocations run as their service account
+		// (#2173).
+		dataformSvc.identity = runIdentity(iamEnforcer, iameval.DataformActAs, creds, func() *resourcemanager.Registry { return projectRegistry })
+		dataformSvc.notebooks = notebooks
+		dataformSvc.runtimeTemplates = colabTemplates(localAISrv)
+	}
 	consoleSrv := buildConsole(consoleDeps{
 		cfg: cfg, iam: iamEnforcer, notebooks: notebooks, assetOut: assetOut, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
 		hfModels: hfModels, garden: garden,
@@ -1419,6 +1553,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		workflows:        workflowsSvc,
 		parameterManager: parameterManagerSvc,
 		dataform:         dataformSvc,
+		dataproc:         dataprocSvc,
 		appHub:           appHubSvc,
 		alloyDB:          alloyDBSvc,
 		filestore:        filestoreSvc,
@@ -1507,6 +1642,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}, cmekKeys(kmsSvc, iamEnforcer).Usable, func() string { return creds.MintAccessTokenFor(creds.Email, metadata.TokenTTL) })
 	if sparkRunner != nil {
 		coord.Register(sparkRunner)
+		if dataprocSvc != nil {
+			dataprocSvc.spark = func() *sparkproc.Docker { return sparkRunner.docker }
+		}
 	}
 
 	// hostComp publishes the CLI-hosted services to the cluster (#575); nil
@@ -1542,6 +1680,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if a := dataformSvc.Addr(); a != "" {
 			live["dataform"] = a
 		}
+		if a := dataprocSvc.Addr(); a != "" {
+			live["dataproc"] = a
+		}
 		if a := appHubSvc.Addr(); a != "" {
 			live["apphub"] = a
 		}
@@ -1562,6 +1703,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := computeSvc.Addr(); a != "" {
 			live["compute"] = a
+		}
+		// The relay VMs reach load balancers and gateways through with
+		// their identity (#2160, internal/vmrelay).
+		if a := computeSvc.RelayAddr(); a != "" {
+			live["compute-relay"] = a
 		}
 		if a := dataTransfer.Addr(); a != "" {
 			live["datatransfer"] = a
@@ -1623,8 +1769,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Storage, the metadata server, whose service account certificates
 	// verify the URLs those accounts sign (#1787).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
+	// Kubernetes Engine's logging agents write to Cloud Logging from their
+	// clusters' nodes (#2100).
+	gkeLogs := gkeSvc != nil && loggingSvc != nil
 	pubsubKMS := serviceEnabled(cfg, config.ServicePubSub) && serviceEnabled(cfg, config.ServiceKMS)
-	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || spannerKMS(cfg) || memorystoreCMEK(cfg) || computeEnabled(cfg) {
+	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) || pubsubKMS || firestoreKMS(cfg) || spannerKMS(cfg) || memorystoreCMEK(cfg) || computeEnabled(cfg) || gkeLogs {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
@@ -1659,7 +1808,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// A VM reads its metadata from the Compute port and its service
 		// account's tokens from the metadata server (#1963).
 		if computeEnabled(cfg) {
-			published["compute"], published["metadata"] = true, true
+			published["compute"], published["metadata"], published["compute-relay"] = true, true, true
+			// Its Ops Agent writes to Cloud Logging and Cloud Monitoring
+			// (#2139, computeopsagent.go), when they are served.
+			published["logging"], published["monitoring"] = true, true
+		}
+		if gkeLogs {
+			published["logging"] = true
 		}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
 			out := map[string]string{}
@@ -1685,6 +1840,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// the tunnelled backends' Service names, known now, and the CLI-hosted
 	// services' cloudburrow-host name, known once hostComp has started —
 	// after the adapter — so the table is read per request, not at Start.
+	// Kubernetes Engine's container logs, shipped by each cluster's
+	// fluentbit-gke agent to this instance's Cloud Logging, which its pods
+	// reach as the host's address (#2100).
+	if gkeLogs {
+		newGKELogAgents(gkeDir(cfg), gkeSvc, loggingSvc, func() string {
+			if a := hostComp.HostAddr("logging"); a != "" {
+				return "http://" + a
+			}
+			return ""
+		}, stdout).register(coord)
+	}
 	if computeSvc != nil {
 		computeSvc.guestBase = func() string {
 			if a := hostComp.InCluster("compute"); a != "" {
@@ -1692,7 +1858,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			}
 			return ""
 		}
-		computeSvc.metadataHost = func() string { return hostComp.InCluster("metadata") }
+		computeSvc.relayAt = func() string { return hostComp.InCluster("compute-relay") }
+		computeSvc.opsAgentHosts = func() (string, string) {
+			return hostComp.InCluster("logging"), hostComp.InCluster("monitoring")
+		}
+		computeSvc.guestReach = hostComp.Reach
+		computeSvc.storage = func() string {
+			if f := forwarderFor(forwarders, "storage"); f != nil {
+				return f.HostAddr()
+			}
+			return ""
+		}
 	}
 	if memorystoreAdminSvc != nil && kmsSvc != nil {
 		// A CMEK Memorystore server's pod unwraps its data key with Cloud
@@ -1965,6 +2141,7 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 	fmt.Fprintf(w, "  kubeconfig: %s\n", cfg.KubeconfigPath())
 	fmt.Fprintf(w, "  mode:       %s\n", cfg.Mode)
 	fmt.Fprintf(w, "  iam:        enforcement %s\n", iamEnforcementMode(cfg))
+	fmt.Fprintf(w, "  containers: %s\n", unconfinedLine(cfg.AllowUnconfinedContainers))
 
 	if !cfg.IsLoopback() {
 		fmt.Fprintf(w, "\n  WARNING: bound to %s, which is not loopback.\n", cfg.BindAddress)
@@ -1972,6 +2149,9 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 		fmt.Fprintf(w, "  address controls it and the cluster it manages.\n")
 	}
 	printKMSWarning(w, kmsSvc)
+	if cfg.AllowUnconfinedContainers {
+		fmt.Fprint(w, unconfinedWarning)
+	}
 
 	fmt.Fprintf(w, "\n  services: ")
 	for i, s := range cfg.EnabledServices() {
@@ -2071,6 +2251,11 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 		iam = info.IAMEnforcement
 	}
 	fmt.Fprintf(stdout, "iam:        enforcement %s\n", iam)
+	unconfined := cfg.AllowUnconfinedContainers
+	if info, err := readRuntime(cfg); err == nil {
+		unconfined = info.AllowUnconfinedContainers
+	}
+	fmt.Fprintf(stdout, "containers: %s\n", unconfinedLine(unconfined))
 	// Microsoft's SQL Server licence (#1916): who accepted it, when, how.
 	for _, l := range mssqlEULALines(readMSSQLEULAStatus(cfg)) {
 		fmt.Fprintln(stdout, l)
@@ -2244,3 +2429,19 @@ func projectLine(cfg config.Config) string {
 		return project
 	}
 }
+
+// unconfinedLine is `status`'s and the banner's containers line: whether
+// the instance may run containers unconfined (#2162).
+func unconfinedLine(allowed bool) string {
+	if allowed {
+		return "unconfined allowed (--allow-unconfined-containers): the Dataproc DOCKER component runs"
+	}
+	return "confined (the Dataproc DOCKER component is refused; --allow-unconfined-containers allows it)"
+}
+
+// unconfinedWarning is the banner's warning with
+// --allow-unconfined-containers (#2162).
+const unconfinedWarning = "\n  WARNING: --allow-unconfined-containers is on. Dataproc clusters with the\n" +
+	"  DOCKER component run each node's Docker daemon with seccomp, AppArmor and\n" +
+	"  the /proc and /sys masks unconfined, which weakens the isolation between\n" +
+	"  those containers and this machine. Start without the flag to refuse them.\n"

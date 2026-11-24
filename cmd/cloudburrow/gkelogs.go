@@ -10,213 +10,133 @@ package main
 // whose labels are project_id, location, cluster_name, namespace_name,
 // pod_name and container_name (https://docs.cloud.google.com/monitoring/api/resources).
 // System logs are those of the kube-system, istio-system, knative-serving,
-// gke-system and config-management-system namespaces
-// (https://docs.cloud.google.com/kubernetes-engine/docs/concepts/about-logs);
-// workload logs the rest. The control plane's own logs, with the
-// APISERVER, SCHEDULER and CONTROLLER_MANAGER components, are on the
-// k8s_control_plane_component resource, log container.googleapis.com/<component>.
+// gke-system and config-management-system namespaces; GKE collects them
+// with a fluentbit-based agent it deploys on every node
+// (https://docs.cloud.google.com/kubernetes-engine/docs/concepts/about-logs).
+// The control plane's own logs, with the APISERVER, SCHEDULER and
+// CONTROLLER_MANAGER components, are on the k8s_control_plane_component
+// resource, log container.googleapis.com/<component>.
 //
-// gkeLogFeeder does that for the served clusters: it lists each cluster's
-// pods, follows every container's log file on the kind node that runs it
-// (the container runtime records each line's stream there, as runlogs.go
-// reads Cloud Run's), and writes each line through the served Logging's
-// WriteLogEntries. Each entry also carries GKE's labels: the pod's labels
-// as k8s-pod/<key>, and the node as compute.googleapis.com/resource_name
-// (the Logging agent's, not on the pages above: UNVERIFIED against a
-// document). A line of stderr is severity ERROR and of stdout INFO unless
-// it is structured JSON naming its own (the agent's, UNVERIFIED). When a
-// cluster's logging, or the component a container belongs to, is turned
-// off its files are followed no longer, and what is written meanwhile is
-// never shipped.
+// The agent here is internal/logagent, run in each cluster as GKE runs its
+// own: the kube-system DaemonSet fluentbit-gke, one pod per node, which
+// reads the node's container log files and writes to the instance's Cloud
+// Logging through the cloudburrow-host route pods reach the CLI by. Its
+// image is built from the Linux builds this CLI embeds
+// (internal/logagentimage) and loaded into every node; it is never pushed.
+//
+// gkeLogAgents keeps each served cluster's agent as its logging says: the
+// fluentbit-gke-config ConfigMap names the categories shipped and since
+// when, the DaemonSet runs while any is on, and is removed when logging is
+// none. The agent keeps its position in each file on the node, so it ships
+// across a restart of the CLI, which it keeps retrying while Cloud Logging
+// is gone, and never ships a line twice or loses one.
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
+	"fmt"
 	"io"
-	"strconv"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"cloud.google.com/go/logging/apiv2/loggingpb"
-	"google.golang.org/genproto/googleapis/api/monitoredres"
-	ltype "google.golang.org/genproto/googleapis/logging/type"
-
+	"github.com/cloudburrow/cloudburrow/internal/images"
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/logagent"
+	"github.com/cloudburrow/cloudburrow/internal/logagentimage"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
-	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 )
 
-// gkeControlPlane are the control plane's static pods' components (their
-// "component" label) and GKE's component names; etcd's logs are never
-// shipped.
-var gkeControlPlane = map[string]string{
-	"kube-apiserver": "apiserver", "kube-scheduler": "scheduler", "kube-controller-manager": "controller-manager", "etcd": "",
+// gkeLogSweep is how often each cluster's agent is reconciled.
+const gkeLogSweep = 2 * time.Second
+
+// gkeControlPlaneComponents are the control plane categories, by GKE's
+// component names.
+var gkeControlPlaneComponents = []string{"apiserver", "scheduler", "controller-manager"}
+
+// gkeLogCategories are the categories t ships.
+func gkeLogCategories(t gke.TelemetryTarget) map[string]bool {
+	on := map[string]bool{logagent.System: t.SystemLogs, logagent.Workload: t.WorkloadLogs}
+	for _, c := range gkeControlPlaneComponents {
+		on[c] = t.ControlPlaneLogs[c]
+	}
+	return on
 }
 
-// gkePodList reads `kubectl get pods -A -o json`: each container of each
-// pod, the node it runs on, and what its entries are labelled with, for
-// target t. Only what t ships is listed; the category is the key of the
-// time its shipping started ("system", "workload" or a control plane
-// component).
-func gkeLogTargets(t gke.TelemetryTarget, raw []byte) ([]gkeLogSource, error) {
-	var list struct {
-		Items []struct {
-			Metadata struct {
-				Name      string            `json:"name"`
-				Namespace string            `json:"namespace"`
-				UID       string            `json:"uid"`
-				Labels    map[string]string `json:"labels"`
-			} `json:"metadata"`
-			Spec struct {
-				NodeName       string                  `json:"nodeName"`
-				Containers     []struct{ Name string } `json:"containers"`
-				InitContainers []struct{ Name string } `json:"initContainers"`
-			} `json:"spec"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(raw, &list); err != nil {
-		return nil, err
-	}
-	var out []gkeLogSource
-	for _, p := range list.Items {
-		m := p.Metadata
-		if p.Spec.NodeName == "" {
-			continue
-		}
-		category := "workload"
-		if gke.SystemNamespaces[m.Namespace] {
-			category = "system"
-		}
-		component := ""
-		if m.Namespace == "kube-system" && m.Labels["tier"] == "control-plane" {
-			c, ok := gkeControlPlane[m.Labels["component"]]
-			if ok {
-				if c == "" {
-					continue
-				}
-				component, category = c, c
-			}
-		}
-		switch {
-		case component != "":
-			if !t.ControlPlaneLogs[component] {
-				continue
-			}
-		case category == "system":
-			if !t.SystemLogs {
-				continue
-			}
-		default:
-			if !t.WorkloadLogs {
-				continue
-			}
-		}
-		var names []string
-		for _, c := range p.Spec.InitContainers {
-			names = append(names, c.Name)
-		}
-		for _, c := range p.Spec.Containers {
-			names = append(names, c.Name)
-		}
-		for _, c := range names {
-			src := gkeLogSource{node: p.Spec.NodeName, category: category, dir: podLogDir(m.Namespace, m.Name, m.UID) + "/" + c,
-				runLogSource: runLogSource{podUID: m.UID, pod: m.Name, container: c, project: t.Project,
-					labels: map[string]string{"compute.googleapis.com/resource_name": p.Spec.NodeName}}}
-			if component != "" {
-				src.logName = "container.googleapis.com/" + component
-				src.resource = &monitoredres.MonitoredResource{Type: "k8s_control_plane_component", Labels: map[string]string{
-					"project_id": t.Project, "location": t.Location, "cluster_name": t.Cluster,
-					"component_name": component, "component_location": t.Location}}
-				src.labels = map[string]string{}
-			} else {
-				src.resource = &monitoredres.MonitoredResource{Type: "k8s_container", Labels: map[string]string{
-					"project_id": t.Project, "location": t.Location, "cluster_name": t.Cluster,
-					"namespace_name": m.Namespace, "pod_name": m.Name, "container_name": c}}
-				for k, v := range m.Labels {
-					src.labels["k8s-pod/"+k] = v
-				}
-			}
-			out = append(out, src)
-		}
-	}
-	return out, nil
+// gkeLogCluster is how a cluster's agent is reconciled: kubectl and kind
+// on one kind cluster.
+type gkeLogCluster interface {
+	// Apply applies a manifest.
+	Apply(ctx context.Context, kind, manifest string) error
+	// Kubectl runs kubectl and returns its output.
+	Kubectl(ctx context.Context, kind string, args ...string) (string, error)
+	// Nodes are the kind node containers: their container IDs by name.
+	Nodes(ctx context.Context, kind string) (map[string]string, error)
+	// Image builds the agent image for the nodes' architecture.
+	Image(ctx context.Context, kind string) (string, error)
+	// Load loads ref into node unless it has it, and says whether it
+	// loaded.
+	Load(ctx context.Context, kind, node, ref string) (bool, error)
 }
 
-// gkeLogSource is one container's log directory on a node, and its
-// entries' log, resource and labels.
-type gkeLogSource struct {
-	runLogSource
-	node, category, dir string
-	// logName is the log of a control plane component; empty is stdout or
-	// stderr by stream.
-	logName string
+// gkeLogState is what has been applied to one cluster.
+type gkeLogState struct {
+	read    bool
+	cfg     logagent.Config
+	written string
+	applied string
+	removed bool
+	// loaded are the node containers (by ID) that have the image.
+	loaded map[string]bool
+	image  string
 }
 
-// gkeLogEntry is the entry of one line of a stream.
-func gkeLogEntry(s gkeLogSource, stream string, ts time.Time, line string) *loggingpb.LogEntry {
-	log := s.logName
-	if log == "" {
-		log = stream
-	}
-	e := runLogEntry(s.runLogSource, log, ts, line)
-	if e.Severity == ltype.LogSeverity_DEFAULT {
-		e.Severity = ltype.LogSeverity_INFO
-		if stream == "stderr" {
-			e.Severity = ltype.LogSeverity_ERROR
-		}
-	}
-	return e
-}
-
-// gkeLogFeeder follows the served clusters' containers into Cloud Logging.
-type gkeLogFeeder struct {
+// gkeLogAgents reconciles the served clusters' logging agents.
+type gkeLogAgents struct {
 	targets func() []gke.TelemetryTarget
-	kubectl func(ctx context.Context, kind string, args ...string) (string, error)
-	write   func(context.Context, *loggingpb.WriteLogEntriesRequest) (*loggingpb.WriteLogEntriesResponse, error)
-	docker  func(ctx context.Context, args ...string) (io.ReadCloser, func() error, error)
-	now     func() time.Time
-	every   time.Duration
+	// endpoint is the instance's Cloud Logging as pods reach it,
+	// http://host:port, or "" while it is not published to them.
+	endpoint func() string
+	cluster  gkeLogCluster
+	now      func() time.Time
+	every    time.Duration
+	out      io.Writer
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	done   chan struct{}
-	// since is when each cluster's category ("<kind>/<category>") started
-	// to be shipped: lines before it are never written.
-	since   map[string]time.Time
-	follows map[string]*runLogFollow
+	state  map[string]*gkeLogState
+	warned string
 }
 
-func newGKELogFeeder(dir string, gkeSvc *gkeService, svc *loggingService) *gkeLogFeeder {
+func newGKELogAgents(dir string, gkeSvc *gkeService, svc *loggingService, endpoint func() string, out io.Writer) *gkeLogAgents {
 	if gkeSvc == nil || svc == nil {
 		return nil
 	}
-	return &gkeLogFeeder{
+	return &gkeLogAgents{
 		targets: func() []gke.TelemetryTarget {
 			if api := gkeSvc.API(); api != nil {
 				return api.Telemetry()
 			}
 			return nil
 		},
-		kubectl: gkeKubectl(dir),
-		write: func(ctx context.Context, req *loggingpb.WriteLogEntriesRequest) (*loggingpb.WriteLogEntriesResponse, error) {
-			return svc.api.WriteLogEntries(ctx, req)
-		},
-		docker: dockerStream, now: time.Now, every: runLogSweep,
-		since: map[string]time.Time{}, follows: map[string]*runLogFollow{},
+		endpoint: endpoint,
+		cluster:  &gkeKindLogCluster{dir: dir, run: images.ExecRunner{}, images: map[string]string{}},
+		now:      time.Now, every: gkeLogSweep, out: out,
+		state: map[string]*gkeLogState{},
 	}
 }
 
-func (f *gkeLogFeeder) Name() string { return "gke-logs" }
+func (f *gkeLogAgents) Name() string { return "gke-logs" }
 
-func (f *gkeLogFeeder) register(coord *lifecycle.Coordinator) {
+func (f *gkeLogAgents) register(coord *lifecycle.Coordinator) {
 	if f != nil {
 		coord.Register(f)
 	}
 }
 
-func (f *gkeLogFeeder) Start(ctx context.Context) error {
+func (f *gkeLogAgents) Start(ctx context.Context) error {
 	if f == nil {
 		return nil
 	}
@@ -241,7 +161,9 @@ func (f *gkeLogFeeder) Start(ctx context.Context) error {
 	return nil
 }
 
-func (f *gkeLogFeeder) Stop(ctx context.Context) error {
+// Stop ends the reconciling and leaves each agent running: it ships again
+// once Cloud Logging is back.
+func (f *gkeLogAgents) Stop(ctx context.Context) error {
 	if f == nil {
 		return nil
 	}
@@ -260,184 +182,187 @@ func (f *gkeLogFeeder) Stop(ctx context.Context) error {
 	return nil
 }
 
-// sweep follows every log file of what is shipped now, and stops
-// following the rest.
-func (f *gkeLogFeeder) sweep(ctx context.Context) {
-	type file struct {
-		kind string
-		src  gkeLogSource
-		// on is when the file's cluster's logging was last changed.
-		on time.Time
-	}
-	var files []file
-	listed := map[string]bool{} // clusters whose files were listed
-	// A category turned on is shipped from when the change turned it on
-	// (TelemetryTarget.LoggingChanged), or this sweep's start: a pod made
-	// as soon as logging is back on writes its first line within half a
-	// second, before the next sweep, and listing the pods and their files
-	// takes seconds more.
-	start := f.now()
+// sweep reconciles every running cluster's agent.
+func (f *gkeLogAgents) sweep(ctx context.Context) {
+	live := map[string]bool{}
 	for _, t := range f.targets() {
-		if !t.SystemLogs && !t.WorkloadLogs && len(t.ControlPlaneLogs) == 0 {
-			continue
+		live[t.Kind] = true
+		f.mu.Lock()
+		st := f.state[t.Kind]
+		if st == nil {
+			st = &gkeLogState{loaded: map[string]bool{}}
+			f.state[t.Kind] = st
 		}
-		raw, err := f.kubectl(ctx, t.Kind, "get", "pods", "-A", "-o", "json")
-		if err != nil {
-			continue
-		}
-		srcs, err := gkeLogTargets(t, []byte(raw))
-		if err != nil {
-			continue
-		}
-		byNode := map[string]map[string]gkeLogSource{}
-		for _, s := range srcs {
-			if byNode[s.node] == nil {
-				byNode[s.node] = map[string]gkeLogSource{}
-			}
-			byNode[s.node][s.dir] = s
-		}
-		ok := true
-		for node, dirs := range byNode {
-			names, err := f.nodeLogFiles(ctx, node)
-			if err != nil {
-				ok = false
-				continue
-			}
-			for _, n := range names {
-				if s, found := dirs[n[:max(strings.LastIndex(n, "/"), 0)]]; found {
-					files = append(files, file{kind: t.Kind, src: s, on: t.LoggingChanged})
-					files[len(files)-1].src.dir = n
-				}
-			}
-		}
-		if ok {
-			listed[t.Kind] = true
+		f.mu.Unlock()
+		if err := f.reconcile(ctx, t, st); err != nil && ctx.Err() == nil {
+			f.warn(fmt.Sprintf("  warning: Kubernetes Engine cluster %s's logging agent: %v\n", t.Name, err))
 		}
 	}
 	f.mu.Lock()
+	for k := range f.state {
+		if !live[k] {
+			delete(f.state, k)
+		}
+	}
+	f.mu.Unlock()
+}
+
+// warn prints a warning once until it changes.
+func (f *gkeLogAgents) warn(msg string) {
+	f.mu.Lock()
 	defer f.mu.Unlock()
-	seen := map[string]bool{}
-	categories := map[string]bool{}
-	for _, fl := range files {
-		cat := fl.kind + "/" + fl.src.category
-		categories[cat] = true
-		if _, ok := f.since[cat]; !ok {
-			// From when the change turned it on, when this server made
-			// it; else from this sweep's start.
-			f.since[cat] = start
-			if !fl.on.IsZero() && fl.on.Before(start) {
-				f.since[cat] = fl.on
+	if msg != f.warned && f.out != nil {
+		fmt.Fprint(f.out, msg)
+	}
+	f.warned = msg
+}
+
+// reconcile writes t's configuration, then runs its agent while any
+// category is on and removes it when none is.
+func (f *gkeLogAgents) reconcile(ctx context.Context, t gke.TelemetryTarget, st *gkeLogState) error {
+	c := f.cluster
+	if !st.read {
+		// The configuration a previous run wrote, whose categories' times
+		// are kept: the agent ran on while this process was gone.
+		out, err := c.Kubectl(ctx, t.Kind, "get", "configmap", "-n", logagent.Namespace, logagent.ConfigMap,
+			"--ignore-not-found", "-o", "jsonpath={.data.config\\.json}")
+		if err != nil {
+			return err
+		}
+		if s := strings.TrimSpace(out); s != "" {
+			if cfg, err := logagent.ParseConfig(s); err == nil {
+				st.cfg, st.written = cfg, cfg.Marshal()
 			}
 		}
-		key := fl.kind + "\x00" + fl.src.node + "\x00" + fl.src.dir
-		seen[key] = true
-		st := f.follows[key]
-		if st == nil {
-			st = &runLogFollow{last: f.since[cat]}
-			f.follows[key] = st
+		st.read = true
+	}
+	next := st.cfg.Next(gkeLogCategories(t), t.LoggingChanged, f.now())
+	next.Project, next.Location, next.Cluster = t.Project, t.Location, t.Cluster
+	if s := next.Marshal(); s != st.written {
+		if err := c.Apply(ctx, t.Kind, logagent.ConfigManifest(next)); err != nil {
+			return err
 		}
-		if st.running {
+		st.written = s
+	}
+	st.cfg = next
+	if !next.Any() {
+		if !st.removed {
+			if _, err := c.Kubectl(ctx, t.Kind, "delete", "daemonset", "-n", logagent.Namespace, logagent.Name, "--ignore-not-found", "--wait=false"); err != nil {
+				return err
+			}
+			st.removed, st.applied = true, ""
+		}
+		return nil
+	}
+	endpoint := f.endpoint()
+	if endpoint == "" {
+		return fmt.Errorf("the instance's Cloud Logging is not published to the cluster's pods yet")
+	}
+	if st.image == "" {
+		ref, err := c.Image(ctx, t.Kind)
+		if err != nil {
+			return err
+		}
+		st.image = ref
+	}
+	nodes, err := c.Nodes(ctx, t.Kind)
+	if err != nil {
+		return err
+	}
+	ids := map[string]bool{}
+	for name, id := range nodes {
+		ids[id] = true
+		if st.loaded[id] {
 			continue
 		}
-		fctx, cancel := context.WithCancel(ctx)
-		st.running, st.cancel = true, cancel
-		go f.follow(fctx, fl.src, st)
-	}
-	for key, st := range f.follows {
-		kind := key[:strings.Index(key, "\x00")]
-		if !seen[key] && (listed[kind] || !f.shipping(kind)) {
-			if st.cancel != nil {
-				st.cancel()
-			}
-			delete(f.follows, key)
+		loaded, err := c.Load(ctx, t.Kind, name, st.image)
+		if err != nil {
+			return err
+		}
+		st.loaded[id] = true
+		if loaded {
+			// A pod the DaemonSet made before the image was there waits in
+			// ErrImageNeverPull's back-off; made again, it starts now.
+			_, _ = c.Kubectl(ctx, t.Kind, "delete", "pod", "-n", logagent.Namespace, "-l", "k8s-app="+logagent.Name,
+				"--field-selector", "spec.nodeName="+name, "--ignore-not-found", "--wait=false")
 		}
 	}
-	// A category no longer shipped starts again from when it is turned
-	// back on.
-	for cat := range f.since {
-		kind := cat[:strings.Index(cat, "/")]
-		if !categories[cat] && (listed[kind] || !f.shipping(kind)) {
-			delete(f.since, cat)
+	for id := range st.loaded {
+		if !ids[id] {
+			delete(st.loaded, id)
 		}
 	}
+	m := logagent.Manifest(st.image, endpoint)
+	if m != st.applied {
+		if err := c.Apply(ctx, t.Kind, m); err != nil {
+			return err
+		}
+		st.applied, st.removed = m, false
+	}
+	return nil
 }
 
-// shipping is whether kind is one of the clusters whose logs are shipped;
-// f.mu is held, and the targets read again.
-func (f *gkeLogFeeder) shipping(kind string) bool {
-	for _, t := range f.targets() {
-		if t.Kind == kind && (t.SystemLogs || t.WorkloadLogs || len(t.ControlPlaneLogs) > 0) {
-			return true
-		}
-	}
-	return false
+// gkeKindLogCluster is gkeLogCluster on the kind clusters in dir.
+type gkeKindLogCluster struct {
+	dir string
+	run images.ExecRunner
+
+	mu     sync.Mutex
+	images map[string]string // by architecture
 }
 
-// nodeLogFiles lists a node's container log files.
-func (f *gkeLogFeeder) nodeLogFiles(ctx context.Context, node string) ([]string, error) {
-	out, wait, err := f.docker(ctx, "exec", node, "find", "/var/log/pods", "-name", "*.log")
+func (k *gkeKindLogCluster) kube(kind string) *k8s.Runner {
+	return kubeRunner(filepath.Join(k.dir, kind, "kubeconfig"), "")
+}
+
+func (k *gkeKindLogCluster) Apply(ctx context.Context, kind, manifest string) error {
+	return k.kube(kind).Apply(ctx, manifest, k8s.ApplyOptions{})
+}
+
+func (k *gkeKindLogCluster) Kubectl(ctx context.Context, kind string, args ...string) (string, error) {
+	return k.kube(kind).Do(ctx, "", args...)
+}
+
+func (k *gkeKindLogCluster) Nodes(ctx context.Context, kind string) (map[string]string, error) {
+	out, err := k.run.Run(ctx, "docker", "ps", "--filter", "label=io.x-k8s.kind.cluster="+kind, "--format", "{{.Names}} {{.ID}}")
 	if err != nil {
 		return nil, err
 	}
-	raw, rerr := io.ReadAll(out)
-	if err := wait(); err != nil {
-		return nil, err
+	nodes := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		if f := strings.Fields(line); len(f) == 2 {
+			nodes[f[0]] = f[1]
+		}
 	}
-	if rerr != nil {
-		return nil, rerr
-	}
-	return strings.Fields(string(raw)), nil
+	return nodes, nil
 }
 
-// follow reads one log file for a while, writing each line newer than the
-// last one written; the next sweep continues it.
-func (f *gkeLogFeeder) follow(ctx context.Context, s gkeLogSource, st *runLogFollow) {
-	f.mu.Lock()
-	since, offset := st.last, st.offset
-	f.mu.Unlock()
-	last, n := since, int64(0)
-	if out, wait, err := f.docker(ctx, "exec", s.node, "timeout", runLogTailFor,
-		"tail", "-c", "+"+strconv.FormatInt(offset+1, 10), "-F", s.dir); err == nil {
-		last, n = f.read(ctx, out, s, since)
-		_ = wait()
+func (k *gkeKindLogCluster) Image(ctx context.Context, kind string) (string, error) {
+	loader := &images.Loader{ClusterName: kind, Runner: k.run}
+	arch, err := loader.NodeArchitecture(ctx, filepath.Join(k.dir, kind, "kubeconfig"))
+	if err != nil {
+		return "", fmt.Errorf("the nodes' architecture: %w", err)
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	st.running = false
-	st.offset += n
-	if last.After(st.last) {
-		st.last = last
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if ref := k.images[arch]; ref != "" {
+		return ref, nil
 	}
+	ref, err := logagentimage.Build(ctx, k.run, arch)
+	if err != nil {
+		return "", fmt.Errorf("the logging agent image: %w", err)
+	}
+	k.images[arch] = ref
+	return ref, nil
 }
 
-// read writes the entries of a CRI log stream newer than since, while ctx
-// lasts.
-func (f *gkeLogFeeder) read(ctx context.Context, r io.Reader, s gkeLogSource, since time.Time) (time.Time, int64) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), logging.MaxEntryBytes)
-	last, n := since, int64(0)
-	partial := map[string]string{}
-	for sc.Scan() {
-		if ctx.Err() != nil {
-			break
-		}
-		n += int64(len(sc.Bytes())) + 1
-		ts, stream, line, complete, ok := parseCRILine(sc.Text())
-		if !ok {
-			continue
-		}
-		if !complete {
-			partial[stream] += line
-			continue
-		}
-		line, partial[stream] = partial[stream]+line, ""
-		if !ts.After(since) {
-			continue
-		}
-		if ts.After(last) {
-			last = ts
-		}
-		_, _ = f.write(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{gkeLogEntry(s, stream, ts, line)}})
+func (k *gkeKindLogCluster) Load(ctx context.Context, kind, node, ref string) (bool, error) {
+	loader := &images.Loader{ClusterName: kind, Runner: k.run}
+	if loader.NodeHas(ctx, node, ref) {
+		return false, nil
 	}
-	return last, n
+	if _, err := k.run.Run(ctx, "kind", "load", "docker-image", ref, "--name", kind, "--nodes", node); err != nil {
+		return false, fmt.Errorf("load %s into %s: %w", ref, node, err)
+	}
+	return true, nil
 }

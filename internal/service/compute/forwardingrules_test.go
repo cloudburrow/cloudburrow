@@ -40,11 +40,13 @@ func TestPSCEndpointsThroughTheGoClient(t *testing.T) {
 	}
 	_ = op.Wait(ctx)
 	if _, err := rules.Insert(ctx, &computepb.InsertForwardingRuleRequest{Project: p, Region: r, ForwardingRuleResource: &computepb.ForwardingRule{
-		Name: proto.String("lb"), Target: proto.String("projects/proj/regions/us-central1/targetPools/x")}}); code(err) != http.StatusNotImplemented {
-		t.Errorf("a load balancing rule: %v", err)
+		Name: proto.String("lb"), Target: proto.String("projects/proj/regions/us-central1/targetPools/x")}}); code(err) != http.StatusNotFound {
+		// Load balancers' rules are served since #2153: an absent target
+		// pool is not found.
+		t.Errorf("a load balancing rule of an absent target pool: %v", err)
 	}
 	if _, err := rules.Insert(ctx, &computepb.InsertForwardingRuleRequest{Project: p, Region: r, ForwardingRuleResource: &computepb.ForwardingRule{
-		Name: proto.String("nope"), Target: proto.String("projects/1/regions/us-central1/serviceAttachments/none")}}); code(err) != http.StatusNotFound {
+		Name: proto.String("nope"), Network: proto.String("default"), Target: proto.String("projects/1/regions/us-central1/serviceAttachments/none")}}); code(err) != http.StatusNotFound {
 		t.Errorf("an unknown attachment: %v", err)
 	}
 	op, err = rules.Insert(ctx, &computepb.InsertForwardingRuleRequest{Project: p, Region: r, ForwardingRuleResource: &computepb.ForwardingRule{

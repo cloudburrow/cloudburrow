@@ -572,7 +572,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [storage, served, gke, run, crossservice, scale, emulators, memorystore, sql, sqlreplicas, acceptance, iam, localai, localaispeech]
+        shard: [storage, served, gke, gkeupgrade, run, crossservice, scale, emulators, memorystore, sql, sqlreplicas, acceptance, iam, localai, localaispeech]
     env:
       SHARD: ${{ matrix.shard }}
       # Every make build here uses the emulator binaries the
@@ -598,7 +598,7 @@ jobs:
       # of embedding, speech, OCR and vision models, each held twice while
       # its cache is packed or unpacked.
       - name: Free disk for the Kubernetes Engine API's clusters
-        if: matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'localai' || matrix.shard == 'localaispeech'
+        if: matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'gkeupgrade' || matrix.shard == 'localai' || matrix.shard == 'localaispeech'
         run: |
           df -h /
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift
@@ -633,7 +633,7 @@ jobs:
       # since 586.0.0 had no `gcloud alpha source-manager hooks`, which
       # TestGcloudSourceManagerHooks drives (#1927; main run 44645694075).
       - name: Install the Google Cloud CLI
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'sqlreplicas' || matrix.shard == 'iam'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'gkeupgrade' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'sqlreplicas' || matrix.shard == 'iam'
         run: |
           curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-593.0.0-linux-x86_64.tar.gz
           echo "42c32b7553c712f71fcf6f124546c0519437f53755f47f9bd0c957998cd6b826  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
@@ -1008,7 +1008,7 @@ jobs:
             grep -- '--- SKIP' compat.log || true
             # What the Kubernetes Engine clusters left (#1913): they are
             # deleted by name, so this should be what the instance began with.
-            if [ "$SHARD" = served ] || [ "$SHARD" = gke ]; then df -h /; kind get clusters; fi
+            if [ "$SHARD" = served ] || [ "$SHARD" = gke ] || [ "$SHARD" = gkeupgrade ]; then df -h /; kind get clusters; fi
           fi
 
           # The official Node.js clients (#589), configured from `cloudburrow
@@ -1408,7 +1408,7 @@ jobs:
         run: |
           go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > all.txt
           missing=
-          for shard in storage served gke run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
+          for shard in storage served gke gkeupgrade run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
             d=logs/compat-log-$shard
             [ -d "$d" ] || { echo "no logs from the $shard shard"; missing=1; continue; }
             # Top-level results only; a subtest's line is indented.

@@ -27,6 +27,11 @@ const envDataTransfer = "CLOUDBURROW_TEST_DATATRANSFER"
 // transfer config, which the official client reads back; Data transfers
 // lists it too; its page's Run transfer now runs it on the local BigQuery,
 // and its Run history shows the run SUCCEEDED with the job's message.
+// The create page has Google's sections and labels (#2094: Transfer config
+// name's Display name, Schedule options' Repeat frequency, Destination
+// settings' Dataset), its Repeat frequency Hours every 6 is the schedule
+// "every 6 hours", and the page is walked by keyboard; the transfer's page
+// has Google's Disable.
 func TestBigQueryScheduledQueryThroughThePage(t *testing.T) {
 	needService(t, "bigquery")
 	c, err := datatransfer.NewClient(context.Background(), option.WithEndpoint(endpoint(t, envDataTransfer)),
@@ -46,7 +51,25 @@ func TestBigQueryScheduledQueryThroughThePage(t *testing.T) {
 
 	p.navigate("/bigquery-scheduled-queries/create" + q)
 	p.waitFor(`document.querySelector("#view #f-query") !== null`)
+	var labels string
+	p.eval(`[...document.querySelectorAll("#view form label, #view form legend, #view form h2, #view form h3, #view form .form-section-title, #view form .create-step-title")].map((l) => l.textContent.trim()).join("|")`, &labels)
+	for _, want := range []string{"Transfer config name", "Display name", "Schedule options", "Repeat frequency", "Destination settings", "Dataset", "Data source details"} {
+		if !strings.Contains(labels, want) {
+			t.Errorf("Create scheduled query has no %q: %s", want, labels)
+		}
+	}
+	var repeats []string
+	p.eval(`[...document.querySelectorAll("#view #f-repeat option")].map((o) => o.textContent.trim())`, &repeats)
+	if strings.Join(repeats, "|") != "Hours|Days|Weeks|Months|Custom|On-demand" {
+		t.Errorf("Repeat frequency offers %v, want Google's Hours, Days, Weeks, Months, Custom, On-demand", repeats)
+	}
+	p.run(chromedp.Focus(chromedp.CSS(`#view #f-display_name`)))
+	for _, fl := range p.keyboardFailures() {
+		t.Errorf("Create scheduled query: %s", fl)
+	}
 	setField(p, "#view", "f-display_name", "browser nightly")
+	setField(p, "#view", "f-repeat", "Hours")
+	setField(p, "#view", "f-frequency", "6")
 	setField(p, "#view", "f-dataset", ds)
 	setField(p, "#view", "f-query", "SELECT @run_date AS d, 1 AS n")
 	setField(p, "#view", "f-table", `out_{run_time|"%Y%m%d"}`)
@@ -69,7 +92,7 @@ func TestBigQueryScheduledQueryThroughThePage(t *testing.T) {
 		}
 	}
 	if cfg == nil || cfg.GetDisplayName() != "browser nightly" || cfg.GetDataSourceId() != "scheduled_query" ||
-		cfg.GetParams().GetFields()["write_disposition"].GetStringValue() != "WRITE_TRUNCATE" {
+		cfg.GetParams().GetFields()["write_disposition"].GetStringValue() != "WRITE_TRUNCATE" || cfg.GetSchedule() != "every 6 hours" {
 		t.Fatalf("the config made in the browser: %v", cfg)
 	}
 	t.Cleanup(func() {
@@ -86,6 +109,11 @@ func TestBigQueryScheduledQueryThroughThePage(t *testing.T) {
 	p.waitFor(`document.querySelector("#view h1") !== null && document.body.textContent.includes("Run history")`)
 	var detail string
 	p.eval(`location.pathname + location.search`, &detail)
+	var actions string
+	p.eval(`[...document.querySelectorAll("#view .page-actions button")].map((b) => b.textContent.trim()).join("|")`, &actions)
+	if !strings.Contains("|"+actions+"|", "|Disable|") {
+		t.Errorf("the transfer's page actions are %s, want Google's Disable", actions)
+	}
 	p.clickText("#view .page-actions button", "Run transfer now")
 	deadline := time.Now().Add(90 * time.Second)
 	var history string

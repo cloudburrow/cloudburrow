@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/chromedp/chromedp"
 )
 
 // TestConnectionPoliciesThroughTheBrowser (#2141), on an instance serving
@@ -17,7 +19,8 @@ import (
 // Google services, Service class, Network, Region, Custom service
 // instance scope, Subnetworks, Connection limit) ending in Create policy,
 // lists the policy and opens its page, whose Edit ends in Update policy;
-// Cloud SQL's create page has Enable Managed Connection Pool and, with
+// Cloud SQL's create page has Enable Managed Connection Pool (MySQL's
+// with max_pool_size alone) and, with
 // Private Service Connect chosen, Add an Endpoint; an instance's Query
 // insights has the Database load chart. Each screen passes the WCAG 2.1
 // AA audit, keyboard included.
@@ -65,6 +68,22 @@ func TestConnectionPoliciesThroughTheBrowser(t *testing.T) {
 	if !strings.Contains(labels, "Enable Managed Connection Pool") {
 		t.Error("the create page lacks Enable Managed Connection Pool")
 	}
+	// MySQL's thread pool (#2141): with MySQL chosen, Enable Managed
+	// Connection Pool, checked by keyboard, shows max_pool_size alone.
+	p.eval(`(() => { document.querySelector('input[name="f-engine-choice"][value="MySQL"]').click(); return true; })()`, nil)
+	p.waitFor(`document.querySelector("#f-mysqlConnectionPooling").getClientRects().length > 0 && document.querySelector("#f-connectionPooling").getClientRects().length === 0`)
+	p.run(chromedp.Focus(`#f-mysqlConnectionPooling`), chromedp.KeyEvent(" "))
+	p.waitFor(`document.querySelector("#f-mysqlConnectionPooling").checked`)
+	p.eval(`(() => { const b = [...document.querySelectorAll("#view button")].find((b) => b.textContent.trim() === "Advanced pooling options" &&
+		b.getClientRects().length > 0); b.click(); return true; })()`, nil)
+	p.waitFor(`document.querySelector("#f-mysql_pool_max_pool_size").getClientRects().length > 0`)
+	var poolMode bool
+	p.eval(`!!document.querySelector("#f-poolMode") && document.querySelector("#f-poolMode").getClientRects().length > 0`, &poolMode)
+	if poolMode {
+		t.Error("MySQL's pooling shows PostgreSQL's Pool mode")
+	}
+	p.eval(`(() => { document.querySelector('input[name="f-engine-choice"][value="PostgreSQL"]').click(); return true; })()`, nil)
+	p.waitFor(`document.querySelector("#f-connectionPooling").getClientRects().length > 0`)
 	p.eval(`(() => { const c = document.querySelector("#f-privateIp"); if (!c.checked) c.click();
 		return true; })()`, nil)
 	p.waitFor(`document.querySelector('input[name="f-privateMethod-choice"][value="psc"]') !== null`)
