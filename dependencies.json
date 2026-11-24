@@ -111,6 +111,21 @@
         "notes": "Resolved 2026-11-24. The SDK container the Apache Beam project publishes for its portable runners. Pinned for Java 21 pipelines; not yet exercised by a test.",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/beam_java21_sdk:2.78.0`."
       },
+      "beamGoSDK": {
+        "$comment": "Dataflow (#2215): the Apache Beam 2.78.0 Go SDK harness. internal/beamrun copies its boot (/opt/apache/beam/boot) into a Go job's directory and runs it as the container executable of Beam's worker pool, which fetches the job's staged worker binary and runs it.",
+        "image": "apache/beam_go_sdk:2.78.0",
+        "digest": "sha256:6290be71b91b975153ed86ffe7e05f3d36376c3e46ece68ea08de366fba17fab",
+        "license": "Apache-2.0 (Apache Beam) and the distroless base it is built on",
+        "redistribution": "not published: pulled by digest by the local CLI on a Go Dataflow job's first run",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-24. The SDK container the Apache Beam project publishes for its portable runners; testdata/dataflowgo (test-only) builds its pipelines with the Go SDK module github.com/apache/beam/sdks/v2 v2.78.0 (Apache-2.0) from the Go module proxy.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/beam_go_sdk:2.78.0`."
+      },
       "mavenTemurin17": {
         "$comment": "Dataflow (#2215): test/compat/dataflowjava2215_test.go builds testdata/dataflowjava (Apache Beam 2.78.0's Java SDK and Dataflow runner, from Maven Central) and submits it with this image's JDK. Test-only.",
         "image": "maven:3.9.9-eclipse-temurin-17",

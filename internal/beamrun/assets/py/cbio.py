@@ -16,6 +16,7 @@ attribute; and a DoFn that publishes each serialized message. A drain
 written, the watermark advances to the end of time and the job finishes.
 """
 import os
+import re
 import time
 import uuid
 
@@ -262,8 +263,27 @@ def _drop(pipeline, tid, keep):
     del ts[tid]
 
 
-def rewrite(pipeline, env_id):
-    """Replaces the pipeline's Pub/Sub reads and writes in place."""
+def _runtime(value, overridden, options):
+    """A read's or write's topic or subscription: value, or, for a
+    template's runtime parameter (a ValueProvider: the payload names the
+    parameter in *_runtime_overridden and leaves the value empty), the
+    parameter's value in the job's options, which a template's launch
+    sets."""
+    if value or not overridden:
+        return value
+    v = (options or {}).get(overridden)
+    if v is None:
+        # The Java SDK's option names are camelCase, Python's snake_case.
+        alt = re.sub(r"_([a-z])", lambda m: m.group(1).upper(), overridden)
+        v = (options or {}).get(alt)
+    if not v:
+        raise RuntimeError("The template parameter %s has no value." % overridden)
+    return str(v)
+
+
+def rewrite(pipeline, env_id, options=None):
+    """Replaces the pipeline's Pub/Sub reads and writes in place; options
+    are the job's pipeline options (a template's runtime parameters)."""
     n = 0
     for tid in list(pipeline.components.transforms):
         if tid not in pipeline.components.transforms:
@@ -281,13 +301,15 @@ def rewrite(pipeline, env_id):
             pl = beam_runner_api_pb2.PubSubReadPayload()
             pl.ParseFromString(t.spec.payload)
             _ = (mp | "Impulse" >> beam.Impulse()
-                 | "Read" >> beam.ParDo(ReadPubSubFn(resource_name(pl.topic), resource_name(pl.subscription), pl.with_attributes,
+                 | "Read" >> beam.ParDo(ReadPubSubFn(resource_name(_runtime(pl.topic, pl.topic_runtime_overridden, options)),
+                                                     resource_name(_runtime(pl.subscription, pl.subscription_runtime_overridden, options)),
+                                                     pl.with_attributes,
                                                      pl.timestamp_attribute, pl.id_attribute)).with_output_types(bytes))
         else:
             pl = beam_runner_api_pb2.PubSubWritePayload()
             pl.ParseFromString(t.spec.payload)
             _ = (mp | "Impulse" >> beam.Impulse()
-                 | "Write" >> beam.ParDo(WritePubSubFn(resource_name(pl.topic))))
+                 | "Write" >> beam.ParDo(WritePubSubFn(resource_name(_runtime(pl.topic, pl.topic_runtime_overridden, options)))))
         mini = mp.to_runner_api()
         leaves = _leaves(mini)
         added = _splice(pipeline, mini, prefix, env_id)

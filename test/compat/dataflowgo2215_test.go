@@ -30,10 +30,16 @@ func buildBeamGo(t *testing.T, ctx context.Context) string {
 	if err != nil {
 		t.Fatalf("docker version: %v", err)
 	}
-	work := t.TempDir()
-	cmd := exec.CommandContext(ctx, "go", "build", "-trimpath", "-o", filepath.Join(work, "prog"), ".")
-	cmd.Dir = filepath.Join(moduleRoot(t), "testdata", "dataflowgo")
-	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+strings.TrimSpace(string(arch)), "CGO_ENABLED=0", "GOWORK=off")
+	work, src := t.TempDir(), t.TempDir()
+	// Its go.sum is made here, from the module proxy and the checksum
+	// database (the Beam SDK's module graph names modules the repository
+	// keeps no sums of).
+	if err := os.CopyFS(src, os.DirFS(filepath.Join(moduleRoot(t), "testdata", "dataflowgo"))); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, "go", "build", "-mod=mod", "-trimpath", "-o", filepath.Join(work, "prog"), ".")
+	cmd.Dir = src
+	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+strings.TrimSpace(string(arch)), "CGO_ENABLED=0", "GOWORK=off", "GOFLAGS=")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build testdata/dataflowgo: %v\n%s", err, out)
 	}
@@ -301,6 +307,59 @@ func TestGoDataflowBigQuery(t *testing.T) {
 	id = goJobID(t, runBeamGo(t, ctx, netns, work, project, bucket, name, "--pipeline=bigquery-read",
 		"--table="+table, "--expansion_addr="+expansion, "--output=gs://"+bucket+"/out/scores.txt"))
 	j = waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DONE, dataflowpb.JobState_JOB_STATE_FAILED)
+	if j.CurrentState != dataflowpb.JobState_JOB_STATE_DONE {
+		t.Fatalf("read job %s is %s:\n%s", id, j.CurrentState, jobMessages(t, ctx, c, project, id))
+	}
+	r, err := sc.Bucket(bucket).Object("out/scores.txt").NewReader(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(r)
+	r.Close()
+	got := strings.Split(strings.TrimSpace(string(b)), "\n")
+	sort.Strings(got)
+	if s := strings.Join(got, ","); s != "ada=10,grace=20,linus=30" {
+		t.Errorf("the read wrote %s; want ada=10,grace=20,linus=30", s)
+	}
+}
+
+// covers: google.dataflow.v1beta3.JobsV1Beta3/CreateJob
+//
+// TestGoDataflowBigQueryRead (#2215): a Go pipeline reads a BigQuery
+// table the BigQuery client made, with the Go SDK's cross-language
+// bigqueryio.Read (Java's BigQueryIO, expanded by Beam's Java expansion
+// service for Google Cloud I/O), submitted with the Go SDK's Dataflow
+// runner; the read's output is the table's rows.
+func TestGoDataflowBigQueryRead(t *testing.T) {
+	h, _, c := dataflowEnv(t)
+	storageAddr := h.Endpoint(EnvStorage)
+	bqAddr := h.Endpoint(EnvBigQuery)
+	dfAddr := h.Endpoint(EnvDataflow)
+	mdAddr := h.Endpoint(EnvMetadata)
+	bq, project := bigqueryClient(t, h)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	sc := storageClient(t, h)
+	bucket := fmt.Sprintf("%s-dataflow-gbr-%d", project, time.Now().UnixNano()%1e6)
+	dataflowBucket(t, ctx, sc, project, bucket)
+	ds := fmt.Sprintf("gobqr_%d", time.Now().UnixNano()%1e6)
+	if err := bq.Dataset(ds).Create(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bq.Dataset(ds).DeleteWithContents(context.Background()) })
+	q := bq.Query("CREATE TABLE `" + project + "." + ds + ".scores` AS SELECT * FROM UNNEST([STRUCT('ada' AS name, 10 AS score), ('grace', 20), ('linus', 30)])")
+	if job, err := q.Run(ctx); err != nil {
+		t.Fatal(err)
+	} else if st, err := job.Wait(ctx); err != nil || st.Err() != nil {
+		t.Fatalf("create the table: %v %v", err, st.Err())
+	}
+	work := buildBeamGo(t, ctx)
+	network := beamNetwork(t, ctx, map[int]string{9000: storageAddr, 9002: bqAddr, 80: dfAddr, 9006: mdAddr})
+	netns, expansion := beamExpansionService(t, ctx, network)
+	name := fmt.Sprintf("go-bq-read-%d", time.Now().UnixNano()%1e6)
+	id := goJobID(t, runBeamGo(t, ctx, netns, work, project, bucket, name, "--pipeline=bigquery-read",
+		"--table="+project+":"+ds+".scores", "--expansion_addr="+expansion, "--output=gs://"+bucket+"/out/scores.txt"))
+	j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DONE, dataflowpb.JobState_JOB_STATE_FAILED)
 	if j.CurrentState != dataflowpb.JobState_JOB_STATE_DONE {
 		t.Fatalf("read job %s is %s:\n%s", id, j.CurrentState, jobMessages(t, ctx, c, project, id))
 	}

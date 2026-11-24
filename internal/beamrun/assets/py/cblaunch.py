@@ -475,7 +475,7 @@ def main():
     try:
         env, java_version, has_go = rewrite_environments(p, args.harness, args.java_harness, args.java_dir,
                                                          args.go_harness, args.go_dir)
-        cbio.rewrite(p, env)
+        cbio.rewrite(p, env, opts)
         opaque_custom_windows(p)
     except Exception as e:
         emit(event="done", state="FAILED", message="Workflow failed. Causes: %s" % e)
