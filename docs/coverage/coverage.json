@@ -15451,6 +15451,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlprivate2141_test.go:28 TestCloudSQLZonesPrivateIPAndPSCEndpoints",
+          "test/compat/lbipv6rules2140_test.go:33 TestRegionalAndInternalIPv6ForwardingRules2140",
           "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140",
           "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
         ]
@@ -15460,6 +15461,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlprivate2141_test.go:28 TestCloudSQLZonesPrivateIPAndPSCEndpoints",
+          "test/compat/lbipv6rules2140_test.go:33 TestRegionalAndInternalIPv6ForwardingRules2140",
           "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140",
           "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
         ]
@@ -15469,6 +15471,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlprivate2141_test.go:28 TestCloudSQLZonesPrivateIPAndPSCEndpoints",
+          "test/compat/lbipv6rules2140_test.go:33 TestRegionalAndInternalIPv6ForwardingRules2140",
           "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140",
           "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
         ]
@@ -15508,7 +15511,7 @@
         "tests": [
           "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
+          "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -15516,7 +15519,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
+          "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -15525,7 +15528,7 @@
         "tests": [
           "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
+          "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -15554,7 +15557,7 @@
         "tests": [
           "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
           "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140",
-          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
+          "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -15563,7 +15566,7 @@
         "tests": [
           "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
           "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140",
-          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
+          "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -15572,7 +15575,7 @@
         "tests": [
           "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
           "test/compat/psc2140_test.go:32 TestPrivateServiceConnectThroughTheGoClient2140",
-          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
+          "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -16162,7 +16165,7 @@
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance",
-          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
+          "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -16211,7 +16214,7 @@
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/routerbgp2140_test.go:37 TestCloudRouterBGPWithARouterApplianceVM2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
-          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
+          "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -16761,6 +16764,7 @@
         "method": "compute.regionBackendServices.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/lbipv6rules2140_test.go:33 TestRegionalAndInternalIPv6ForwardingRules2140",
           "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
         ]
       },
@@ -16928,6 +16932,7 @@
         "method": "compute.regionHealthChecks.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/lbipv6rules2140_test.go:33 TestRegionalAndInternalIPv6ForwardingRules2140",
           "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
         ]
       },
@@ -17515,6 +17520,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
+          "test/compat/cloudnateim2140_test.go:35 TestCloudNATEndpointIndependentMappingAndDynamicPorts2140",
           "test/compat/routerbgp2140_test.go:37 TestCloudRouterBGPWithARouterApplianceVM2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
           "test/compat/routers2140_test.go:34 TestCloudRouterAndNATThroughTheGoClient"
@@ -17536,6 +17542,7 @@
         "method": "compute.routers.get",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudnateim2140_test.go:35 TestCloudNATEndpointIndependentMappingAndDynamicPorts2140",
           "test/compat/routers2140_test.go:34 TestCloudRouterAndNATThroughTheGoClient"
         ]
       },
@@ -17557,6 +17564,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
+          "test/compat/cloudnateim2140_test.go:35 TestCloudNATEndpointIndependentMappingAndDynamicPorts2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
           "test/compat/routers2140_test.go:34 TestCloudRouterAndNATThroughTheGoClient"
         ]
@@ -17582,6 +17590,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
+          "test/compat/cloudnateim2140_test.go:35 TestCloudNATEndpointIndependentMappingAndDynamicPorts2140",
           "test/compat/routerbgp2140_test.go:37 TestCloudRouterBGPWithARouterApplianceVM2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
           "test/compat/routers2140_test.go:34 TestCloudRouterAndNATThroughTheGoClient"
@@ -17615,6 +17624,7 @@
         "method": "compute.routers.patch",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudnateim2140_test.go:35 TestCloudNATEndpointIndependentMappingAndDynamicPorts2140",
           "test/compat/routers2140_test.go:34 TestCloudRouterAndNATThroughTheGoClient"
         ]
       },
@@ -17962,7 +17972,7 @@
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
+          "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -17980,7 +17990,7 @@
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
           "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
-          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
+          "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -17999,7 +18009,7 @@
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
           "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
-          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
+          "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {
@@ -18023,7 +18033,7 @@
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
           "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
-          "test/compat/vpcipv6_2140_test.go:38 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
+          "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
       {

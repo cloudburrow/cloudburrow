@@ -39,6 +39,10 @@ type vpcService struct {
 	ip, to string
 	port   int
 	what   string // the forwarding rule, for the ruleset's comment
+	// v6 is an IPv6 internal forwarding rule's address (ipVersion IPV6),
+	// which the guest's relay6 carries: nftables cannot rewrite an IPv6
+	// destination to the IPv4 listener.
+	v6 bool
 }
 
 // vpcServicesLocked are the internal services self reaches.
@@ -49,16 +53,19 @@ func (s *Server) vpcServicesLocked(self vmNet, reach map[string]bool) []vpcServi
 	region := regionOfZone(self.zone)
 	var out []vpcService
 	add := func(ip string, rule obj, port int, what string) {
-		if net.ParseIP(ip).To4() == nil {
+		ip = strings.TrimSuffix(ip, "/96")
+		parsed := net.ParseIP(ip)
+		if parsed == nil {
 			return
 		}
+		v6 := parsed.To4() == nil
 		for _, e := range strs(rule, "cloudburrowAddresses") {
 			k, v, ok := strings.Cut(e, "=")
 			if !ok || k != strconv.Itoa(port) {
 				continue
 			}
 			if to := s.opts.GuestReach(v); to != "" {
-				out = append(out, vpcService{ip: ip, port: port, to: to, what: what})
+				out = append(out, vpcService{ip: ip, port: port, to: to, what: what, v6: v6})
 			}
 		}
 	}
@@ -120,6 +127,9 @@ func servicesNFT(svcs []vpcService, hook string) string {
 	var b strings.Builder
 	b.WriteString("  chain services {\n    type nat hook " + hook + " priority -100; policy accept;\n")
 	for _, v := range svcs {
+		if v.v6 {
+			continue // relay6, in the config's relay6 lines
+		}
 		fmt.Fprintf(&b, "    ip daddr %s tcp dport %d dnat ip to %s comment %q\n", v.ip, v.port, v.to, lastSeg(v.what))
 	}
 	b.WriteString("  }\n")

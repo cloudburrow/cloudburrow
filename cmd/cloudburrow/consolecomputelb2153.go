@@ -374,6 +374,10 @@ func lbCreateFields(groups, hcs, buckets []string) []console.Field {
 		{Name: "protocol", Label: "Protocol", Type: "select", Default: "HTTP", Section: s2, Options: []string{"HTTP", "HTTPS", "TCP", "SSL"},
 			Help: "HTTP or HTTPS for an Application Load Balancer; TCP or SSL for a proxy Network Load Balancer; TCP for a passthrough one."},
 		{Name: "port", Label: "Port", Type: "text", Default: "80", Section: s2, Pattern: `^[0-9]{1,5}(-[0-9]{1,5})?$`},
+		{Name: "ipVersion", Label: "IP version", Type: "radio", Default: "IPV4", Section: s2, Options: []string{"IPV4", "IPV6"},
+			OptionLabels: map[string]string{"IPV4": "IPv4", "IPV6": "IPv6"}},
+		{Name: "subnetwork", Label: "Subnetwork", Type: "text", Section: s2, VisibleWhen: map[string]string{"ipVersion": "IPV6"},
+			Help: "A regional IPv6 frontend's dual-stack or IPv6-only subnetwork, whose IPv6 access type is internal for an internal load balancer and external for a public one."},
 		{Name: "ipAddress", Label: "IP address", Type: "text", Section: s2,
 			Help: "Empty for Ephemeral (127.0.0.1 on this machine), or the name of a reserved static address of the load balancer's scope."},
 		{Name: "certificate", Label: "Certificate", Type: "text", Section: s2, ShowWhen: "protocol=HTTPS|protocol=SSL",
@@ -443,6 +447,9 @@ func (p computeLBProvider) Create(ctx context.Context, project string, v map[str
 		if lbType != "application" {
 			return "", errors.New("Balancing mode: custom metrics are for Application Load Balancers")
 		}
+	}
+	if v["ipVersion"] == "IPV6" && regional && strings.TrimSpace(v["subnetwork"]) == "" {
+		return "", errors.New("Subnetwork: a regional IPv6 frontend needs its dual-stack or IPv6-only subnetwork")
 	}
 	scope := "global"
 	if regional {
@@ -593,6 +600,15 @@ func (p computeLBProvider) Create(ctx context.Context, project string, v map[str
 	}
 	if network != "" {
 		rule["network"] = network
+	}
+	if v["ipVersion"] == "IPV6" {
+		rule["ipVersion"] = "IPV6"
+		if sub := strings.TrimSpace(v["subnetwork"]); sub != "" && regional {
+			if !strings.Contains(sub, "/") {
+				sub = "regions/" + region + "/subnetworks/" + sub
+			}
+			rule["subnetwork"] = sub
+		}
 	}
 	var certs []any
 	if protocol == "HTTPS" || protocol == "SSL" {

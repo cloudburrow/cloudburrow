@@ -1,0 +1,95 @@
+#!/usr/bin/perl
+# IPv6 internal forwarding rules on the VM's data plane (#2140;
+# internal/service/compute/vpcservices.go). The vpc agent writes
+# /run/cloudburrow-vpc/relay6, one "ADDRESS PORT LISTENER" line per IPv6
+# internal forwarding rule address and port the VM reaches, and holds each
+# ADDRESS on lo; this relay takes the VM's TCP connections to ADDRESS:PORT
+# and carries them to the load balancer's listener (an IPv4 address and
+# port its pod reaches), as the IPv4 rules' nftables rewrite does: nftables
+# cannot rewrite an IPv6 destination to an IPv4 one. The egress firewall
+# rules apply first (the guest's egress chain matches these addresses on
+# lo). Only core Perl modules are used.
+use strict;
+use warnings;
+use Socket qw(AF_INET AF_INET6 SOCK_STREAM SOL_SOCKET SO_REUSEADDR SHUT_WR inet_aton inet_pton pack_sockaddr_in pack_sockaddr_in6);
+
+my $conf = '/run/cloudburrow-vpc/relay6';
+$SIG{CHLD} = 'IGNORE';
+$SIG{PIPE} = 'IGNORE';
+my %ls;    # "ADDRESS PORT" => { fh => listener, to => "IP:PORT" }
+
+while (1) {
+  my %want;
+  if (open my $f, '<', $conf) {
+    while (<$f>) {
+      my ($ip, $port, $to) = split ' ';
+      $want{"$ip $port"} = $to if defined $to && $port =~ /^\d+$/;
+    }
+    close $f;
+  }
+  for my $k (keys %ls) {
+    if (!exists $want{$k}) {
+      close $ls{$k}{fh};
+      delete $ls{$k};
+    } else {
+      $ls{$k}{to} = $want{$k};
+    }
+  }
+  for my $k (keys %want) {
+    next if $ls{$k};
+    my ($ip, $port) = split ' ', $k;
+    my $a = inet_pton(AF_INET6, $ip) or next;
+    socket(my $s, AF_INET6, SOCK_STREAM, 0) or next;
+    setsockopt($s, SOL_SOCKET, SO_REUSEADDR, 1);
+    bind($s, pack_sockaddr_in6($port, $a)) or next;  # retried while lo lacks it
+    listen($s, 128) or next;
+    $ls{$k} = { fh => $s, to => $want{$k} };
+  }
+  my $rin = '';
+  vec($rin, fileno($_->{fh}), 1) = 1 for values %ls;
+  my $n = select(my $rout = $rin, undef, undef, 2);
+  next unless $n && $n > 0;
+  for my $l (values %ls) {
+    next unless vec($rout, fileno($l->{fh}), 1);
+    accept(my $c, $l->{fh}) or next;
+    my $pid = fork();
+    if (defined $pid && $pid == 0) {
+      close $_->{fh} for values %ls;
+      relay($c, $l->{to});
+      exit 0;
+    }
+    close $c;
+  }
+}
+
+# relay copies between the VM's connection and the listener until both
+# sides have closed.
+sub relay {
+  my ($c, $to) = @_;
+  my ($h, $p) = $to =~ /^([0-9.]+):(\d+)$/ or return;
+  socket(my $u, AF_INET, SOCK_STREAM, 0) or return;
+  connect($u, pack_sockaddr_in($p, inet_aton($h))) or return;
+  my %peer = (fileno($c) => [$c, $u], fileno($u) => [$u, $c]);
+  my %open = (fileno($c) => 1, fileno($u) => 1);
+  while (%open) {
+    my $rin = '';
+    vec($rin, $_, 1) = 1 for keys %open;
+    select(my $rout = $rin, undef, undef, undef) > 0 or last;
+    for my $fd (keys %open) {
+      next unless vec($rout, $fd, 1);
+      my ($from, $dst) = @{ $peer{$fd} };
+      my $r = sysread($from, my $buf, 65536);
+      if (!$r) {
+        delete $open{$fd};
+        shutdown($dst, SHUT_WR);
+        next;
+      }
+      my $off = 0;
+      while ($off < $r) {
+        my $w = syswrite($dst, $buf, $r - $off, $off);
+        return unless defined $w;
+        $off += $w;
+      }
+    }
+  }
+}

@@ -797,6 +797,16 @@ func (s *Server) checkNats(project, region, network, router string, old obj, l [
 				}
 			}
 		}
+		// Dynamic port allocation's current sizes, kept across updates
+		// unless maxPortsPerVm is lowered, which resets every VM to
+		// minPortsPerVm (nat/docs/ports-and-addresses).
+		if o["enableDynamicPortAllocation"] == true {
+			for _, oe := range sliceOf(old["nats"]) {
+				if om, _ := oe.(map[string]any); str(om, "name") == name && om["_dynPorts"] != nil && natMaxPorts(o) >= natMaxPorts(om) {
+					o["_dynPorts"], o["_dynAt"] = om["_dynPorts"], om["_dynAt"]
+				}
+			}
+		}
 		out = append(out, o)
 	}
 	return out, nil

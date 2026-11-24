@@ -7,7 +7,9 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Cloud NAT's address translation (#2140). Each public Cloud NAT gateway
@@ -58,6 +60,9 @@ type NATGateway struct {
 	LogFilter string
 	// VMs are the VMs it translates.
 	VMs []NATVM
+	// EIM is enableEndpointIndependentMapping; Dynamic is
+	// enableDynamicPortAllocation.
+	EIM, Dynamic bool
 }
 
 // NATVM is a VM a gateway translates and the ports it was given; NatIP is
@@ -86,15 +91,22 @@ type natSlot struct {
 	lo, hi int
 }
 
-// natAllocLocked is gateway m's static port allocation: each VM it
-// translates, in order, is given minPortsPerVm ports of a NAT IP from
-// port 1024, natPortsPerIP/minPortsPerVm VMs per address. An AUTO_ONLY
-// gateway is given more addresses as its VMs need them, as Google
-// allocates them; a MANUAL_ONLY gateway's VMs past its addresses get none
-// (minExtraNatIpsNeeded).
+// natAllocLocked is gateway m's port allocation. With static allocation
+// each VM it translates, in order, is given minPortsPerVm ports of a NAT
+// IP from port 1024, natPortsPerIP/minPortsPerVm VMs per address. With
+// dynamic port allocation each VM is given its current number of ports
+// (natDynPortsOf: minPortsPerVm, doubled as it nears exhausting them, up
+// to maxPortsPerVm, and halved again once it uses few), a block aligned
+// to its size, first fit over the gateway's addresses in order. An
+// AUTO_ONLY gateway is given more addresses as its VMs need them, as
+// Google allocates them; a MANUAL_ONLY gateway's VMs past its addresses
+// get none (minExtraNatIpsNeeded).
 func (s *Server) natAllocLocked(r obj, m map[string]any) (ips []string, slots []natSlot) {
 	ips, _ = s.natIPsOf(m)
 	vms := s.natVMsLocked(r, m)
+	if m["enableDynamicPortAllocation"] == true {
+		return s.natDynAllocLocked(m, ips, vms)
+	}
 	ports := natMinPorts(m)
 	per := natPortsPerIP / ports
 	if per < 1 {
@@ -120,6 +132,209 @@ func (s *Server) natAllocLocked(r obj, m map[string]any) (ips []string, slots []
 		slots = append(slots, sl)
 	}
 	return ips, slots
+}
+
+// natDynAllocLocked is natAllocLocked with dynamic port allocation.
+func (s *Server) natDynAllocLocked(m map[string]any, ips []string, vms []natVM) ([]string, []natSlot) {
+	type block struct{ lo, hi int }
+	used := map[string][]block{}
+	free := func(ip string, lo, hi int) bool {
+		for _, b := range used[ip] {
+			if lo <= b.hi && b.lo <= hi {
+				return false
+			}
+		}
+		return true
+	}
+	// A VM keeps the block it was given (_dynAt, "NATIP:LO-HI") while it
+	// is still free and aligned to its size, so another VM's growth or
+	// shrinking never moves it: those whose size is unchanged first, then
+	// those that grew or shrank in place where they can; the others are
+	// placed first fit.
+	at := mapOf(m["_dynAt"])
+	slots := make([]natSlot, len(vms))
+	for i, vm := range vms {
+		slots[i].vm = vm
+	}
+	for _, same := range []bool{true, false} {
+		for i, vm := range vms {
+			ip, rng, ok := strings.Cut(str(at, vm.ip), ":")
+			a, b, _ := strings.Cut(rng, "-")
+			n, err1 := strconv.Atoi(a)
+			h, err2 := strconv.Atoi(b)
+			size := natDynPortsOf(m, vm.ip)
+			if slots[i].ip != "" || !ok || err1 != nil || err2 != nil || (h-n+1 == size) != same ||
+				(n-1024)%size != 0 || n-1024+size > natPortsPerIP || !hasStr(ips, ip) || !free(ip, n, n+size-1) {
+				continue
+			}
+			slots[i].ip, slots[i].lo, slots[i].hi = ip, n, n+size-1
+			used[ip] = append(used[ip], block{n, n + size - 1})
+		}
+	}
+	for k := range slots {
+		sl := &slots[k]
+		if sl.ip != "" {
+			continue
+		}
+		size := natDynPortsOf(m, sl.vm.ip)
+		for i := 0; sl.ip == ""; i++ {
+			if i == len(ips) {
+				if str(m, "natIpAllocateOption") != natAutoOnly {
+					break
+				}
+				ip := s.freeAutoNatIPLocked()
+				if ip == "" {
+					break
+				}
+				m["_autoIps"] = append(sliceOf(m["_autoIps"]), ip)
+				ips = append(ips, ip)
+			}
+			for off := 0; off+size <= natPortsPerIP; off += size {
+				if lo, hi := 1024+off, 1024+off+size-1; free(ips[i], lo, hi) {
+					sl.ip, sl.lo, sl.hi = ips[i], lo, hi
+					used[ips[i]] = append(used[ips[i]], block{lo, hi})
+					break
+				}
+			}
+		}
+	}
+	next := map[string]any{}
+	for _, sl := range slots {
+		if sl.ip != "" && sl.vm.ip != "" {
+			next[sl.vm.ip] = fmt.Sprintf("%s:%d-%d", sl.ip, sl.lo, sl.hi)
+		}
+	}
+	if len(next) == 0 {
+		delete(m, "_dynAt")
+	} else {
+		m["_dynAt"] = next
+	}
+	return ips, slots
+}
+
+// natMaxPorts is a dynamic gateway's maxPortsPerVm (Google's default
+// 65536), as one block of an address: at most its largest power of 2.
+func natMaxPorts(m map[string]any) int {
+	max := natDefaultMaxDyn
+	if v, ok := m["maxPortsPerVm"].(float64); ok && v > 0 {
+		max = int(v)
+	}
+	if max > natMaxBlock {
+		max = natMaxBlock
+	}
+	return max
+}
+
+// natMaxBlock is the largest power of 2 of an address's 64512 ports.
+const natMaxBlock = 32768
+
+// natDynPortsOf is how many ports a dynamic gateway's VM at ip has now.
+func natDynPortsOf(m map[string]any, ip string) int {
+	n := natMinPorts(m)
+	if v, ok := mapOf(m["_dynPorts"])[ip].(float64); ok && int(v) > n {
+		n = int(v)
+	}
+	if max := natMaxPorts(m); n > max {
+		n = max
+	}
+	return n
+}
+
+// natShrinkAfter is how long a VM uses at most a quarter of its dynamic
+// ports before they are halved, and natGrowAt the share of them in use
+// (7/8) at which they are doubled: "If a VM is close to exhausting all
+// the ports that are allocated to it, the number of ports assigned to the
+// VM is doubled", and "when the port usage significantly decreases, the
+// ports are deallocated" (nat/docs/ports-and-addresses).
+const (
+	natShrinkAfter = 30 * time.Second
+	natGrowNum     = 7
+	natGrowDen     = 8
+)
+
+// SetNATPortUsage is what the gateway key's pod reports: how many NAT
+// ports each VM, by internal IP, has in use (its connections' distinct NAT
+// ports, the larger of TCP's and UDP's). A gateway with dynamic port
+// allocation doubles the ports of a VM close to exhausting them, up to
+// maxPortsPerVm, and halves those of a VM that has used at most a quarter
+// of them for natShrinkAfter, down to minPortsPerVm. It reports whether
+// an allocation changed.
+func (s *Server) SetNATPortUsage(key string, inUse map[string]int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	router, name, _ := strings.Cut(key, "/nats/")
+	r, ok := s.res[router]
+	if !ok {
+		return false
+	}
+	var m map[string]any
+	for _, e := range sliceOf(r["nats"]) {
+		if nm, _ := e.(map[string]any); str(nm, "name") == name {
+			m = nm
+		}
+	}
+	if m == nil || m["enableDynamicPortAllocation"] != true {
+		return false
+	}
+	if s.natLow == nil {
+		s.natLow = map[string]time.Time{}
+	}
+	dyn := mapOf(m["_dynPorts"])
+	if dyn == nil {
+		dyn = map[string]any{}
+	}
+	now := s.opts.Now()
+	min, max := natMinPorts(m), natMaxPorts(m)
+	changed := false
+	live := map[string]bool{}
+	for _, vm := range s.natVMsLocked(r, m) {
+		if vm.ip == "" {
+			continue
+		}
+		live[vm.ip] = true
+		have := natDynPortsOf(m, vm.ip)
+		used, lowKey := inUse[vm.ip], key+"|"+vm.ip
+		next := have
+		switch {
+		case used*natGrowDen >= have*natGrowNum && have < max:
+			next = have * 2
+			delete(s.natLow, lowKey)
+		case used*4 <= have && have > min:
+			since, ok := s.natLow[lowKey]
+			if !ok {
+				s.natLow[lowKey] = now
+			} else if now.Sub(since) >= natShrinkAfter {
+				next = have / 2
+				s.natLow[lowKey] = now
+			}
+		default:
+			delete(s.natLow, lowKey)
+		}
+		if next != have {
+			changed = true
+			if next <= min {
+				delete(dyn, vm.ip)
+			} else {
+				dyn[vm.ip] = float64(next)
+			}
+		}
+	}
+	for ip := range dyn {
+		if !live[ip] {
+			delete(dyn, ip)
+			changed = true
+		}
+	}
+	if !changed {
+		return false
+	}
+	if len(dyn) == 0 {
+		delete(m, "_dynPorts")
+	} else {
+		m["_dynPorts"] = dyn
+	}
+	_ = s.saveLocked()
+	return true
 }
 
 // natNeed is how many NAT IPs m's VMs need.
@@ -166,7 +381,8 @@ func (s *Server) natGatewaysLocked() []NATGateway {
 			}
 			key := natGatewayKey(k, str(m, "name"))
 			g := NATGateway{Key: key, Project: strings.Split(k, "/")[1], Region: lastSeg(str(r, "region")), Router: str(r, "name"),
-				RouterID: str(r, "id"), Name: str(m, "name"), Network: str(r, "network"), Token: natToken(key), NatIPs: ips}
+				RouterID: str(r, "id"), Name: str(m, "name"), Network: str(r, "network"), Token: natToken(key), NatIPs: ips,
+				EIM: m["enableEndpointIndependentMapping"] == true, Dynamic: m["enableDynamicPortAllocation"] == true}
 			if lc, ok := m["logConfig"].(map[string]any); ok {
 				g.Log, g.LogFilter = lc["enable"] == true, str(lc, "filter")
 			}
@@ -208,9 +424,9 @@ func subnetGatewayOf(sub obj) string {
 func (s *Server) NATGateways() []NATGateway {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	before := fmt.Sprint(s.natAutoIPsLocked())
+	before := fmt.Sprint(s.natAutoIPsLocked(), s.natDynAtLocked())
 	out := s.natGatewaysLocked()
-	if fmt.Sprint(s.natAutoIPsLocked()) != before {
+	if fmt.Sprint(s.natAutoIPsLocked(), s.natDynAtLocked()) != before {
 		_ = s.saveLocked()
 	}
 	return out
@@ -351,7 +567,30 @@ func natNFT(g NATGateway, peerPods []string) string {
 		if v.NatIP == "" {
 			continue
 		}
-		fmt.Fprintf(&b, "    oifname \"eth0\" ip saddr %s meta l4proto { tcp, udp } snat ip to %s:%d-%d comment %q\n", v.IP, v.NatIP, v.PortLo, v.PortHi, v.Name)
+		if g.EIM {
+			// Endpoint-Independent Mapping: an internal IP:port is mapped to
+			// one NAT port whatever its destination, a hash of the pair into
+			// the VM's range; a second internal port whose NAT port another
+			// connection to the same destination holds is dropped, the
+			// endpoint-independent conflict of nat/docs/ports-and-addresses.
+			// (nftables types a hash as an integer: a map turns it into
+			// the port.)
+			n := v.PortHi - v.PortLo + 1
+			fmt.Fprintf(&b, "    oifname \"eth0\" ip saddr %s meta l4proto { tcp, udp } snat ip to %s : jhash ip saddr . th sport mod %d map { ", v.IP, v.NatIP, n)
+			for i := 0; i < n; i++ {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				fmt.Fprintf(&b, "%d : %d", i, v.PortLo+i)
+			}
+			fmt.Fprintf(&b, " } comment %q\n", v.Name)
+		} else {
+			// Without it the mapping is per connection: "random" keeps
+			// Linux from reusing an internal IP:port's earlier mapping for
+			// a new destination (find_appropriate_src), which would be
+			// endpoint-independent.
+			fmt.Fprintf(&b, "    oifname \"eth0\" ip saddr %s meta l4proto { tcp, udp } snat ip to %s:%d-%d random comment %q\n", v.IP, v.NatIP, v.PortLo, v.PortHi, v.Name)
+		}
 		fmt.Fprintf(&b, "    oifname \"eth0\" ip saddr %s snat ip to %s\n", v.IP, v.NatIP)
 	}
 	b.WriteString("  }\n}\n")
@@ -414,4 +653,27 @@ func natUsage(slots []natSlot) map[string]bool {
 		}
 	}
 	return used
+}
+
+// mapOf is v as a JSON object, or nil.
+func mapOf(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	return m
+}
+
+// natDynAtLocked are the dynamic gateways' blocks (_dynAt), by gateway
+// key, as fmt prints them in key order.
+func (s *Server) natDynAtLocked() map[string]any {
+	out := map[string]any{}
+	for k, r := range s.res {
+		if !strings.Contains(k, "/routers/") {
+			continue
+		}
+		for _, e := range sliceOf(r["nats"]) {
+			if m, _ := e.(map[string]any); m["_dynAt"] != nil {
+				out[natGatewayKey(k, str(m, "name"))] = fmt.Sprint(m["_dynAt"])
+			}
+		}
+	}
+	return out
 }

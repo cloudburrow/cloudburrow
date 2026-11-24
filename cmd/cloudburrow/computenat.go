@@ -225,6 +225,32 @@ func natConntrack(listing string, vms, natIPs map[string]bool) []natConn {
 	return out
 }
 
+// natPortsInUse is, by VM IP, how many NAT ports its connections hold:
+// their distinct NAT IP and port pairs, the larger of TCP's and UDP's
+// count, as each protocol has its own ports.
+func natPortsInUse(conns []natConn) map[string]int {
+	seen := map[string]bool{}
+	count := map[string]map[int]int{}
+	for _, c := range conns {
+		k := fmt.Sprintf("%s/%d/%s:%d", c.srcIP, c.proto, c.natIP, c.natPort)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		if count[c.srcIP] == nil {
+			count[c.srcIP] = map[int]int{}
+		}
+		count[c.srcIP][c.proto]++
+	}
+	out := map[string]int{}
+	for ip, by := range count {
+		for _, n := range by {
+			out[ip] = max(out[ip], n)
+		}
+	}
+	return out
+}
+
 // natDropped are the elements of the gateway's dropped set, as
 // `nft -j list set` prints it.
 func natDropped(raw string) []natConn {
@@ -298,8 +324,11 @@ func (n *natTranslation) logFlows(ctx context.Context, gws []compute.NATGateway)
 	live := map[string]bool{}
 	for _, g := range gws {
 		live[g.Key] = true
-		if !g.Log || g.Pod == "" || n.svc.natLogs == nil {
+		logs := g.Log && n.svc.natLogs != nil
+		if !logs {
 			delete(n.seen, g.Key)
+		}
+		if g.Pod == "" || (!logs && !g.Dynamic) {
 			continue
 		}
 		out, err := n.svc.vms.kubectl(ctx, "exec", natPodName(g), "--", "sh", "-c",
@@ -316,7 +345,14 @@ func (n *natTranslation) logFlows(ctx context.Context, gws []compute.NATGateway)
 		for _, ip := range g.NatIPs {
 			natIPs[ip] = true
 		}
-		conns := append(natConntrack(ct, vmIPs, natIPs), natDropped(dropped)...)
+		translated := natConntrack(ct, vmIPs, natIPs)
+		if g.Dynamic {
+			n.svc.API().SetNATPortUsage(g.Key, natPortsInUse(translated))
+		}
+		if !logs {
+			continue
+		}
+		conns := append(translated, natDropped(dropped)...)
 		prev := n.seen[g.Key]
 		cur := map[string]bool{}
 		var entries []*loggingpb.LogEntry

@@ -85,6 +85,10 @@ type vmNet struct {
 	// that no Cloud NAT gateway translates (#2140): it has no route to the
 	// internet, as on Google.
 	noInternet bool
+	// relay6 are the IPv6 internal forwarding rule addresses the VM
+	// reaches through its relay (vpcservices.go), which its egress
+	// firewall rules apply to on lo.
+	relay6 []string
 }
 
 func vmNetOf(rel string, o obj) (vmNet, bool) {
@@ -321,6 +325,15 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 		if nics := sliceOf(inst["networkInterfaces"]); natConf == "" && len(nics) > 0 && len(sliceOf(objOf(nics[0])["accessConfigs"])) == 0 {
 			self.noInternet = true
 		}
+		// IPv6 internal load balancers (vpcservices.go): through relay6.
+		for _, v := range s.vpcServicesLocked(self, reach) {
+			if v.v6 && self.ip6 != "" {
+				fmt.Fprintf(&b, "relay6 %s %d %s\n", v.ip, v.port, v.to)
+				if !hasStr(self.relay6, v.ip) {
+					self.relay6 = append(self.relay6, v.ip)
+				}
+			}
+		}
 		table = firewallNFT(self, members, s.firewallsOfLocked(self.network), peerPods)
 		// Private services access and Cloud SQL's Private Service Connect
 		// endpoints (#2141).
@@ -552,7 +565,16 @@ func firewallNFT(self vmNet, members []vmNet, rules []obj, peerPods []string) st
 	}
 	b.WriteString("    counter drop comment \"implied deny ingress\"\n  }\n")
 	b.WriteString("  chain egress {\n    type filter hook output priority filter; policy accept;\n")
-	b.WriteString("    oifname \"lo\" accept\n    ct state established,related accept\n")
+	if len(self.relay6) > 0 {
+		// An IPv6 internal load balancer's address is on lo (relay6): the
+		// egress rules below apply to it as to any VPC destination.
+		// (An ip6 match never matches IPv4, which lo still accepts.)
+		b.WriteString("    oifname \"lo\" meta nfproto ipv4 accept\n")
+		b.WriteString("    oifname \"lo\" ip6 daddr != " + nftSet(self.relay6) + " accept\n")
+	} else {
+		b.WriteString("    oifname \"lo\" accept\n")
+	}
+	b.WriteString("    ct state established,related accept\n")
 	b.WriteString("    oifname != \"vpc0\" ip daddr " + nftSet(append([]string{"169.254.169.254"}, ClusterCIDRs...)) + " accept\n")
 	if self.noInternet {
 		// No external IP and no Cloud NAT (#2140): nothing but private

@@ -194,6 +194,10 @@ type Server struct {
 	// pods are the pod IPs the running VMs' guests last reported (#1968),
 	// by instance.
 	pods map[string]podSeen
+	// natLow is, by NAT gateway key and VM IP, since when a VM of a gateway
+	// with dynamic port allocation has used few of its ports
+	// (natgateways.go), so its ports are halved after natShrinkAfter.
+	natLow map[string]time.Time
 
 	// stopLoop ends the schedules' runner (resourcepolicies.go) and the
 	// autoscalers' (autoscalers.go); loops is done once both have ended.

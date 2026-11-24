@@ -35,7 +35,7 @@ func TestConsoleLoadBalancing2153(t *testing.T) {
 		t.Fatal(err)
 	}
 	fields := lb.CreateFormFor(ctx, project)
-	if got := vpcFieldNames(fields); !strings.HasPrefix(got, "lbType,facing,deployment,region,network,name,protocol,port,ipAddress,certificate,domains,backendType,instanceGroup") {
+	if got := vpcFieldNames(fields); !strings.HasPrefix(got, "lbType,facing,deployment,region,network,name,protocol,port,ipVersion,subnetwork,ipAddress,certificate,domains,backendType,instanceGroup") {
 		t.Fatalf("Create load balancer fields = %s", got)
 	}
 	if f := vpcField(fields, "instanceGroup"); f == nil || f.Type != "select" || strings.Join(f.Options, ",") != "us-central1-a/web" {

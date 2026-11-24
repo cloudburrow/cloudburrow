@@ -15,6 +15,8 @@
 #     permanent neighbour and forwarding entry per peer's IPv6 address, so
 #     IPv6 crosses the same VXLAN segment; an IPv6-only interface gets no
 #     addr and no IPv4 routes;
+#   - IPv6 internal load balancers: each forwarding rule address on lo,
+#     for relay6 to carry to its listener;
 #   - internal DNS: INSTANCE.ZONE.c.PROJECT.internal of every instance on
 #     the network, in a block of /etc/hosts;
 #   - the relays (#2160): each VPC address and port of a load balancer or
@@ -75,6 +77,30 @@ apply() {
   else
     ip -4 addr flush dev vpc0
   fi
+  # Pins (#2140): a /32 through eth0 for each address the guest itself
+  # needs over its pod interface: the cluster DNS servers, the metadata
+  # server's (the guest URL's host) and each peer's pod (the VXLAN
+  # underlay). A subnet may legitimately overlap the cluster's ranges
+  # (10.96.0.0/24 is a valid subnet on Google), and its on-link route on
+  # vpc0 would otherwise take the guest's DNS, its metadata (so its SSH
+  # keys) and its underlay with it.
+  pgw=$(ip -4 route show default dev eth0 | sed -n 's/^default via \([0-9.]*\).*/\1/p' | head -n 1)
+  {
+    sed -n 's/^nameserver[[:space:]]*\([0-9.]*\)[[:space:]]*$/\1/p' /etc/resolv.conf
+    [ -n "$HOSTIP" ] && echo "$HOSTIP"
+    sed -n 's/^peer6\{0,1\} [^ ]* [^ ]* \([0-9.]*\)$/\1/p' "$RUN/conf"
+  } | grep -v '^$' | sort -u > "$RUN/pins.new"
+  if [ -f "$RUN/pins" ]; then
+    while read -r ip; do
+      grep -qx "$ip" "$RUN/pins.new" || ip route del "$ip/32" dev eth0 2>/dev/null
+    done < "$RUN/pins"
+  fi
+  if [ -n "$pgw" ]; then
+    while read -r ip; do
+      ip route replace "$ip/32" via "$pgw" dev eth0
+    done < "$RUN/pins.new"
+  fi
+  mv "$RUN/pins.new" "$RUN/pins"
   # Routes: one per subnet range; stale ones removed.
   sed -n 's/^route //p' "$RUN/conf" > "$RUN/routes"
   while read -r cidr; do
@@ -130,6 +156,24 @@ apply() {
       [ -n "$pod" ] && bridge fdb replace "$pmac" dev vpc0 dst "$pod" self permanent
     done < "$RUN/peers6"
   fi
+  # IPv6 internal forwarding rules (vpcservices.go): each address on lo,
+  # where relay6 takes the VM's connections to it.
+  sed -n 's/^relay6 //p' "$RUN/conf" > "$RUN/relay6.new"
+  if [ -s "$RUN/relay6.new" ]; then
+    echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null
+    echo 0 > /proc/sys/net/ipv6/conf/lo/disable_ipv6 2>/dev/null
+  fi
+  cut -d' ' -f1 "$RUN/relay6.new" | sort -u > "$RUN/relay6addrs.new"
+  if [ -f "$RUN/relay6addrs" ]; then
+    while read -r a; do
+      grep -qx "$a" "$RUN/relay6addrs.new" || ip -6 addr del "$a/128" dev lo 2>/dev/null
+    done < "$RUN/relay6addrs"
+  fi
+  while read -r a; do
+    ip -6 addr replace "$a/128" dev lo nodad
+  done < "$RUN/relay6addrs.new"
+  mv "$RUN/relay6addrs.new" "$RUN/relay6addrs"
+  mv "$RUN/relay6.new" "$RUN/relay6"
   # Peers: a permanent neighbour and forwarding entry each.
   sed -n 's/^peer //p' "$RUN/conf" > "$RUN/peers"
   while read -r ip pmac pod; do
@@ -197,8 +241,17 @@ relays() {
   log "relaying $(wc -l < "$RUN/relays.new") load balancer and gateway addresses, $(wc -l < "$RUN/relays-udp.new") UDP"
 }
 
+# The guest URL's host, resolved while the cluster DNS is reachable; kept
+# when a later lookup fails.
+HOST=$(printf '%s' "$URL" | sed -E 's#^[a-z]+://##; s#[:/].*$##')
+HOSTIP=""
 last=""
 while true; do
+  h=$(getent ahostsv4 "$HOST" 2>/dev/null | awk 'NR==1 {print $1}')
+  if [ -n "$h" ] && [ "$h" != "$HOSTIP" ]; then
+    HOSTIP=$h
+    last=""
+  fi
   pod=$(ip -4 -o addr show dev eth0 scope global | sed -n 's/.* inet \([0-9.]*\)\/.*/\1/p' | grep -vx "${CLOUDBURROW_INTERNAL_IP:-none}" | head -n 1)
   if conf=$(curl -sf -m 5 -H 'Metadata-Flavor: Google' "$URL?pod=$pod") && [ -n "$conf" ]; then
     if [ "$conf" != "$last" ]; then
