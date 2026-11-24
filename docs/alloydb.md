@@ -110,7 +110,11 @@ and reading rows, and counts every attempt to leave:
 - The AlloyDB Auth Proxy (v1.18.0): `--alloydbadmin-api-endpoint http://` +
   `CLOUDBURROW_ALLOYDB_ENDPOINT`, `--token` and `--disable-built-in-telemetry`. Its connector
   still opens the Cloud Monitoring client above, which tries `monitoring.googleapis.com` once, and
-  the proxy has no option that stops it: run it where nothing leaves the machine.
+  the proxy has no option that stops it: alloydbconn v1.20.0's `NewDialer` creates that client
+  whatever its options, and v1.18.0's `--disable-metrics` and `--disable-traces` apply only with
+  `--telemetry-project` (which is not passed, so the proxy's own Cloud Monitoring and Cloud Trace
+  exporters stay off; re-read 2026-11-24 in the v1.18.0 `cmd/root.go`). Run it where nothing
+  leaves the machine, as the tests do, in a container on an `--internal` Docker network.
 
 ## Export and import
 

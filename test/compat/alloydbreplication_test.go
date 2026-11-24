@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -463,7 +464,12 @@ func TestAlloyDBConnectionPoolingAndAddresses(t *testing.T) {
 	// one (macOS with no loopback aliases), both share the host's, and
 	// the connectors, which send no server name for an address, reach the
 	// primary there (docs/alloydb.md).
+	// Only macOS may lack them: on Linux 127.0.0.0/8 is the host's, so
+	// every instance has its own address and the routing is asserted.
 	if alloyDBOwnAddress(pool) || alloyDBOwnAddress(primary) {
+		alloyDBExpectRows(ctx, t, d, pool.GetName(), 2, true)
+	} else if runtime.GOOS != "darwin" {
+		t.Errorf("on %s every instance has its own loopback address, but the read pool and the primary share %s", runtime.GOOS, pool.GetIpAddress())
 		alloyDBExpectRows(ctx, t, d, pool.GetName(), 2, true)
 	} else {
 		t.Logf("the read pool and the primary share %s (no spare loopback address here): the read pool is not told apart by the connector", pool.GetIpAddress())
@@ -471,6 +477,10 @@ func TestAlloyDBConnectionPoolingAndAddresses(t *testing.T) {
 	}
 	for _, in := range []*alloydbpb.Instance{primary, pool} {
 		if !alloyDBOwnAddress(in) {
+			if runtime.GOOS != "darwin" {
+				t.Errorf("on %s %s has no address of its own: %s", runtime.GOOS, in.GetName(), in.GetIpAddress())
+				continue
+			}
 			t.Logf("%s shares the host's address %s (no spare loopback address here): not reached by IP", in.GetName(), in.GetIpAddress())
 			continue
 		}
