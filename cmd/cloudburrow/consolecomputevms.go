@@ -261,7 +261,23 @@ func (p computeInstancesProvider) instanceActions(o map[string]any, onPage bool)
 		acts = append(acts, console.Action{ID: "ssh", Label: "SSH", Button: true})
 	}
 	if status == "TERMINATED" || status == "SUSPENDED" {
-		acts = append(acts, console.Action{ID: "start", Label: "Start / Resume", ConfirmStyle: console.DeleteConfirmClick, Confirm: "Start or resume " + name + "?"})
+		start := console.Action{ID: "start", Label: "Start / Resume", ConfirmStyle: console.DeleteConfirmClick, Confirm: "Start or resume " + name + "?"}
+		// A VM with customer-supplied keys is started with each disk's key
+		// (instances.startWithEncryptionKey), as Google's Start dialog
+		// asks for them.
+		l, _ := o["disks"].([]any)
+		for _, x := range l {
+			e, _ := x.(map[string]any)
+			if vpcStr(vmMap(e, "diskEncryptionKey"), "sha256") != "" {
+				dn := vpcLast(vpcStr(e, "source"))
+				start.Fields = append(start.Fields, console.Field{Name: "csek:" + vpcStr(e, "source"), Label: "Key for " + dn,
+					Type: "text", Required: true, Pattern: `^[A-Za-z0-9+\/]{43}=$`, Help: "The disk's customer-supplied key, base64."})
+			}
+		}
+		if len(start.Fields) > 0 {
+			start.Label, start.Submit, start.ConfirmStyle, start.Confirm = "Start with encryption key", "Start", "", ""
+		}
+		acts = append(acts, start)
 	}
 	if status == "RUNNING" || status == "SUSPENDED" {
 		acts = append(acts, console.Action{ID: "stop", Label: "Stop", ConfirmStyle: console.DeleteConfirmClick, Confirm: "Stop " + name + "? Its processes end; its disks keep what they hold."})
@@ -512,6 +528,13 @@ func (p computeInstancesProvider) Detail(ctx context.Context, project string, pa
 			{Label: "Machine type", Value: vpcLast(vpcStr(o, "machineType"))}, {Label: "CPU platform", Value: vpcStr(o, "cpuPlatform")},
 			{Label: "Architecture", Value: vpcDash(vpcStr(o, "cpuPlatform"))},
 		}},
+		// Google's VM details: its resource policies (instance schedule,
+		// placement policy) and where the placement put it (#2206).
+		{Heading: "Management", Properties: []console.Property{
+			{Label: "Resource policies", Value: vpcDash(strings.Join(vmPolicyNames(o), ", "))},
+			{Label: "Availability domain", Value: vpcDash(vmAvailabilityDomain(o))},
+			{Label: "Physical host topology", Value: vpcDash(vmTopology(o))},
+		}},
 		{Heading: "Networking", Properties: []console.Property{
 			{Label: "Internal IP", Value: vpcDash(vmInternalIP(o))}, {Label: "External IP", Value: vpcDash(vmExternalIP(o))},
 			{Label: "Network tags", Value: vpcDash(strings.Join(vpcStrs(vmMap(o, "tags"), "items"), ", "))},
@@ -710,7 +733,17 @@ func (p computeInstancesProvider) ActAtResult(ctx context.Context, project strin
 		if vpcStr(o, "status") == "SUSPENDED" {
 			verb = "resume"
 		}
-		_, err = p.call("POST", project, base+"/"+verb, nil, nil)
+		var body map[string]any
+		var keyed []any
+		for k, v := range values {
+			if src, ok := strings.CutPrefix(k, "csek:"); ok {
+				keyed = append(keyed, map[string]any{"source": src, "diskEncryptionKey": map[string]any{"rawKey": strings.TrimSpace(v)}})
+			}
+		}
+		if len(keyed) > 0 && verb == "start" {
+			verb, body = "startWithEncryptionKey", map[string]any{"disks": keyed}
+		}
+		_, err = p.call("POST", project, base+"/"+verb, nil, body)
 	case "stop", "suspend", "reset":
 		_, err = p.call("POST", project, base+"/"+action, nil, nil)
 	case "delete":
@@ -855,7 +888,10 @@ func (p computeDisksProvider) CreateForm() (string, []console.Field) {
 		{Name: "snapshotSchedule", Label: "Snapshot schedule", Type: "text", Section: "Snapshot schedule", Pattern: `^([a-z]([\-a-z0-9]{0,61}[a-z0-9])?)?$`,
 			Help: "The name of a snapshot schedule of the disk's region (Snapshot schedules); empty takes none."},
 		{Name: "encryption", Label: "Encryption", Type: "radio", Section: "Encryption", Default: "Google-managed encryption key",
-			Options: []string{"Google-managed encryption key", "Cloud KMS key"}},
+			Options: []string{"Google-managed encryption key", "Cloud KMS key", "Customer-supplied encryption key"}},
+		{Name: "rawKey", Label: "Customer-supplied key", Type: "text", Section: "Encryption", VisibleWhen: map[string]string{"encryption": "Customer-supplied encryption key"},
+			Pattern: `^([A-Za-z0-9+\/]{43}=)?$`,
+			Help:    "A 256-bit key in RFC 4648 standard base64 (44 characters). Keep it: the disk can't be attached, its VM started or snapshotted without it."},
 		{Name: "kmsKeyName", Label: "Cloud KMS key", Type: "text", Section: "Encryption", VisibleWhen: map[string]string{"encryption": "Cloud KMS key"},
 			Pattern: `^(projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+)?$`,
 			Help:    "projects/PROJECT/locations/LOCATION/keyRings/RING/cryptoKeys/KEY: in the disk's region, a multi-region that contains it, or global."},
@@ -910,6 +946,13 @@ func (p computeDisksProvider) Create(ctx context.Context, project string, values
 			return "", errors.New("kmsKeyName: choose a Cloud KMS key")
 		}
 		b["diskEncryptionKey"] = map[string]any{"kmsKeyName": k}
+	}
+	if values["encryption"] == "Customer-supplied encryption key" {
+		k := strings.TrimSpace(values["rawKey"])
+		if k == "" {
+			return "", errors.New("rawKey: give the customer-supplied key")
+		}
+		b["diskEncryptionKey"] = map[string]any{"rawKey": k}
 	}
 	if s := strings.TrimSpace(values["snapshotSchedule"]); s != "" {
 		region := zone[:strings.LastIndex(zone, "-")]
@@ -1368,6 +1411,9 @@ func diskEncryptionText(d map[string]any) string {
 	if k := vpcStr(vmMap(d, "diskEncryptionKey"), "kmsKeyName"); k != "" {
 		return "Customer-managed (" + k + ")"
 	}
+	if h := vpcStr(vmMap(d, "diskEncryptionKey"), "sha256"); h != "" {
+		return "Customer-supplied (SHA-256 " + h + ")"
+	}
 	return "Google-managed"
 }
 
@@ -1379,4 +1425,31 @@ func diskSchedulesText(d map[string]any) string {
 		out = append(out, vpcLast(rp))
 	}
 	return strings.Join(out, ", ")
+}
+
+// vmPolicyNames are an instance's resource policies' names.
+func vmPolicyNames(o map[string]any) []string {
+	var out []string
+	for _, p := range vpcStrs(o, "resourcePolicies") {
+		out = append(out, vpcLast(p))
+	}
+	return out
+}
+
+func vmAvailabilityDomain(o map[string]any) string {
+	if v := vmMap(o, "scheduling")["availabilityDomain"]; v != nil {
+		return fmt.Sprint(v)
+	}
+	return ""
+}
+
+func vmTopology(o map[string]any) string {
+	t := vmMap(vmMap(o, "resourceStatus"), "physicalHostTopology")
+	var parts []string
+	for _, k := range []string{"cluster", "block", "subblock", "host"} {
+		if v := vpcStr(t, k); v != "" {
+			parts = append(parts, v)
+		}
+	}
+	return strings.Join(parts, " / ")
 }

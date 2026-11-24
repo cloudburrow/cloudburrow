@@ -89,7 +89,10 @@ func (b *computeVMs) sealIn(ctx context.Context, pod string, key []byte) error {
 	errc := make(chan error, 2)
 	go func() {
 		err := b.podExec(ctx, pod, nil, tarW,
-			"cd /d && tar --numeric-owner --exclude=./"+compute.SealedFile+"* -cpf - .")
+			// The sealed file being written beside them changes "." as
+			// tar reads it: GNU tar's exit status 1 (a file changed) is
+			// expected, as nothing else writes to a disk being sealed.
+			"cd /d && tar --numeric-owner --warning=no-file-changed --exclude=./"+compute.SealedFile+"* -cpf - .; [ $? -le 1 ]")
 		_ = tarW.CloseWithError(err)
 		errc <- err
 	}()

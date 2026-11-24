@@ -14961,9 +14961,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 34,
-      "Unimplemented": 59,
-      "Verified": 111
+      "Implemented": 32,
+      "Unimplemented": 56,
+      "Verified": 116
     },
     "rows": [
       {
@@ -15056,6 +15056,7 @@
         "method": "compute.disks.createSnapshot",
         "status": "Verified",
         "tests": [
+          "test/compat/computediskencryption_test.go:78 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -15121,13 +15122,17 @@
       },
       {
         "method": "compute.disks.startAsyncReplication",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskencryption_test.go:78 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.disks.stopAsyncReplication",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskencryption_test.go:78 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.disks.stopGroupAsyncReplication",
@@ -15397,8 +15402,10 @@
       },
       {
         "method": "compute.instances.addResourcePolicies",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskencryption_test.go:78 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.instances.aggregatedList",
@@ -15509,8 +15516,10 @@
       },
       {
         "method": "compute.instances.removeResourcePolicies",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskencryption_test.go:78 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.instances.reset",
@@ -15599,18 +15608,22 @@
         "method": "compute.instances.start",
         "status": "Verified",
         "tests": [
+          "test/compat/computediskencryption_test.go:78 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
       {
         "method": "compute.instances.startWithEncryptionKey",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskencryption_test.go:78 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.instances.stop",
         "status": "Verified",
         "tests": [
+          "test/compat/computediskencryption_test.go:78 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -16004,6 +16017,7 @@
         "method": "compute.resourcePolicies.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/computediskencryption_test.go:78 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
           "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksThroughTheGoClient"
         ]
       },
@@ -16011,6 +16025,7 @@
         "method": "compute.resourcePolicies.get",
         "status": "Verified",
         "tests": [
+          "test/compat/computediskencryption_test.go:78 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
           "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksThroughTheGoClient"
         ]
       },
@@ -16024,6 +16039,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
+          "test/compat/computediskencryption_test.go:78 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
           "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksThroughTheGoClient"
         ]
       },

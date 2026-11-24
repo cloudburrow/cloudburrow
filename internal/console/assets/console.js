@@ -526,6 +526,10 @@ const ROUTES = [
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
   // Snapshot schedules (#2206): Google's Snapshots page's Snapshot
   // schedules tab.
+  // Instance schedules (#2206): Google's VM instances page's Instance
+  // schedules tab.
+  { path: "/compute/instanceSchedules", service: "compute-instanceschedules", icon: "compute", title: "Instance schedules", kind: "Instance schedule",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/snapshotSchedules", service: "compute-snapshotschedules", icon: "compute", title: "Snapshot schedules", kind: "Snapshot schedule",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/snapshots", service: "compute-snapshots", icon: "compute", title: "Snapshots", kind: "Snapshot",

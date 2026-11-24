@@ -71,7 +71,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	// VPC network (#1936): the Compute Engine API's networking.
 	config.ServiceCompute: {Providers: []string{"vpc-networks", "vpc-firewalls", "vpc-routes", "vpc-addresses", "vpc-psc", "psc-policies",
 		"compute-instances", "compute-disks", "compute-snapshots", "compute-images", "compute-machinetypes", "compute-metadata",
-		"compute-asyncreplication", "compute-consistencygroups", "compute-snapshotschedules"}},
+		"compute-asyncreplication", "compute-consistencygroups", "compute-snapshotschedules", "compute-instanceschedules"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable
