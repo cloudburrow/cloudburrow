@@ -474,8 +474,11 @@ func (s *Server) startScheduler() {
 	stop := make(chan struct{})
 	s.schedStop = stop
 	s.mu.Unlock()
+	// The tick is read here, not in the goroutine, so a test that sets
+	// scheduleTick later never races a scheduler that starts late.
+	tick := scheduleTick
 	go func() {
-		t := time.NewTicker(scheduleTick)
+		t := time.NewTicker(tick)
 		defer t.Stop()
 		for {
 			select {
