@@ -32,6 +32,8 @@ var resourceDescriptors = []*monitoredres.MonitoredResourceDescriptor{
 		"project_id", "queue_id", "target_type", "location"),
 	res("cloudsql_database", "Cloud SQL Database", "A database hosted in Google Cloud SQL.",
 		"project_id", "database_id", "region"),
+	res("cloudsql_instance_database", "Cloud SQL Instance Database", "A Cloud SQL Instance Database.",
+		"project_id", "resource_id", "location", "database"),
 	res("consumed_api", "Consumed API", "An API consumed by a Google Cloud project.",
 		"project_id", "service", "method", "version", "location", "credential_id"),
 	res("dataflow_job", "Dataflow Job", "A Dataflow job.",

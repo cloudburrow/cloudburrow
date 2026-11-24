@@ -1727,11 +1727,33 @@ Cloud SQL for MySQL's managed connection pooling is, as Google documents it (<ht
 - A statement runs only while it holds one of `max_pool_size` threads, from the command's first byte to the last packet of its answer, read by the MySQL client/server protocol (result sets, multiple results, prepared statements, cursors' fetches, `LOAD DATA LOCAL INFILE`). Between statements a connection holds no thread. A connection inside a transaction is given the next thread first. Replication sessions (`COM_BINLOG_DUMP`, `COM_REGISTER_SLAVE`) hold none.
 - `max_pool_size` is the only flag, as Google documents. Its default "depends on the number of vCPU cores" (CloudBurrow's: one thread a vCPU, UNVERIFIED, re-read 2026-11-22); it takes a whole number from 1 (the page gives no range). Any other flag, PostgreSQL's included, is 400.
 - Enterprise Plus only: an Enterprise instance is 400. Enabling it restarts the instance, as Google documents, and so does changing `max_pool_size` here. `thread_cache_size` defaults to 0 while it is on, unless a database flag sets it. `poolerCount` is not answered.
-- Not built: the pool's metrics in Cloud Monitoring (`threads`, `pending_connection`, `avg_wait_time`); the pool serves its figures on a pod-local page only.
+- Its metrics are in Cloud Monitoring: see [Pooling metrics](#pooling-metrics).
 
 `TestCloudSQLMySQLManagedConnectionPooling` (compat, the official `sqladmin/v1` client and Cloud SQL Go connector for MySQL) shows it pools: with `max_pool_size` 2, eight clients at once have eight sessions (connection IDs), and the server, by its own clock (`SYSDATE(6)` at each statement's start and end), runs at most two of their half-second statements at a time; turned off, more than two run together.
 
 The console has Connections' Enable Managed Connection Pool, with Advanced pooling options (MySQL's: `max_pool_size` alone), on the create page and in Edit. The Overview's Connect to this instance shows whether the instance pools connections.
+
+### Pooling metrics
+
+Managed connection pooling's metrics are in Cloud Monitoring (#2163), with Google's types, kinds, units, labels and monitored resources (<https://docs.cloud.google.com/monitoring/api/metrics_gcp_c>, read 2026-11-22), sampled every 60 seconds with the instance's other `cloudsql.googleapis.com` metrics (a read samples first when the last sample is older than ten seconds):
+
+| Metric | Kind, unit | Resource | Read from |
+| --- | --- | --- | --- |
+| `database/mysql/conn_pool/threads` (`status`: `active`, `idle`) | GAUGE, 1 | `cloudsql_database` | the thread pool's threads busy and free |
+| `database/mysql/conn_pool/pending_connections` | GAUGE, 1 | `cloudsql_database` | the connections queued for a thread |
+| `database/mysql/conn_pool/avg_wait_time` | GAUGE, ms | `cloudsql_database` | the average wait of the statements given a thread since the last sample (0 when none was) |
+| `per_database/conn_pool/client_connections` (`status`: `active`, `waiting`) | GAUGE, 1 | `cloudsql_instance_database` | PgBouncer's `SHOW POOLS` `cl_active` and `cl_waiting`, summed over the database's pools |
+| `per_database/conn_pool/server_connections` (`status`: `active`, `idle`) | GAUGE, 1 | `cloudsql_instance_database` | `SHOW POOLS` `sv_active`, and `sv_idle` plus `sv_used` |
+| `per_database/conn_pool/num_pools` | GAUGE, 1 | `cloudsql_instance_database` | the database's rows in `SHOW POOLS` (a pool a user) |
+| `per_database/conn_pool/client_connections_avg_wait_time` | GAUGE, us | `cloudsql_instance_database` | `SHOW STATS` `avg_wait_time` (PgBouncer's last 60-second stats period) |
+| `per_database/conn_pool/client_connections_attempts_count` | CUMULATIVE, 1 | `cloudsql_instance_database` | the pooler log's `login attempt` lines |
+| `per_database/conn_pool/client_connections_error_count` | CUMULATIVE, 1 | `cloudsql_instance_database` | the pooler log's `pooler error` lines: the errors PgBouncer sends a client as it disconnects it (a failed sign-in, a server connection that failed, a timeout, a limit reached) |
+
+The thread pool's figures are its page on pod port 13307 (`mysql-thread-pool --status`), read through the API server's pod proxy; no Service publishes it. PgBouncer's are read on its `pgbouncer` console database as `cloudburrow_stats`, its `stats_users`, which signs in only from the pod's loopback (the port-forward the CLI reads through, as the server trusts `postgres` there) and only to that database; every other sign-in is md5 against the server's password, SCRAM where the server keeps SCRAM, as before. The two cumulative counts run from the first time CloudBurrow read the instance's pooler log; each read takes the lines since the last. A database of the server no client has used through the pooler reads zero, with no pools. The console's own reads are not counted.
+
+The instance's Overview offers them in its Chart list while pooling is on: MySQL's Connection pool threads (active), (idle), Connection pool pending connections and Connection pool average wait time; PostgreSQL's Client connections (active), (waiting), Server connections (active), (idle), Number of connection pools, Average wait time (the databases' mean), Client connection attempts count and Error count (both summed over the databases). Metrics explorer lists them under `cloudsql_database` and `cloudsql_instance_database`.
+
+`TestCloudSQLConnectionPoolingMetrics` (compat, the official `sqladmin/v1`, Cloud SQL Go connector and `monitoring/apiv3` clients) runs pooled load and reads the series back: with `max_pool_size` 2 and eight clients looping one-second statements, PostgreSQL's database reads eight clients (at least five waiting), at most two server connections, one pool, an average wait above half a second, an error for each sign-in with a wrong password (pgx tries each address the connector's localhost resolves to) and eight attempts more than that; MySQL's pool reads two threads active, none idle, five or six pending and an average wait above half a second; after the load, nothing waits or is busy. `TestCloudSQLPoolingMetricsThroughThePage` (browser) picks Number of connection pools on a pooled instance's Overview by keyboard and sees its readings, and Metrics explorer's table of `client_connections`.
 
 `TestCloudSQLManagedConnectionPooling` (compat, the official `sqladmin/v1` client and Cloud SQL Go connector) shows it pools. Eight clients signed in through the connector share at most `max_pool_size` 2 server connections. With pooling off, each client has a server connection of its own. `TestCloudSQLPrivateIPAndPSCReachableFromAVM` (compat) shows a VM reaching the pooler of one instance at its private IP and of another at a Private Service Connect endpoint, each answering PostgreSQL's SSLRequest on 6432.
 

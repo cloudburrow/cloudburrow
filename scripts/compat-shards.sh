@@ -243,7 +243,7 @@ COMPAT_CROSSSERVICE_TESTS="^Test((Gcloud|Terraform|GcloudAndTerraform)?Eventarc[
 # API's service connection policies and the automatic endpoints made
 # through them, and managed connection pooling, which the sql shard (near
 # its COMPAT_TIMEOUT) had no time left for.
-COMPAT_SQL_NETWORK_TESTS='^Test(CloudSQLZonesPrivateIPAndPSCEndpoints|CloudSQLPrivateIPAndPSCReachableFromAVM|CloudSQLPSCAutoConnections|CloudSQLManagedConnectionPooling|CloudSQLMySQLManagedConnectionPooling|NetworkConnectivity[A-Za-z]*)$'
+COMPAT_SQL_NETWORK_TESTS='^Test(CloudSQLZonesPrivateIPAndPSCEndpoints|CloudSQLPrivateIPAndPSCReachableFromAVM|CloudSQLPSCAutoConnections|CloudSQLManagedConnectionPooling|CloudSQLMySQLManagedConnectionPooling|CloudSQLConnectionPoolingMetrics|NetworkConnectivity[A-Za-z]*)$'
 COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica|BlueGreen|External|Switchover|Demote|Failover|Promote)|'"$COMPAT_SQL_NETWORK_TESTS"
 
 # The console's headless-browser suite (#594) runs in the storage, run,
@@ -730,8 +730,11 @@ compat_shard() {
       # LOGGING is not in TEST_VARS, so the Logging suites stay in theirs.
       # Compute Engine (#1936) as SQL_COMPUTE: private networks are
       # checked against its networks.
-      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging,compute
-      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING,SQL_COMPUTE
+      # Cloud Monitoring as SQL_MONITORING (#2163), for managed connection
+      # pooling's metrics; MONITORING is not exported, so the Monitoring
+      # suites stay in theirs.
+      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging,compute,monitoring
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING,SQL_COMPUTE,SQL_MONITORING
       # The replica tests run in sqlreplicas, against the same instance,
       # and the restart probes in sql.
       if [ "$1" = sqlreplicas ]; then
