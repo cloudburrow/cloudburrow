@@ -38,10 +38,10 @@ tracks it; a closed issue is named only where it says what was built.
 | App Hub | 5 | 1 | 1 | 3 | 0 |
 | AlloyDB for PostgreSQL | 6 | 1 | 4 | 1 | 0 |
 | Filestore | 7 | 2 | 4 | 1 | 0 |
-| Dataflow | 9 | 7 | 1 | 1 | 0 |
+| Dataflow | 8 | 5 | 2 | 1 | 0 |
 | Dataform | 7 | 0 | 3 | 4 | 0 |
 | Console | 11 | 5 | 5 | 1 | 0 |
-| **Total** | **114** | **23** | **37** | **48** | **6** |
+| **Total** | **113** | **21** | **38** | **48** | **6** |
 
 ## Cloud Storage
 
@@ -396,21 +396,20 @@ data kept across `stop` and `up` in persistent mode; the console's Filestore pag
 Built (#2215, part): the Dataflow v1b3 API over gRPC and JSON (jobs create, get, list, aggregated
 list, update with cancel, drain and runtime parameters, replacement by `replaceJobId`; messages,
 autoscaling events, metrics, execution details; classic templates through `templates.launch`,
-`templates.get` and `templates.create`); each job's Beam pipeline run on Apache Beam 2.78.0's
+`templates.get` and `templates.create`; Python Flex Templates from the instance's Artifact Registry); each job's Beam pipeline run on Apache Beam 2.78.0's
 Flink 1.20 portable runner with the Python 3.12 SDK harness, in Docker on an `--internal` network
-whose one route is the instance's Cloud Storage, Pub/Sub, BigQuery and Dataflow; the Python SDK's
-DataflowRunner, batch and streaming with drain; gcloud `dataflow jobs`, Terraform
-`google_dataflow_job`; the console's Jobs list, job page with its graph, metrics and logs, and
+whose one route is the instance's Cloud Storage, Pub/Sub, BigQuery, Dataflow and database emulators; the Python SDK's
+DataflowRunner, batch and streaming with drain; gcloud `dataflow jobs` and `flex-template`, Terraform
+`google_dataflow_job` and `google_dataflow_flex_template_job`; the console's Jobs list, job page with its graph, metrics and logs, and
 Create job from template.
 
 | Gap | Why open | Size |
 |---|---|---|
-| Flex Templates: `LaunchFlexTemplate` answers `UNIMPLEMENTED`; running a launcher image from Artifact Registry, and Terraform `google_dataflow_flex_template_job` (#2215) | not built yet | M |
+| Flex Templates' `FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE`, `_SETUP_FILE` and `_EXTRA_PACKAGES` are not installed at launch (the launcher has no route to PyPI; the image must hold its packages), and Java Flex Templates (#2215) | no emulator support | S |
 | Google-provided templates built from Google's DataflowTemplates (Pub/Sub to BigQuery, Cloud Storage Text to BigQuery, Pub/Sub to Cloud Storage), offered in Create job from template's menu (#2215) | not built yet | M |
 | Java and Go SDK pipelines: their environments are refused with the reason; only Python 3.12 pipelines run (#2215) | not built yet | L |
 | Snapshots: `SnapshotJob`, `GetSnapshot`, `ListSnapshots`, `DeleteSnapshot` answer `UNIMPLEMENTED` (#2215) | not built yet | M |
-| Google's Bigtable, Spanner and Datastore connectors against the instance's emulators (#2215) | not built yet | M |
-| `GetStageExecutionDetails` and `CreateJobFromTemplate` have no official-SDK test (#2215) | not built yet | S |
+| Reading from Datastore and Spanner in a pipeline has no test, and `ReadFromBigtable` is a cross-language Java transform, which needs the Java SDK (#2215); their writes are verified | not built yet | S |
 | The pipeline components (#2210) | not built yet | M |
 | Workers are one local Flink cluster per job: machine types, zones, networks, disk sizes and service accounts are recorded, not used; `maxNumWorkers` bounds the job's parallelism | no emulator support | S |
 | The error codes and texts of invalid job names, a drain of a batch job and unknown template parameters (`UNVERIFIED`) | not documented by Google | S |

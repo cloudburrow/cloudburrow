@@ -1,7 +1,8 @@
 # A Dataflow job's one route out (internal/beamrun): on the job's
 # --internal network, it listens on each LISTEN port given as
 # LISTEN=HOST:PORT and relays to that address of the host (the
-# instance's Cloud Storage, Pub/Sub, BigQuery and Dataflow ports). It
+# instance's Cloud Storage, Pub/Sub, BigQuery and Dataflow ports, and its
+# Datastore, Bigtable and Spanner emulators). It
 # dials nothing else. The addresses are resolved before the relay joins
 # the internal network, from the default bridge.
 import asyncio

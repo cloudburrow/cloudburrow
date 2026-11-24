@@ -41,6 +41,7 @@ type dataflowClients struct {
 	messages *dataflow.MessagesV1Beta3Client
 	metrics  *dataflow.MetricsV1Beta3Client
 	tmpl     *dataflow.TemplatesClient
+	flex     *dataflow.FlexTemplatesClient
 }
 
 // dataflowEnv asks for every endpoint the Dataflow tests use, before any
@@ -66,7 +67,10 @@ func dataflowEnv(t *testing.T) (*Harness, string, dataflowClients) {
 	if c.tmpl, err = dataflow.NewTemplatesClient(ctx, opts...); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { c.jobs.Close(); c.messages.Close(); c.metrics.Close(); c.tmpl.Close() })
+	if c.flex, err = dataflow.NewFlexTemplatesClient(ctx, opts...); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.jobs.Close(); c.messages.Close(); c.metrics.Close(); c.tmpl.Close(); c.flex.Close() })
 	return h, addr, c
 }
 
@@ -197,7 +201,7 @@ func jobIDOf(t *testing.T, out string) string {
 	return ""
 }
 
-// covers: google.dataflow.v1beta3.JobsV1Beta3/CreateJob, google.dataflow.v1beta3.JobsV1Beta3/GetJob, google.dataflow.v1beta3.JobsV1Beta3/ListJobs, google.dataflow.v1beta3.JobsV1Beta3/AggregatedListJobs, google.dataflow.v1beta3.JobsV1Beta3/UpdateJob, google.dataflow.v1beta3.MessagesV1Beta3/ListJobMessages, google.dataflow.v1beta3.MetricsV1Beta3/GetJobMetrics, google.dataflow.v1beta3.MetricsV1Beta3/GetJobExecutionDetails
+// covers: google.dataflow.v1beta3.JobsV1Beta3/CreateJob, google.dataflow.v1beta3.JobsV1Beta3/GetJob, google.dataflow.v1beta3.JobsV1Beta3/ListJobs, google.dataflow.v1beta3.JobsV1Beta3/AggregatedListJobs, google.dataflow.v1beta3.JobsV1Beta3/UpdateJob, google.dataflow.v1beta3.MessagesV1Beta3/ListJobMessages, google.dataflow.v1beta3.MetricsV1Beta3/GetJobMetrics, google.dataflow.v1beta3.MetricsV1Beta3/GetJobExecutionDetails, google.dataflow.v1beta3.MetricsV1Beta3/GetStageExecutionDetails
 //
 // TestPythonDataflowWordCount (#2215): Apache Beam's own wordcount example
 // (apache_beam.examples.wordcount), run with the Python SDK's
@@ -326,6 +330,13 @@ func TestPythonDataflowWordCount(t *testing.T) {
 	det, err := c.metrics.GetJobExecutionDetails(ctx, &dataflowpb.GetJobExecutionDetailsRequest{ProjectId: project, Location: "us-central1", JobId: id}).Next()
 	if err != nil || det.State != dataflowpb.ExecutionState_EXECUTION_STATE_SUCCEEDED {
 		t.Errorf("GetJobExecutionDetails = %v, %v; want a SUCCEEDED stage", det, err)
+	}
+	if det != nil {
+		w, err := c.metrics.GetStageExecutionDetails(ctx, &dataflowpb.GetStageExecutionDetailsRequest{ProjectId: project, Location: "us-central1",
+			JobId: id, StageId: det.StageId}).Next()
+		if err != nil || len(w.GetWorkItems()) == 0 || w.WorkItems[0].State != dataflowpb.ExecutionState_EXECUTION_STATE_SUCCEEDED {
+			t.Errorf("GetStageExecutionDetails(%s) = %v, %v; want a worker's SUCCEEDED work item", det.StageId, w, err)
+		}
 	}
 	for _, st := range []dataflowpb.JobState{dataflowpb.JobState_JOB_STATE_CANCELLED, dataflowpb.JobState_JOB_STATE_DRAINED} {
 		_, err := c.jobs.UpdateJob(ctx, &dataflowpb.UpdateJobRequest{ProjectId: project, Location: "us-central1", JobId: id,

@@ -287,10 +287,10 @@ func (s *Server) GetTemplate(ctx context.Context, req *dataflowpb.GetTemplateReq
 // while the template's launcher image runs the pipeline's program, whose
 // DataflowRunner then submits it, taking this job's ID.
 func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchFlexTemplateRequest) (*dataflowpb.LaunchFlexTemplateResponse, error) {
-	// A Flex Template's launcher is its container image, run to submit
-	// the job; the CLI has no runner for it yet (#2215, gaps.md).
+	// A Flex Template's launcher is its container image, run in Docker to
+	// submit the job.
 	if s.opts.Launcher == nil {
-		return nil, apierror.Unimplemented("Flex Templates are not served yet: CloudBurrow does not run a Flex Template's launcher image. Launch a classic template with templates.launch.")
+		return nil, apierror.FailedPrecondition("Flex Templates run their launcher image in the instance's Docker, which this instance does not have.") // UNVERIFIED (docs re-read 2026-11-24)
 	}
 	if err := checkProject(req.GetProjectId()); err != nil {
 		return nil, err
@@ -360,7 +360,7 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 			return nil, apierror.AlreadyExists("There is already an active job named %s. If you want to submit a second job, try again by setting a different name.", job.Name) // UNVERIFIED (docs re-read 2026-11-24)
 		}
 	}
-	r := &jobRec{job: job, flex: true}
+	r := &jobRec{job: job, flex: true, flexTemp: env.GetTempLocation()}
 	key := jobKey(job.ProjectId, loc, job.Id)
 	s.jobs[key] = r
 	s.addMessageLocked(r, dataflowpb.JobMessageImportance_JOB_MESSAGE_BASIC, "Starting the Flex Template launcher for image "+image+".")
@@ -399,7 +399,8 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 		err := s.opts.Launcher.Launch(context.Background(), FlexLaunch{Project: job.ProjectId, Location: loc, JobName: job.Name, Image: image, Args: args})
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if r.job.CurrentState == dataflowpb.JobState_JOB_STATE_QUEUED {
+		// Unless the program's job took the launch's place (adopted).
+		if s.jobs[key] == r && r.job.CurrentState == dataflowpb.JobState_JOB_STATE_QUEUED {
 			msg := "Error occurred in the launcher container: the template's program did not submit a job."
 			if err != nil {
 				msg = "Error occurred in the launcher container: " + err.Error()

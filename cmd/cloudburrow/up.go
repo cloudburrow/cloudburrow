@@ -1652,6 +1652,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		return creds.MintAccessTokenFor(email, metadata.TokenTTL), nil
 	}, cmekKeys(kmsSvc, iamEnforcer).Usable, func() string { return creds.MintAccessTokenFor(creds.Email, metadata.TokenTTL) })
+	if dataflowSvc != nil {
+		// A Flex Template's image is read as the instance's account (#2215).
+		dataflowSvc.registryToken = func() string { return creds.MintAccessTokenFor(creds.Email, metadata.TokenTTL) }
+	}
 	if sparkRunner != nil {
 		coord.Register(sparkRunner)
 		if dataprocSvc != nil {

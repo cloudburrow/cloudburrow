@@ -193,8 +193,22 @@ func (p dataflowProvider) Create(ctx context.Context, project string, values map
 		}
 	}
 	region := strings.TrimSpace(values["region"])
+	gcsPath := strings.TrimSpace(values["gcsPath"])
+	// A Custom Template's path is a classic template's file or a Flex
+	// Template's spec; Google's page launches either.
+	if t, err := s.GetTemplate(ctx, &dataflowpb.GetTemplateRequest{ProjectId: project, Location: region,
+		Template: &dataflowpb.GetTemplateRequest_GcsPath{GcsPath: gcsPath}}); err == nil && t.GetTemplateType() == dataflowpb.GetTemplateResponse_FLEX {
+		resp, err := s.LaunchFlexTemplate(ctx, &dataflowpb.LaunchFlexTemplateRequest{ProjectId: project, Location: region,
+			LaunchParameter: &dataflowpb.LaunchFlexTemplateParameter{JobName: strings.TrimSpace(values["jobName"]), Parameters: params,
+				Template:    &dataflowpb.LaunchFlexTemplateParameter_ContainerSpecGcsPath{ContainerSpecGcsPath: gcsPath},
+				Environment: &dataflowpb.FlexTemplateRuntimeEnvironment{TempLocation: env.GetTempLocation(), MaxWorkers: env.GetMaxWorkers(), NumWorkers: env.GetNumWorkers()}}})
+		if err != nil {
+			return "", err
+		}
+		return resp.GetJob().GetLocation() + "/" + resp.GetJob().GetId(), nil
+	}
 	resp, err := s.LaunchTemplate(ctx, &dataflowpb.LaunchTemplateRequest{ProjectId: project, Location: region,
-		Template:         &dataflowpb.LaunchTemplateRequest_GcsPath{GcsPath: strings.TrimSpace(values["gcsPath"])},
+		Template:         &dataflowpb.LaunchTemplateRequest_GcsPath{GcsPath: gcsPath},
 		LaunchParameters: &dataflowpb.LaunchTemplateParameters{JobName: strings.TrimSpace(values["jobName"]), Parameters: params, Environment: env}})
 	if err != nil {
 		return "", err
@@ -253,6 +267,11 @@ func (p dataflowProvider) Detail(ctx context.Context, project string, path []str
 	opts := j.GetEnvironment().GetSdkPipelineOptions().GetFields()["options"].GetStructValue().GetFields()
 	keys := make([]string, 0, len(opts))
 	for k := range opts {
+		// Each option once, by Google's camelCase name: the service keeps
+		// a snake_case option's camelCase twin beside it.
+		if strings.Contains(k, "_") && opts[dataflowCamel(k)] != nil {
+			continue
+		}
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -526,4 +545,15 @@ func (p dataflowProvider) ActAt(ctx context.Context, project string, path []stri
 	_, err = s.UpdateJob(ctx, &dataflowpb.UpdateJobRequest{ProjectId: j.GetProjectId(), Location: j.GetLocation(), JobId: j.GetId(),
 		Job: &dataflowpb.Job{RequestedState: st}})
 	return err
+}
+
+// dataflowCamel is a snake_case pipeline option's camelCase name.
+func dataflowCamel(k string) string {
+	parts := strings.Split(k, "_")
+	for i := 1; i < len(parts); i++ {
+		if parts[i] != "" {
+			parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+		}
+	}
+	return strings.Join(parts, "")
 }

@@ -1,0 +1,10 @@
+{
+  "name": "Word count (Flex Template)",
+  "description": "Counts the words of a Cloud Storage text file into Cloud Storage, or upper-cases a Pub/Sub subscription's messages into a topic.",
+  "parameters": [
+    {"name": "input", "label": "Input file", "helpText": "The Cloud Storage file to read, gs://bucket/path.", "isOptional": true},
+    {"name": "output", "label": "Output prefix", "helpText": "The Cloud Storage prefix the counts are written under.", "isOptional": true},
+    {"name": "subscription", "label": "Input subscription", "helpText": "projects/PROJECT/subscriptions/NAME, for a streaming job.", "isOptional": true},
+    {"name": "topic", "label": "Output topic", "helpText": "projects/PROJECT/topics/NAME, for a streaming job.", "isOptional": true}
+  ]
+}

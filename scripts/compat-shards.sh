@@ -625,16 +625,18 @@ compat_shard() {
       # Spark (#2156), the Dataproc API's batches and Spark Connect
       # sessions, which run on the same Spark runner. And Dataflow (#2215),
       # whose Beam pipelines run on the pinned Flink job server in Docker,
-      # reading and writing Cloud Storage, Pub/Sub and BigQuery.
-      SERVICES=bigquery,storage,logging,run,kms,dataproc,pubsub,dataflow
+      # reading and writing Cloud Storage, Pub/Sub and BigQuery, and the
+      # Datastore, Bigtable and Spanner emulators; its Flex Templates' images
+      # are in Cloud Run's Artifact Registry.
+      SERVICES=bigquery,storage,logging,run,kms,dataproc,pubsub,dataflow,datastore,bigtable,spanner
       # --allow-unconfined-containers (#2162): the Dataproc DOCKER component's
       # rootless daemons run unconfined, so only with it; TestDataprocDockerComponent
       # runs here, and TestDataprocDockerComponentOff, the refusal without
       # it, skips on this instance (it runs on any instance without the flag).
       FIXTURES=(--allow-unconfined-containers)
-      TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,KMS,GCLOUD,DATAPROC,PUBSUB,DATAFLOW
+      TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,KMS,GCLOUD,DATAPROC,PUBSUB,DATAFLOW,DATASTORE,BIGTABLE,SPANNER
       export CLOUDBURROW_TEST_SPARK=1
-      COMPAT_RUN='^Test(BigQuerySpark|BqSpark|Dataproc|GcloudDataproc|PythonDataflow|DataflowJobsAPI|GcloudDataflow|TerraformDataflowJob)'
+      COMPAT_RUN='^Test(BigQuerySpark|BqSpark|Dataproc|GcloudDataproc|PythonDataflow|DataflowJobsAPI|GcloudDataflow|TerraformDataflow)'
       COMPAT_TIMEOUT=150m ;;
     localai|localaispeech)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI

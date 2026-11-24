@@ -251,8 +251,8 @@ func TestTemplates(t *testing.T) {
 	if _, err := s.GetTemplate(ctx, &dataflowpb.GetTemplateRequest{ProjectId: "p", Template: &dataflowpb.GetTemplateRequest_GcsPath{GcsPath: "gs://b/none"}}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("GetTemplate of a missing file = %v; want INVALID_ARGUMENT", err)
 	}
-	if _, err := s.LaunchFlexTemplate(ctx, &dataflowpb.LaunchFlexTemplateRequest{ProjectId: "p"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("LaunchFlexTemplate without a launcher = %v; want UNIMPLEMENTED", err)
+	if _, err := s.LaunchFlexTemplate(ctx, &dataflowpb.LaunchFlexTemplateRequest{ProjectId: "p"}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("LaunchFlexTemplate without a launcher = %v; want FAILED_PRECONDITION", err)
 	}
 	if _, err := s.SnapshotJob(ctx, &dataflowpb.SnapshotJobRequest{ProjectId: "p", JobId: j.Id}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("SnapshotJob = %v; want UNIMPLEMENTED", err)
@@ -301,5 +301,76 @@ func TestPersistenceAndREST(t *testing.T) {
 	}
 	if got := s2.Jobs("p"); len(got) != 0 {
 		t.Errorf("after Reset the project has %d jobs", len(got))
+	}
+}
+
+// fakeLauncher stands for a template's program: it submits the job its
+// launch names, as the SDK's DataflowRunner does, or fails.
+type fakeLauncher struct {
+	s    **Server
+	got  chan FlexLaunch
+	fail bool
+}
+
+func (l fakeLauncher) Launch(ctx context.Context, f FlexLaunch) error {
+	l.got <- f
+	if l.fail {
+		return errors.New("Traceback: ModuleNotFoundError: no module named nope")
+	}
+	_, err := (*l.s).CreateJob(ctx, &dataflowpb.CreateJobRequest{ProjectId: f.Project, Location: f.Location, Job: job(f.JobName, false)})
+	return err
+}
+
+func TestFlexTemplates(t *testing.T) {
+	ctx := context.Background()
+	spec := `{"image": "us-central1-docker.pkg.dev/p/r/flex:1", "sdkInfo": {"language": "PYTHON"},
+		"metadata": {"name": "words", "parameters": [{"name": "input", "label": "Input"}]}}`
+	var s *Server
+	got := make(chan FlexLaunch, 2)
+	s = newTestServer(t, Options{Storage: memStorage{"gs://b/flex.json": spec}, Launcher: fakeLauncher{s: &s, got: got}})
+	launch := func(name string, params map[string]string) (*dataflowpb.LaunchFlexTemplateResponse, error) {
+		return s.LaunchFlexTemplate(ctx, &dataflowpb.LaunchFlexTemplateRequest{ProjectId: "p", Location: DefaultLocation,
+			LaunchParameter: &dataflowpb.LaunchFlexTemplateParameter{JobName: name, Parameters: params,
+				Template:    &dataflowpb.LaunchFlexTemplateParameter_ContainerSpecGcsPath{ContainerSpecGcsPath: "gs://b/flex.json"},
+				Environment: &dataflowpb.FlexTemplateRuntimeEnvironment{TempLocation: "gs://b/tmp", MaxWorkers: 2}}})
+	}
+	if _, err := launch("flex", nil); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("a launch without a required parameter = %v; want INVALID_ARGUMENT", err)
+	}
+	r, err := launch("flex", map[string]string{"input": "gs://b/in.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.GetJob().GetCurrentState() != dataflowpb.JobState_JOB_STATE_QUEUED {
+		t.Errorf("the launched job is %s; want QUEUED", r.GetJob().GetCurrentState())
+	}
+	f := <-got
+	if f.Image != "us-central1-docker.pkg.dev/p/r/flex:1" || !strings.Contains(strings.Join(f.Args, " "), "--input=gs://b/in.txt --job_name=flex --project=p --region=us-central1 --temp_location=gs://b/tmp --max_num_workers=2") {
+		t.Errorf("the launcher was given %+v", f)
+	}
+	// The program's job is the launch's: one job, its ID, run to the end.
+	j := waitState(t, s, r.GetJob().GetId(), dataflowpb.JobState_JOB_STATE_DONE)
+	if o := j.GetEnvironment().GetSdkPipelineOptions().GetFields()["options"].GetStructValue().GetFields(); j.Name != "flex" ||
+		o["tempLocation"].GetStringValue() != "gs://b/tmp" || o["pipelineUrl"] == nil {
+		t.Errorf("the adopted job is %v", j)
+	}
+	if l, _ := s.ListJobs(ctx, &dataflowpb.ListJobsRequest{ProjectId: "p", Location: DefaultLocation}); len(l.Jobs) != 1 {
+		t.Errorf("ListJobs = %d jobs; want the launch's one", len(l.Jobs))
+	}
+
+	// A program that fails fails the launch's job, with its error.
+	s2 := newTestServer(t, Options{Storage: memStorage{"gs://b/flex.json": spec}, Launcher: fakeLauncher{s: &s, got: got, fail: true}})
+	r2, err := s2.LaunchFlexTemplate(ctx, &dataflowpb.LaunchFlexTemplateRequest{ProjectId: "p",
+		LaunchParameter: &dataflowpb.LaunchFlexTemplateParameter{JobName: "broken", Parameters: map[string]string{"input": "x"},
+			Template: &dataflowpb.LaunchFlexTemplateParameter_ContainerSpecGcsPath{ContainerSpecGcsPath: "gs://b/flex.json"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-got
+	waitState(t, s2, r2.GetJob().GetId(), dataflowpb.JobState_JOB_STATE_FAILED)
+	m, _ := s2.ListJobMessages(ctx, &dataflowpb.ListJobMessagesRequest{ProjectId: "p", Location: DefaultLocation, JobId: r2.GetJob().GetId(),
+		MinimumImportance: dataflowpb.JobMessageImportance_JOB_MESSAGE_ERROR})
+	if len(m.GetJobMessages()) == 0 || !strings.Contains(m.JobMessages[len(m.JobMessages)-1].MessageText, "ModuleNotFoundError") {
+		t.Errorf("the failed launch's messages are %v", m.GetJobMessages())
 	}
 }

@@ -24215,56 +24215,57 @@
     "Key": "dataflow",
     "Title": "Dataflow (v1b3): jobs, messages, metrics, snapshots and templates",
     "counts": {
-      "Implemented": 2,
-      "Unimplemented": 5,
-      "Verified": 11
+      "Unimplemented": 4,
+      "Verified": 14
     },
     "rows": [
       {
         "method": "google.dataflow.v1beta3.FlexTemplatesService/LaunchFlexTemplate",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataflowflex2215_test.go:134 TestPythonDataflowFlexTemplate"
+        ]
       },
       {
         "method": "google.dataflow.v1beta3.JobsV1Beta3/AggregatedListJobs",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflow2215_test.go:211 TestPythonDataflowWordCount"
+          "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount"
         ]
       },
       {
         "method": "google.dataflow.v1beta3.JobsV1Beta3/CheckActiveJobs",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflow2215_test.go:352 TestPythonDataflowStreamingDrain"
+          "test/compat/dataflow2215_test.go:363 TestPythonDataflowStreamingDrain"
         ]
       },
       {
         "method": "google.dataflow.v1beta3.JobsV1Beta3/CreateJob",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflow2215_test.go:211 TestPythonDataflowWordCount"
+          "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount"
         ]
       },
       {
         "method": "google.dataflow.v1beta3.JobsV1Beta3/GetJob",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflow2215_test.go:211 TestPythonDataflowWordCount"
+          "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount"
         ]
       },
       {
         "method": "google.dataflow.v1beta3.JobsV1Beta3/ListJobs",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflow2215_test.go:211 TestPythonDataflowWordCount"
+          "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount"
         ]
       },
       {
         "method": "google.dataflow.v1beta3.JobsV1Beta3/SnapshotJob",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/dataflow2215_test.go:456 TestDataflowJobsAPI"
+          "test/compat/dataflow2215_test.go:467 TestDataflowJobsAPI"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -24272,35 +24273,37 @@
         "method": "google.dataflow.v1beta3.JobsV1Beta3/UpdateJob",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflow2215_test.go:211 TestPythonDataflowWordCount",
-          "test/compat/dataflow2215_test.go:352 TestPythonDataflowStreamingDrain"
+          "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount",
+          "test/compat/dataflow2215_test.go:363 TestPythonDataflowStreamingDrain"
         ]
       },
       {
         "method": "google.dataflow.v1beta3.MessagesV1Beta3/ListJobMessages",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflow2215_test.go:211 TestPythonDataflowWordCount"
+          "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount"
         ]
       },
       {
         "method": "google.dataflow.v1beta3.MetricsV1Beta3/GetJobExecutionDetails",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflow2215_test.go:211 TestPythonDataflowWordCount"
+          "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount"
         ]
       },
       {
         "method": "google.dataflow.v1beta3.MetricsV1Beta3/GetJobMetrics",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflow2215_test.go:211 TestPythonDataflowWordCount"
+          "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount"
         ]
       },
       {
         "method": "google.dataflow.v1beta3.MetricsV1Beta3/GetStageExecutionDetails",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount"
+        ]
       },
       {
         "method": "google.dataflow.v1beta3.SnapshotsV1Beta3/DeleteSnapshot",
@@ -24319,21 +24322,23 @@
       },
       {
         "method": "google.dataflow.v1beta3.TemplatesService/CreateJobFromTemplate",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/dataflowtools_test.go:104 TestGcloudDataflow"
+        ]
       },
       {
         "method": "google.dataflow.v1beta3.TemplatesService/GetTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflowtools_test.go:103 TestGcloudDataflow"
+          "test/compat/dataflowtools_test.go:104 TestGcloudDataflow"
         ]
       },
       {
         "method": "google.dataflow.v1beta3.TemplatesService/LaunchTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflowtools_test.go:103 TestGcloudDataflow"
+          "test/compat/dataflowtools_test.go:104 TestGcloudDataflow"
         ]
       }
     ]

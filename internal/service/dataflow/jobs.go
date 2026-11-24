@@ -145,6 +145,12 @@ func (s *Server) create(project, loc string, job *dataflowpb.Job, replace string
 	if job.JobMetadata == nil {
 		job.JobMetadata = &dataflowpb.JobMetadata{}
 	}
+	camelOptions(job)
+	if adopt != nil && adopt.flexTemp != "" {
+		if o := job.GetEnvironment().GetSdkPipelineOptions().GetFields()["options"].GetStructValue(); o != nil {
+			o.Fields["tempLocation"] = structpb.NewStringValue(adopt.flexTemp)
+		}
+	}
 	if sdk, ver := sdkOf(job); ver != "" {
 		job.JobMetadata.SdkVersion = &dataflowpb.SdkVersion{Version: ver, VersionDisplayName: sdk,
 			SdkSupportStatus: dataflowpb.SdkVersion_SUPPORTED}
@@ -480,4 +486,32 @@ func lowerSDK(name string) string {
 		return "Go"
 	}
 	return name
+}
+
+// camelOptions gives each of a job's snake_case pipeline options (the
+// Python SDK's spelling, temp_location) its camelCase name too
+// (tempLocation), the spelling Google's service shows a job's options in
+// and the Terraform provider reads google_dataflow_flex_template_job's
+// temp_location back from.
+func camelOptions(job *dataflowpb.Job) {
+	o := job.GetEnvironment().GetSdkPipelineOptions().GetFields()["options"].GetStructValue()
+	if o == nil {
+		return
+	}
+	for k, v := range o.Fields {
+		if !strings.Contains(k, "_") {
+			continue
+		}
+		parts := strings.Split(k, "_")
+		for i := 1; i < len(parts); i++ {
+			if parts[i] != "" {
+				parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+			}
+		}
+		if c := strings.Join(parts, ""); c != k {
+			if _, ok := o.Fields[c]; !ok {
+				o.Fields[c] = v
+			}
+		}
+	}
 }

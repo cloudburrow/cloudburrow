@@ -80,10 +80,15 @@ const InstanceLabel = "cloudburrow.dev/dataflow-instance"
 // DataflowRunner speaks REST (not TLS gRPC) to an endpoint whose host
 // has; Dataflow's on port 80, as the SDK takes an endpoint without a port.
 const (
-	relayName      = "relay.cloudburrow.localhost"
-	storagePort    = 9000
-	pubsubPort     = 9001
-	bigqueryPort   = 9002
+	relayName    = "relay.cloudburrow.localhost"
+	storagePort  = 9000
+	pubsubPort   = 9001
+	bigqueryPort = 9002
+	// The database emulators Google's Datastore, Bigtable and Spanner
+	// connectors reach through their emulator variables.
+	datastorePort  = 9003
+	bigtablePort   = 9004
+	spannerPort    = 9005
 	dataflowPort   = 80
 	workerPoolPort = 50000
 )
@@ -158,7 +163,11 @@ type Docker struct {
 	Tmp string
 	// Token is the access token the job's clients send.
 	Token func() string
-	Logf  func(format string, args ...any)
+	// Registry is the instance's Artifact Registry address on the host
+	// (host:port), which a Flex Template's image is read from; nil or ""
+	// for none. RegistryToken is the token it is read with.
+	Registry, RegistryToken func() string
+	Logf                    func(format string, args ...any)
 
 	probeMu sync.Mutex
 	probed  bool
@@ -237,53 +246,10 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 		_, _ = d.docker(c, args...)
 	}
 
-	var routes []string
-	var targets []string
-	ports := []int{}
-	for _, r := range []struct {
-		name string
-		port int
-	}{{"storage", storagePort}, {"pubsub", pubsubPort}, {"bigquery", bigqueryPort}, {"dataflow", dataflowPort}} {
-		if a := live[r.name]; a != "" {
-			targets = append(targets, a)
-			ports = append(ports, r.port)
-		}
-	}
-	host, stop, err := d.hostTargets(ctx, targets...)
+	relayIP, stopNet, err := d.jobNetwork(ctx, network, relay, dir, image, label, live)
+	cleanup = append(cleanup, stopNet)
 	if err != nil {
 		return failed(err.Error())
-	}
-	cleanup = append(cleanup, stop)
-	for i, p := range ports {
-		routes = append(routes, fmt.Sprintf("%d=%s", p, host[i]))
-	}
-
-	if out, err := d.docker(ctx, "network", "create", "--internal", "--label", label, network); err != nil {
-		return failed("create the job's internal network: " + out)
-	}
-	cleanup = append(cleanup, func() { bg("network", "rm", network) })
-	relayArgs := []string{"run", "-d", "--name", relay, "--label", label, "-v", dir + ":/cb:ro", "--entrypoint", "python3"}
-	if !d.desktop {
-		relayArgs = append(relayArgs, "--add-host", "host.docker.internal:host-gateway")
-	}
-	relayArgs = append(relayArgs, image, "/cb/relay.py")
-	relayArgs = append(relayArgs, routes...)
-	if out, err := d.docker(ctx, relayArgs...); err != nil {
-		return failed("start the job's relay: " + out)
-	}
-	cleanup = append(cleanup, func() { bg("rm", "-f", "-v", relay) })
-	if err := d.waitLog(ctx, relay, "ready", 2*time.Minute); err != nil {
-		return failed(err.Error())
-	}
-	if out, err := d.docker(ctx, "network", "connect", "--alias", relayName, network, relay); err != nil {
-		return failed("connect the job's relay: " + out)
-	}
-	// gRPC clients resolve any name under .localhost to loopback (RFC
-	// 6761), so Pub/Sub's is given the relay's address on the network.
-	relayIP, err := d.docker(ctx, "inspect", "-f", "{{(index .NetworkSettings.Networks \""+network+"\").IPAddress}}", relay)
-	relayIP = strings.TrimSpace(relayIP)
-	if err != nil || net.ParseIP(relayIP) == nil {
-		return failed("find the job's relay's address: " + relayIP)
 	}
 
 	parallelism := job.Workers
@@ -379,6 +345,73 @@ func pythonVersions() []string {
 }
 
 // clientEnv is the job's clients' environment on its network.
+// jobNetwork makes network, an --internal Docker network whose one other
+// peer is relay (named relayName on it), which forwards the instance's
+// Cloud Storage, Pub/Sub, BigQuery and Dataflow ports to the host; it
+// answers the relay's address on the network. stop undoes what was made,
+// also on an error.
+func (d *Docker) jobNetwork(ctx context.Context, network, relay, dir, image, label string, live map[string]string) (relayIP string, stop func(), err error) {
+	var cleanup []func()
+	stop = func() {
+		for i := len(cleanup) - 1; i >= 0; i-- {
+			cleanup[i]()
+		}
+	}
+	bg := func(args ...string) {
+		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		_, _ = d.docker(c, args...)
+	}
+	var routes, targets []string
+	ports := []int{}
+	for _, r := range []struct {
+		name string
+		port int
+	}{{"storage", storagePort}, {"pubsub", pubsubPort}, {"bigquery", bigqueryPort}, {"dataflow", dataflowPort},
+		{"datastore", datastorePort}, {"bigtable", bigtablePort}, {"spanner", spannerPort}} {
+		if a := live[r.name]; a != "" {
+			targets = append(targets, a)
+			ports = append(ports, r.port)
+		}
+	}
+	host, stopHost, err := d.hostTargets(ctx, targets...)
+	if err != nil {
+		return "", stop, err
+	}
+	cleanup = append(cleanup, stopHost)
+	for i, p := range ports {
+		routes = append(routes, fmt.Sprintf("%d=%s", p, host[i]))
+	}
+	if out, err := d.docker(ctx, "network", "create", "--internal", "--label", label, network); err != nil {
+		return "", stop, errors.New("create the job's internal network: " + out)
+	}
+	cleanup = append(cleanup, func() { bg("network", "rm", network) })
+	relayArgs := []string{"run", "-d", "--name", relay, "--label", label, "-v", dir + ":/cb:ro", "--entrypoint", "python3"}
+	if !d.desktop {
+		relayArgs = append(relayArgs, "--add-host", "host.docker.internal:host-gateway")
+	}
+	relayArgs = append(relayArgs, image, "/cb/relay.py")
+	relayArgs = append(relayArgs, routes...)
+	if out, err := d.docker(ctx, relayArgs...); err != nil {
+		return "", stop, errors.New("start the job's relay: " + out)
+	}
+	cleanup = append(cleanup, func() { bg("rm", "-f", "-v", relay) })
+	if err := d.waitLog(ctx, relay, "ready", 2*time.Minute); err != nil {
+		return "", stop, err
+	}
+	if out, err := d.docker(ctx, "network", "connect", "--alias", relayName, network, relay); err != nil {
+		return "", stop, errors.New("connect the job's relay: " + out)
+	}
+	// gRPC clients resolve any name under .localhost to loopback (RFC
+	// 6761), so Pub/Sub's is given the relay's address on the network.
+	ip, err := d.docker(ctx, "inspect", "-f", "{{(index .NetworkSettings.Networks \""+network+"\").IPAddress}}", relay)
+	ip = strings.TrimSpace(ip)
+	if err != nil || net.ParseIP(ip) == nil {
+		return "", stop, errors.New("find the job's relay's address: " + ip)
+	}
+	return ip, stop, nil
+}
+
 func (d *Docker) clientEnv(job Job, dir, relayIP string) []string {
 	token := "cloudburrow-dataflow"
 	if d.Token != nil {
@@ -392,6 +425,9 @@ func (d *Docker) clientEnv(job Job, dir, relayIP string) []string {
 		"-e", "PYTHONPATH=/cb/py", "-e", "CB_DRAIN=/cb/ctl/drain",
 		"-e", fmt.Sprintf("STORAGE_EMULATOR_HOST=http://%s:%d", host, storagePort),
 		"-e", fmt.Sprintf("PUBSUB_EMULATOR_HOST=%s:%d", relayIP, pubsubPort),
+		"-e", fmt.Sprintf("DATASTORE_EMULATOR_HOST=%s:%d", relayIP, datastorePort),
+		"-e", fmt.Sprintf("BIGTABLE_EMULATOR_HOST=%s:%d", relayIP, bigtablePort),
+		"-e", fmt.Sprintf("SPANNER_EMULATOR_HOST=%s:%d", relayIP, spannerPort),
 		"-e", fmt.Sprintf("BIGQUERY_EMULATOR_HOST=http://%s:%d", host, bigqueryPort),
 		"-e", fmt.Sprintf("CB_BIGQUERY_URL=http://%s:%d/bigquery/v2/", host, bigqueryPort),
 		"-e", "GOOGLE_CLOUD_PROJECT=" + job.Project,

@@ -92,14 +92,15 @@ func gcloudDataflow(t *testing.T, h *Harness, project string) func(args ...strin
 	}
 }
 
-// covers: google.dataflow.v1beta3.TemplatesService/LaunchTemplate, google.dataflow.v1beta3.TemplatesService/GetTemplate
+// covers: google.dataflow.v1beta3.TemplatesService/LaunchTemplate, google.dataflow.v1beta3.TemplatesService/GetTemplate, google.dataflow.v1beta3.TemplatesService/CreateJobFromTemplate
 //
 // TestGcloudDataflow (#2215): `gcloud dataflow jobs run` launches the
 // classic template the Python SDK staged (templates.launch, validated
 // first with a dry run through the Go client); `jobs list --status=active`,
 // `jobs describe` and `jobs show` see the
 // running streaming job; `jobs drain` drains it and `jobs cancel` of the
-// drained job is refused.
+// drained job is refused. templates.create through the Go client makes a
+// running job that `jobs cancel` cancels.
 func TestGcloudDataflow(t *testing.T) {
 	h, _, c := dataflowEnv(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
@@ -163,6 +164,22 @@ func TestGcloudDataflow(t *testing.T) {
 	}
 	if out, err := run("dataflow", "jobs", "cancel", id, "--region=us-central1"); err == nil && !strings.Contains(out, "Failed") {
 		t.Errorf("jobs cancel of a drained job succeeded:\n%s", out)
+	}
+
+	// templates.create, the older form of templates.launch: the job it
+	// answers runs, and is cancelled.
+	cj, err := c.tmpl.CreateJobFromTemplate(ctx, &dataflowpb.CreateJobFromTemplateRequest{ProjectId: tp.project, Location: "us-central1",
+		JobName: name + "-create", Template: &dataflowpb.CreateJobFromTemplateRequest_GcsPath{GcsPath: tp.path},
+		Environment: &dataflowpb.RuntimeEnvironment{TempLocation: "gs://" + tp.bucket + "/tmp", MaxWorkers: 2}})
+	if err != nil || cj.GetId() == "" || cj.GetName() != name+"-create" {
+		t.Fatalf("CreateJobFromTemplate = %v, %v", cj, err)
+	}
+	if j := waitDataflowJob(t, ctx, c, tp.project, cj.Id, dataflowpb.JobState_JOB_STATE_RUNNING, dataflowpb.JobState_JOB_STATE_FAILED); j.CurrentState != dataflowpb.JobState_JOB_STATE_RUNNING {
+		t.Fatalf("CreateJobFromTemplate's job is %s:\n%s", j.CurrentState, jobMessages(t, ctx, c, tp.project, cj.Id))
+	}
+	gc("dataflow", "jobs", "cancel", cj.Id, "--region=us-central1")
+	if j := waitDataflowJob(t, ctx, c, tp.project, cj.Id, dataflowpb.JobState_JOB_STATE_CANCELLED, dataflowpb.JobState_JOB_STATE_FAILED); j.CurrentState != dataflowpb.JobState_JOB_STATE_CANCELLED {
+		t.Errorf("after jobs cancel the job is %s", j.CurrentState)
 	}
 }
 

@@ -138,6 +138,10 @@ type jobRec struct {
 	// flex is a Flex Template's job, QUEUED until its launcher's program
 	// submits the pipeline under its name.
 	flex bool
+	// flexTemp is a Flex Template launch's temporary location, which its
+	// job's options carry as tempLocation (the SDK's temp_location is
+	// that location with the job's name and time appended).
+	flexTemp string
 }
 
 // NewServer returns the server, loading opts.State.

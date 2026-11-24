@@ -40,10 +40,13 @@ type dataflowService struct {
 	interpose []grpc.UnaryServerInterceptor
 	requests  func(rest.Request)
 	// live is the instance's bound addresses.
-	live   func() map[string]string
-	server *grpctransport.Server
-	api    *dataflow.Server
-	docker *beamrun.Docker
+	live func() map[string]string
+	// registryToken is the token a Flex Template's image is read from
+	// the Artifact Registry with; nil reads it with none.
+	registryToken func() string
+	server        *grpctransport.Server
+	api           *dataflow.Server
+	docker        *beamrun.Docker
 }
 
 func newDataflowService(cfg config.Config) *dataflowService {
@@ -101,8 +104,12 @@ func (s *dataflowService) Start(ctx context.Context) error {
 		state = filepath.Join(s.cfg.InstanceDir(), "dataflow.json")
 	}
 	s.docker = &beamrun.Docker{Instance: s.cfg.Name, Live: s.liveAddrs,
-		Logf: func(format string, args ...any) { fmt.Printf("cloudburrow: "+format+"\n", args...) }}
-	opts := dataflow.Options{State: state, Engine: dataflowEngine{d: s.docker},
+		// A Flex Template's image is read from the instance's Artifact
+		// Registry (Cloud Run's) as the instance's account.
+		Registry:      func() string { return s.liveAddrs()["run"] },
+		RegistryToken: s.registryToken,
+		Logf:          func(format string, args ...any) { fmt.Printf("cloudburrow: "+format+"\n", args...) }}
+	opts := dataflow.Options{State: state, Engine: dataflowEngine{d: s.docker}, Launcher: flexLauncher{d: s.docker},
 		Logf: func(format string, args ...any) { fmt.Printf("cloudburrow: "+format+"\n", args...) }}
 	if s.live != nil && serviceEnabled(s.cfg, config.ServiceStorage) {
 		opts.Storage = &dataprocStorage{live: s.live}
@@ -162,6 +169,13 @@ func (r *dataflowResetter) ResetProject(_ context.Context, project string) error
 		return errors.New("the Dataflow API has not started")
 	}
 	return api.Reset(project)
+}
+
+// flexLauncher runs the API's Flex Template launches on beamrun.
+type flexLauncher struct{ d *beamrun.Docker }
+
+func (l flexLauncher) Launch(ctx context.Context, f dataflow.FlexLaunch) error {
+	return l.d.LaunchFlex(ctx, beamrun.Flex{Project: f.Project, Location: f.Location, JobName: f.JobName, Image: f.Image, Args: f.Args})
 }
 
 // dataflowEngine runs the API's jobs on beamrun.

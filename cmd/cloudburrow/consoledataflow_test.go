@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/dataflow/apiv1beta3/dataflowpb"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataflow"
@@ -38,6 +39,18 @@ func (fakeDataflowEngine) Run(ctx context.Context, run dataflow.Run, r dataflow.
 	}
 }
 
+// fakeDataflowLauncher stands for a Flex Template's program: it submits
+// a batch job of the launch's name.
+type fakeDataflowLauncher struct{ api **dataflow.Server }
+
+func (l fakeDataflowLauncher) Launch(ctx context.Context, f dataflow.FlexLaunch) error {
+	_, err := (*l.api).CreateJob(ctx, &dataflowpb.CreateJobRequest{ProjectId: f.Project, Location: f.Location,
+		Job: &dataflowpb.Job{Name: f.JobName, Type: dataflowpb.JobType_JOB_TYPE_BATCH, Environment: &dataflowpb.Environment{
+			SdkPipelineOptions: &structpb.Struct{Fields: map[string]*structpb.Value{"options": structpb.NewStructValue(&structpb.Struct{
+				Fields: map[string]*structpb.Value{"pipelineUrl": structpb.NewStringValue("gs://b/p.pb")}})}}}}})
+	return err
+}
+
 type fakeDataflowStorage map[string]string
 
 func (f fakeDataflowStorage) Read(_ context.Context, uri string) ([]byte, error) {
@@ -52,7 +65,11 @@ func TestConsoleDataflow(t *testing.T) {
 	const project = "df-console"
 	tmpl := `{"type": "JOB_TYPE_STREAMING", "environment": {"sdkPipelineOptions": {"options": {"pipelineUrl": "gs://b/p.pb", "streaming": true}},
 		"userAgent": {"name": "Apache Beam Python 3.12 SDK", "version": "2.78.0"}}}`
-	api, err := dataflow.NewServer(dataflow.Options{Engine: fakeDataflowEngine{}, Storage: fakeDataflowStorage{"gs://b/templates/words": tmpl}})
+	flex := `{"image": "us-central1-docker.pkg.dev/p/r/flex:1", "metadata": {"name": "flex", "parameters": []}}`
+	var api *dataflow.Server
+	launcher := fakeDataflowLauncher{api: &api}
+	api, err := dataflow.NewServer(dataflow.Options{Engine: fakeDataflowEngine{}, Launcher: launcher,
+		Storage: fakeDataflowStorage{"gs://b/templates/words": tmpl, "gs://b/templates/flex.json": flex}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +167,21 @@ func TestConsoleDataflow(t *testing.T) {
 	}
 	if acts := p.DetailActions(ctx, project, []string{name}); len(acts) != 0 {
 		t.Errorf("a drained job offers %+v", acts)
+	}
+	// A Custom Template's path that is a Flex Template's spec launches it.
+	fname, err := p.Create(ctx, project, form(map[string]string{"jobName": "flexjob", "gcsPath": "gs://b/templates/flex.json", "tempLocation": "gs://b/tmp"}))
+	if err != nil {
+		t.Fatalf("Create job from a Flex Template: %v", err)
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		_, j, _ = p.job(ctx, project, fname)
+		if j.GetCurrentState() == dataflowpb.JobState_JOB_STATE_DONE && j.GetName() == "flexjob" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the Flex Template's job is %s", j.GetCurrentState())
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	if l, _ := p.List(ctx, ""); l.Prompt == "" {
 		t.Error("the Jobs list without a project has no prompt")
