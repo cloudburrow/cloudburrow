@@ -22,7 +22,9 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/networkconnectivity"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
+	"github.com/cloudburrow/cloudburrow/internal/service/vpcaccess"
 	"github.com/cloudburrow/cloudburrow/internal/sysparams"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
@@ -42,6 +44,10 @@ type computeService struct {
 	wrapJSON func(http.Handler) http.Handler
 	gke      *gkeService
 	api      *compute.Server
+	// vpcAccess is Serverless VPC Access (vpcaccess.googleapis.com,
+	// #2140), served on this port beside /compute/v1/, as its connectors
+	// live in the networks served here.
+	vpcAccess *vpcaccess.Server
 	// vms runs the VM instances (#1963); guestBase and metadataHost are
 	// set by up once the cluster host is known.
 	vms          *computeVMs
@@ -58,6 +64,9 @@ type computeService struct {
 	// and ncGRPC its gRPC server.
 	nc     *networkconnectivity.Server
 	ncGRPC *grpc.Server
+	// registry is the project registry, for Shared VPC's organization
+	// rule (#2140); nil allows every project.
+	registry func() *resourcemanager.Registry
 }
 
 func newComputeService(cfg config.Config) *computeService {
@@ -80,6 +89,15 @@ func (s *computeService) API() *compute.Server {
 		return nil
 	}
 	return s.api
+}
+
+// VPCAccess is Serverless VPC Access, available after Start; nil without
+// compute.
+func (s *computeService) VPCAccess() *vpcaccess.Server {
+	if s == nil {
+		return nil
+	}
+	return s.vpcAccess
 }
 
 // Addr is the bound address.
@@ -111,18 +129,40 @@ func (s *computeService) Start(ctx context.Context) error {
 		return s.metadataHost()
 	}
 	s.svcIPs = &serviceIPs{kubeconfig: s.cfg.KubeconfigPath(), namespace: s.cfg.Cluster.Namespace}
-	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, NetworkUsers: s.networkUsers, VMs: s.vms,
-		PrivateServices: s.privateServices, ServiceAttachment: s.serviceAttachment})
+	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, ExtraGroups: s.gkeGroups, NetworkUsers: s.networkUsers, VMs: s.vms,
+		PrivateServices: s.privateServices, ServiceAttachment: s.serviceAttachment,
+		ProjectOrganization: s.projectOrganization, LB: &computeLB{cfg: s.cfg, vms: s.vms}})
 	if err != nil {
 		return err
 	}
 	s.api = api
+	// The schedules' and autoscalers' loops (#2139); with no Addr, Start
+	// listens on nothing.
+	if err := api.Start(ctx); err != nil {
+		return err
+	}
+	vstate := ""
+	if state != "" {
+		vstate = filepath.Join(s.cfg.InstanceDir(), "vpcaccess.json")
+	}
+	va, err := vpcaccess.New(vpcaccess.Options{State: vstate, Networks: api})
+	if err != nil {
+		return err
+	}
+	s.vpcAccess = va
 	ln, err := net.Listen("tcp", net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Compute)))
 	if err != nil {
 		return fmt.Errorf("compute: %w", err)
 	}
 	s.ln = ln
-	var h http.Handler = api
+	vrest := vpcaccess.NewRESTHandler(va)
+	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if vpcaccess.Handles(r.URL.Path) {
+			vrest.ServeHTTP(w, r)
+			return
+		}
+		api.ServeHTTP(w, r)
+	})
 	if s.wrapJSON != nil {
 		h = s.wrapJSON(h)
 	}
@@ -142,6 +182,9 @@ func (s *computeService) Start(ctx context.Context) error {
 }
 
 func (s *computeService) Stop(ctx context.Context) error {
+	if s.api != nil {
+		_ = s.api.Stop(ctx)
+	}
 	if s.vms != nil {
 		s.vms.stopAll()
 	}
@@ -156,9 +199,11 @@ func (s *computeService) Stop(ctx context.Context) error {
 }
 
 // instanceGroupManagers answers Kubernetes Engine's instance group
-// managers (#1913) on the Compute port.
+// managers (#1913) on the Compute port, when the compute service runs
+// without VMs; with them, the Compute API serves its own managed instance
+// groups and lists GKE's beside them (gkeGroups, #2139).
 func (s *computeService) instanceGroupManagers(w http.ResponseWriter, r *http.Request) bool {
-	if !strings.Contains(r.URL.Path, "/instanceGroupManagers") {
+	if !strings.Contains(r.URL.Path, "/instanceGroupManagers") || s.vms != nil {
 		return false
 	}
 	api := s.gke.API()
@@ -166,6 +211,14 @@ func (s *computeService) instanceGroupManagers(w http.ResponseWriter, r *http.Re
 		return false
 	}
 	return api.ServeInstanceGroupManagers(w, r)
+}
+
+// gkeGroups are a zone's Kubernetes Engine node-pool groups.
+func (s *computeService) gkeGroups(project, zone string) map[string]map[string]any {
+	if api := s.gke.API(); api != nil {
+		return api.InstanceGroupManagers(project, zone)
+	}
+	return nil
 }
 
 func (s *computeService) register(coord *lifecycle.Coordinator) {
@@ -240,5 +293,33 @@ func (r *computeResetter) ResetProject(_ context.Context, project string) error 
 			return err
 		}
 	}
-	return api.ResetProject(project)
+	if err := api.ResetProject(project); err != nil {
+		return err
+	}
+	if va := r.svc.VPCAccess(); va != nil {
+		return va.ResetProject(project)
+	}
+	return nil
+}
+
+// projectOrganization is the organization a registered project is in, for
+// Shared VPC (#2140): the local organization for a project under it or one
+// of its folders, "" for a top-level project, and unknown for a project
+// the registry does not keep.
+func (s *computeService) projectOrganization(project string) (string, bool) {
+	if s.registry == nil {
+		return "", false
+	}
+	reg := s.registry()
+	if reg == nil {
+		return "", false
+	}
+	p, err := reg.Get(project)
+	if err != nil {
+		return "", false
+	}
+	if p.Parent == "" {
+		return "", true
+	}
+	return resourcemanager.OrganizationName, true
 }

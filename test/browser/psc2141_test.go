@@ -16,14 +16,14 @@ import (
 // TestCloudSQLPSCEndpointThroughTheBrowser (#2141), on an instance
 // serving Cloud SQL and Compute Engine: a Cloud SQL instance with Private
 // Service Connect shows its service attachment on Connections; Private
-// Service Connect's Connected endpoints, Connect endpoint (Published
-// service, Target service, Endpoint name, Network, Subnetwork, Create IP
-// address, Enable global access) ending in Add endpoint, adds an endpoint
-// to it, listed Accepted. Each screen passes the WCAG 2.1 AA audit,
+// Service Connect's Connected endpoints (#2140's tab), Connect endpoint
+// (Published service, Target service, Endpoint name, Network, Subnetwork,
+// IP address, Enable global access) ending in Add endpoint, adds an
+// endpoint to it, listed Accepted. Each screen passes the WCAG 2.1 AA audit,
 // keyboard included.
 func TestCloudSQLPSCEndpointThroughTheBrowser(t *testing.T) {
 	needService(t, "cloudsql-instances")
-	needService(t, "vpc-psc")
+	needService(t, "netservices-psc-endpoints")
 	project := servedProject(t)
 	q := "?project=" + url.QueryEscape(project)
 	svc := sqlAdminSDK(t)
@@ -58,10 +58,12 @@ func TestCloudSQLPSCEndpointThroughTheBrowser(t *testing.T) {
 	list := "/net-services/psc/list/consumers" + q
 	p.navigate(list)
 	p.clickText("#view button", "Connect endpoint")
-	p.waitFor(`document.querySelector("#f-targetService") !== null`)
+	p.waitFor(`document.querySelector('#view input[name="f-target-choice"][value="published"]') !== null`)
+	p.eval(`(() => { document.querySelector('#view input[name="f-target-choice"][value="published"]').click(); return true; })()`, nil)
+	p.waitFor(`(() => { const f = document.querySelector("#f-targetService"); return !!f && f.getClientRects().length > 0; })()`)
 	var labels string
 	p.eval(`[...document.querySelectorAll("#view label")].map((l) => l.textContent.trim()).join("|")`, &labels)
-	for _, w := range []string{"Published service", "Target service", "Endpoint name", "Network", "Subnetwork", "Create IP address", "Enable global access"} {
+	for _, w := range []string{"Published service", "Target service", "Endpoint name", "Network", "Subnetwork", "IP address", "Enable global access"} {
 		if !strings.Contains(labels, w) {
 			t.Errorf("Connect endpoint lacks %q", w)
 		}
@@ -75,9 +77,8 @@ func TestCloudSQLPSCEndpointThroughTheBrowser(t *testing.T) {
 	row := fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].find((r) => r.textContent.includes(%q))`, ep)
 	p.waitFor(`location.pathname === "/net-services/psc/list/consumers" && ` + row + ` !== undefined`)
 	t.Cleanup(func() {
-		consoleDo(t, http.MethodDelete, "/api/resources/vpc-psc"+q+"&name="+url.QueryEscape("us-central1/"+ep), "")
-		consoleDo(t, http.MethodPost, "/api/actions/vpc-addresses"+q,
-			fmt.Sprintf(`{"Path":["us-central1",%q],"Action":"release","Values":{}}`, ep))
+		consoleDo(t, http.MethodPost, "/api/actions/netservices-psc-endpoints"+q,
+			fmt.Sprintf(`{"Path":["us-central1",%q],"Action":"delete","Values":{}}`, ep))
 	})
 	p.eval(row+`.textContent`, &text)
 	if !strings.Contains(text, "Accepted") {

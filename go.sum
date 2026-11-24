@@ -490,6 +490,8 @@ cloud.google.com/go/vision/v2 v2.15.0/go.mod h1:DUdjdFkXqPvEoPC4WDYFvYCn0LlAZ4vV
 cloud.google.com/go/vmmigration v1.16.0/go.mod h1:ILrSjXnHMpdamkkAU8fjMKKMsH27B6FLC5kv/6TkLy0=
 cloud.google.com/go/vmwareengine v1.9.0/go.mod h1:zXXuUaIpvDhsV6sR+JdQfcQ4V5+pDarrp7FW7nOdS2I=
 cloud.google.com/go/vpcaccess v1.14.0/go.mod h1:MxbVgr+2fpIFIEIdSmgnb8ykNWRPVtslpmWijp7an68=
+cloud.google.com/go/vpcaccess v1.16.1 h1:CcbWaGr46rlbE98WeWmN7tuCfrV0UUYaXDACTKkGITI=
+cloud.google.com/go/vpcaccess v1.16.1/go.mod h1:EIaqtBnSrMVV8bfNqWo3vhWyKy1vrwMcH/Nc+OiBhFw=
 cloud.google.com/go/webrisk v1.17.0/go.mod h1:ypwCZ+G/SXyUZ+x3ppxn1hu+6tDifGNd/OpwPtCdJHI=
 cloud.google.com/go/websecurityscanner v1.12.0/go.mod h1:cZSc9HqoFdccL1mqZtPIInOd4R8PBGwI20wdnrz6AO8=
 cloud.google.com/go/workflows v1.20.0/go.mod h1:TC9yx7VpjGdBBeKM8FG2EMtms5Q9nyTqI+2uV9bDNs4=

@@ -37,8 +37,8 @@ tracks it; a closed issue is named only where it says what was built.
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | App Hub | 5 | 1 | 1 | 3 | 0 |
 | Dataform | 7 | 0 | 2 | 4 | 1 |
-| Console | 9 | 7 | 2 | 0 | 0 |
-| **Total** | **89** | **14** | **24** | **44** | **7** |
+| Console | 11 | 8 | 3 | 0 | 0 |
+| **Total** | **91** | **15** | **25** | **44** | **7** |
 
 ## Cloud Storage
 
@@ -364,12 +364,22 @@ code assets over Dataform (#2094).
 
 Closed by the sweep: Test permissions on the Permissions tab (#1242), and the request-rate,
 latency and resource charts (#1267); the Artifact Registry repository Permissions tab (#1439).
+Compute Engine's instance templates, instance groups, machine images, custom images, snapshot and
+instance schedules, SSH keys, regional managed instance groups, autoscalers that scale on the VMs' real CPU, named ports, a managed group's Set instance template and per-VM actions, and VPC network peering, subnets, effective routes and internal
+addresses (#2139, #2140).
 
 | Gap | Why open | Size |
 |---|---|---|
 | BigQuery Studio's Apache Spark notebooks, data preparations and pipelines (#2094): a Spark notebook's `DataprocSparkSession` is a Spark Connect session of Serverless for Apache Spark, whose sessions API CloudBurrow does not serve (<https://docs.cloud.google.com/bigquery/docs/use-spark>, read 2026-11-22); pipelines and data preparations are Dataform code assets, a pipeline's tasks a repository's `definitions/actions.yaml` (<https://docs.cloud.google.com/bigquery/docs/create-pipelines>, read 2026-11-22), which CloudBurrow's Dataform compiler does not read, and it runs no notebook or data preparation action (#2105). Home's Create new shows each disabled with its reason. Built in the 2026-11-22 round: the notebook runtime a pipeline's notebook task would run on (`internal/nbruntime`) | not built yet | L |
 | BigQuery Studio's notebook runtime reaches only the instance's BigQuery: it runs on an `--internal` Docker network, so `pip install` and any other download a Colab Enterprise runtime makes fail; Home's What's new is CloudBurrow's own list, Google's feed being Google's, and Try with templates queries this instance, Google's templates reading `bigquery-public-data`, which a local instance does not hold (#2094) | no emulator support (nothing local: Google's feed and public datasets; no egress by design) | S |
 | Cloud SQL: managed connection pooling for MySQL (a server thread pool the community MySQL server lacks; 501), and the pooler at a private IP or Private Service Connect endpoint (only the server's port is in a VM's NAT chains) (#2141) | no thread pool in community MySQL; pooler port not in the VPC model | M |
+| Compute Engine methods served without a page yet (#2139): image and machine image labels after create, and a VM's scheduling after create; each is in `docs/console-parity.md` §8 as a gap | not built yet | S |
+| Compute Engine choices drawn unavailable with the reason (#2139, #2140): regional disks (replication across zones), the Ops Agent, IPv6, image import from a Cloud Storage file or a virtual disk, and promoting an external ephemeral IP, which is `127.0.0.1` here | no emulator support | M |
+| Cloud Router and Cloud NAT (#2140): BGP sessions never come up (no Cloud VPN, Interconnect or peer router exists locally, so every peer is `DOWN` and no route is learned); a gateway's VMs leave through this machine's own address, not the NAT IP, and NAT logs are not written; Private NAT, route policies and named sets are 501; a router appliance peer is not checked against a Network Connectivity Center spoke, which is not served | no emulator support (no BGP speaker, no public addresses) | M |
+| Private Service Connect (#2140): endpoints and service attachments are records: a published service's `targetService` is not checked against an internal load balancer, and no traffic reaches a service attachment published here through an endpoint (a load balancer's Private Service Connect network endpoint group does, #2153; an endpoint of a Cloud SQL instance's attachment carries its connections, #2141), and VMs reach the local Google APIs over the host with or without an endpoint for Google APIs; Service Directory registration of endpoints and service attachments' IAM methods are 501 | no emulator support (no Service Directory, endpoints carry no packets) | M |
+| Cloud Load Balancing (#2153): UDP forwarding rules carry nothing; Cloud Armor security policies, Cloud CDN (signed URL keys, caching), Identity-Aware Proxy, mutual TLS, Certificate Manager maps, target gRPC proxies and the `CUSTOM_METRICS` balancing mode are 501; health checks probe only instance and hybrid endpoints; the console has no Edit page for a load balancer (its parts are edited through the API, gcloud and Terraform) | not built yet (the console's Edit), no emulator support (the rest) | L |
+| Serverless VPC Access and Cloud Run VPC egress (#2140): connectors are records, `READY` at once, and Cloud Run checks a service's or job's `vpcAccess` (the connector exists, is READY and is in its region; Direct VPC egress's network and subnet exist) and records it, but carries no traffic: no connector VMs run, and a Cloud Run container is a Knative pod whose egress is the kind cluster's, not a VPC network's, so it cannot reach a VM's internal IP (the VMs' VPC is a VXLAN segment inside their own pods, which the Run pods are not on) and `egress` changes nothing. A connector's custom IP range makes no hidden `aet-` subnet in the network, so a subnet created later may overlap it. `connectors.patch` and the Monitoring charts are not served | needs a VPC data plane for Knative pods | L |
+| Shared VPC (#2140): Individual subnets (subnet-level permissions) need `subnetworks.setIamPolicy`, not served; `subnetworks.listUsable` is 501 (the console's service project view lists the host's subnets itself) | not built yet | S |
 
 ## Excluded on purpose
 

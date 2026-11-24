@@ -564,10 +564,17 @@ type Field struct {
 	// RemoveLabel names each row's remove button where Google's is not
 	// "Remove": Audit Logs' exempted principals have Delete (#2013).
 	RemoveLabel string `json:"removeLabel,omitempty"`
-	// DisabledOptions, on a "radio" field, are options drawn but not
-	// choosable: SQL Server on Cloud SQL's engine choice, which CloudBurrow
-	// does not run (#1860).
+	// DisabledOptions, on a "radio" or "select" field, are options drawn
+	// but not choosable: SQL Server on Cloud SQL's engine choice, which
+	// CloudBurrow does not run (#1860); a firewall rule's IPv6 ranges
+	// (#2140).
 	DisabledOptions []string `json:"disabledOptions,omitempty"`
+	// LabelsBy and LabelsFor, on a "radio" field, name its options by the
+	// value the field LabelsBy names holds: Protocols and ports reads Allow
+	// all or Deny all as the rule's Action on match is Allow or Deny
+	// (#2140). An option LabelsFor does not name keeps its OptionLabels.
+	LabelsBy  string                       `json:"labelsBy,omitempty"`
+	LabelsFor map[string]map[string]string `json:"labelsFor,omitempty"`
 	// Links are documents the field is about, drawn as links under its
 	// help: Microsoft's licence terms beside Cloud SQL for SQL Server's
 	// licence checkbox (#1916). Each opens in a new tab.

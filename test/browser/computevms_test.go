@@ -148,9 +148,10 @@ func TestComputeEngineThroughTheBrowser(t *testing.T) {
 		time.Sleep(2 * time.Second)
 	}
 
-	// Stop and Start / Resume from the list's row menu.
+	// Stop and Start / Resume from the list's row menu. Stop and Delete are
+	// Google's one dialog with Skip graceful shutdown (#2139).
 	p.navigate("/compute/instances?project=" + project)
-	vmRowMenu(p, vm, "Stop", nil, byButton)
+	vmRowMenu(p, vm, "Stop", map[string]string{"noGracefulShutdown": "false"}, "")
 	waitStatus("compute-instances", vm, "TERMINATED", 3*time.Minute)
 	p.navigate("/compute/instances?project=" + project)
 	vmRowMenu(p, vm, "Start / Resume", nil, byButton)
@@ -158,7 +159,7 @@ func TestComputeEngineThroughTheBrowser(t *testing.T) {
 
 	// Delete; the boot disk goes with it, the data disk stays.
 	p.navigate("/compute/instances?project=" + project)
-	vmRowMenu(p, vm, "Delete", nil, byButton)
+	vmRowMenu(p, vm, "Delete", map[string]string{"noGracefulShutdown": "false"}, "")
 	deadline = time.Now().Add(3 * time.Minute)
 	for find("compute-instances", vm) != nil {
 		if time.Now().After(deadline) {

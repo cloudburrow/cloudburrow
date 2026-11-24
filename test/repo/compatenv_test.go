@@ -429,6 +429,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"SQL_PRIVATECA":            "127.0.0.1:9028",
 		"SQL_COMPUTE":              "127.0.0.1:9031",
 		"MEMORYSTORE_COMPUTE":      "127.0.0.1:9031",
+		"RUN_COMPUTE":              "127.0.0.1:9031",
 		"MEMORYSTORE_PRIVATECA":    "127.0.0.1:9028",
 		"CLOUDSQL_SECRETS":         "127.0.0.1:9006",
 		"NOPUBSUB_STORAGE":         "http://127.0.0.1:50003",

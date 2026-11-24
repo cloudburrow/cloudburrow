@@ -70,6 +70,7 @@ var serviceUsageAPIs = []struct {
 	// The Network Connectivity API's service connectivity automation
 	// (#2141), on the Compute Engine port.
 	{config.ServiceCompute, serviceusage.API{Name: "networkconnectivity.googleapis.com", Title: "Network Connectivity API"}},
+	{config.ServiceCompute, serviceusage.API{Name: "vpcaccess.googleapis.com", Title: "Serverless VPC Access API"}},
 	{config.ServiceWorkflows, serviceusage.API{Name: "workflows.googleapis.com", Title: "Workflows API"}},
 	{config.ServiceWorkflows, serviceusage.API{Name: "workflowexecutions.googleapis.com", Title: "Workflow Executions API"}},
 	{config.ServiceParameterManager, serviceusage.API{Name: "parametermanager.googleapis.com", Title: "Parameter Manager API"}},

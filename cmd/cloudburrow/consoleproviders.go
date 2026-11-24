@@ -1992,7 +1992,8 @@ func (p runProvider) CreateForm() (string, []console.Field) {
 		runVolumeFields("Container")[0], runVolumeFields("Container")[1], runVolumeFields("Container")[2],
 		runVolumeFields("Container")[3], runVolumeFields("Container")[4], runVolumeFields("Container")[5],
 		runSettingsFields("Settings", true)[0], runSettingsFields("Settings", true)[1], runSettingsFields("Settings", true)[2],
-		runSettingsFields("Settings", true)[3], runSettingsFields("Settings", true)[4],
+		runSettingsFields("Settings", true)[3], runSettingsFields("Settings", true)[4], runSettingsFields("Settings", true)[5],
+		runSettingsFields("Settings", true)[6], runSettingsFields("Settings", true)[7], runSettingsFields("Settings", true)[8],
 		{
 			Name: "cpu", Label: "CPU limit", Type: "text",
 			Help:    `Optional, as Kubernetes quantities: "1", "500m".`,

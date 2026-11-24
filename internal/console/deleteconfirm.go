@@ -241,10 +241,6 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"vpc-firewalls": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/firewall/docs/using-firewalls", Verified: true},
 	// "Click Delete again to confirm."
 	"vpc-routes": {Style: DeleteConfirmClick, Source: "https://docs.cloud.google.com/vpc/docs/using-routes", Verified: true},
-	// Private Service Connect endpoints (#2141). UNVERIFIED: the dialog is
-	// not described (docs re-read 2026-11-22:
-	// https://docs.cloud.google.com/vpc/docs/configure-private-service-connect-services).
-	"vpc-psc": unverified,
 	// Service connection policies (#2141). UNVERIFIED: the dialog is not
 	// described (docs re-read 2026-11-22:
 	// https://docs.cloud.google.com/vpc/docs/configure-service-connection-policies).
@@ -254,6 +250,11 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// click Delete." No dialog described (docs re-read 2026-11-20:
 	// https://docs.cloud.google.com/compute/docs/disks/manage-snapshots).
 	"compute-snapshots": unverified,
+	// Compute Engine machine images (#2139). UNVERIFIED: "Select the
+	// machine images you want to delete, then click Delete." No dialog
+	// described (docs re-read 2026-11-22:
+	// https://docs.cloud.google.com/compute/docs/machine-images/manage-machine-images).
+	"compute-machine-images": unverified,
 }
 
 // deleteConfirmOf is p's confirmation style, empty for the default.

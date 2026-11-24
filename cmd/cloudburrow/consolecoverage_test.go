@@ -67,8 +67,13 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceMonitoring: {Providers: []string{"monitoring-explorer", "monitoring-metrics", "monitoring-alerting", "monitoring-incidents",
 		"monitoring-channels", "monitoring-uptime", "monitoring-dashboards", "monitoring-groups", "monitoring-services", "monitoring-snoozes"}},
 	// VPC network (#1936): the Compute Engine API's networking.
-	config.ServiceCompute: {Providers: []string{"vpc-networks", "vpc-firewalls", "vpc-routes", "vpc-addresses", "vpc-psc", "psc-policies",
-		"compute-instances", "compute-disks", "compute-snapshots", "compute-images", "compute-machinetypes", "compute-metadata"}},
+	config.ServiceCompute: {Providers: []string{"vpc-networks", "vpc-firewalls", "vpc-routes", "vpc-addresses",
+		"compute-instances", "compute-disks", "compute-snapshots", "compute-images", "compute-machinetypes", "compute-metadata",
+		"vpc-subnets", "vpc-peering", "hybrid-routers", "netservices-nat", "vpc-sharedvpc", "netservices-psc-endpoints", "netservices-psc-published", "psc-policies", "vpc-connectors", "vpc-addresses-internal", "vpc-routes-effective",
+		"compute-instance-schedules", "compute-snapshot-schedules", "compute-instance-templates", "compute-instance-groups",
+		"compute-machine-images", "compute-ssh-keys",
+		// Cloud Load Balancing (#2153).
+		"netservices-lb", "netservices-lb-backends", "netservices-lb-frontends", "compute-healthchecks", "compute-negs", "netservices-lb-certs"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable

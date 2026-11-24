@@ -218,6 +218,8 @@ func (s *Server) deleteNetwork(project, name string) (obj, error) {
 		}
 	}
 	delete(s.res, rel)
+	// Its peers' peerings to it go INACTIVE (#2140).
+	s.resyncPeersLocked(rel)
 	if name == "default" {
 		s.defaultDeleted[project] = true
 	}
@@ -239,12 +241,19 @@ func (s *Server) networkUsersLocked(rel string) []string {
 			if str(r, "network") == rel {
 				users = append(users, k)
 			}
+		case strings.Contains(k, "/routers/"):
+			// A Cloud Router (#2140) keeps its network.
+			if str(r, "network") == rel {
+				users = append(users, k)
+			}
 		case strings.Contains(k, "/global/routes/"):
 			if str(r, "network") == rel && r["_system"] == nil {
 				users = append(users, k)
 			}
 		}
 	}
+	// Private Service Connect endpoints (#2140).
+	users = append(users, s.pscUsersLocked(rel)...)
 	sort.Strings(users)
 	if s.opts.NetworkUsers != nil {
 		users = append(users, s.opts.NetworkUsers(rel)...)

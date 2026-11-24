@@ -16,8 +16,9 @@ import (
 // TestVPCNetworkThroughTheBrowser (#1936), in a shard whose instance serves
 // the compute service. From the drawer's Networking row, VPC network's
 // pages: Create VPC network (custom, with a first subnet) on its create
-// page; on the network's page Add subnet and, on the subnet's row, Expand
-// IP range; Create firewall rule on Firewall; Create route on Routes;
+// page; on the network's page Add subnet and, on the subnet's page, Edit's
+// wider IP range; Create firewall rule on Firewall policies (Specified
+// protocols and ports, TCP 22); Create route on Routes;
 // Reserve internal static IP address and Allocate IP range for private
 // services access on IP addresses, then Release; each change is read back
 // through the console API from the compute.Server the Compute Engine API
@@ -62,7 +63,8 @@ func TestVPCNetworkThroughTheBrowser(t *testing.T) {
 		t.Fatalf("the network made on the page reads %s", body)
 	}
 
-	// The network's page: Add subnet, an overlap refused, Expand IP range.
+	// The network's page: Add subnet, an overlap refused, and the subnet's
+	// Edit widening its range (#2140).
 	p.follow("browser-vpc")
 	p.waitFor(`location.pathname.endsWith("browser-vpc")`)
 	p.pageAction("Add subnet", map[string]string{"name": "browser-sub2", "region": "us-east1", "ipCidrRange": "10.60.0.0/24"}, "")
@@ -82,16 +84,17 @@ func TestVPCNetworkThroughTheBrowser(t *testing.T) {
 	p.forgive()
 	p.clickText(".modal.is-open button", "Cancel")
 	p.waitFor(`document.querySelector(".modal") === null`)
-	p.rowAction("Subnets", "browser-sub2", "Expand IP range", map[string]string{"ipCidrRange": "10.60.0.0/22"}, "")
+	p.navigate("/networking/networks/list/browser-vpc/subnets/us-east1/browser-sub2?project=" + project)
+	p.editAnywhere(map[string]string{"ipCidrRange": "10.60.0.0/22"})
 	if body := detail("browser-vpc", "subnets", "us-east1", "browser-sub2"); !strings.Contains(body, "10.60.0.0/22") {
-		t.Errorf("Expand IP range: the subnet reads %s", body)
+		t.Errorf("the subnet's Edit: the subnet reads %s", body)
 	}
 
-	// Firewall.
+	// Firewall policies.
 	p.navigate("/networking/firewalls/list?project=" + project)
 	p.clickText("#view button", "Create firewall rule")
 	p.submitForm(map[string]string{"name": "browser-allow-ssh", "network": "browser-vpc", "sourceRanges": "35.235.240.0/20",
-		"protocols": "tcp:22"}, "name")
+		"protocolsMode": "specified", "tcp": "true", "tcpPorts": "22"}, "name")
 	p.waitFor(`location.pathname === "/networking/firewalls/list" && ` + rowWith("browser-allow-ssh"))
 	if body := resources("vpc-firewalls"); !strings.Contains(body, `"Protocols / ports":"tcp:22"`) {
 		t.Errorf("the firewall rule made on the page reads %s", body)
@@ -101,16 +104,17 @@ func TestVPCNetworkThroughTheBrowser(t *testing.T) {
 	p.navigate("/networking/routes/list?project=" + project)
 	p.clickText("#view button", "Create route")
 	p.submitForm(map[string]string{"name": "browser-route", "network": "browser-vpc", "destRange": "192.168.10.0/24",
-		"nextHop": "Specify an IP address", "nextHopIp": "10.50.0.9"}, "name")
+		"nextHop": "Specify IP address of an instance", "nextHopIp": "10.50.0.9"}, "name")
 	p.waitFor(`location.pathname === "/networking/routes/list" && ` + rowWith("browser-route"))
 	if body := resources("vpc-routes"); !strings.Contains(body, "10.50.0.9") {
 		t.Errorf("the route made on the page reads %s", body)
 	}
 
-	// IP addresses: an internal address and a private services access range.
-	p.navigate("/networking/addresses/list?project=" + project)
+	// IP addresses' Internal IP addresses tab (#2140): an internal address
+	// and a private services access range.
+	p.navigate("/networking/addresses/internal?project=" + project)
 	vpcListAction(p, "reserve-internal", map[string]string{"name": "browser-int", "network": "browser-vpc", "region": "us-central1",
-		"subnetwork": "browser-sub", "address": "10.50.0.20"})
+		"subnetwork": "browser-sub", "assign": "Let me choose", "address": "10.50.0.20"})
 	vpcListAction(p, "allocate-psa", map[string]string{"name": "browser-psa", "network": "browser-vpc", "prefixLength": "20"})
 	p.waitFor(rowWith("browser-int") + " && " + rowWith("browser-psa"))
 	var l struct {
@@ -120,7 +124,7 @@ func TestVPCNetworkThroughTheBrowser(t *testing.T) {
 			Target []string
 		}
 	}
-	if err := json.Unmarshal([]byte(resources("vpc-addresses")), &l); err != nil || len(l.Items) != 2 {
+	if err := json.Unmarshal([]byte(resources("vpc-addresses-internal")), &l); err != nil || len(l.Items) != 2 {
 		t.Fatalf("addresses after Reserve: %v %+v", err, l)
 	}
 	for _, it := range l.Items {
@@ -169,5 +173,27 @@ func vpcListAction(p *tab, id string, values map[string]string) {
 	p.eval(`[...document.querySelectorAll(".modal.is-open .form-error")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ")`, &refusal)
 	if refusal != "" {
 		p.t.Fatalf("%s was refused: %s", id, refusal)
+	}
+}
+
+// editAnywhere takes the resource page's Edit, a dialog or a page of its
+// own, sets values, saves, and waits for it to close.
+func (p *tab) editAnywhere(values map[string]string) {
+	p.t.Helper()
+	p.clickText("#view .page-actions button, #view .page-actions a, #view #detail-edit", "Edit")
+	p.waitFor(`document.querySelector(".modal.is-open form, form.edit-page") !== null`)
+	var scope string
+	p.eval(`document.querySelector(".modal.is-open form") ? ".modal.is-open form" : "form.edit-page"`, &scope)
+	for id, v := range values {
+		p.setField(scope+" #f-"+id, v)
+	}
+	p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(%q);
+		const b = f.querySelector('button[type="submit"]') || document.querySelector("#edit-page-save"); b.click(); return true; })()`, scope), nil)
+	p.waitFor(fmt.Sprintf(`document.querySelector(%q) === null ||
+		[...document.querySelectorAll(%q)].some((e) => !e.hidden && e.textContent)`, scope, scope+" .form-error"))
+	var refused string
+	p.eval(fmt.Sprintf(`[...document.querySelectorAll(%q)].filter((e) => !e.hidden).map((e) => e.textContent).join(" ")`, scope+" .form-error"), &refused)
+	if refused != "" {
+		p.t.Fatalf("Save was refused: %s", refused)
 	}
 }

@@ -29,6 +29,7 @@ const (
 // runTabOf is the service tab each edit-form field is on; a field not named
 // is on Containers.
 var runTabOf = map[string]string{
+	"vpcMode": "networking", "vpcNetwork": "networking", "vpcSubnet": "networking", "vpcTags": "networking",
 	"vpcConnector": "networking", "vpcEgress": "networking", "sessionAffinity": "networking",
 	"serviceAccount": "security", "encryptionKey": "security",
 	"minInstances": "scaling", "maxInstances": "scaling", "cpuUtilization": "scaling",

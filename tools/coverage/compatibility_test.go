@@ -95,6 +95,7 @@ var compatSections = map[string]string{
 	"dataformv1beta1":  "## Dataform v1beta1 — `google.cloud.dataform.v1beta1`",
 	"apphub":           "## App Hub — `google.cloud.apphub.v1`",
 	"trace":            "## Cloud Trace — `google.devtools.cloudtrace.v1` and `v2`",
+	"vpcaccess":        "## Serverless VPC Access — `google.cloud.vpcaccess.v1`",
 	"workflows":        "## Workflows — `google.cloud.workflows.v1` and `google.cloud.workflows.executions.v1`",
 	// The Kubernetes Engine API (#1913), named by gRPC method.
 	"gke": "## Kubernetes Engine API — `google.container.v1`",

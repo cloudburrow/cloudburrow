@@ -47,7 +47,7 @@ Do not edit these files by hand.
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [API Keys API (v2)](apikeys.md) | 9 | 9 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Firebase Rules API (v1)](firebaserules.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Compute Engine API (v1): VPC networking](compute.md) | 174 | 80 | 0 | 64 | 30 | 0 | 0 | 0 |
+| [Compute Engine API (v1): VPC networking](compute.md) | 532 | 161 | 0 | 110 | 261 | 0 | 0 | 0 |
 | [Network Connectivity API (v1)](networkconnectivity.md) | 62 | 18 | 0 | 44 | 0 | 0 | 0 | 0 |
 | [Cloud Storage companion APIs (Batch Operations, Insights, Transfer v1)](storagejobs.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Backup and DR Service API (v1)](backupdr.md) | 61 | 47 | 0 | 14 | 0 | 0 | 0 | 0 |
@@ -63,6 +63,7 @@ Do not edit these files by hand.
 | [Dataform (v1beta1)](dataformv1beta1.md) | 81 | 79 | 0 | 0 | 2 | 0 | 0 | 0 |
 | [App Hub (v1)](apphub.md) | 31 | 31 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Trace API (v1 and v2)](trace.md) | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Serverless VPC Access (v1)](vpcaccess.md) | 4 | 4 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Workflows and Workflow Executions (v1)](workflows.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Kubernetes Engine API (v1)](gke.md) | 37 | 37 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery sharing (Analytics Hub) API (v1)](analyticshub.md) | 29 | 28 | 0 | 0 | 1 | 0 | 0 | 0 |

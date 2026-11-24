@@ -54,6 +54,7 @@ require (
 	cloud.google.com/go/storageinsights v1.10.1
 	cloud.google.com/go/storagetransfer v1.21.1
 	cloud.google.com/go/trace v1.18.1
+	cloud.google.com/go/vpcaccess v1.16.1
 	cloud.google.com/go/workflows v1.22.1
 	github.com/Eyevinn/mp4ff v0.63.0
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace v1.39.0

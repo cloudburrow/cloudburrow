@@ -20,8 +20,9 @@ import (
 // and PENDING otherwise ("it stays in a PENDING state until that project
 // is added"), read again each time, so removing a project closes its
 // connection. A VM of the network reaches the producer at the endpoint's
-// address: the guest's ruleset sends it on (vpc.go). Load balancing
-// forwarding rules are not served.
+// address: the guest's ruleset sends it on (vpc.go). The forwardingRules
+// collection itself is psc.go's (#2140), which takes these targets as well
+// as the service attachments it keeps; load balancers' rules are lbrules.go's.
 
 // ServiceAttachmentFunc resolves a service attachment
 // (projects/P/regions/R/serviceAttachments/N) for an endpoint of
@@ -29,73 +30,6 @@ import (
 // ok is false when no producer publishes it. It is called with the
 // server's lock held, and must not call back into it.
 type ServiceAttachmentFunc func(attachment, consumer string) (target PrivateService, accepted, ok bool)
-
-func (s *Server) insertForwardingRule(project, region string, b obj) (obj, error) {
-	name := str(b, "name")
-	if err := checkName("resource.name", name); err != nil {
-		return nil, err
-	}
-	scope := "regions/" + region
-	rel := "projects/" + project + "/" + scope + "/forwardingRules/" + name
-	if _, ok := s.res[rel]; ok {
-		return nil, errf(http.StatusConflict, "alreadyExists", "The resource '%s' already exists", rel)
-	}
-	target := str(b, "target")
-	if target == "" {
-		return nil, required("resource.target")
-	}
-	attach := Rel(target, project)
-	if !strings.Contains(attach, "/serviceAttachments/") {
-		return nil, unimplemented("a forwarding rule whose target is %s: only Private Service Connect endpoints (a service attachment target) are served", target)
-	}
-	if s.opts.ServiceAttachment == nil {
-		return nil, notFound(attach)
-	}
-	if _, _, ok := s.opts.ServiceAttachment(attach, project); !ok {
-		return nil, notFound(attach)
-	}
-	if lb := str(b, "loadBalancingScheme"); lb != "" {
-		return nil, invalid("Invalid value for field 'resource.loadBalancingScheme': '%s'. A Private Service Connect forwarding rule has no load balancing scheme.", lb)
-	}
-	network := str(b, "network")
-	if network == "" {
-		network = "projects/" + project + "/global/networks/default"
-	}
-	network = Rel(network, project)
-	if !strings.Contains(network, "/") {
-		network = "projects/" + project + "/global/networks/" + network
-	}
-	if _, ok := s.res[network]; !ok {
-		return nil, notFound(network)
-	}
-	ip, addrRel, sub, err := s.endpointAddressLocked(project, region, network, str(b, "IPAddress"), str(b, "subnetwork"))
-	if err != nil {
-		return nil, err
-	}
-	o := obj{"kind": "compute#forwardingRule", "name": name, "selfLink": rel, "region": "projects/" + project + "/" + scope,
-		"IPAddress": ip, "network": network, "target": attach, "pscConnectionId": newID(), "fingerprint": newFingerprint()}
-	if sub != "" {
-		o["subnetwork"] = sub
-	}
-	if d := str(b, "description"); d != "" {
-		o["description"] = d
-	}
-	if v, ok := b["allowPscGlobalAccess"].(bool); ok && v {
-		o["allowPscGlobalAccess"] = true
-	}
-	if l, ok := b["labels"].(map[string]any); ok && len(l) > 0 {
-		o["labels"] = l
-	}
-	o["labelFingerprint"] = labelFingerprint(o["labels"])
-	o["id"], o["creationTimestamp"] = newID(), s.stamp()
-	s.pscStatusLocked(o)
-	if addrRel != "" {
-		a := s.res[addrRel]
-		a["status"], a["users"] = "IN_USE", []any{rel}
-	}
-	s.res[rel] = norm(o)
-	return s.done(project, scope, "insert", rel, s.res[rel]["id"])
-}
 
 // endpointAddressLocked is an endpoint's address: a reserved regional
 // internal address (its name, link or IP) of network, or, unset, the
@@ -119,7 +53,7 @@ func (s *Server) endpointAddressLocked(project, region, network, ref, sub string
 		if !ok {
 			return "", "", "", notFound(addrRel)
 		}
-		if str(a, "addressType") != "INTERNAL" || lastSeg(str(a, "region")) != region {
+		if pu := str(a, "purpose"); str(a, "addressType") != "INTERNAL" || lastSeg(str(a, "region")) != region || (pu != "" && pu != "GCE_ENDPOINT") {
 			return "", "", "", invalid("Invalid value for field 'resource.IPAddress': '%s'. A Private Service Connect endpoint's address must be a regional internal address in region '%s'.", ref, region)
 		}
 		if str(a, "network") != network {
@@ -176,13 +110,23 @@ func (s *Server) endpointAddressLocked(project, region, network, ref, sub string
 	return "", "", "", errf(http.StatusBadRequest, "ipSpaceExhausted", "IP space of '%s' is exhausted.", sub)
 }
 
-// pscStatusLocked sets o's pscConnectionStatus from its producer's accept
-// list now: ACCEPTED, PENDING, or CLOSED once the attachment is gone.
+// pscStatusLocked sets the pscConnectionStatus of o, an endpoint whose
+// target is another service's attachment (a Cloud SQL instance's), from
+// its producer's accept list now: ACCEPTED, PENDING, or CLOSED once the
+// attachment is gone. An endpoint of an attachment this server keeps
+// (psc.go), of Google APIs, or a load balancer's rule is left as it is.
 func (s *Server) pscStatusLocked(o obj) {
+	t := str(o, "target")
+	if !strings.Contains(t, "/serviceAttachments/") || str(o, "loadBalancingScheme") != "" {
+		return
+	}
+	if _, ok := s.res[t]; ok {
+		return
+	}
 	status := "CLOSED"
 	if s.opts.ServiceAttachment != nil {
 		project := strings.Split(str(o, "selfLink"), "/")[1]
-		if _, accepted, ok := s.opts.ServiceAttachment(str(o, "target"), project); ok {
+		if _, accepted, ok := s.opts.ServiceAttachment(t, project); ok {
 			status = "PENDING"
 			if accepted {
 				status = "ACCEPTED"
@@ -190,62 +134,6 @@ func (s *Server) pscStatusLocked(o obj) {
 		}
 	}
 	o["pscConnectionStatus"] = status
-}
-
-func (s *Server) deleteForwardingRule(project, region, name string) (obj, error) {
-	rel := "projects/" + project + "/regions/" + region + "/forwardingRules/" + name
-	o, ok := s.res[rel]
-	if !ok {
-		return nil, notFound(rel)
-	}
-	for k, a := range s.res {
-		if strings.Contains(k, "/addresses/") {
-			if users := strs(a, "users"); len(users) == 1 && users[0] == rel {
-				delete(a, "users")
-				a["status"] = "RESERVED"
-			}
-		}
-	}
-	delete(s.res, rel)
-	return s.done(project, "regions/"+region, "delete", rel, o["id"])
-}
-
-// forwardingRulesLocked answers the regional forwardingRules collection.
-func (s *Server) forwardingRulesLocked(c call, region string, p []string, get, post, del bool) (obj, error) {
-	n := len(p)
-	rel := "projects/" + c.project + "/regions/" + region + "/forwardingRules"
-	switch {
-	case n == 3 && get:
-		for k, o := range s.res {
-			if strings.HasPrefix(k, rel+"/") {
-				s.pscStatusLocked(o)
-			}
-		}
-		return s.listOut("compute#forwardingRuleList", rel, s.res, c.query)
-	case n == 3 && post:
-		return s.insertForwardingRule(c.project, region, c.body)
-	case n == 4 && get:
-		o, ok := s.res[rel+"/"+p[3]]
-		if !ok {
-			return nil, notFound(rel + "/" + p[3])
-		}
-		s.pscStatusLocked(o)
-		return o, nil
-	case n == 4 && del:
-		if s.automated[rel+"/"+p[3]] {
-			// "You cannot directly delete Private Service Connect endpoints
-			// that are created through service connectivity automation"
-			// (about-service-connection-policies). The wording is UNVERIFIED
-			// (re-read 2026-11-22: the same page quotes no error).
-			return nil, errf(http.StatusBadRequest, "resourceInUseByAnotherResource",
-				"The forwarding rule '%s' was created by service connectivity automation and cannot be deleted directly: "+
-					"decommission the service instance that uses it.", rel+"/"+p[3])
-		}
-		return s.deleteForwardingRule(c.project, region, p[3])
-	case n == 5 && post && p[4] == "setLabels":
-		return s.setLabels(c.project, "regions/"+region, rel+"/"+p[3], c.body)
-	}
-	return nil, unimplemented("%s %s is not served", c.method, strings.Join(p, "/"))
 }
 
 // pscEndpointsLocked are the accepted Private Service Connect endpoints
