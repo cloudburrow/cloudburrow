@@ -523,7 +523,7 @@ func checkDAG(prefix string, k *kfpSpec, compName string, comp kfpComponent, see
 				}
 			}
 		case len(ex.CustomJob) > 0:
-			return apierror.InvalidArgument("%spipeline_spec executor %q is a Vertex AI custom job (customJob), which this instance does not run: CustomJobs are not served", prefix, c.ExecutorLabel)
+			return apierror.InvalidArgument("%spipeline_spec executor %q is a Vertex AI custom job (customJob), which this instance does not run: use a container executor (Google Cloud Pipeline Components' CustomTrainingJobOp runs a CustomJob)", prefix, c.ExecutorLabel)
 		default:
 			return apierror.InvalidArgument("%spipeline_spec executor %q has no container, importer or resolver", prefix, c.ExecutorLabel)
 		}

@@ -206,6 +206,8 @@ func (s *Server) runTrainingPipeline(ctx context.Context, e *trainingEntry, pare
 	done, err := s.waitCustomJob(ctx, job.GetName())
 	switch {
 	case ctx.Err() != nil:
+		// Cancelling the pipeline cancels its backing CustomJob.
+		_, _ = (&jobService{s: s}).CancelCustomJob(context.Background(), &aiplatformpb.CancelCustomJobRequest{Name: job.GetName()})
 		fail(codes.Canceled, "CANCELED")
 		return
 	case err != nil:

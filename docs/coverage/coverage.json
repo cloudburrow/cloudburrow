@@ -6529,9 +6529,9 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Implemented": 3,
-      "Unimplemented": 12,
-      "Verified": 151
+      "Implemented": 5,
+      "Unimplemented": 32,
+      "Verified": 164
     },
     "rows": [
       {
@@ -6667,6 +6667,199 @@
         "method": "google.cloud.aiplatform.v1.GenAiCacheService/UpdateCachedContent",
         "status": "Implemented",
         "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelBatchPredictionJob",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelCustomJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelDataLabelingJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelHyperparameterTuningJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelNasJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateBatchPredictionJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateCustomJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateDataLabelingJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateHyperparameterTuningJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateModelDeploymentMonitoringJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateNasJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteBatchPredictionJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteCustomJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteDataLabelingJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteHyperparameterTuningJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteModelDeploymentMonitoringJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteNasJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetBatchPredictionJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetCustomJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetDataLabelingJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetHyperparameterTuningJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetModelDeploymentMonitoringJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetNasJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetNasTrialDetail",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListBatchPredictionJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListCustomJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListDataLabelingJobs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListHyperparameterTuningJobs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListModelDeploymentMonitoringJobs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListNasJobs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListNasTrialDetails",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/PauseModelDeploymentMonitoringJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ResumeModelDeploymentMonitoringJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/SearchModelDeploymentMonitoringStatsAnomalies",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/UpdateModelDeploymentMonitoringJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.aiplatform.v1.LlmUtilityService/ComputeTokens",
@@ -7196,22 +7389,27 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/CancelTrainingPipeline",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
+        "status": "Implemented",
+        "note": "no official-SDK test can reach it: Served (#2210): cancels the pipeline and its backing CustomJob, as CancelCustomJob does (TestVertexAICustomTraining verifies CancelCustomJob); no compat test cancels a training pipeline yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/CreatePipelineJob",
         "status": "Verified",
         "tests": [
+          "test/compat/jobs2210_test.go:392 TestPipelineTemplates",
           "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs",
           "test/compat/pipelines2205_test.go:283 TestVertexAIPipelineResolverAndLimits",
-          "test/compat/pipelines2205_test.go:74 TestPythonKFPControlFlow"
+          "test/compat/pipelines2205_test.go:74 TestPythonKFPControlFlow",
+          "test/compat/pipelines2210_test.go:144 TestPythonGCPC"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/CreateTrainingPipeline",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining",
+          "test/compat/pipelines2210_test.go:144 TestPythonGCPC"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/DeletePipelineJob",
@@ -7222,8 +7420,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/DeleteTrainingPipeline",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/GetPipelineJob",
@@ -7231,13 +7431,17 @@
         "tests": [
           "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs",
           "test/compat/pipelines2205_test.go:283 TestVertexAIPipelineResolverAndLimits",
-          "test/compat/pipelines2205_test.go:74 TestPythonKFPControlFlow"
+          "test/compat/pipelines2205_test.go:74 TestPythonKFPControlFlow",
+          "test/compat/pipelines2210_test.go:144 TestPythonGCPC"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/GetTrainingPipeline",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining",
+          "test/compat/pipelines2210_test.go:144 TestPythonGCPC"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/ListPipelineJobs",
@@ -7248,8 +7452,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/ListTrainingPipelines",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/DirectPredict",

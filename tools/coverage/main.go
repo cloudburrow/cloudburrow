@@ -242,6 +242,8 @@ var areas = []area{
 		"google.cloud.aiplatform.v1.NotebookService", "google.cloud.aiplatform.v1.ScheduleService",
 		// Vertex AI Pipelines' pipeline jobs (#2173).
 		"google.cloud.aiplatform.v1.PipelineService",
+		// Custom training and batch prediction jobs (#2210).
+		"google.cloud.aiplatform.v1.JobService",
 		// Vertex ML Metadata (#2205).
 		"google.cloud.aiplatform.v1.MetadataService"},
 		// The runtime templates' IAM policies (#2105): the IAMPolicy mixin,

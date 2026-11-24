@@ -38,7 +38,7 @@ func init() {
 		}
 	}
 	// Colab Enterprise (#2105), v1 only as served.
-	for _, s := range []string{"NotebookService", "ScheduleService", "PipelineService", "MetadataService"} {
+	for _, s := range []string{"NotebookService", "ScheduleService", "PipelineService", "MetadataService", "JobService"} {
 		Services["google.cloud.aiplatform.v1."+s] = VertexAI
 	}
 	Services["google.cloud.documentai.v1.DocumentProcessorService"] = DocumentAI

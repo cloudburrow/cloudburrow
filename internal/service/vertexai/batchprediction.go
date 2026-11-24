@@ -20,8 +20,11 @@ package vertexai
 //   - Cloud Storage output goes in a directory
 //     prediction-MODEL_DISPLAY_NAME-JOB_CREATE_TIME under the prefix, its
 //     time in ISO 8601 (YYYY-MM-DDThh:mm:ss.sssZ), as
-//     predictions_00001.jsonl lines {"instance": ..., "prediction": ...}
-//     and errors_00001.jsonl lines {"instance": ..., "error": ...};
+//     prediction.results-00000-of-00001 lines {"instance": ..., "prediction":
+//     ...}, as "Get batch inferences from a custom trained model" names them
+//     (prediction.results-{file_number}-of-{number_of_files_generated}), and
+//     prediction.errors_stats-00000-of-00001 lines {"instance": ...,
+//     "error": ...};
 //     BigQuery output in a dataset prediction_MODEL_DISPLAY_NAME_JOB_CREATE_TIME
 //     (YYYY_MM_DDThh_mm_ss_sssZ) of the output_uri's project, its tables
 //     predictions and errors; output_info names them;
@@ -30,8 +33,12 @@ package vertexai
 //     the instances per request; model_parameters are each request's
 //     parameters.
 //
-// UNVERIFIED: the output files' names and the errors table's columns
-// beyond instance and error (Google's page shows them only as examples).
+// UNVERIFIED (re-read 2026-11-24,
+// https://docs.cloud.google.com/vertex-ai/docs/predictions/get-batch-predictions
+// and the BatchPredictionJob proto): the file number's padding, the errors
+// file's name (the page names none; the proto's output_config, written for
+// AutoML, names predictions_0001 and errors_0001 files) and the errors
+// table's columns beyond instance and error.
 
 import (
 	"context"
@@ -257,7 +264,7 @@ func (s *Server) runBatchJob(ctx context.Context, e *batchJobEntry, runner Pipel
 
 func batchErrorsAt(info *aiplatformpb.BatchPredictionJob_OutputInfo) string {
 	if d := info.GetGcsOutputDirectory(); d != "" {
-		return d + "/errors_00001.jsonl"
+		return d + "/prediction.errors_stats-00000-of-00001"
 	}
 	return info.GetBigqueryOutputDataset() + ".errors"
 }
@@ -509,7 +516,7 @@ func (s *Server) writePredictions(ctx context.Context, job *aiplatformpb.BatchPr
 	}
 	write := func(file string, rows []any) error {
 		var b strings.Builder
-		if oc.GetPredictionsFormat() == "csv" && strings.HasPrefix(file, "predictions") {
+		if oc.GetPredictionsFormat() == "csv" && strings.HasPrefix(file, "prediction.results") {
 			w := csv.NewWriter(&b)
 			_ = w.Write([]string{"instance", "prediction"})
 			for _, r := range rows {
@@ -526,20 +533,20 @@ func (s *Server) writePredictions(ctx context.Context, job *aiplatformpb.BatchPr
 				b.WriteByte('\n')
 			}
 		}
-		return runner.WriteObject(ctx, bucket, object+"/"+file, "application/jsonl", []byte(b.String()))
+		ctype := "application/jsonl"
+		if oc.GetPredictionsFormat() == "csv" && strings.HasPrefix(file, "prediction.results") {
+			ctype = "text/csv"
+		}
+		return runner.WriteObject(ctx, bucket, object+"/"+file, ctype, []byte(b.String()))
 	}
-	ext := "jsonl"
-	if oc.GetPredictionsFormat() == "csv" {
-		ext = "csv"
-	}
-	if err := write("predictions_00001."+ext, preds); err != nil {
+	if err := write("prediction.results-00000-of-00001", preds); err != nil {
 		return nil, err
 	}
 	var er []any
 	for _, e := range errs {
 		er = append(er, e)
 	}
-	if err := write("errors_00001.jsonl", er); err != nil {
+	if err := write("prediction.errors_stats-00000-of-00001", er); err != nil {
 		return nil, err
 	}
 	return &aiplatformpb.BatchPredictionJob_OutputInfo{OutputLocation: &aiplatformpb.BatchPredictionJob_OutputInfo_GcsOutputDirectory{GcsOutputDirectory: dir}}, nil

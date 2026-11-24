@@ -10,7 +10,9 @@ package main
 // artifact its type, storage location (URI) and metrics, with Open in ML
 // Metadata.
 //
-// UNVERIFIED (Google's docs show neither): how nested DAGs, conditions and
+// UNVERIFIED (re-read 2026-11-24,
+// https://docs.cloud.google.com/vertex-ai/docs/pipelines/visualize-pipeline,
+// which shows neither): how nested DAGs, conditions and
 // loops are drawn (here a DAG node expands in place, each loop iteration a
 // DAG of its own), the Expand artifacts switch's label, and how a cached
 // step's status is worded ("Cached" here, the task SKIPPED with a CACHED

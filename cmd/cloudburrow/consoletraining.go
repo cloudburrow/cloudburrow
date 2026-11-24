@@ -373,7 +373,7 @@ func (trainingPipelinesProvider) CreateForm() (string, []console.Field) {
 			OptionLabels: map[string]string{"new": "Train new model", "version": "Train new version"}},
 		{Name: "displayName", Label: "Name", Type: "text", Required: true, Section: "Model details", Pattern: `^.{1,128}$`,
 			Help: "The training pipeline's name, and the model's."},
-		{Name: "parentModel", Label: "Model", Type: "text", Section: "Model details", ShowWhen: "modelMode=version", Pattern: `^(projects/[^/]+/locations/[^/]+/models/[^/@]+|[a-z0-9_-]+)?$`,
+		{Name: "parentModel", Label: "Model", Type: "text", Section: "Model details", ShowWhen: "modelMode=version", Pattern: `^(projects/[^\/]+/locations/[^\/]+/models/[^\/@]+|[a-z0-9_\-]+)?$`,
 			Help: "The model to add a version to: its ID, or projects/PROJECT/locations/REGION/models/ID."},
 		{Name: "container", Label: "Training container", Type: "radio", Section: "Training container", Options: []string{"prebuilt", "custom"}, Default: "custom",
 			OptionLabels: map[string]string{"prebuilt": "Prebuilt container", "custom": "Custom container"}},
