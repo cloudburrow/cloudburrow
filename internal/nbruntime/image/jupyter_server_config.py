@@ -24,3 +24,8 @@ c.ServerApp.shutdown_no_activity_timeout = 0
 c.LabApp.news_url = None
 c.LabApp.check_for_updates_class = "jupyterlab.NeverCheckForUpdate"
 c.LabApp.extension_manager = "readonly"
+# A JupyterLab page's calls to the instance's APIs (Google's Dataproc
+# plugin's browser side calls them itself) go through the server
+# (cloudburrow_endpoints' /cloudburrow-api/ route): nothing but the
+# instance reaches the relay.
+c.ServerApp.jpserver_extensions.update({"cloudburrow_endpoints": True})

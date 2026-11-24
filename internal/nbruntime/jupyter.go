@@ -17,6 +17,8 @@ package nbruntime
 //	host.docker.internal:8083  its Cloud Storage JSON API, when served
 //	host.docker.internal:8084  its Resource Manager (REST)
 //	host.docker.internal:8085  its Service Usage (REST)
+//	host.docker.internal:8086  its Compute Engine API (REST)
+//	host.docker.internal:8087  its Cloud KMS (REST)
 //
 // and one inbound port, 8888, published on the host's loopback alone and
 // relayed to JupyterLab's 8080 on the internal network: the console's
@@ -60,6 +62,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
@@ -96,6 +99,8 @@ const (
 	storagePort      = "8083"
 	rmPort           = "8084"
 	usagePort        = "8085"
+	computePort      = "8086"
+	kmsPort          = "8087"
 )
 
 // IdlePoll is how often an instance's kernel activity is read.
@@ -206,6 +211,7 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 	for _, r := range []struct{ port, addr string }{
 		{relayPort, rest}, {"8081", call(m.Dataproc)}, {metadataPort, metaAddr}, {storagePort, call(m.Storage)},
 		{rmPort, workbenchOnly(colab, m.ResourceManager)}, {usagePort, workbenchOnly(colab, m.ServiceUsage)},
+		{computePort, workbenchOnly(colab, m.Compute)}, {kmsPort, workbenchOnly(colab, m.KMS)},
 	} {
 		a, err := relayTo(r.port, r.addr)
 		if err != nil {
@@ -281,13 +287,7 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 		runArgs = append(runArgs, "-e", "CB_STORAGE_ENDPOINT="+ep+storagePort)
 	}
 	if !colab {
-		runArgs = append(runArgs, gcloudEnv(s.project, m.region(), ep, call(m.Storage) != "", call(m.Dataproc) != "")...)
-		if call(m.ResourceManager) != "" {
-			runArgs = append(runArgs, "-e", "CB_RESOURCEMANAGER_ENDPOINT="+ep+rmPort)
-		}
-		if call(m.ServiceUsage) != "" {
-			runArgs = append(runArgs, "-e", "CB_SERVICEUSAGE_ENDPOINT="+ep+usagePort)
-		}
+		runArgs = append(runArgs, m.gcloudEnv(s.project, ep)...)
 	}
 	if call(m.Dataproc) != "" {
 		runArgs = append(runArgs, "-e", "CB_DATAPROC_ENDPOINT="+dataprocEndpoint,
@@ -390,21 +390,48 @@ func (m *Manager) region() string {
 // Google's JupyterLab plugins read their project, region, credentials and
 // API endpoints from, as on a Workbench VM: its credentials are the
 // metadata server's (GCE_METADATA_ROOT), its endpoints the relay's
-// (api_endpoint_overrides), and it never checks for updates or reports
-// usage.
-func gcloudEnv(project, region, ep string, storage, dataproc bool) []string {
+// (api_endpoint_overrides, in the form the plugins join paths to), and it
+// never checks for updates or reports usage. CB_API_PORTS lists the relay
+// ports the plugins' browser side may reach through the instance's
+// JupyterLab (cloudburrow_endpoints' /cloudburrow-api/PORT/ route).
+func (m *Manager) gcloudEnv(project, ep string) []string {
 	env := []string{"-e", "GCE_METADATA_ROOT=" + relayAlias + ":" + metadataPort,
-		"-e", "CLOUDSDK_CORE_PROJECT=" + project, "-e", "CLOUDSDK_COMPUTE_REGION=" + region, "-e", "CLOUDSDK_DATAPROC_REGION=" + region,
+		"-e", "CLOUDSDK_CORE_PROJECT=" + project, "-e", "CLOUDSDK_COMPUTE_REGION=" + m.region(), "-e", "CLOUDSDK_DATAPROC_REGION=" + m.region(),
 		"-e", "CLOUDSDK_CORE_DISABLE_USAGE_REPORTING=true", "-e", "CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK=true",
 		"-e", "CLOUDSDK_CORE_DISABLE_PROMPTS=1", "-e", "CLOUDSDK_CONFIG=/home/jupyter/.config/gcloud",
-		"-e", "CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY=" + ep + relayPort + "/bigquery/v2/"}
-	if storage {
-		env = append(env, "-e", "CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE="+ep+storagePort)
+		"-e", "CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY=" + ep + relayPort + "/"}
+	ports := []string{relayPort}
+	for _, o := range []struct {
+		f             func() string
+		port, env, ov string
+	}{
+		{m.Storage, storagePort, "", "STORAGE"},
+		{m.Dataproc, "8081", "", "DATAPROC"},
+		{m.ResourceManager, rmPort, "CB_RESOURCEMANAGER_ENDPOINT", "CLOUDRESOURCEMANAGER"},
+		{m.ServiceUsage, usagePort, "CB_SERVICEUSAGE_ENDPOINT", "SERVICEUSAGE"},
+		{m.Compute, computePort, "", "COMPUTE"},
+		{m.KMS, kmsPort, "", "CLOUDKMS"},
+	} {
+		if call(o.f) == "" {
+			continue
+		}
+		url := ep + o.port + "/"
+		switch o.ov {
+		case "STORAGE":
+			// Both the Cloud Storage and Dataproc plugins add the path to a
+			// bare host (gcs_jupyter_plugin's api_endpoint; the Dataproc
+			// plugin's storage/v1/).
+			url = ep + o.port
+		case "COMPUTE":
+			url = ep + o.port + "/compute/v1"
+		}
+		env = append(env, "-e", "CLOUDSDK_API_ENDPOINT_OVERRIDES_"+o.ov+"="+url)
+		if o.env != "" {
+			env = append(env, "-e", o.env+"="+ep+o.port)
+		}
+		ports = append(ports, o.port)
 	}
-	if dataproc {
-		env = append(env, "-e", "CLOUDSDK_API_ENDPOINT_OVERRIDES_DATAPROC="+ep+"8081/")
-	}
-	return env
+	return append(env, "-e", "CB_API_PORTS="+strings.Join(ports, ","))
 }
 
 func call(f func() string) string {
@@ -558,7 +585,30 @@ func (m *Manager) metadataHandler(s *session) http.Handler {
 		return keys
 	}
 	const v1 = "/computeMetadata/v1/"
+	// The access tokens this metadata server gave, which its userinfo
+	// answers for.
+	var mintedMu sync.Mutex
+	minted := map[string]bool{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// OAuth 2.0's userinfo (www.googleapis.com/oauth2/v3/userinfo),
+		// which Google's BigQuery JupyterLab plugin asks for the principal
+		// behind its credentials: an access token of the instance's
+		// service account is that account (sub, email, email_verified);
+		// any other is refused, as Google refuses an invalid token.
+		if r.URL.Path == "/oauth2/v3/userinfo" {
+			bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+			mintedMu.Lock()
+			known := ok && minted[strings.TrimSpace(bearer)]
+			mintedMu.Unlock()
+			if !known {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":"invalid_request","error_description":"Invalid Credentials"}`))
+				return
+			}
+			writeJSON(w, map[string]any{"sub": accountID(email), "email": email, "email_verified": true})
+			return
+		}
 		w.Header().Set("Metadata-Flavor", "Google")
 		if r.Header.Get("Metadata-Flavor") != "Google" {
 			http.Error(w, "Missing Metadata-Flavor:Google header.", http.StatusForbidden)
@@ -698,6 +748,9 @@ func (m *Manager) metadataHandler(s *session) http.Handler {
 					tok = t
 				}
 			}
+			mintedMu.Lock()
+			minted[tok] = true
+			mintedMu.Unlock()
 			writeJSON(w, map[string]any{"access_token": tok, "expires_in": 3599, "token_type": "Bearer"})
 		default:
 			http.NotFound(w, r)

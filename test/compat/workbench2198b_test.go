@@ -85,7 +85,12 @@ func verifyIDToken(t *testing.T, metadataAddr, tok string) map[string]any {
 // the kernel gets one for an audience, standard format (aud, azp, sub,
 // iss); format=full adds email and google.compute_engine (the instance's
 // name, ID, zone and project); every one verifies against the instance's
-// IAM signing keys; a request without an audience is refused.
+// IAM signing keys; a request without an audience is refused. Google's
+// JupyterLab plugins run in it with the instance's gcloud: the Dataproc
+// plugin's credentials are its project and region, its browser-side API
+// URLs the instance's JupyterLab's own routes (which list the clusters),
+// the BigQuery plugin lists projects and datasets, and the Cloud Storage
+// plugin buckets.
 func TestWorkbenchJupyterLabBearerAndIdentity(t *testing.T) {
 	h := New(t)
 	_, clients := workbenchClients(t, h)
@@ -117,8 +122,8 @@ func TestWorkbenchJupyterLabBearerAndIdentity(t *testing.T) {
 	if m == nil {
 		t.Fatalf("proxy_uri %q", in.GetProxyUri())
 	}
-	get := func(auth string) (int, string) {
-		req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+m[2]+"/api/status", nil)
+	getPath := func(path, auth string) (int, string) {
+		req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+m[2]+path, nil)
 		req.Host = in.GetProxyUri()
 		if auth != "" {
 			req.Header.Set("Authorization", auth)
@@ -131,6 +136,7 @@ func TestWorkbenchJupyterLabBearerAndIdentity(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(b)
 	}
+	get := func(auth string) (int, string) { return getPath("/api/status", auth) }
 	if code, _ := get(""); code != http.StatusUnauthorized {
 		t.Errorf("no session and no token = %d, want 401", code)
 	}
@@ -151,8 +157,58 @@ func TestWorkbenchJupyterLabBearerAndIdentity(t *testing.T) {
 		t.Errorf("a bearer token = %d %.200s, want the server's status", code, body)
 	}
 
+	// Google's JupyterLab plugins, as on a Workbench VM, read the
+	// instance's gcloud configuration and reach the instance's APIs.
+	bearer := "Bearer " + tok.AccessToken
+	var creds struct {
+		ProjectID   string `json:"project_id"`
+		RegionID    string `json:"region_id"`
+		ConfigError int    `json:"config_error"`
+		LoginError  int    `json:"login_error"`
+	}
+	if code, body := getPath("/dataproc-plugin/credentials", bearer); code != http.StatusOK || json.Unmarshal([]byte(body), &creds) != nil ||
+		creds.ProjectID != project || creds.RegionID != "us-central1" || creds.ConfigError != 0 || creds.LoginError != 0 {
+		t.Errorf("the Dataproc plugin's credentials = %d project %q region %q errors %d/%d", code, creds.ProjectID, creds.RegionID, creds.ConfigError, creds.LoginError)
+	}
+	var urls map[string]string
+	if code, body := getPath("/dataproc-plugin/getGcpServiceUrls", bearer); code != http.StatusOK || json.Unmarshal([]byte(body), &urls) != nil {
+		t.Errorf("the Dataproc plugin's service URLs = %d %.300s", code, body)
+	}
+	// Its browser side calls the APIs itself, through the instance's
+	// JupyterLab.
+	prefix := "http://" + in.GetProxyUri() + "/cloudburrow-api/"
+	if !strings.HasPrefix(urls["dataproc_url"], prefix) || !strings.HasPrefix(urls["bigquery_url"], prefix) {
+		t.Errorf("the Dataproc plugin's service URLs = %v, want the instance's %s routes", urls, prefix)
+	} else {
+		path := strings.TrimPrefix(urls["dataproc_url"], "http://"+in.GetProxyUri()) + "v1/projects/" + project + "/regions/us-central1/clusters"
+		if code, body := getPath(path, bearer); code != http.StatusOK || !strings.HasPrefix(strings.TrimSpace(body), "{") {
+			t.Errorf("listing clusters from the page = %d %.300s", code, body)
+		}
+	}
+	// Its principal is the instance's service account (OAuth 2.0
+	// userinfo for the instance's token).
+	var identity struct {
+		Principal string `json:"principal"`
+		Project   string `json:"project"`
+	}
+	if code, body := getPath("/bigquery-jupyter-plugin/config", bearer); code != http.StatusOK || json.Unmarshal([]byte(body), &identity) != nil ||
+		!strings.HasSuffix(identity.Principal, ".gserviceaccount.com") || identity.Project != project {
+		t.Errorf("the BigQuery plugin's identity = %d %.300s", code, body)
+	}
+	if code, body := getPath("/bigquery-jupyter-plugin/projects", bearer); code != http.StatusOK || !strings.Contains(body, `"`+project+`"`) {
+		t.Errorf("the BigQuery plugin's projects = %d %.300s", code, body)
+	}
+	if code, body := getPath("/bigquery-jupyter-plugin/datasets?project_id="+project, bearer); code != http.StatusOK || strings.Contains(body, `"error"`) {
+		t.Errorf("the BigQuery plugin's datasets = %d %.300s", code, body)
+	}
+	if code, body := getPath("/gcs-jupyter-plugin/api/storage/listBuckets", bearer); code != http.StatusOK || strings.Contains(body, `"error"`) {
+		t.Errorf("the Cloud Storage plugin's buckets = %d %.300s", code, body)
+	}
+
 	lab := openJupyterLab(t, in.GetProxyUri(), in.GetName())
 	out, status := lab.execute(`
+import subprocess
+print("gcloudproject", subprocess.run(["gcloud", "config", "get", "project"], capture_output=True, text=True).stdout.strip())
 import google.auth.transport.requests, google.oauth2.id_token, os, urllib.request
 print("fetched", google.oauth2.id_token.fetch_id_token(google.auth.transport.requests.Request(), "https://service.example.test"))
 host = os.environ["GCE_METADATA_HOST"]
@@ -191,6 +247,9 @@ print("email", md("email"))
 	if full["aud"] != "https://full.example.test" || full["email"] != email || full["email_verified"] != true || ce == nil ||
 		ce["instance_name"] != id || ce["instance_id"] != in.GetId() || ce["zone"] != "us-central1-a" || ce["project_id"] != project {
 		t.Errorf("the full token's claims = %v", full)
+	}
+	if field("gcloudproject") != project {
+		t.Errorf("gcloud's project in the instance = %q, want %s", field("gcloudproject"), project)
 	}
 	if !strings.Contains(out, "noaudience HTTP 400") {
 		t.Errorf("identity without an audience: %q, want HTTP 400", out)

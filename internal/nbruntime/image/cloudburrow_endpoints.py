@@ -72,6 +72,41 @@ def _gateway(module):
     module.configure_gateway_client_url = local_configure
 
 
+_RELAY = "http://host.docker.internal:"
+_API_PORTS = [p for p in os.environ.get("CB_API_PORTS", "").split(",") if p]
+_API_ROUTE = "cloudburrow-api"
+
+
+def _for_browser(handler, url):
+    """The browser's URL for a relay URL: the instance's JupyterLab's own
+    /cloudburrow-api/PORT/ route (_ApiHandler), on the page's origin."""
+    if not isinstance(url, str) or not url.startswith(_RELAY):
+        return url
+    port, _, rest = url[len(_RELAY):].partition("/")
+    if port not in _API_PORTS:
+        return url
+    base = handler.settings.get("base_url", "/")
+    return "%s://%s%s%s/%s/%s" % (handler.request.protocol, handler.request.host, base, _API_ROUTE, port, rest)
+
+
+def _browser_urls(module):
+    """The Dataproc plugin's browser side calls Google's APIs itself, at the
+    URLs its getGcpServiceUrls answers (the gcloud api_endpoint_overrides,
+    read server-side). Those are the relay's, which only the instance
+    reaches, so the browser is given the instance's own route to each."""
+    handler = module.UrlHandler
+    get = handler.get
+
+    async def local_get(self):
+        url_map = await module.urls.map()
+        self.finish({k: _for_browser(self, v) for k, v in url_map.items()})
+
+    import tornado.web
+
+    local_get.__wrapped__ = get
+    handler.get = tornado.web.authenticated(local_get)
+
+
 def _set(attr, value):
     def patch(module):
         if value and hasattr(module, attr):
@@ -85,7 +120,8 @@ def _set(attr, value):
 _MODULES = {
     "bigquery_jupyter_plugin.services.explorer": _set("_RESOURCE_MANAGER_URL", _RESOURCE_MANAGER and _RESOURCE_MANAGER + "/v1/projects"),
     "bigquery_jupyter_plugin.services.serviceusage": _set("_SERVICE_USAGE_URL", _SERVICE_USAGE and _SERVICE_USAGE + "/v1"),
-    "dataproc_jupyter_plugin.handlers": _gateway,
+    "bigquery_jupyter_plugin.services.credentials": _set("_USERINFO_URL", os.environ.get("GCE_METADATA_HOST") and "http://" + os.environ["GCE_METADATA_HOST"] + "/oauth2/v3/userinfo"),
+    "dataproc_jupyter_plugin.handlers": lambda m: (_gateway(m), _browser_urls(m)),
 }
 
 
@@ -126,3 +162,69 @@ class _Finder:
 
 if os.environ.get("CB_WORKBENCH") and not any(isinstance(f, _Finder) for f in sys.meta_path):
     sys.meta_path.insert(0, _Finder())
+
+
+# The /cloudburrow-api/PORT/ route (#2198): a Jupyter Server extension of a
+# Workbench instance (jupyter_server_config.py), which relays a JupyterLab
+# page's calls to an API of the instance, as the page's calls to
+# *.googleapis.com reach Google. The page is the instance's JupyterLab's,
+# signed in to it; each call is sent with the instance's service account's
+# token, which is the one the page itself holds (the plugins' credentials
+# handler reads gcloud's, from the metadata server).
+def _jupyter_server_extension_points():
+    return [{"module": "cloudburrow_endpoints"}]
+
+
+def _load_jupyter_server_extension(server_app):
+    if not _API_PORTS:
+        return
+    import google.auth
+    import google.auth.transport.requests
+    import tornado.httpclient
+    import tornado.web
+    from jupyter_server.base.handlers import APIHandler
+    from jupyter_server.utils import url_path_join
+
+    creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    client = tornado.httpclient.AsyncHTTPClient()
+
+    class _ApiHandler(APIHandler):
+        def check_xsrf_cookie(self):
+            # The page sends its own Authorization, so Jupyter's token
+            # check, not the XSRF cookie, authenticates it (the console's
+            # proxy adds the server's token).
+            return None
+
+        @tornado.web.authenticated
+        async def _relay(self, port, path):
+            if port not in _API_PORTS:
+                raise tornado.web.HTTPError(404)
+            if not creds.valid:
+                await tornado.ioloop.IOLoop.current().run_in_executor(None, creds.refresh, google.auth.transport.requests.Request())
+            url = _RELAY + port + "/" + path
+            if self.request.query:
+                url += "?" + self.request.query
+            headers = {"Authorization": "Bearer " + creds.token}
+            for h in ("Content-Type", "Accept", "X-Goog-Upload-Protocol", "X-Goog-Upload-Command", "X-Goog-Upload-Offset", "X-Goog-Upload-Header-Content-Type"):
+                if h in self.request.headers:
+                    headers[h] = self.request.headers[h]
+            method = self.request.method
+            body = self.request.body if method in ("POST", "PUT", "PATCH") else None
+            if method in ("POST", "PUT", "PATCH") and body is None:
+                body = b""
+            resp = await client.fetch(url, method=method, headers=headers, body=body, raise_error=False,
+                                      allow_nonstandard_methods=True, request_timeout=600, follow_redirects=False)
+            self.set_status(resp.code if resp.code >= 100 else 502)
+            for h in ("Content-Type", "Location", "X-Goog-Upload-URL", "X-Goog-Upload-Status"):
+                v = resp.headers.get(h)
+                if v:
+                    self.set_header(h, _for_browser(self, v) if h in ("Location", "X-Goog-Upload-URL") else v)
+            if resp.body:
+                self.write(resp.body)
+            await self.finish()
+
+        get = post = put = patch = delete = _relay
+
+    route = url_path_join(server_app.web_app.settings["base_url"], _API_ROUTE, r"(\d+)/(.*)")
+    server_app.web_app.add_handlers(".*$", [(route, _ApiHandler)])
+    server_app.log.info("Relaying JupyterLab's API calls at %s", route)

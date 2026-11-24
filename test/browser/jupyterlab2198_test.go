@@ -60,10 +60,11 @@ func labRunCell(t *testing.T, lab *tab, kernel, code string, want *regexp.Regexp
 	lab.eval(fmt.Sprintf(`[...document.querySelectorAll('.jp-LauncherCard[data-category="Notebook"]')].find((c) => new RegExp(%q).test(c.textContent + " " + (c.title || ""))).click(), true`, kernel), nil)
 	const panel = `.jp-NotebookPanel:not(.lm-mod-hidden):not(.p-mod-hidden)`
 	lab.waitForWithin(`document.querySelector("`+panel+` .jp-Cell .jp-InputArea-editor") !== null`, 2*time.Minute)
-	// The kernel is idle before the cell is run.
-	lab.waitForWithin(`(() => { const s = document.querySelector("`+panel+` .jp-Notebook-ExecutionIndicator, `+panel+` .jp-KernelStatus, .jp-KernelStatus");
-		const st = s && (s.getAttribute("data-status") || s.textContent || "");
-		return /idle/i.test(st) || (!!document.querySelector("`+panel+` .jp-Toolbar-kernelStatus.jp-CircleIcon, `+panel+` [data-status=idle]")); })()`, 3*time.Minute)
+	// The kernel is started and idle before the cell is run: the status
+	// bar names it and reads Idle (JupyterLab 3 and 4 alike); a cell run
+	// before the notebook's session has its kernel is not sent.
+	lab.waitForWithin(`[...document.querySelectorAll("#jp-main-statusbar *")].some((e) => e.children.length === 0 && /^(?!No Kernel).+\|\s*Idle$/.test(e.textContent.trim()))`, 3*time.Minute)
+	time.Sleep(2 * time.Second)
 	lab.run(chromedp.Click(chromedp.CSS(panel + ` .jp-Cell .jp-InputArea-editor`)))
 	lab.run(cmd(input.InsertText, input.InsertTextParams{Text: code}))
 	// CodeMirror 5 reads its input on its own poll: the cell holds the code

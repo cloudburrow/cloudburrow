@@ -149,6 +149,10 @@ type Manager struct {
 	// none: a Workbench instance's BigQuery JupyterLab plugin lists
 	// projects and checks the BigQuery API's state there (#2198).
 	ResourceManager, ServiceUsage func() string
+	// Compute and KMS are the instance's Compute Engine and Cloud KMS REST
+	// addresses on the host, "" when not served: the Dataproc JupyterLab
+	// plugin's create pages list regions, networks and keys there.
+	Compute, KMS func() string
 	// Region is the Dataproc region a notebook's sessions are made in;
 	// "" is us-central1.
 	Region string

@@ -6838,7 +6838,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes",
-          "test/compat/workbench2198b_test.go:210 TestColabEnterpriseRuntimeJupyterServer"
+          "test/compat/workbench2198b_test.go:269 TestColabEnterpriseRuntimeJupyterServer"
         ]
       },
       {
@@ -6888,7 +6888,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes",
-          "test/compat/workbench2198b_test.go:210 TestColabEnterpriseRuntimeJupyterServer"
+          "test/compat/workbench2198b_test.go:269 TestColabEnterpriseRuntimeJupyterServer"
         ]
       },
       {
@@ -6932,7 +6932,7 @@
         "tests": [
           "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes",
           "test/compat/pipelines2173_test.go:356 TestIAMEnforcementVertexAIRunIdentity",
-          "test/compat/workbench2198b_test.go:210 TestColabEnterpriseRuntimeJupyterServer"
+          "test/compat/workbench2198b_test.go:269 TestColabEnterpriseRuntimeJupyterServer"
         ]
       },
       {
@@ -7570,7 +7570,7 @@
         "tests": [
           "test/compat/workbench2173_test.go:58 TestWorkbenchInstances",
           "test/compat/workbench2198_test.go:180 TestWorkbenchJupyterLab",
-          "test/compat/workbench2198b_test.go:89 TestWorkbenchJupyterLabBearerAndIdentity"
+          "test/compat/workbench2198b_test.go:94 TestWorkbenchJupyterLabBearerAndIdentity"
         ]
       },
       {
@@ -7579,7 +7579,7 @@
         "tests": [
           "test/compat/workbench2173_test.go:58 TestWorkbenchInstances",
           "test/compat/workbench2198_test.go:180 TestWorkbenchJupyterLab",
-          "test/compat/workbench2198b_test.go:89 TestWorkbenchJupyterLabBearerAndIdentity"
+          "test/compat/workbench2198b_test.go:94 TestWorkbenchJupyterLabBearerAndIdentity"
         ]
       },
       {

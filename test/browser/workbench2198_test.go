@@ -23,8 +23,11 @@ import (
 
 // TestWorkbenchJupyterLabFromTheConsole (#2198): an instance's row's Open
 // JupyterLab opens, in a new window, the instance's own JupyterLab on its
-// proxy_uri host, through the console. In the real JupyterLab UI: the
-// Launcher's Python 3 (ipykernel) notebook, a cell that creates a table in
+// proxy_uri host, through the console. In the real JupyterLab UI: Google's
+// JupyterLab plugins (the Dataproc plugin's Clusters page, from the
+// instance's Dataproc API; the BigQuery Dataset explorer, showing the
+// project's dataset; the Cloud Storage browser); the Launcher's Python 3
+// (ipykernel) notebook, a cell that creates a table in
 // the instance's BigQuery and queries it with Google's client, run with
 // Shift+Enter, whose output is checked; then the Launcher's Terminal, a
 // shell in the instance, whose command's output is checked in the
@@ -105,9 +108,28 @@ func TestWorkbenchJupyterLabFromTheConsole(t *testing.T) {
 		t.Errorf("JupyterLab opened at %s, want the instance's proxy_uri host", host)
 	}
 
+	// Google's JupyterLab plugins, as on a Workbench VM: the Launcher's
+	// Google Cloud Resources (the Dataproc plugin's Clusters and
+	// Serverless), whose Clusters page lists the project's clusters from
+	// the instance's Dataproc API; the BigQuery plugin's Dataset explorer,
+	// whose project opens on the dataset made above; the Cloud Storage
+	// plugin's bucket browser.
+	lab.waitFor(`[...document.querySelectorAll(".jp-Launcher-section")].some((s) => /Google Cloud Resources/.test(s.textContent) && /Clusters/.test(s.textContent) && /Serverless/.test(s.textContent))`)
+	lab.eval(`[...document.querySelectorAll(".jp-LauncherCard")].find((c) => c.textContent.trim() === "Clusters").click(), true`, nil)
+	lab.waitForWithin(`[...document.querySelectorAll(".jp-MainAreaWidget:not(.lm-mod-hidden)")].some((w) => /CREATE CLUSTER/i.test(w.innerText) && /No rows to display|RUNNING|Running/.test(w.innerText))`, 2*time.Minute)
+	lab.run(chromedp.Click(chromedp.CSS(`.jp-SideBar [data-id="bigquery-jupyter-plugin-explorer"]`)))
+	lab.waitForWithin(fmt.Sprintf(`[...document.querySelectorAll("#jp-left-stack > .lm-Widget:not(.lm-mod-hidden) .bq-row.bq-project .bq-label")].some((l) => l.textContent.trim() === %q)`, project), time.Minute)
+	lab.eval(fmt.Sprintf(`[...document.querySelectorAll(".bq-row.bq-project")].find((r) => r.querySelector(".bq-label").textContent.trim() === %q).click(), true`, project), nil)
+	lab.waitForWithin(fmt.Sprintf(`[...document.querySelectorAll(".bq-label")].some((l) => l.textContent.trim() === %q)`, dataset), time.Minute)
+	lab.run(chromedp.Click(chromedp.CSS(`.jp-SideBar [data-id="GCS-bucket-tab"]`)))
+	lab.waitForWithin(`(() => { const p = document.querySelector("#jp-left-stack > .lm-Widget:not(.lm-mod-hidden)"); return !!p && /Google Cloud Storage/.test(p.innerText) && !/error/i.test(p.innerText); })()`, time.Minute)
+	lab.run(chromedp.Click(chromedp.CSS(`.jp-SideBar [data-id="filebrowser"]`)))
+	lab.eval(`(() => { const b = document.querySelector('[data-command="launcher:create"], .jp-ToolbarButtonComponent[title="New Launcher"]'); if (b) b.click(); return true; })()`, nil)
+	lab.waitFor(`document.querySelector(".jp-Launcher:not(.lm-mod-hidden) .jp-LauncherCard[data-category=\"Notebook\"]") !== null`)
+
 	// The Launcher's Python 3 notebook; a cell querying the instance's
 	// BigQuery with Google's client, run with Shift+Enter.
-	lab.run(chromedp.Click(chromedp.CSS(`.jp-LauncherCard[data-category="Notebook"]`)))
+	lab.run(chromedp.Click(chromedp.CSS(`.jp-Launcher:not(.lm-mod-hidden) .jp-LauncherCard[data-category="Notebook"]`)))
 	lab.waitForWithin(`document.querySelector(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .cm-content") !== null`, 2*time.Minute)
 	// The kernel is idle before the cell is run: the toolbar's kernel
 	// name shows it, and its status no longer reads starting or busy.
