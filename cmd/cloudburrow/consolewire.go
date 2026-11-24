@@ -119,6 +119,8 @@ type consoleDeps struct {
 	dataproc *dataprocService
 	// appHub is App Hub (#2110), nil unless enabled.
 	appHub *appHubService
+	// alloyDB is AlloyDB for PostgreSQL (#2191), nil unless enabled.
+	alloyDB *alloyDBService
 	// trace is Cloud Trace (#2118), nil unless enabled.
 	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
@@ -407,6 +409,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceDataproc] && d.dataproc != nil {
 		providers = append(providers, dataprocBatchesProvider{svc: d.dataproc}, dataprocSessionsProvider{svc: d.dataproc}, dataprocTemplatesProvider{svc: d.dataproc},
 			dataprocClustersProvider{svc: d.dataproc}, dataprocJobsProvider{svc: d.dataproc}, dataprocWorkflowsProvider{svc: d.dataproc}, dataprocPoliciesProvider{svc: d.dataproc})
+	}
+	// AlloyDB for PostgreSQL (#2191), in process: Clusters, a cluster's
+	// Overview, Backups, Users and Databases.
+	if enabled[config.ServiceAlloyDB] && d.alloyDB != nil {
+		providers = append(providers, alloyDBProvider{svc: d.alloyDB}, alloyDBBackupsProvider{svc: d.alloyDB})
 	}
 	if enabled[config.ServiceAppHub] && d.appHub != nil {
 		providers = append(providers, appHubProvider{svc: d.appHub}, appHubDiscoveredProvider{svc: d.appHub}, appHubSettingsProvider{svc: d.appHub})
@@ -915,6 +922,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceDataform:         "Dataform",
 	config.ServiceDataproc:         "Serverless for Apache Spark",
 	config.ServiceAppHub:           "App Hub",
+	config.ServiceAlloyDB:          "AlloyDB",
 	config.ServiceTrace:            "Cloud Trace",
 }
 

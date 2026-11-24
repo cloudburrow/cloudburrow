@@ -116,3 +116,52 @@ func CloudSQLMySQLThreadPool(b Backend, image string, maxPoolSize int) Backend {
 	b.ServiceTargetPort = MySQLThreadPoolPort
 	return b
 }
+
+// AlloyDBPoolerPort is AlloyDB's managed connection pooler's port (#2191):
+// Google's 6432, which clients connect to directly.
+const AlloyDBPoolerPort = 6432
+
+// AlloyDBConnectorPoolerPort is the pool the AlloyDB connectors and the
+// Auth Proxy are pooled in: Google keeps them a pool of their own
+// (authproxy_pooler_count). Its clients have been authenticated by the
+// connectors' server-side proxy (the client certificate, and the token of
+// an IAM connection), as Google's is, so it checks no password: only
+// that the role exists, and only from the pod's loopback, where the
+// CLI's port-forward arrives (connectorPoolerHBA).
+const AlloyDBConnectorPoolerPort = 6435
+
+// AlloyDBPoolers are the managed connection poolers beside an AlloyDB
+// instance's server: PgBouncer on AlloyDBPoolerPort, which checks each
+// client's password against the server's (as Cloud SQL's does), and on
+// AlloyDBConnectorPoolerPort for the connectors, with the same settings.
+func AlloyDBPoolers(settings map[string]string) []Sidecar {
+	direct := CloudSQLPooler(AlloyDBPoolerPort, settings)
+	proxied := CloudSQLPooler(AlloyDBConnectorPoolerPort, settings)
+	proxied.Name = PoolerContainer + "-connectors"
+	proxied.Command = []string{"sh", "-c", strings.Replace(poolerScript, poolerHBA, connectorPoolerHBA, 1)}
+	return []Sidecar{direct, proxied}
+}
+
+// poolerHBA is the pooler's hba.conf (poolerScript): trust only for
+// PoolerStatsUser on the console from the pod's loopback, md5 for every
+// other sign-in.
+const poolerHBA = `host pgbouncer ${CLOUDSQL_POOLER_STATS_USER} 127.0.0.1/32 trust
+host pgbouncer ${CLOUDSQL_POOLER_STATS_USER} ::1/128 trust
+host all ${CLOUDSQL_POOLER_STATS_USER} 0.0.0.0/0 reject
+host all ${CLOUDSQL_POOLER_STATS_USER} ::/0 reject
+host all all 0.0.0.0/0 md5
+host all all ::/0 md5
+`
+
+// connectorPoolerHBA is the connectors' pool's: its one client is the
+// connectors' server-side proxy, which reaches it through the CLI's
+// port-forward, on the pod's loopback, once it has checked the client
+// certificate (and an IAM connection's token). So only loopback is
+// trusted; every other address, another pod's or a VM's, is refused,
+// and nothing reaches this pool with no password the way Google's
+// proxy alone reaches its own.
+const connectorPoolerHBA = `host all all 127.0.0.1/32 trust
+host all all ::1/128 trust
+host all all 0.0.0.0/0 reject
+host all all ::/0 reject
+`

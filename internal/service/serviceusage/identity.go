@@ -62,6 +62,10 @@ var serviceAgents = map[string]string{
 	"iap.googleapis.com":                "gcp-sa-iap.iam.gserviceaccount.com",
 	// The Network Security Service Account, its primary agent (#2160).
 	"networksecurity.googleapis.com": "gcp-sa-networksecurity.iam.gserviceaccount.com",
+	// AlloyDB Service Agent, the primary agent of alloydb.googleapis.com,
+	// which uses a cluster's customer-managed key
+	// (docs.cloud.google.com/alloydb/docs/cmek, read 2026-11-23).
+	"alloydb.googleapis.com": "gcp-sa-alloydb.iam.gserviceaccount.com",
 	// Kubernetes Engine Service Agent, the primary agent of
 	// container.googleapis.com.
 	"container.googleapis.com": "container-engine-robot.iam.gserviceaccount.com",

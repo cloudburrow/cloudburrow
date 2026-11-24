@@ -104,6 +104,10 @@ var targetEndpoints = []targetEndpoint{
 	{"DATAFORM", envKey("CLOUDBURROW_DATAFORM_ENDPOINT")},
 	{"DATAPROC", envKey("CLOUDBURROW_DATAPROC_ENDPOINT")},
 	{"APPHUB", envKey("CLOUDBURROW_APPHUB_ENDPOINT")},
+	{"ALLOYDB", envKey("CLOUDBURROW_ALLOYDB_ENDPOINT")},
+	{"ALLOYDB_CONNECTOR", envKey("CLOUDBURROW_ALLOYDB_CONNECTOR_ENDPOINT")},
+	{"ALLOYDB_TLS", envKey("CLOUDBURROW_ALLOYDB_TLS_ENDPOINT")},
+	{"ALLOYDB_CA", envKey("CLOUDBURROW_ALLOYDB_CA_FILE")},
 	{"TRACE", envKey("CLOUDBURROW_TRACE_ENDPOINT")},
 }
 
@@ -267,6 +271,7 @@ var gcloudOverrides = []struct {
 	{"apphub", []string{"APPHUB"}},
 	// Dataproc (#2162): gcloud dataproc's REST, on the Dataproc port.
 	{"dataproc", []string{"DATAPROC"}},
+	{"alloydb", []string{"ALLOYDB"}},
 	// Bigtable's admin REST API, on the Bigtable front's port (#1440).
 	{"bigtableadmin", []string{"BIGTABLE"}},
 	// Spanner's admin REST API and the Firestore Admin API (#1461).

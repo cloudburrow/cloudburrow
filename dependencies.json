@@ -3902,11 +3902,55 @@
         "license": "MIT (Node.js) and DFSG-free Debian packages (see /usr/share/doc/*/copyright)",
         "redistribution": "not published: built locally by the compat test only",
         "scope": "test-only",
-        "usedBy": "test/compat/egresscontainer_test.go (#1981)",
+        "usedBy": "test/compat/egresscontainer_test.go (#1981); test/compat/testdata/alloydbconnectors/Dockerfile builds FROM it too (#2191)",
         "updateFeed": "docker-hub-tag-list",
         "verification": "image-digest",
         "notes": "Multi-arch OCI index, resolved 2026-11-20 with docker buildx imagetools inspect.",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect node:24.11.1-bookworm-slim`."
+      },
+      "alloydbAuthProxy": {
+        "$comment": "Google's AlloyDB Auth Proxy, downloaded by test/compat/testdata/alloydbconnectors/Dockerfile and checked against the SHA-256 its release lists, for the daemon's architecture.",
+        "version": "v1.18.0",
+        "source": "https://github.com/GoogleCloudPlatform/alloydb-auth-proxy",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded into the locally built test image; nothing of it is in the CLI or the repository",
+        "scope": "test-only",
+        "usedBy": "test/compat/alloydbconnectors_test.go (#2191): TestAlloyDBConnectorsSendRealSQL builds test/compat/testdata/alloydbconnectors/Dockerfile locally and runs it on an internal Docker network whose one route is a relay to the instance",
+        "updateFeed": "github-releases",
+        "verification": "release-checksum",
+        "checksums": {
+          "alloydb-auth-proxy.linux.amd64": "sha256:2c6f0e36d41929f28c6fda7a78ae3b2ee98b490598b03c0a0bbf7b0ea03bcf75",
+          "alloydb-auth-proxy.linux.arm64": "sha256:eaec142da7592086c09e4c4e775bef137af878386d03c283fc9bb536c1f01ff6"
+        },
+        "checksumsNote": "Copied from the v1.18.0 release notes' table on 2026-11-23; the arm64 binary built into the image matched it."
+      },
+      "alloydbPythonConnector": {
+        "$comment": "pip install in test/compat/testdata/alloydbconnectors/Dockerfile: Google's google-cloud-alloydb-connector[pg8000] 1.15.0 (Apache-2.0), with pg8000 (BSD-3-Clause) and what pip resolves for them.",
+        "version": "1.15.0",
+        "source": "https://pypi.org/project/google-cloud-alloydb-connector/1.15.0/",
+        "license": "Apache-2.0 (Google's package); BSD-3-Clause (pg8000)",
+        "redistribution": "not published: installed into the locally built test image; nothing of it is in the CLI or the repository",
+        "scope": "test-only",
+        "usedBy": "test/compat/alloydbconnectors_test.go (#2191): TestAlloyDBConnectorsSendRealSQL builds test/compat/testdata/alloydbconnectors/Dockerfile locally and runs it on an internal Docker network whose one route is a relay to the instance",
+        "updateFeed": "pypi",
+        "verification": "built-and-run",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
+      },
+      "alloydbJavaConnector": {
+        "$comment": "Maven's dependency:copy-dependencies in test/compat/testdata/alloydbconnectors/Dockerfile (its pom.xml): Google's com.google.cloud:alloydb-jdbc-connector 1.4.1 (Apache-2.0) and org.postgresql:postgresql 42.7.8 (BSD-2-Clause), with what Maven resolves for them. The JDK and Maven are Debian bookworm's openjdk-17-jdk-headless (GPL-2.0 with the Classpath Exception) and maven (Apache-2.0) packages, installed in the test image only.",
+        "version": "alloydb-jdbc-connector 1.4.1, postgresql 42.7.8",
+        "source": "https://repo1.maven.org/maven2/com/google/cloud/alloydb-jdbc-connector/1.4.1/",
+        "license": "Apache-2.0 (Google's connector); BSD-2-Clause (PostgreSQL JDBC)",
+        "redistribution": "not published: downloaded into the locally built test image; nothing of it is in the CLI or the repository",
+        "scope": "test-only",
+        "usedBy": "test/compat/alloydbconnectors_test.go (#2191): TestAlloyDBConnectorsSendRealSQL builds test/compat/testdata/alloydbconnectors/Dockerfile locally and runs it on an internal Docker network whose one route is a relay to the instance",
+        "updateFeed": "maven-central",
+        "verification": "built-and-run",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
       },
       "iso14496_26Conformance": {
         "version": "ISO/IEC 14496-26:2024 (2nd edition), mpeg4audio-conformance2ndEd_20230125",

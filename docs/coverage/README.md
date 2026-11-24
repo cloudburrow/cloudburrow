@@ -64,6 +64,7 @@ Do not edit these files by hand.
 | [Dataform (v1beta1)](dataformv1beta1.md) | 81 | 81 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Dataproc (v1): clusters, jobs, workflow templates, autoscaling policies and Serverless for Apache Spark](dataproc.md) | 44 | 44 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [App Hub (v1)](apphub.md) | 31 | 31 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [AlloyDB for PostgreSQL (v1)](alloydb.md) | 37 | 37 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Trace API (v1 and v2)](trace.md) | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Serverless VPC Access (v1)](vpcaccess.md) | 4 | 4 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Certificate Manager (v1)](certificatemanager.md) | 30 | 25 | 0 | 0 | 5 | 0 | 0 | 0 |

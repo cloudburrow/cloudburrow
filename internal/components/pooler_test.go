@@ -50,3 +50,39 @@ func TestPoolerHBATrustsOnlyTheStatsUserOnLoopback(t *testing.T) {
 		t.Errorf("the sidecar's stats user is %q, want %q", c.Env["CLOUDSQL_POOLER_STATS_USER"], PoolerStatsUser)
 	}
 }
+
+// TestAlloyDBConnectorPoolerTrustsOnlyLoopback pins AlloyDB's two poolers
+// (#2191): the direct one is Cloud SQL's, password-checked; the
+// connectors' trusts only the pod's loopback, where the CLI's
+// port-forward from the connectors' proxy arrives, and refuses every other
+// address. The replacement must really happen: a no-op would leave the
+// connectors' clients, which send no password, refused.
+func TestAlloyDBConnectorPoolerTrustsOnlyLoopback(t *testing.T) {
+	if !strings.Contains(poolerScript, poolerHBA) {
+		t.Fatal("poolerHBA is not the pooler script's hba.conf")
+	}
+	cs := AlloyDBPoolers(nil)
+	if len(cs) != 2 {
+		t.Fatalf("%d poolers, want 2", len(cs))
+	}
+	direct, proxied := cs[0], cs[1]
+	if direct.Port != AlloyDBPoolerPort || direct.Command[2] != poolerScript {
+		t.Errorf("the direct pooler is not Cloud SQL's on %d", AlloyDBPoolerPort)
+	}
+	if proxied.Port != AlloyDBConnectorPoolerPort {
+		t.Errorf("the connectors' pooler is on %d, want %d", proxied.Port, AlloyDBConnectorPoolerPort)
+	}
+	script := proxied.Command[2]
+	if strings.Contains(script, poolerHBA) || !strings.Contains(script, connectorPoolerHBA) {
+		t.Fatalf("the connectors' pooler does not use connectorPoolerHBA:\n%s", script)
+	}
+	for _, l := range strings.Split(strings.TrimSpace(connectorPoolerHBA), "\n") {
+		f := strings.Fields(l)
+		if f[len(f)-1] == "trust" && f[3] != "127.0.0.1/32" && f[3] != "::1/128" {
+			t.Errorf("rule %q trusts beyond loopback", l)
+		}
+	}
+	if !strings.HasSuffix(strings.TrimSpace(connectorPoolerHBA), "host all all ::/0 reject") {
+		t.Error("the connectors' hba does not end refusing every other address")
+	}
+}
