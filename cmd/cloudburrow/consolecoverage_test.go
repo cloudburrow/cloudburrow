@@ -73,7 +73,16 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 		"compute-instance-schedules", "compute-snapshot-schedules", "compute-instance-templates", "compute-instance-groups",
 		"compute-machine-images", "compute-ssh-keys",
 		// Cloud Load Balancing (#2153).
-		"netservices-lb", "netservices-lb-backends", "netservices-lb-frontends", "compute-healthchecks", "compute-negs", "netservices-lb-certs"}},
+		"netservices-lb", "netservices-lb-backends", "netservices-lb-frontends", "compute-healthchecks", "compute-negs", "netservices-lb-certs",
+		// Cloud Armor, Cloud CDN, IAP and Certificate Manager (#2160).
+		"netsecurity-armor", "netservices-cdn", "security-iap", "security-iap-tcp", "ccm-certificates", "ccm-maps", "ccm-dnsauth", "ccm-issuance",
+		"netsecurity-armor-edge", "netsecurity-armor-waf", "servicemesh-routing",
+		// Trust configs and Client Authentication (#2160).
+		"ccm-trustconfigs", "netsecurity-clientauth", "netsecurity-clienttls", "netsecurity-meshauthz", "netsecurity-authz",
+		// Address groups and Backend Authentication (#2160).
+		"netsecurity-addressgroups", "netsecurity-backendauth",
+		// Secure Web Proxy (#2160).
+		"netsecurity-swp-proxies", "netsecurity-swp-policies", "netsecurity-swp-urllists", "netsecurity-swp-tls"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable

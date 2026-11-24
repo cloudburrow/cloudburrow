@@ -226,7 +226,15 @@ func TestLBHealthChecksNeedTheProbeRangesAllowed(t *testing.T) {
 		}
 		return len(l) == 2
 	})
-	if code, body, _ := get(t, http.DefaultClient, base+"/"); code != http.StatusServiceUnavailable || body != "no healthy upstream" {
+	// A probe that began before the rule was deleted may still pass once:
+	// wait for the proxy to see what getHealth reports.
+	var code int
+	var body string
+	waitFor(t, "no healthy upstream", func() bool {
+		code, body, _ = get(t, http.DefaultClient, base+"/")
+		return code == http.StatusServiceUnavailable
+	})
+	if body != "no healthy upstream" {
 		t.Fatalf("no healthy backend: %d %q", code, body)
 	}
 }

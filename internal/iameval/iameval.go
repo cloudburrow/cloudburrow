@@ -86,6 +86,15 @@ type Request struct {
 	// service-level parents, the resource's first.
 	Own  []Attached
 	Time time.Time
+	// RequestHost and RequestPath are an Identity-Aware Proxy request's
+	// host and URL path, which its bindings' conditions read as
+	// request.host and request.path (#2160).
+	RequestHost, RequestPath string
+	// DestinationIP and DestinationPort are an IAP TCP forwarding
+	// tunnel's destination (#2160), which conditions read as
+	// destination.ip and destination.port; 0 is no port.
+	DestinationIP   string
+	DestinationPort int64
 }
 
 // Attributes are what req's conditions read: resource.name, resource.type,
@@ -95,7 +104,8 @@ func (req Request) Attributes() iamcond.Attributes {
 	if at.IsZero() {
 		at = time.Now()
 	}
-	return iamcond.Attributes{ResourceName: req.Resource, ResourceType: req.Type, ResourceService: req.Service, RequestTime: at}
+	return iamcond.Attributes{ResourceName: req.Resource, ResourceType: req.Type, ResourceService: req.Service, RequestTime: at,
+		RequestHost: req.RequestHost, RequestPath: req.RequestPath, DestinationIP: req.DestinationIP, DestinationPort: req.DestinationPort}
 }
 
 // Access is an access state, in Policy Troubleshooter v3's words.
@@ -392,6 +402,17 @@ func predefinedGrants(role, permission string) bool {
 func basicGrants(role, permission string) (grants, ok bool) {
 	parts := strings.Split(permission, ".")
 	verb := parts[len(parts)-1]
+	// IAP's access permissions (iap.webServiceVersions.accessViaIAP, the
+	// tunnel's and egress's) are not in the basic roles: a project owner
+	// is granted roles/iap.httpsResourceAccessor before reaching an
+	// IAP-secured app, as on Google (#2160; UNVERIFIED against
+	// `gcloud iam roles describe roles/owner`, which the docs point to and
+	// the role catalog here does not carry, re-read 2026-11-22:
+	// https://docs.cloud.google.com/iam/docs/roles-overview).
+	if strings.HasPrefix(permission, "iap.") && (verb == "accessViaIAP" || verb == "egressViaIAP") && strings.HasPrefix(role, "roles/") &&
+		(role == "roles/owner" || role == "roles/editor" || role == "roles/viewer") {
+		return false, true
+	}
 	switch role {
 	case "roles/owner":
 		return true, true

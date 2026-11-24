@@ -16,11 +16,14 @@ import (
 	ahpb "cloud.google.com/go/bigquery/analyticshub/apiv1/analyticshubpb"
 	"cloud.google.com/go/billing/apiv1/billingpb"
 	"cloud.google.com/go/billing/budgets/apiv1/budgetspb"
+	"cloud.google.com/go/certificatemanager/apiv1/certificatemanagerpb"
 	"cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	dfpb "cloud.google.com/go/dataform/apiv1/dataformpb"
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
 	iamv3pb "cloud.google.com/go/iam/apiv3/iampb"
+	"cloud.google.com/go/networksecurity/apiv1/networksecuritypb"
+	"cloud.google.com/go/networkservices/apiv1/networkservicespb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	pmpb "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
@@ -45,15 +48,19 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/analyticshub"
 	"github.com/cloudburrow/cloudburrow/internal/service/apphub"
 	"github.com/cloudburrow/cloudburrow/internal/service/billing"
+	"github.com/cloudburrow/cloudburrow/internal/service/certificatemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
+	"github.com/cloudburrow/cloudburrow/internal/service/iap"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/kmsinventory"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/networkconnectivity"
+	"github.com/cloudburrow/cloudburrow/internal/service/networksecurity"
+	"github.com/cloudburrow/cloudburrow/internal/service/networkservices"
 	"github.com/cloudburrow/cloudburrow/internal/service/parametermanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/privateca"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
@@ -143,6 +150,30 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	vpcaccesspb.RegisterVpcAccessServiceServer(srv, va)
+	// Certificate Manager and IAP alone (#2160): their mixins are other
+	// services' rows.
+	cmSrv, err := certificatemanager.New(certificatemanager.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificatemanagerpb.RegisterCertificateManagerServer(srv, cmSrv)
+	nsSrv, err := networksecurity.New(networksecurity.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	networksecuritypb.RegisterNetworkSecurityServer(srv, nsSrv)
+	nsSrv.RegisterAddressGroups(srv)
+	nsvSrv, err := networkservices.New(networkservices.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	networkservicespb.RegisterNetworkServicesServer(srv, nsvSrv)
+	networkservicespb.RegisterDepServiceServer(srv, nsvSrv)
+	iapSrv, err := iap.New(iap.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	iapSrv.Register(srv)
 	gkeSrv, err := gke.NewServer(nil, gke.Options{Versions: []gke.Version{{GKE: "1.36.4-gke.0", Image: "kindest/node:v1.36.4"}}})
 	if err != nil {
 		t.Fatal(err)

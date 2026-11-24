@@ -38,6 +38,8 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/sysparams"
+	"github.com/cloudburrow/cloudburrow/internal/vmrelay"
+	"google.golang.org/grpc"
 )
 
 // Options configure a Server.
@@ -88,6 +90,39 @@ type Options struct {
 	// LB reaches load balancers' backends (#2153, lbplane.go); nil
 	// reaches only those this package can itself.
 	LB LBBackends
+	// CertMaps is Certificate Manager, which target HTTPS and SSL proxies'
+	// certificate maps name (#2160, lbext.go); nil refuses certificateMap.
+	CertMaps CertificateMaps
+	// IAP is Identity-Aware Proxy, which a backend service's iap enforces
+	// (#2160, lbext.go); nil refuses every request through an IAP-enabled
+	// backend service.
+	IAP IAPGate
+	// NetSec is Network Security, which target HTTPS proxies'
+	// serverTlsPolicy and authorizationPolicy and backend services'
+	// securitySettings.clientTlsPolicy name, and whose authorization
+	// policies target forwarding rules (#2160, lbmtls.go); nil refuses
+	// those fields and authorizes every request.
+	NetSec NetworkSecurity
+	// XDSCredentialDir is where the xDS API's TLS bootstrap files are
+	// written: its CA and each project's workload credentials (#2160,
+	// lbxdssec.go); empty serves only the plaintext bootstrap.
+	XDSCredentialDir string
+	// AuthzExt are Service Extensions' authorization extensions, which a
+	// CUSTOM authorization policy calls (#2160, lbauthzext.go); nil answers
+	// 500 to a request such a policy delegates.
+	AuthzExt AuthzExtensions
+	// SourceTags are the permanent IDs of the tag values a resource carries
+	// (its effective tags), by full resource name
+	// (//compute.googleapis.com/projects/P/zones/Z/instances/ID); nil
+	// gives instances no tags.
+	SourceTags func(fullName string) []int64
+	// Gateways are Secure Web Proxy's gateways, which VMs reach at their
+	// VPC addresses through the relay (#2160, vmrelay.go); nil relays
+	// only load balancers.
+	Gateways RelayGateways
+	// RelayBind is the address the relay listens on, 127.0.0.1 when
+	// empty: where VMs' pods reach this machine (vmrelay.go).
+	RelayBind string
 }
 
 // PrivateService is one private services access endpoint: its address and
@@ -108,6 +143,9 @@ type obj = map[string]any
 // Server is the Compute Engine API's VPC networking.
 type Server struct {
 	opts Options
+
+	xdsOnce sync.Once
+	xdsGRPC *grpc.Server
 
 	mu  sync.Mutex
 	res map[string]obj // by relative name: projects/P/global/networks/N
@@ -146,6 +184,11 @@ type Server struct {
 
 	srv *http.Server
 	ln  net.Listener
+	// relay is the listener VMs' guests relay their connections to load
+	// balancers and gateways through (vmrelay.go).
+	relay *vmrelay.Server
+	// relayAt is the relay's in-cluster address (UseRelayAddress).
+	relayAt func() string
 }
 
 // New returns a Server with its state restored.
@@ -175,6 +218,7 @@ func (s *Server) Start(context.Context) error {
 		go func() { defer s.loops.Done(); s.autoscaleLoop(ctx) }()
 	}
 	s.lbStart()
+	s.startRelay()
 	if s.opts.Addr == "" {
 		return nil
 	}
@@ -196,6 +240,7 @@ func (s *Server) Stop(ctx context.Context) error {
 		s.loops.Wait()
 	}
 	s.lbStop()
+	s.stopRelay()
 	if s.srv == nil {
 		return nil
 	}

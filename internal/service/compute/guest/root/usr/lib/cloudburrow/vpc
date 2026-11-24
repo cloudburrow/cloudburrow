@@ -10,7 +10,14 @@
 #     network, and a static neighbour and forwarding entry per peer VM
 #     (its internal IP, its MAC, its pod IP);
 #   - internal DNS: INSTANCE.ZONE.c.PROJECT.internal of every instance on
-#     the network, in a block of /etc/hosts.
+#     the network, in a block of /etc/hosts;
+#   - the relays (#2160): each VPC address and port of a load balancer or
+#     Secure Web Proxy gateway the instance reaches is redirected (by the
+#     ruleset's relay chain) to a local socat, which opens a connection to
+#     CloudBurrow's relay port and begins it with the PROXY protocol
+#     version 2 header CloudBurrow gave for it (the instance's internal IP,
+#     the address dialled and the instance's guest token), so the load
+#     balancer or proxy sees this instance as the connection's source.
 set -u
 URL="${CLOUDBURROW_GUEST_METADATA}/cloudburrow/vpc"
 RUN=/run/cloudburrow-vpc
@@ -71,6 +78,37 @@ apply() {
   } > "$RUN/hosts"
   cat "$RUN/hosts" > /etc/hosts
   log "vpc0 $addr (VNI $vni), $(wc -l < "$RUN/peers") peers, $(grep -c ' comment ' "$RUN/ruleset") firewall entries"
+  relays
+}
+
+# relays keeps one local socat per "relay LOCAL ADDRESS PORT HEADER" line,
+# restarting them all when the lines or the relay's port change.
+relays() {
+  umask 077
+  sed -n 's/^relay //p' "$RUN/conf" > "$RUN/relays.new"
+  rport=$(val relayport)
+  key="$(val relayhost) $rport $(cat "$RUN/relays.new")"
+  [ "$key" = "$(cat "$RUN/relays.key" 2>/dev/null)" ] && return 0
+  if [ -f "$RUN/relays.pids" ]; then
+    while read -r pid; do kill "$pid" 2>/dev/null; done < "$RUN/relays.pids"
+  fi
+  : > "$RUN/relays.pids"
+  host=$(val relayhost)
+  if [ -z "$host" ]; then
+    hp=${CLOUDBURROW_GUEST_METADATA#*://}; hp=${hp%%/*}; host=${hp%:*}
+  fi
+  if [ -n "$rport" ]; then
+    while read -r lp ip port hdr; do
+      printf '%s' "$hdr" | base64 -d > "$RUN/relay-$lp.hdr"
+      # socat ends an address at an unescaped colon, so the inner
+      # address's colons are escaped.
+      socat TCP-LISTEN:"$lp",bind=127.0.0.1,reuseaddr,fork \
+        SYSTEM:"cat $RUN/relay-$lp.hdr - | socat -t 30 - TCP\:$host\:$rport" </dev/null >/dev/null 2>&1 &
+      echo $! >> "$RUN/relays.pids"
+    done < "$RUN/relays.new"
+  fi
+  printf '%s' "$key" > "$RUN/relays.key"
+  log "relaying $(wc -l < "$RUN/relays.new") load balancer and gateway addresses"
 }
 
 last=""

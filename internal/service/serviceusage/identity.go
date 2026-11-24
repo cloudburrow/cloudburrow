@@ -53,6 +53,12 @@ var serviceAgents = map[string]string{
 	"apphub.googleapis.com": "gcp-sa-apphub.iam.gserviceaccount.com",
 	// Serverless VPC Access Service Agent (#2140).
 	"vpcaccess.googleapis.com": "gcp-sa-vpcaccess.iam.gserviceaccount.com",
+	// Certificate Manager's and Identity-Aware Proxy's primary agents
+	// (docs.cloud.google.com/iam/docs/service-agents, read 2026-11-22, #2160).
+	"certificatemanager.googleapis.com": "gcp-sa-certificatemanager.iam.gserviceaccount.com",
+	"iap.googleapis.com":                "gcp-sa-iap.iam.gserviceaccount.com",
+	// The Network Security Service Account, its primary agent (#2160).
+	"networksecurity.googleapis.com": "gcp-sa-networksecurity.iam.gserviceaccount.com",
 	// Kubernetes Engine Service Agent, the primary agent of
 	// container.googleapis.com.
 	"container.googleapis.com": "container-engine-robot.iam.gserviceaccount.com",
@@ -120,6 +126,11 @@ var serviceAgents = map[string]string{
 // https://cloud.google.com/iam/docs/service-agents gives no primary
 // service agent, so generateServiceIdentity names none for them.
 var noPrimaryAgent = map[string]string{
+	// Network Services' four agents (Agent Gateway, Service Extensions'
+	// gcp-sa-dep, Network Actions, Secure Web Proxy's
+	// gcp-sa-securewebproxy) are none of them primary (read 2026-11-22,
+	// #2160).
+	"networkservices.googleapis.com": "Network Services API",
 	// The page lists no agent of the Telemetry API (#2118).
 	"telemetry.googleapis.com": "Telemetry API",
 	// The Inventory API's agent is the Cloud KMS organization service

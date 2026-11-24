@@ -64,7 +64,8 @@ func (h *lbHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	rule := deepCopy(s.res[h.rule]).(obj)
 	proxy := s.res[str(rule, "target")]
-	m := deepCopy(s.res[str(proxy, "urlMap")]).(obj)
+	mapRel := str(proxy, "urlMap")
+	m := deepCopy(s.res[mapRel]).(obj)
 	s.mu.Unlock()
 	if m == nil {
 		lbError(w, http.StatusNotFound, "the target proxy has no URL map")
@@ -73,8 +74,18 @@ func (h *lbHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	scheme := "http"
 	if h.tls {
 		scheme = "https"
+		// Frontend mutual TLS's check, then the authorization policies
+		// (#2160, lbmtls.go).
+		r = s.withClientCert(r, proxy)
+	}
+	if !h.authorize(w, r, scheme) {
+		return
 	}
 	host := r.Host
+	if s.iapAuthenticate(w, r, scheme) {
+		// IAP's sign-in coming back to the app (#2160).
+		return
+	}
 	d := lbMatch(m, host, r.URL.Path, r.Header, r.URL.Query())
 	if d.action != nil {
 		if fi := objOf(d.action["faultInjectionPolicy"]); fi != nil {
@@ -124,8 +135,30 @@ func (h *lbHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		lbError(w, http.StatusNotFound, "no backend")
 		return
 	}
+	// Cloud Armor's edge security policy, then Cloud CDN's cache, then
+	// the backend security policy and IAP on a miss (#2160).
+	areq := newArmorReq(r, scheme)
+	extra, ok := s.armorCheck(w, areq, str(so, "edgeSecurityPolicy"))
+	if !ok {
+		return
+	}
+	headers = append(headers, extra...)
+	cw, done := h.cdnFront(w, r, so, mapRel, scheme)
+	if done {
+		return
+	}
+	defer cw.finish()
+	w = cw
 	if str(so, "kind") == "compute#backendBucket" {
 		h.serveBucket(w, r, so, newPath, headers)
+		return
+	}
+	extra, ok = s.armorCheck(w, areq, str(so, "securityPolicy"))
+	if !ok {
+		return
+	}
+	headers = append(headers, extra...)
+	if !s.iapCheck(w, r, so, scheme) {
 		return
 	}
 	s.mu.Lock()
@@ -266,6 +299,9 @@ func headerVars(v string, r *http.Request, clientIP string) string {
 	repl := strings.NewReplacer("{client_ip_address}", clientIP, "{client_region}", "", "{client_region_subdivision}", "",
 		"{client_city}", "", "{client_city_lat_long}", "", "{client_rtt_msec}", "0", "{origin_request_header}", r.Header.Get("Origin"),
 		"{tls_sni_hostname}", sniOf(r), "{tls_version}", tlsVersionOf(r), "{tls_cipher_suite}", cipherOf(r))
+	if strings.Contains(v, "{client_cert_") {
+		v = strings.NewReplacer(mtlsVars(r)...).Replace(v)
+	}
 	return repl.Replace(v)
 }
 
@@ -403,6 +439,9 @@ func (t *lbTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		st.tried[ep.id] = true
 		resp, err := t.send(req, body, st, ep)
 		t.s.lb.bal.done(ep)
+		if err == nil {
+			t.s.lb.bal.recordORCA(ep, resp)
+		}
 		retry := false
 		switch {
 		case err != nil:
@@ -506,6 +545,12 @@ func (t *lbTransport) send(req *http.Request, body []byte, st *lbRequestState, e
 			out.URL.Scheme, rt = "https", h2Transport
 		case "H2C", "GRPC":
 			rt = h2cTransport
+		}
+		if tlsBackend {
+			// Backend authenticated TLS and mTLS (lbbackendtls.go).
+			if bt, ok := t.s.backendTLSTransport(st.set, proto == "HTTP2"); ok {
+				rt = bt
+			}
 		}
 	}
 	return rt.RoundTrip(out)

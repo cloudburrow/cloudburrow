@@ -80,6 +80,7 @@ import (
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	_ "cloud.google.com/go/billing/apiv1/billingpb"
 	_ "cloud.google.com/go/billing/budgets/apiv1/budgetspb"
+	_ "cloud.google.com/go/certificatemanager/apiv1/certificatemanagerpb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
@@ -101,6 +102,7 @@ import (
 	_ "cloud.google.com/go/iam/apiv1/iampb"
 	_ "cloud.google.com/go/iam/apiv2/iampb"
 	_ "cloud.google.com/go/iam/apiv3/iampb"
+	_ "cloud.google.com/go/iap/apiv1/iappb"
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
 	_ "cloud.google.com/go/kms/inventory/apiv1/inventorypb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
@@ -108,6 +110,8 @@ import (
 	_ "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	_ "cloud.google.com/go/monitoring/dashboard/apiv1/dashboardpb"
 	_ "cloud.google.com/go/networkconnectivity/apiv1/networkconnectivitypb"
+	_ "cloud.google.com/go/networksecurity/apiv1/networksecuritypb"
+	_ "cloud.google.com/go/networkservices/apiv1/networkservicespb"
 	_ "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	_ "cloud.google.com/go/redis/apiv1/redispb"
@@ -377,6 +381,26 @@ var areas = []area{
 	// Engine port; its Locations and Operations mixins are other areas'
 	// rows.
 	{Key: "vpcaccess", Title: "Serverless VPC Access (v1)", Own: true, Services: []string{"google.cloud.vpcaccess.v1.VpcAccessService"}},
+	// Certificate Manager and Identity-Aware Proxy (#2160): CloudBurrow's
+	// own, JSON on the Compute Engine port; Certificate Manager's Locations
+	// and Operations mixins are other areas' rows.
+	{Key: "certificatemanager", Title: "Certificate Manager (v1)", Own: true, Services: []string{"google.cloud.certificatemanager.v1.CertificateManager"}},
+	// Network Security (#2160): CloudBurrow's own, JSON on the Compute
+	// Engine port, gRPC and JSON; the parts Cloud Load Balancing, Cloud
+	// Armor and Secure Web Proxy read (TLS policies, authorization
+	// policies, backend authentication configs, address groups, gateway
+	// security policies). Its Locations and Operations mixins are other
+	// areas' rows.
+	{Key: "networksecurity", Title: "Network Security (v1)", Own: true, Services: []string{"google.cloud.networksecurity.v1.NetworkSecurity",
+		"google.cloud.networksecurity.v1.AddressGroupService", "google.cloud.networksecurity.v1.OrganizationAddressGroupService"}},
+	// Network Services (#2160): CloudBurrow's own, JSON on the Compute
+	// Engine port; Secure Web Proxy's gateways and Service Extensions'
+	// authorization extensions. Its Locations and Operations mixins are
+	// other areas' rows.
+	{Key: "networkservices", Title: "Network Services (v1)", Own: true,
+		Services: []string{"google.cloud.networkservices.v1.NetworkServices", "google.cloud.networkservices.v1.DepService"}},
+	{Key: "iap", Title: "Identity-Aware Proxy (v1)", Own: true,
+		Services: []string{"google.cloud.iap.v1.IdentityAwareProxyAdminService", "google.cloud.iap.v1.IdentityAwareProxyOAuthService"}},
 	{Key: "workflows", Title: "Workflows and Workflow Executions (v1)", Own: true,
 		Services: []string{"google.cloud.workflows.v1.Workflows", "google.cloud.workflows.executions.v1.Executions"}},
 	// The Kubernetes Engine API (#1913): CloudBurrow's own, gRPC and JSON

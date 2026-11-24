@@ -187,6 +187,8 @@ func (s *monitoringService) Start(ctx context.Context) error {
 	if s.computeCPU != nil {
 		s.computeStop = make(chan struct{})
 		go sampleComputeMetrics(api, monitoringCompute{api: s.computeCPU}, s.computeStop)
+		// The load balancers' custom metrics, dry-run ones included (#2160).
+		go sampleLBMetrics(api, monitoringLB{api: s.computeCPU}, s.computeStop)
 	}
 	setRunMetricsEndpoint(s.Addr)
 	if s.reqs != nil {

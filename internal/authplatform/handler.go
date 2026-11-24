@@ -26,6 +26,11 @@ type Endpoints struct {
 	Store *Store
 	// User is the account a local sign-in is: the instance's user.
 	User string
+	// LocalRedirect maps the URL the browser is sent back to onto this
+	// machine, for a redirect URI that names a Google endpoint (IAP's
+	// https://iap.googleapis.com/v1/oauth/clientIds/C:handleRedirect,
+	// #2160), so the browser never leaves it; nil keeps every URL.
+	LocalRedirect func(string) string
 
 	mu      sync.Mutex
 	pending map[string]pendingAuth
@@ -126,6 +131,9 @@ func (e *Endpoints) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		to := Deny(p.req)
 		if r.PostForm.Get("decision") == "allow" {
 			to = e.Store.Approve(p.req, e.User)
+		}
+		if e.LocalRedirect != nil {
+			to = e.LocalRedirect(to)
 		}
 		http.Redirect(w, r, to, http.StatusFound)
 	default:

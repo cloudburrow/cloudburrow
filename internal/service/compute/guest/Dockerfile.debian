@@ -6,7 +6,7 @@ ARG BASE
 FROM ${BASE}
 ENV container=docker DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
- && apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server sudo curl ca-certificates iproute2 procps less nftables netcat-openbsd \
+ && apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server sudo curl ca-certificates iproute2 procps less nftables netcat-openbsd socat \
  && apt-get clean && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/ssh/ssh_host_* \
  && (userdel -r ubuntu 2>/dev/null || true)

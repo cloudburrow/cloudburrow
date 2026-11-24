@@ -14,6 +14,7 @@ require (
 	cloud.google.com/go/bigquery v1.85.0
 	cloud.google.com/go/bigtable v1.58.0
 	cloud.google.com/go/billing v1.28.1
+	cloud.google.com/go/certificatemanager v1.17.1
 	cloud.google.com/go/cloudbuild v1.35.0
 	cloud.google.com/go/cloudquotas v1.14.1
 	cloud.google.com/go/cloudsqlconn v1.24.0
@@ -31,11 +32,14 @@ require (
 	cloud.google.com/go/functions v1.26.0
 	cloud.google.com/go/grafeas v0.6.1
 	cloud.google.com/go/iam v1.14.0
+	cloud.google.com/go/iap v1.19.1
 	cloud.google.com/go/kms v1.35.0
 	cloud.google.com/go/logging v1.20.0
 	cloud.google.com/go/longrunning v1.5.0
 	cloud.google.com/go/memorystore v1.7.0
 	cloud.google.com/go/networkconnectivity v1.30.1
+	cloud.google.com/go/networksecurity v0.21.1
+	cloud.google.com/go/networkservices v1.8.1
 	cloud.google.com/go/observability v0.1.1
 	cloud.google.com/go/orgpolicy v1.22.1
 	cloud.google.com/go/parametermanager v1.2.1
@@ -271,8 +275,8 @@ require (
 	github.com/apache/thrift v0.24.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/cncf/xds/go v0.0.0-20260202195803-dba9d589def2 // indirect
-	github.com/envoyproxy/go-control-plane/envoy v1.40.0 // indirect
+	github.com/cncf/xds/go v0.0.0-20260202195803-dba9d589def2
+	github.com/envoyproxy/go-control-plane/envoy v1.40.0
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.9 // indirect
@@ -286,7 +290,7 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/s2a-go v0.1.11 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.25 // indirect
-	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
+	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.32.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect

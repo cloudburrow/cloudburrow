@@ -114,9 +114,13 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"dataform.googleapis.com":               "gcp-sa-dataform.iam.gserviceaccount.com",
 		"apphub.googleapis.com":                 "gcp-sa-apphub.iam.gserviceaccount.com",
 		"vpcaccess.googleapis.com":              "gcp-sa-vpcaccess.iam.gserviceaccount.com",
+		"certificatemanager.googleapis.com":     "gcp-sa-certificatemanager.iam.gserviceaccount.com",
+		"networksecurity.googleapis.com":        "gcp-sa-networksecurity.iam.gserviceaccount.com",
+		"iap.googleapis.com":                    "gcp-sa-iap.iam.gserviceaccount.com",
 		"workflowexecutions.googleapis.com":     "",
 		"kmsinventory.googleapis.com":           "",
 		"telemetry.googleapis.com":              "",
+		"networkservices.googleapis.com":        "",
 	}
 	if len(want) != len(serviceAgents)+len(noPrimaryAgent) {
 		t.Fatalf("want has %d services; the tables have %d", len(want), len(serviceAgents)+len(noPrimaryAgent))

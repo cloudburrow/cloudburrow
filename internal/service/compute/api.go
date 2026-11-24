@@ -36,6 +36,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveLBCA(w, r)
 		return
 	}
+	if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+		// The xDS API of proxyless gRPC (#2160).
+		s.XDSHandler().ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == XDSBootstrapPath {
+		// A bootstrap file naming this port (#2160), for ?project=P&network=N.
+		s.serveXDSBootstrap(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, IAPRedirectPrefix) {
+		// IAP's OAuth redirect URI, as on iap.googleapis.com (#2160).
+		s.ServeIAPRedirect(w, r)
+		return
+	}
+	if r.URL.Path == IAPKeysPath {
+		// The keys of IAP's signed headers (#2160).
+		s.serveIAPKeys(w, r)
+		return
+	}
 	if !strings.HasPrefix(r.URL.Path, Prefix) {
 		writeError(w, unimplemented("CloudBurrow's Compute Engine API serves %s only (%s %s).", Prefix, r.Method, r.URL.Path))
 		return
@@ -217,6 +237,9 @@ func (s *Server) doLocked(c call) (obj, error) {
 		return s.project(c)
 	case n == 1 && post && p[0] == "setCommonInstanceMetadata":
 		return s.setCommonInstanceMetadata(c)
+	case n == 1 && post && p[0] == "setCloudArmorTier":
+		// Cloud Armor Enterprise (#2160, lbaddressgroups.go).
+		return s.setCloudArmorTier(c)
 	case n == 1 && xpnMethod(p[0]):
 		// Shared VPC (#2140, xpn.go).
 		return s.xpn(c)

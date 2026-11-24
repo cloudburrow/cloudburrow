@@ -217,6 +217,15 @@ func (s *Server) RegisterAPI(g grpc.ServiceRegistrar) {
 	ncpb.RegisterDataTransferServiceServer(g, dataTransfer{})
 }
 
+// HasOperation reports whether name is one of this API's operations, for
+// a port whose gRPC surface serves other APIs' operations beside them.
+func (s *Server) HasOperation(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.ops[name]
+	return ok
+}
+
 // Operations is the operations server, for a gRPC server that serves
 // another API's operations beside these (Compute's port has none).
 func (s *Server) Operations() longrunningpb.OperationsServer { return &operations{s: s} }

@@ -200,6 +200,8 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 			peerPods = append(peerPods, p.ip)
 		}
 	}
+	relayText, relayChain := s.relayConfigLocked(self, str(inst, "_guestToken"), reach)
+	b.WriteString(relayText)
 	b.WriteString("nft\n")
 	fw := firewallNFT(self, members, s.firewallsOfLocked(self.network), peerPods)
 	var eps []PrivateService
@@ -208,6 +210,9 @@ func (s *Server) vpcConfigLocked(inst obj, pod string) (string, bool) {
 	}
 	eps = append(eps, s.pscEndpointsLocked(self.network, regionOfZone(self.zone))...)
 	fw = withPrivateServices(fw, eps)
+	if relayChain != "" {
+		fw = strings.TrimSuffix(fw, "}\n") + relayChain + "}\n"
+	}
 	b.WriteString(fw)
 	return b.String(), true
 }

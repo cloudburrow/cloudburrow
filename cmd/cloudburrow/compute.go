@@ -7,20 +7,26 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 
+	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/metadata"
+	"github.com/cloudburrow/cloudburrow/internal/service/certificatemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
+	"github.com/cloudburrow/cloudburrow/internal/service/iap"
 	"github.com/cloudburrow/cloudburrow/internal/service/networkconnectivity"
+	"github.com/cloudburrow/cloudburrow/internal/service/networksecurity"
+	"github.com/cloudburrow/cloudburrow/internal/service/networkservices"
 	"github.com/cloudburrow/cloudburrow/internal/service/redisadmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -43,19 +49,51 @@ type computeService struct {
 	// wrapJSON wraps the API (IAM enforcement, #1879); nil is none.
 	wrapJSON func(http.Handler) http.Handler
 	gke      *gkeService
-	api      *compute.Server
+	// privateca is Certificate Authority Service, when served: Secure Web
+	// Proxy's TLS inspection leaves (#2160); nil inspects nothing.
+	privateca *privateCAService
+	api       *compute.Server
 	// vpcAccess is Serverless VPC Access (vpcaccess.googleapis.com,
 	// #2140), served on this port beside /compute/v1/, as its connectors
 	// live in the networks served here.
 	vpcAccess *vpcaccess.Server
+	// certManager is Certificate Manager (certificatemanager.googleapis.com)
+	// and iap Identity-Aware Proxy (iap.googleapis.com), #2160, served on
+	// this port too: the load balancers here serve their certificate maps
+	// and enforce IAP on backend services (computecertiap.go).
+	certManager *certificatemanager.Server
+	iap         *iap.Server
+	// netSec is Network Security (networksecurity.googleapis.com, #2160):
+	// the server TLS policies, client TLS policies and authorization
+	// policies the load balancers here read (computenetsec.go).
+	netSec *networksecurity.Server
+	// netSvc is Network Services (networkservices.googleapis.com, #2160):
+	// Secure Web Proxy's gateways, each a forward proxy here, and Service
+	// Extensions' authorization extensions (computenetsvc.go).
+	netSvc *networkservices.Server
+	// apisGRPC is the gRPC surface of the APIs on this port (computegrpc.go).
+	apisGRPC *computeGRPC
+	// iapEval and creds are the host's IAM evaluator and credentials, which
+	// IAP checks requests with; up sets them (useIAP).
+	iapEval *iameval.Evaluator
+	creds   *metadata.Credentials
+	// authPlatform and metaAddr are IAP's browser sign-in: Google Auth
+	// Platform's store and the metadata server's address, where the
+	// authorization endpoint is (useIAPSignIn).
+	authPlatform *authplatform.Store
+	metaAddr     func() string
+	// callerOf names a bearer token's caller (the IAM enforcer's), for
+	// IAP TCP forwarding's tunnels; tunnel is their relay.
+	callerOf func(string) iameval.Caller
+	tunnel   *iap.Tunnel
 	// vms runs the VM instances (#1963); guestBase and metadataHost are
 	// set by up once the cluster host is known.
 	vms          *computeVMs
 	guestBase    func() string
 	metadataHost func() string
-	cancel       context.CancelFunc
-	srv          *http.Server
-	ln           net.Listener
+	// relayAt is the VM relay's in-cluster address (#2160), set by up.
+	relayAt func() string
+	cancel  context.CancelFunc
 	// sql is the Cloud SQL Admin API, whose private IPs the VPC networks
 	// reach (#2141); nil without Cloud SQL.
 	sql    func() *sqladmin.Server
@@ -67,6 +105,27 @@ type computeService struct {
 	// registry is the project registry, for Shared VPC's organization
 	// rule (#2140); nil allows every project.
 	registry func() *resourcemanager.Registry
+	srv      *http.Server
+	ln       net.Listener
+	// handler is the port's own handler, before IAM enforcement and the
+	// request log: the console's calls to the APIs served beside
+	// /compute/v1/ (Certificate Manager and IAP, #2160) go through it.
+	handler http.Handler
+}
+
+// v1Handler is the Compute port's handler as the console calls it: the
+// APIs served on the port, unwrapped; the Compute API's alone before Start
+// has built it (the console's tests). nil without compute.
+func (s *computeService) v1Handler() http.Handler {
+	switch {
+	case s == nil:
+		return nil
+	case s.handler != nil:
+		return s.handler
+	case s.api != nil:
+		return s.api
+	}
+	return nil
 }
 
 func newComputeService(cfg config.Config) *computeService {
@@ -101,6 +160,14 @@ func (s *computeService) VPCAccess() *vpcaccess.Server {
 }
 
 // Addr is the bound address.
+// RelayAddr is the VM relay's bound address, "" when it does not listen.
+func (s *computeService) RelayAddr() string {
+	if s == nil || s.api == nil {
+		return ""
+	}
+	return s.api.RelayAddr()
+}
+
 func (s *computeService) Addr() string {
 	if s == nil || s.ln == nil {
 		return ""
@@ -129,13 +196,61 @@ func (s *computeService) Start(ctx context.Context) error {
 		return s.metadataHost()
 	}
 	s.svcIPs = &serviceIPs{kubeconfig: s.cfg.KubeconfigPath(), namespace: s.cfg.Cluster.Namespace}
+	dir := func(name string) string {
+		if state == "" {
+			return ""
+		}
+		return filepath.Join(s.cfg.InstanceDir(), name)
+	}
+	cm, err := certificatemanager.New(certificatemanager.Options{State: dir("certificatemanager.json")})
+	if err != nil {
+		return err
+	}
+	s.certManager = cm
+	ia, err := iap.New(iap.Options{State: dir("iap.json")})
+	if err != nil {
+		return err
+	}
+	s.iap = ia
+	ns, err := networksecurity.New(networksecurity.Options{State: dir("networksecurity.json")})
+	if err != nil {
+		return err
+	}
+	s.netSec = ns
+	// The xDS API's TLS bootstrap files (#2160): its CA and each
+	// project's workload credentials, beside the state.
+	xdsCredDir := ""
+	if state != "" {
+		xdsCredDir = filepath.Join(filepath.Dir(state), "xds-credentials")
+	}
+	nsv, err := networkservices.New(networkservices.Options{State: dir("networkservices.json"), Bind: s.cfg.BindAddress})
+	if err != nil {
+		return err
+	}
+	s.netSvc = nsv
 	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, ExtraGroups: s.gkeGroups, NetworkUsers: s.networkUsers, VMs: s.vms,
 		PrivateServices: s.privateServices, ServiceAttachment: s.serviceAttachment,
-		ProjectOrganization: s.projectOrganization, LB: &computeLB{cfg: s.cfg, vms: s.vms}})
+		ProjectOrganization: s.projectOrganization, LB: &computeLB{cfg: s.cfg, vms: s.vms},
+		CertMaps: cm, IAP: computeIAPGate{svc: s}, NetSec: computeNetSec{ns: ns, cm: cm, endpoints: xdsEndpointPolicies(nsv)}, XDSCredentialDir: xdsCredDir, SourceTags: s.sourceTags,
+		RelayBind: s.cfg.BindAddress})
 	if err != nil {
 		return err
 	}
 	s.api = api
+	api.UseRelayAddress(func() string {
+		if s.relayAt == nil {
+			return ""
+		}
+		return s.relayAt()
+	})
+	cm.UseIssuer(api)
+	cm.UseTargets(func(project string) []certificatemanager.Target { return certMapTargets(api, project) })
+	ia.SetBackendServices(func(rel string) bool { return backendServiceExists(api, rel) })
+	ia.SetNormalizer(s.iapNormalize)
+	s.tunnel = s.newIAPTunnel(api, ia)
+	useNetSec(api, ns, cm, nsv)
+	s.useNetSvc(api, ns, nsv, cm)
+	nsv.Start()
 	// The schedules' and autoscalers' loops (#2139); with no Addr, Start
 	// listens on nothing.
 	if err := api.Start(ctx); err != nil {
@@ -155,14 +270,41 @@ func (s *computeService) Start(ctx context.Context) error {
 		return fmt.Errorf("compute: %w", err)
 	}
 	s.ln = ln
+	// The xDS API over TLS (#2160), as proxyless gRPC reaches Google's:
+	// a TLS handshake on this port gets a certificate from the load
+	// balancing CA for its bound address, and HTTP/2.
+	if cfg, err := api.XDSServerTLS([]string{s.cfg.BindAddress}); err == nil {
+		ln = newTLSSniffListener(ln, cfg)
+	}
 	vrest := vpcaccess.NewRESTHandler(va)
+	cmrest := certificatemanager.NewRESTHandler(cm)
+	iaprest := iap.NewRESTHandler(ia)
+	nsrest := networksecurity.NewRESTHandler(ns)
+	nsvrest := networkservices.NewRESTHandler(nsv)
 	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if iap.Handles(r.URL.Path) {
+			iaprest.ServeHTTP(w, r)
+			return
+		}
+		if ns.Handles(r) {
+			nsrest.ServeHTTP(w, r)
+			return
+		}
+		if nsv.Handles(r) {
+			nsvrest.ServeHTTP(w, r)
+			return
+		}
+		if cm.Handles(r) {
+			cmrest.ServeHTTP(w, r)
+			return
+		}
 		if vpcaccess.Handles(r.URL.Path) {
 			vrest.ServeHTTP(w, r)
 			return
 		}
 		api.ServeHTTP(w, r)
 	})
+	s.handler = h
 	if s.wrapJSON != nil {
 		h = s.wrapJSON(h)
 	}
@@ -175,8 +317,48 @@ func (s *computeService) Start(ctx context.Context) error {
 	if s.requests != nil {
 		h = rest.Observe(h, s.requests)
 	}
-	s.srv = &http.Server{Handler: h2c.NewHandler(hostguard.Wrap(sysparams.Wrap(h, sysparams.Options{V1Errors: true})), &http2.Server{}),
-		ReadHeaderTimeout: 10 * time.Second}
+	jsonAPI := sysparams.Wrap(h, sysparams.Options{V1Errors: true})
+	// gRPC over HTTP/2 without TLS is the xDS API of proxyless gRPC
+	// (#2160), served beside the JSON API, ahead of its system
+	// parameters.
+	var protos http.Protocols
+	protos.SetHTTP1(true)
+	protos.SetUnencryptedHTTP2(true)
+	protos.SetHTTP2(true)
+	// Network Security's, Network Services', Certificate Manager's, IAP's
+	// and Serverless VPC Access's gRPC APIs beside it (computegrpc.go).
+	s.apisGRPC = newComputeGRPC(api.XDSHandler(),
+		computeGRPCAPI{pkg: "google.cloud.networksecurity.v1", g: computeGRPCServer(ns.Register), owns: ns.HasOperation, isLoc: true},
+		computeGRPCAPI{pkg: "google.cloud.networkservices.v1", g: computeGRPCServer(nsv.Register), owns: nsv.HasOperation},
+		computeGRPCAPI{pkg: "google.cloud.certificatemanager.v1", g: computeGRPCServer(cm.Register), owns: cm.HasOperation},
+		computeGRPCAPI{pkg: "google.cloud.iap.v1", g: computeGRPCServer(ia.Register)},
+		// The Network Connectivity API (#2141), whose operations it owns.
+		computeGRPCAPI{pkg: "google.cloud.networkconnectivity.v1", g: s.ncGRPC, owns: s.nc.HasOperation},
+		computeGRPCAPI{pkg: "google.cloud.vpcaccess.v1", g: computeGRPCServer(va.Register), owns: func(string) bool { return true }})
+	apisGRPC := s.apisGRPC
+	guarded := hostguard.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+			apisGRPC.ServeHTTP(w, r)
+			return
+		}
+		jsonAPI.ServeHTTP(w, r)
+	}))
+	// IAP TCP forwarding (#2160): gcloud's
+	// --iap-tunnel-url-override=ws://THIS_PORT. gcloud opens the
+	// WebSocket with Origin: bot:iap-tunneler, which is no browser
+	// origin, so the tunnel takes it beside the usual cross-site rule;
+	// the Host check still applies.
+	s.srv = &http.Server{Handler: hostguard.WrapHost(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !slices.Contains(iap.TunnelPaths, r.URL.Path) {
+			guarded.ServeHTTP(w, r)
+			return
+		}
+		if r.Header.Get("Origin") != iap.TunnelOrigin && !hostguard.CrossSiteAllowed(r) {
+			hostguard.RefuseOrigin(w, r)
+			return
+		}
+		s.tunnel.ServeHTTP(w, r)
+	})), ReadHeaderTimeout: 10 * time.Second, Protocols: &protos}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
 }
@@ -184,6 +366,12 @@ func (s *computeService) Start(ctx context.Context) error {
 func (s *computeService) Stop(ctx context.Context) error {
 	if s.api != nil {
 		_ = s.api.Stop(ctx)
+	}
+	if s.netSvc != nil {
+		s.netSvc.Stop()
+	}
+	if s.apisGRPC != nil {
+		s.apisGRPC.Stop()
 	}
 	if s.vms != nil {
 		s.vms.stopAll()
@@ -297,7 +485,27 @@ func (r *computeResetter) ResetProject(_ context.Context, project string) error 
 		return err
 	}
 	if va := r.svc.VPCAccess(); va != nil {
-		return va.ResetProject(project)
+		if err := va.ResetProject(project); err != nil {
+			return err
+		}
+	}
+	if cm := r.svc.certManager; cm != nil {
+		if err := cm.ResetProject(project); err != nil {
+			return err
+		}
+	}
+	if ns := r.svc.netSec; ns != nil {
+		if err := ns.ResetProject(project); err != nil {
+			return err
+		}
+	}
+	if nsv := r.svc.netSvc; nsv != nil {
+		if err := nsv.ResetProject(project); err != nil {
+			return err
+		}
+	}
+	if ia := r.svc.iap; ia != nil {
+		return ia.ResetProject(project)
 	}
 	return nil
 }

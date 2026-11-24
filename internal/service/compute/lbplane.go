@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/vmrelay"
 )
 
 // The load balancers' data plane (#2153): each load-balancing forwarding
@@ -60,6 +62,9 @@ type lbPlane struct {
 	health    lbHealthState
 	bal       lbBalanceState
 	cache     lbCache
+	rates     lbRates
+	cdn       lbCDN
+	iap       lbIAPKey
 }
 
 // lbRuleListeners are one rule's listeners, and the kind they serve.
@@ -72,7 +77,11 @@ type lbListener struct {
 	rulePort int
 	addr     string
 	ln       net.Listener
-	srv      *http.Server
+	// inj is ln, which also takes the connections VMs relay to the rule
+	// (vmrelay.go).
+	inj *vmrelay.Listener
+	pc  net.PacketConn
+	srv *http.Server
 }
 
 func newLBPlane() *lbPlane {
@@ -89,13 +98,19 @@ func (s *Server) lbChangedLocked() {
 
 // ruleKindLocked is what a rule's listeners serve, "" when nothing.
 func (s *Server) ruleKindLocked(o obj) string {
+	t := str(o, "target")
+	if str(o, "IPProtocol") == "UDP" {
+		if str(o, "backendService") != "" || strings.Contains(t, "/targetPools/") || strings.Contains(t, "/targetInstances/") {
+			return "udp"
+		}
+		return ""
+	}
 	if str(o, "IPProtocol") != "" && str(o, "IPProtocol") != "TCP" {
-		return "" // UDP and the rest: not carried (docs/gaps.md)
+		return "" // ESP, AH, SCTP, ICMP, L3_DEFAULT: not carried (docs/gaps.md)
 	}
 	if str(o, "backendService") != "" {
 		return "l4"
 	}
-	t := str(o, "target")
 	switch {
 	case strings.Contains(t, "/targetHttpProxies/"):
 		return "http"
@@ -152,18 +167,35 @@ func (s *Server) lbListenLocked(rel string) {
 	rl := &lbRuleListeners{kind: kind}
 	var addrs []any
 	for _, port := range ports {
-		var ln net.Listener
-		var err error
-		if a := prev[port]; a != "" {
-			ln, err = net.Listen("tcp", a)
+		var l *lbListener
+		if kind == "udp" {
+			var pc net.PacketConn
+			var err error
+			if a := prev[port]; a != "" {
+				pc, err = net.ListenPacket("udp", a)
+			}
+			if pc == nil || err != nil {
+				pc, err = net.ListenPacket("udp", net.JoinHostPort(lbBind, "0"))
+			}
+			if err != nil {
+				continue
+			}
+			l = &lbListener{rulePort: port, addr: pc.LocalAddr().String(), pc: pc}
+		} else {
+			var ln net.Listener
+			var err error
+			if a := prev[port]; a != "" {
+				ln, err = net.Listen("tcp", a)
+			}
+			if ln == nil || err != nil {
+				ln, err = net.Listen("tcp", net.JoinHostPort(lbBind, "0"))
+			}
+			if err != nil {
+				continue
+			}
+			inj := vmrelay.NewListener(ln)
+			l = &lbListener{rulePort: port, addr: ln.Addr().String(), ln: inj, inj: inj}
 		}
-		if ln == nil || err != nil {
-			ln, err = net.Listen("tcp", net.JoinHostPort(lbBind, "0"))
-		}
-		if err != nil {
-			continue
-		}
-		l := &lbListener{rulePort: port, addr: ln.Addr().String(), ln: ln}
 		s.serveListener(rel, kind, l)
 		rl.ls = append(rl.ls, l)
 		addrs = append(addrs, strconv.Itoa(port)+"="+l.addr)
@@ -182,12 +214,18 @@ func (l *lbListener) close() {
 		_ = l.srv.Shutdown(ctx)
 		cancel()
 	}
+	if l.pc != nil {
+		_ = l.pc.Close()
+		return
+	}
 	_ = l.ln.Close()
 }
 
 // serveListener serves one listener of a rule.
 func (s *Server) serveListener(rule, kind string, l *lbListener) {
 	switch kind {
+	case "udp":
+		go s.serveUDP(rule, l.rulePort, l.pc)
 	case "http", "https":
 		h := &lbHTTP{s: s, rule: rule, port: l.rulePort, tls: kind == "https"}
 		l.srv = &http.Server{Handler: h, ReadHeaderTimeout: 30 * time.Second, IdleTimeout: 610 * time.Second}
@@ -220,23 +258,22 @@ func (s *Server) serveListener(rule, kind string, l *lbListener) {
 func (s *Server) lbTLSConfig(rule string) func(*tls.ClientHelloInfo) (*tls.Config, error) {
 	return func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 		s.mu.Lock()
-		proxy := s.res[str(s.res[rule], "target")]
-		var certs []tls.Certificate
-		for _, c := range strs(proxy, "sslCertificates") {
-			if pair, ok := certPair(s.res[c]); ok {
-				certs = append(certs, pair)
-			}
-		}
+		proxy := deepCopy(s.res[str(s.res[rule], "target")]).(obj)
 		var policy obj
 		if sp := str(proxy, "sslPolicy"); sp != "" {
 			policy = deepCopy(s.res[sp]).(obj)
 		}
 		s.mu.Unlock()
+		// Certificate Manager is asked outside the lock: it issues
+		// certificates through this server.
+		certs := s.proxyCertificates(proxy, hello.ServerName)
 		if len(certs) == 0 {
 			return nil, errors.New("the target proxy has no active SSL certificate")
 		}
 		minV, suites := tlsConfigOf(policy)
 		cfg := &tls.Config{Certificates: certs, MinVersion: minV, CipherSuites: suites, NextProtos: []string{"h2", "http/1.1"}}
+		// A target HTTPS proxy's frontend mutual TLS (#2160, lbmtls.go).
+		s.mtlsHandshake(proxy, cfg)
 		if hello.ServerName != "" {
 			for _, c := range certs {
 				if c.Leaf != nil && c.Leaf.VerifyHostname(hello.ServerName) == nil {

@@ -25,7 +25,8 @@ import (
 // name where they name them (UNVERIFIED for the rest, re-read 2026-11-22).
 
 const lbNote = "Each forwarding rule listens on 127.0.0.1 at the port shown as its address (cloudburrowAddress): requests to it are routed by its URL map to its backends — instance groups' VMs, Cloud Run through serverless network endpoint groups, buckets — as health checks, balancing modes and session affinity decide. " +
-	"Google-managed certificates are issued by this instance's own certificate authority (/cloudburrow/lb/ca.pem). Cloud Armor, Cloud CDN, IAP and UDP are not served."
+	"Google-managed certificates are issued by this instance's own certificate authority (/cloudburrow/lb/ca.pem). " +
+	"Cloud Armor policies, Cloud CDN and Identity-Aware Proxy act on each request through the proxy, as a load balancer's Edit sets them."
 
 // lbScopePath is a resource's [scope, name] path: scope "global" or its
 // region.
@@ -389,9 +390,17 @@ func lbCreateFields(groups, hcs, buckets []string) []console.Field {
 			Help: "ZONE/NAME, or REGION/NAME for a regional managed group."}, groups),
 		{Name: "portName", Label: "Named port", Type: "text", Default: "http", Section: s3, VisibleWhen: map[string]string{"backendType": "instanceGroup"},
 			Help: "The instance group's named port the backend service serves."},
-		{Name: "balancingMode", Label: "Balancing mode", Type: "select", Default: "UTILIZATION", Section: s3, Options: []string{"UTILIZATION", "RATE", "CONNECTION"},
-			VisibleWhen: map[string]string{"backendType": "instanceGroup"}},
+		{Name: "balancingMode", Label: "Balancing mode", Type: "select", Default: "UTILIZATION", Section: s3, Options: []string{"UTILIZATION", "RATE", "CONNECTION", "CUSTOM_METRICS"},
+			OptionLabels: map[string]string{"UTILIZATION": "Utilization", "RATE": "Rate", "CONNECTION": "Connection", "CUSTOM_METRICS": "Custom metrics"},
+			VisibleWhen:  map[string]string{"backendType": "instanceGroup"}},
 		{Name: "maxRatePerInstance", Label: "Maximum RPS per instance", Type: "text", Section: s3, VisibleWhen: map[string]string{"balancingMode": "RATE"}},
+		{Name: "customMetricName", Label: "Custom metric name", Type: "text", Section: s3, VisibleWhen: map[string]string{"balancingMode": "CUSTOM_METRICS"},
+			Pattern: `^[a-z]([\-_.a-z0-9]*[a-z0-9])?$`,
+			Help:    "The metric your backends report in their ORCA load report (the endpoint-load-metrics response header), such as orca.cpu_utilization or a named metric."},
+		{Name: "customMetricMaxUtilization", Label: "Max utilization", Type: "text", Default: "0.8", Section: s3, VisibleWhen: map[string]string{"balancingMode": "CUSTOM_METRICS"},
+			Help: "The target value of the metric, between 0.0 and 1.0."},
+		{Name: "customMetricDryRun", Label: "Dry run", Type: "checkbox", Section: s3, VisibleWhen: map[string]string{"balancingMode": "CUSTOM_METRICS"},
+			Help: "Report the metric without using it to balance traffic."},
 		sel(console.Field{Name: "healthCheck", Label: "Health check", Type: "text", Section: s3, VisibleWhen: map[string]string{"backendType": "instanceGroup"},
 			Help: "An existing health check's name, or empty to create an HTTP (TCP for a Network Load Balancer) health check on the serving port."}, append([]string{""}, hcs...)),
 		{Name: "cloudRunService", Label: "Cloud Run service", Type: "text", Section: s3, VisibleWhen: map[string]string{"backendType": "serverless"},
@@ -417,6 +426,24 @@ func (p computeLBProvider) Create(ctx context.Context, project string, v map[str
 	lbType, internal := vpcOr(v["lbType"], "application"), v["facing"] == "internal"
 	regional := v["deployment"] == "regional" || lbType == "network-passthrough" || internal
 	region := vpcOr(v["region"], "us-central1")
+	var customMetric map[string]any
+	if v["balancingMode"] == "CUSTOM_METRICS" && vpcOr(v["backendType"], "instanceGroup") == "instanceGroup" {
+		customMetric = map[string]any{"name": strings.TrimSpace(v["customMetricName"])}
+		if customMetric["name"] == "" {
+			return "", errors.New("Custom metric name: give the metric your backends report")
+		}
+		u, err := strconv.ParseFloat(vpcOr(strings.TrimSpace(v["customMetricMaxUtilization"]), "0.8"), 64)
+		if err != nil || u < 0 || u > 1 {
+			return "", errors.New("Max utilization: a number between 0.0 and 1.0")
+		}
+		customMetric["maxUtilization"] = u
+		if v["customMetricDryRun"] == "true" || v["customMetricDryRun"] == "on" {
+			customMetric["dryRun"] = true
+		}
+		if lbType != "application" {
+			return "", errors.New("Balancing mode: custom metrics are for Application Load Balancers")
+		}
+	}
 	scope := "global"
 	if regional {
 		scope = region
@@ -536,6 +563,9 @@ func (p computeLBProvider) Create(ctx context.Context, project string, v map[str
 				return "", errors.New("Maximum RPS per instance: a number above 0")
 			}
 			be["maxRatePerInstance"] = r
+		}
+		if mode == "CUSTOM_METRICS" {
+			be["customMetrics"] = []any{customMetric}
 		}
 		bs := map[string]any{"name": name + "-backend-service", "loadBalancingScheme": scheme, "protocol": bp,
 			"healthChecks": []any{coll("healthChecks") + "/" + hc}, "backends": []any{be}}
@@ -785,7 +815,7 @@ func (p computeLBProvider) Detail(ctx context.Context, project string, path []st
 			"Backends": vpcDash(strings.Join(insts, ", "))}})
 	}
 	backs.Total = len(backs.Items)
-	return console.Detail{Title: path[1], Heading: "Load balancer details",
+	return console.Detail{Title: path[1], Heading: "Load balancer details", Edit: p.lbEditForm(project, lm),
 		Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: props}}},
 			{ID: "frontend", Label: "Frontend", Listing: front},
 			{ID: "routing", Label: "Routing rules", Listing: routes},

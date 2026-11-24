@@ -89,14 +89,18 @@ var compatSections = map[string]string{
 	// Workload Identity Federation (#1941), named by whole discovery ID.
 	"workloadidentity": "## Workload Identity Federation — `iam.googleapis.com` v1 pools, `sts.googleapis.com` v1",
 	// Certificate Authority Service (#1834), named by gRPC method.
-	"privateca":        "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
-	"parametermanager": "## Parameter Manager — `google.cloud.parametermanager.v1`",
-	"dataform":         "## Dataform — `google.cloud.dataform.v1`",
-	"dataformv1beta1":  "## Dataform v1beta1 — `google.cloud.dataform.v1beta1`",
-	"apphub":           "## App Hub — `google.cloud.apphub.v1`",
-	"trace":            "## Cloud Trace — `google.devtools.cloudtrace.v1` and `v2`",
-	"vpcaccess":        "## Serverless VPC Access — `google.cloud.vpcaccess.v1`",
-	"workflows":        "## Workflows — `google.cloud.workflows.v1` and `google.cloud.workflows.executions.v1`",
+	"privateca":          "## Certificate Authority Service — `google.cloud.security.privateca.v1`",
+	"parametermanager":   "## Parameter Manager — `google.cloud.parametermanager.v1`",
+	"dataform":           "## Dataform — `google.cloud.dataform.v1`",
+	"dataformv1beta1":    "## Dataform v1beta1 — `google.cloud.dataform.v1beta1`",
+	"apphub":             "## App Hub — `google.cloud.apphub.v1`",
+	"trace":              "## Cloud Trace — `google.devtools.cloudtrace.v1` and `v2`",
+	"vpcaccess":          "## Serverless VPC Access — `google.cloud.vpcaccess.v1`",
+	"certificatemanager": "## Certificate Manager — `google.cloud.certificatemanager.v1`",
+	"networksecurity":    "## Network Security — `google.cloud.networksecurity.v1`",
+	"networkservices":    "## Network Services — `google.cloud.networkservices.v1`",
+	"iap":                "## Identity-Aware Proxy — `google.cloud.iap.v1`",
+	"workflows":          "## Workflows — `google.cloud.workflows.v1` and `google.cloud.workflows.executions.v1`",
 	// The Kubernetes Engine API (#1913), named by gRPC method.
 	"gke": "## Kubernetes Engine API — `google.container.v1`",
 	// BigQuery sharing (#1960), named by gRPC method.

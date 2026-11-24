@@ -38,6 +38,9 @@ func (s *Server) serveStream(rule, kind string, port int, c net.Conn) {
 	if ro == nil {
 		return
 	}
+	if kind == "l4" && !s.l4Allowed(rule, "TCP", c.RemoteAddr(), port) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var (

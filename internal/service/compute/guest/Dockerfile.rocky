@@ -5,7 +5,7 @@
 ARG BASE
 FROM ${BASE}
 ENV container=docker
-RUN dnf -y install --setopt=install_weak_deps=False systemd openssh-server openssh-clients sudo iproute procps-ng passwd shadow-utils less nftables nmap-ncat \
+RUN dnf -y install --setopt=install_weak_deps=False systemd openssh-server openssh-clients sudo iproute procps-ng passwd shadow-utils less nftables nmap-ncat socat \
  && dnf clean all && rm -rf /var/cache/dnf \
  && rm -f /etc/ssh/ssh_host_*
 COPY root/ /

@@ -127,6 +127,8 @@ const ALERTING_TABS = ["/monitoring/alerting", "/monitoring/alerting/incidents",
 const CAS_TABS = ["/security/cas", "/security/cas/certificateAuthorities", "/security/cas/certificates", "/security/cas/templates"];
 const COMPUTE_INSTANCE_TABS = ["/compute/instances", "/compute/instanceSchedules"];
 const COMPUTE_SNAPSHOT_TABS = ["/compute/snapshots", "/compute/snapshotSchedules"];
+// Identity-Aware Proxy's tabs (#2160).
+const IAP_TABS = ["/security/iap", "/security/iap/tcp"];
 const COMPUTE_METADATA_TABS = ["/compute/metadata", "/compute/metadata/sshKeys"];
 const VPC_NETWORK_TABS = ["/networking/networks/list", "/networking/subnets/list"];
 const VPC_ROUTE_TABS = ["/networking/routes/effective", "/networking/routes/list"];
@@ -139,6 +141,21 @@ const VPC_ADDRESS_TABS = ["/networking/addresses/list", "/networking/addresses/i
 const PSC_TABS = ["/net-services/psc/list/consumers", "/net-services/psc/published", "/net-services/psc/list/policies"];
 // Load balancing's tabs (#2153): Load balancers, Backends and Frontends.
 const LB_TABS = ["/net-services/loadbalancing/list/loadBalancers", "/net-services/loadbalancing/list/backends", "/net-services/loadbalancing/list/frontends"];
+// Certificate Manager's tabs (#2160): Certificates, Certificate Maps, DNS
+// Authorizations, Issuance Configs and Classic Certificates (#2153).
+const CCM_TABS = ["/security/ccm/list/certificates", "/security/ccm/list/certificateMaps", "/security/ccm/list/dnsAuthorizations",
+  "/security/ccm/list/issuanceConfigs", "/security/ccm/list/trustConfigs", "/security/ccm/list/lbCertificates"];
+// Cloud Armor's tabs (#2160): the policies, network edge security
+// services and the preconfigured WAF rule sets. The docs give gcloud only
+// for the last two: their tabs are UNVERIFIED (re-read 2026-11-22:
+// armor/docs/advanced-network-ddos, waf-rules).
+const ARMOR_TABS = ["/net-security/securitypolicies/list", "/net-security/securitypolicies/networkEdgeSecurityServices", "/net-security/securitypolicies/wafRules"];
+// Network Security's Authentication Configuration tabs (#2160).
+// Secure Web Proxy (#2160): Web Proxies and SWP Policies (the quickstart's
+// console links), URL lists and TLS inspection policies (UNVERIFIED
+// (re-read 2026-11-22: secure-web-proxy/docs/url-list-syntax-reference) paths).
+const SWP_TABS = ["/net-security/swp/web-proxies/list", "/net-security/swp/policies/list", "/net-security/swp/urllists/list", "/net-security/swp/tls-inspection/list"];
+const NETSEC_AUTH_TABS = ["/net-security/authconfig", "/net-security/authconfig/backendAuthentication", "/net-security/authconfig/clientTlsPolicies", "/net-security/authconfig/authorizationPolicies"];
 const GKE_STORAGE = ["/kubernetes/storage", "/kubernetes/storage-classes"];
 // Cloud Logging's Settings and its Log Scopes tab (#2020), as Google's
 // Settings page has a Log Scopes tab (log-scope/create-and-manage).
@@ -614,8 +631,77 @@ const ROUTES = [
     navHidden: true, navAs: "/net-services/loadbalancing/list/loadBalancers", pageTabs: LB_TABS, section: "Networking", product: "netservices", productTitle: "Network services" },
   // Certificate Manager's Classic Certificates (#2153): Compute Engine SSL
   // certificates.
+  { path: "/security/ccm/list/certificates", service: "ccm-certificates", icon: "vpc", title: "Certificate Manager", tabTitle: "Certificates", kind: "Certificate",
+    pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  { path: "/security/ccm/list/certificateMaps", service: "ccm-maps", icon: "vpc", title: "Certificate Manager", tabTitle: "Certificate Maps", kind: "Certificate map",
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  { path: "/security/ccm/list/dnsAuthorizations", service: "ccm-dnsauth", icon: "vpc", title: "Certificate Manager", tabTitle: "DNS Authorizations", kind: "DNS authorization",
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  { path: "/security/ccm/list/issuanceConfigs", service: "ccm-issuance", icon: "vpc", title: "Certificate Manager", tabTitle: "Issuance Configs", kind: "Certificate issuance config",
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  // Trust configs (#2160): "the Trust configs tab on the Certificate
+  // Manager page" (certificate-manager/docs/trust-configs).
+  { path: "/security/ccm/list/trustConfigs", service: "ccm-trustconfigs", icon: "vpc", title: "Certificate Manager", tabTitle: "Trust Configs", kind: "Trust config",
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
   { path: "/security/ccm/list/lbCertificates", service: "netservices-lb-certs", icon: "vpc", title: "Certificate Manager", tabTitle: "Classic Certificates", kind: "Certificate",
-    section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+    navHidden: true, navAs: "/security/ccm/list/certificates", pageTabs: CCM_TABS, section: "Security and identity", product: "certificatemanager", productTitle: "Certificate Manager" },
+  // Identity-Aware Proxy (#2160): its HTTPS resources, and its SSH and TCP
+  // resources (IAP TCP forwarding's instances and destination groups).
+  { path: "/security/iap", service: "security-iap", icon: "vpc", title: "Identity-Aware Proxy", tabTitle: "HTTPS resources", kind: "HTTPS resource",
+    pageTabs: IAP_TABS, section: "Security and identity", product: "iap", productTitle: "Identity-Aware Proxy" },
+  { path: "/security/iap/tcp", service: "security-iap-tcp", icon: "vpc", title: "Identity-Aware Proxy", tabTitle: "SSH and TCP resources", kind: "Destination group",
+    navHidden: true, navAs: "/security/iap", pageTabs: IAP_TABS, section: "Security and identity", product: "iap", productTitle: "Identity-Aware Proxy" },
+  // Cloud Armor (#2160): Network Security's Cloud Armor policies.
+  { path: "/net-security/securitypolicies/list", service: "netsecurity-armor", icon: "vpc", title: "Cloud Armor policies", tabTitle: "Security policies", kind: "Security policy",
+    pageTabs: ARMOR_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/securitypolicies/networkEdgeSecurityServices", service: "netsecurity-armor-edge", icon: "vpc", title: "Cloud Armor policies", tabTitle: "Network edge security services",
+    kind: "Network edge security service", navHidden: true, navAs: "/net-security/securitypolicies/list", pageTabs: ARMOR_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/securitypolicies/wafRules", service: "netsecurity-armor-waf", icon: "vpc", title: "Cloud Armor policies", tabTitle: "Preconfigured WAF rules",
+    kind: "Rule set", navHidden: true, navAs: "/net-security/securitypolicies/list", pageTabs: ARMOR_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Cloud Service Mesh's Routing rule maps (#2160): the target gRPC
+  // proxies of proxyless gRPC (and target HTTP proxies of Envoy), each
+  // with its INTERNAL_SELF_MANAGED forwarding rule and URL map. The path
+  // and columns are UNVERIFIED (re-read 2026-11-22: route-rule-map-concepts).
+  { path: "/net-services/trafficdirector/routingRuleMaps", service: "servicemesh-routing", icon: "vpc", title: "Routing rule maps", kind: "Routing rule map",
+    section: "Networking", product: "servicemesh", productTitle: "Cloud Service Mesh" },
+  // Client Authentication (#2160): Network Security's Authentication
+  // Configuration page, its Client Authentication tab (server TLS
+  // policies), as load-balancing/docs/https/setting-up-mtls-ccm has it.
+  { path: "/net-security/authconfig", service: "netsecurity-clientauth", icon: "vpc", title: "Authentication Configuration", tabTitle: "Client Authentication",
+    kind: "Client Authentication", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Client TLS policies and service mesh authorization policies (#2160):
+  // the page's other tabs. The tabs are UNVERIFIED (re-read 2026-11-22: service-mesh/docs/security) (docs re-read
+  // 2026-11-22 give gcloud import steps only).
+  // Backend Authentication (#2160): the page's tab of backend
+  // authentication configs, as load-balancing/docs/backend-authenticated-tls-setup
+  // has it ("On the Backend Authentication tab, click Create").
+  { path: "/net-security/authconfig/backendAuthentication", service: "netsecurity-backendauth", icon: "vpc", title: "Authentication Configuration", tabTitle: "Backend Authentication",
+    kind: "Backend Authentication", navHidden: true, navAs: "/net-security/authconfig", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Address groups (#2160), as firewall/docs/use-address-groups-firewall-policies
+  // names the page ("Go to the Address groups page").
+  { path: "/net-security/addressgroups", service: "netsecurity-addressgroups", icon: "vpc", title: "Address groups", kind: "Address group",
+    section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/authconfig/clientTlsPolicies", service: "netsecurity-clienttls", icon: "vpc", title: "Authentication Configuration", tabTitle: "Client TLS policies",
+    kind: "Client TLS policy", navHidden: true, navAs: "/net-security/authconfig", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/authconfig/authorizationPolicies", service: "netsecurity-meshauthz", icon: "vpc", title: "Authentication Configuration", tabTitle: "Service mesh authorization policies",
+    kind: "Service mesh authorization policy", navHidden: true, navAs: "/net-security/authconfig", pageTabs: NETSEC_AUTH_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Authorization policies (#2160): the Application Load Balancers'
+  // authzPolicies (load-balancing/docs/auth-policy). UNVERIFIED (re-read 2026-11-22: load-balancing/docs/auth-policy) path.
+  { path: "/net-security/authzpolicies", service: "netsecurity-authz", icon: "vpc", title: "Authorization policies", kind: "Authorization policy",
+    section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Secure Web Proxy (#2160): Web Proxies, SWP Policies (with their
+  // rules), URL lists and TLS inspection policies, one nav entry.
+  { path: "/net-security/swp/web-proxies/list", service: "netsecurity-swp-proxies", icon: "vpc", title: "Secure Web Proxy", tabTitle: "Web proxies",
+    kind: "Web proxy", pageTabs: SWP_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/swp/policies/list", service: "netsecurity-swp-policies", icon: "vpc", title: "Secure Web Proxy", tabTitle: "Policies",
+    kind: "Policy", navHidden: true, navAs: "/net-security/swp/web-proxies/list", pageTabs: SWP_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/swp/urllists/list", service: "netsecurity-swp-urllists", icon: "vpc", title: "Secure Web Proxy", tabTitle: "URL lists",
+    kind: "URL list", navHidden: true, navAs: "/net-security/swp/web-proxies/list", pageTabs: SWP_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  { path: "/net-security/swp/tls-inspection/list", service: "netsecurity-swp-tls", icon: "vpc", title: "Secure Web Proxy", tabTitle: "TLS inspection policies",
+    kind: "TLS inspection policy", navHidden: true, navAs: "/net-security/swp/web-proxies/list", pageTabs: SWP_TABS, section: "Networking", product: "netsecurity", productTitle: "Network Security" },
+  // Cloud CDN (#2160): Network services' Cloud CDN origins.
+  { path: "/net-services/cdn/list", service: "netservices-cdn", icon: "vpc", title: "Cloud CDN", kind: "Origin",
+    section: "Networking", product: "netservices", productTitle: "Network services" },
 
   // Secret Manager (#1850): Google's menu, Secret Manager (the global
   // secrets), Regional secrets and Settings.
@@ -6638,11 +6724,14 @@ function renderEditPage(view, route, segments, data, crumb) {
   const primary = el("button", { type: "submit", class: "primary", id: "edit-page-save", text: spec.submit || "Save" });
   const cancel = el("a", { class: "button secondary", href: here, text: "Cancel" });
   let submitting = false;
+  const initial = fields.values();
   const submit = async (e) => {
     e.preventDefault();
     error.hidden = true;
     if (submitting) return;
     if (!fields.validate()) { steps.revealInvalid(); return; }
+    // A load balancer's Review and finalize, then Update (EditForm.Review, #2160).
+    if (spec.review && !(await reviewChanges(spec, initial, fields.values()))) return;
     submitting = true;
     setBusy(primary, true);
     const op = recordOperation(`Update ${name}`);
@@ -11052,7 +11141,9 @@ function currentProject() {
 // does not work at the folder's or organization's level drops the choice,
 // so the toolbar always names what the page reads.
 const RESOURCE_SCOPE_KEYS = ["folder", "organizationId"];
-const RESOURCE_SCOPED_PATHS = ["/iam-admin/iam", "/iam-admin/orgpolicies", "/iam-admin/tags", "/tags", "/iam-admin/quotas"];
+// Network Security's Address groups list the organization's groups when
+// it is chosen (firewall/docs/use-address-groups-firewall-policies, #2160).
+const RESOURCE_SCOPED_PATHS = ["/iam-admin/iam", "/iam-admin/orgpolicies", "/iam-admin/tags", "/tags", "/iam-admin/quotas", "/net-security/addressgroups"];
 const resourceScopedPath = (pathname) => RESOURCE_SCOPED_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
 // RESOURCE_NAMES are the folders' and the organization's display names, as
 // the picker last read them: "folder:N" and "organization:N".
@@ -12535,6 +12626,15 @@ function navigate(path) {
   if (project) url.searchParams.set("project", project);
   const scoped = scopeServiceOfPath(url.pathname);
   if (scoped && scopeServiceOfPath(location.pathname) === scoped) carryScope(url, scoped);
+  // The folder or organization chosen in the toolbar stays chosen from one
+  // page that works at its level to another (#2160: an organization address
+  // group's Create returns to the organization's list).
+  if (resourceScopedPath(location.pathname) && resourceScopedPath(url.pathname)) {
+    const here = new URLSearchParams(location.search);
+    for (const k of RESOURCE_SCOPE_KEYS) {
+      if (here.get(k) && !url.searchParams.has(k)) url.searchParams.set(k, here.get(k));
+    }
+  }
   history.pushState({}, "", url);
   // Focus lands on the main region first and the screen is drawn after, so a
   // screen that wants focus somewhere specific — a form's first field — is
