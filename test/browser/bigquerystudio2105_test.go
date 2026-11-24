@@ -84,14 +84,14 @@ func studioTaskStates(p *tab, scope string) string {
 	return s
 }
 
-// TestBigQueryStudioScheduledNotebookThroughThePage (#2105): a saved
+// TestDataformBigQueryStudioScheduledNotebookThroughThePage (#2105): a saved
 // notebook's Schedule > Create schedule (Schedule notebook: Schedule name,
 // Authentication, Notebook options' Cloud Storage bucket, Schedule
 // frequency) makes a schedule Dataform runs; View schedules lists it, its
 // Run starts an execution whose state and task are shown, and View output
 // notebook reads the executed notebook from the bucket. WCAG 2.1 AA for
 // the dialog and the schedules list, and both reached by keyboard.
-func TestBigQueryStudioScheduledNotebookThroughThePage(t *testing.T) {
+func TestDataformBigQueryStudioScheduledNotebookThroughThePage(t *testing.T) {
 	needService(t, "bigquery")
 	needService(t, "dataform")
 	needService(t, "storage")
@@ -201,13 +201,13 @@ func TestBigQueryStudioScheduledNotebookThroughThePage(t *testing.T) {
 	})
 }
 
-// TestBigQueryStudioPipelineThroughThePage (#2105): Create new > Pipeline
+// TestDataformBigQueryStudioPipelineThroughThePage (#2105): Create new > Pipeline
 // opens the pipeline editor; Add task > Query and Add task > Notebook (Run
 // after the query), Settings' Cloud Storage bucket, then Run > Run all
 // tasks saves the pipeline (a Dataform repository of definitions/*.sqlx
 // and definitions/actions.yaml), runs it, and shows each task's state; the
 // query's table is read back. WCAG 2.1 AA and the editor by keyboard.
-func TestBigQueryStudioPipelineThroughThePage(t *testing.T) {
+func TestDataformBigQueryStudioPipelineThroughThePage(t *testing.T) {
 	needService(t, "bigquery")
 	needService(t, "dataform")
 	needService(t, "storage")
@@ -286,12 +286,12 @@ func TestBigQueryStudioPipelineThroughThePage(t *testing.T) {
 	})
 }
 
-// TestBigQueryStudioDataPreparationThroughThePage (#2105): Create new >
+// TestDataformBigQueryStudioDataPreparationThroughThePage (#2105): Create new >
 // Data preparation opens its editor: Source, Add step > Filter and
 // Transformation, Destination with Write mode Append, the SQLX view (a
 // Dataform dataPreparation action), then Run saves it and runs it into the
 // destination, read back. WCAG 2.1 AA and the editor by keyboard.
-func TestBigQueryStudioDataPreparationThroughThePage(t *testing.T) {
+func TestDataformBigQueryStudioDataPreparationThroughThePage(t *testing.T) {
 	needService(t, "bigquery")
 	needService(t, "dataform")
 	s := newStudio2105(t)
@@ -371,7 +371,7 @@ func TestBigQueryStudioDataPreparationThroughThePage(t *testing.T) {
 	})
 }
 
-// TestBigQueryStudioDataPreparationUpsertValidationFlatten (#2105): Add
+// TestDataformBigQueryStudioDataPreparationUpsertValidationFlatten (#2105): Add
 // step > Validation (Failed validation rows go to error table), Flatten of
 // a RECORD (its nested column generated as PARENT_FIELD) and Unnest of an
 // array; Destination with Write mode Upsert and its Merge keys, and an
@@ -380,7 +380,7 @@ func TestBigQueryStudioDataPreparationThroughThePage(t *testing.T) {
 // error table. More > Open YAML opens a YAML data preparation (its source
 // and destination, the SQLX view showing its YAML), and Migrate to SQLX
 // makes it a SQLX one. WCAG 2.1 AA and the new form by keyboard.
-func TestBigQueryStudioDataPreparationUpsertValidationFlatten(t *testing.T) {
+func TestDataformBigQueryStudioDataPreparationUpsertValidationFlatten(t *testing.T) {
 	needService(t, "bigquery")
 	needService(t, "dataform")
 	s := newStudio2105(t)
@@ -477,7 +477,7 @@ func TestBigQueryStudioDataPreparationUpsertValidationFlatten(t *testing.T) {
 	})
 }
 
-// TestBigQueryStudioDataPreparationSuggestions (#2105): Gemini's
+// TestDataformBigQueryStudioDataPreparationSuggestions (#2105): Gemini's
 // suggestions, as data-prep-get-suggestions shows them: after the source's
 // sample loads, the Steps list's Suggestions has cards with Preview, Edit
 // and Apply, made by the instance's local model from the table's schema
@@ -486,7 +486,7 @@ func TestBigQueryStudioDataPreparationUpsertValidationFlatten(t *testing.T) {
 // Description say so, and Generate is off. The model's answer is read as
 // steps the editor can apply (the parsing checked on a fixed answer).
 // WCAG 2.1 AA.
-func TestBigQueryStudioDataPreparationSuggestions(t *testing.T) {
+func TestDataformBigQueryStudioDataPreparationSuggestions(t *testing.T) {
 	needService(t, "bigquery")
 	needService(t, "dataform")
 	s := newStudio2105(t)

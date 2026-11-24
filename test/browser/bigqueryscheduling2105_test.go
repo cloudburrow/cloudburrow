@@ -12,7 +12,7 @@ import (
 	"github.com/chromedp/chromedp/kb"
 )
 
-// TestBigQueryStudioPipelineTaskTypesThroughThePage (#2105): a pipeline's
+// TestDataformBigQueryStudioPipelineTaskTypesThroughThePage (#2105): a pipeline's
 // Add task > Declare source, Table (Incremental table), View, Data quality
 // test and Unit test, each with its target and tags; Run > Select tasks to
 // run (with Include dependencies) runs the chosen table and what it
@@ -21,7 +21,7 @@ import (
 // it with Configuration type Trigger, its View actions disable it, and its
 // details read Trigger Condition. WCAG 2.1 AA and keyboard for the Run
 // pane, the Trigger form and the Scheduling page.
-func TestBigQueryStudioPipelineTaskTypesThroughThePage(t *testing.T) {
+func TestDataformBigQueryStudioPipelineTaskTypesThroughThePage(t *testing.T) {
 	needService(t, "bigquery")
 	needService(t, "dataform")
 	s := newStudio2105(t)

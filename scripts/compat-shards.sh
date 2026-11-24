@@ -351,6 +351,12 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # Document AI and Speech-to-Text (TestStoragePicker*, #2097), whose screens
 # are drawn where Cloud Run serves the local AI endpoint, and Logging's App
 # Hub dimensions (TestLoggingAppHub*, #2096), which need App Hub, run in run.
+# BigQuery Studio's screens that keep their assets in Dataform (notebooks,
+# pipelines, data preparations, the data canvas: #2094, #2105) need Dataform
+# beside BigQuery, which the emulators shard's instance does not serve and
+# the run instance does: their tests are named TestDataformBigQueryStudio*,
+# so TestDataform* runs them in crossservice (main run 45422957668 skipped
+# six named TestBigQueryStudio* in emulators, which failed the step).
 # The run shard's instance draws all of those screens, and the crossservice
 # shard brings up the same instance (compat_shard), so the run instance's
 # browser tests are split between them: the Cloud Run screens' (TestCloudRun*,
@@ -395,8 +401,14 @@ COMPAT_BROWSER_LOCALAI_SHARD_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbedd
 # first Connect, so it runs only when asked for
 # (CLOUDBURROW_TEST_NOTEBOOK_RUNTIME=1), as the Spark procedures' tests run
 # with CLOUDBURROW_TEST_SPARK (main runs 45047408927 and 45102950103 skipped
-# it in emulators, which failed the step).
-COMPAT_BROWSER_NEVER_TESTS='^Test(CloudRunFunctionsEditDownloadAndPermissionsThroughThePage|BigQueryStudioNotebookRuntimeThroughThePage)$'
+# it in emulators, which failed the step). So do Connect to a runtime's
+# (#2094), over the same runtime image, and the Spark notebook's and its
+# Manage sessions' (#2094, #2156), whose Spark Connect session runs in the
+# pinned 1.8 GB apache/spark image (CLOUDBURROW_TEST_SPARK) on Serverless
+# for Apache Spark, which only the nightly spark shard serves, beside
+# Dataform, which it does not (main run 45422957668 skipped all three in
+# emulators).
+COMPAT_BROWSER_NEVER_TESTS='^Test(CloudRunFunctionsEditDownloadAndPermissionsThroughThePage|BigQueryStudioNotebookRuntimeThroughThePage|BigQueryStudioConnectToARuntimeThroughThePage|BigQuerySparkNotebookManageSessionsThroughThePage|BigQuerySparkNotebookThroughThePage)$'
 
 # compat_shard <shard>: sets, for that shard,
 #   SERVICES     the instance's --services
