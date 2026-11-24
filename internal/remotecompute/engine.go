@@ -102,12 +102,12 @@ func (e *Engine) Connect(ctx context.Context, t byoc.RemoteTarget) error {
 	}
 	_ = e.Close(t.Instance)
 	s, err := Connect(ctx, Options{Target: target, StateDir: dir, Instance: t.Instance, SSH: e.SSH, SSHConfig: e.SSHConfig,
-		Key: PEMKey(t.PrivateKey), HostKey: t.HostKey,
+		Key: PEMKey(t.PrivateKey), HostKey: t.HostKey, BeforeConnect: t.BeforeConnect,
 		Progress: func(ev Event) { e.publish(t.Instance, ev) }})
 	if err != nil {
 		return err
 	}
-	rec := Record{Target: target, Created: time.Now().UTC(), Host: s.Status().Host, Provisioned: true}
+	rec := Record{Target: target, Created: time.Now().UTC(), Host: s.Status().Host, Provisioned: true, Via: t.Via}
 	if old, had, _ := LoadRecord(dir); had && old.Provisioned {
 		rec.Created, rec.Machine = old.Created, old.Machine
 	} else if had {
@@ -200,4 +200,28 @@ func (e *Engine) Events(instance string) <-chan byoc.RemoteEvent {
 	c.subs = append(c.subs, ch)
 	e.mu.Unlock()
 	return ch
+}
+
+var _ byoc.RemoteRunner = (*Engine)(nil)
+
+// Run runs command on the instance's VM: over its connection from this
+// process when there is one, else over a connection made for the call.
+func (e *Engine) Run(ctx context.Context, t byoc.RemoteTarget, command string) (string, error) {
+	if s := e.session(t.Instance); s != nil {
+		return s.Run(ctx, command)
+	}
+	if len(t.PrivateKey) == 0 || t.HostKey == "" || t.Host == "" {
+		return "", errors.New("the remote target has no host, key or pinned host key")
+	}
+	target := Target{User: t.User, Host: t.Host, Port: t.Port}
+	if target.Port == 0 {
+		target.Port = 22
+	}
+	s, err := Connect(ctx, Options{Target: target, StateDir: filepath.Join(e.StateDir, t.Instance), Instance: t.Instance, SSH: e.SSH,
+		SSHConfig: e.SSHConfig, Key: PEMKey(t.PrivateKey), HostKey: t.HostKey, SkipPrerequisites: true, BeforeConnect: t.BeforeConnect})
+	if err != nil {
+		return "", err
+	}
+	defer s.Close()
+	return s.Run(ctx, command)
 }

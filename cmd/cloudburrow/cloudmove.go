@@ -94,7 +94,10 @@ func moveInstance(ctx context.Context, cfg config.Config, m *byoc.Manager, to st
 			opts.Target.Port = 22
 		}
 		opts.Key, opts.HostKey = remotecompute.PEMKey(vm.PrivateKey), vm.HostKey
-		rec.Provisioned, machine = true, to
+		// SSM mode: the target is this process's Session Manager tunnel;
+		// SSH mode: the firewall follows this machine's address.
+		opts.BeforeConnect = vm.BeforeConnect
+		rec.Provisioned, rec.Via, machine = true, vm.Via, to
 		if to != cfg.Name {
 			rec.Machine = to
 		}

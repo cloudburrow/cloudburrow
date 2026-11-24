@@ -55,7 +55,7 @@ cloudburrow cloud disconnect aws-111122223333        # removes the credentials f
 
 ## 2. Create the VM
 
-**Create VM** opens a wizard with three choices, and the price before anything is made:
+**Create VM** opens a wizard with four choices, and the price before anything is made:
 
 1. **Region**: the closest to you is chosen first (from this machine's time zone and the tz
    database's coordinates; nothing is asked of the network).
@@ -69,7 +69,18 @@ cloudburrow cloud disconnect aws-111122223333        # removes the credentials f
    | GPU | `g6.xlarge`: 4 vCPU, 16 GB, 1 × NVIDIA L4, the same GPU as Google's G2 | `Standard_NC4as_T4_v3`: 4 vCPU, 28 GB, 1 × NVIDIA T4. Azure lists no NVIDIA L4 VM, so this is the nearest that runs NVIDIA's standard data-centre driver. The wizard says so. |
 
 3. **Auto-stop** after idle time: never, 30 minutes, or 1, 2, 4 or 8 hours (CLI: any duration up
-   to a week).
+   to a week). It can be changed later, on Compute capacity.
+4. **Connection**, how CloudBurrow reaches the VM:
+   - **Session Manager: nothing open to the internet** (AWS, the default). The VM's SSM agent
+     dials out to AWS Systems Manager, and CloudBurrow reaches the VM's SSH through
+     [Session Manager port forwarding](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-sessions-start.html#sessions-remote-port-forwarding):
+     the security group allows nothing inbound. CloudBurrow speaks Session Manager's data-channel
+     protocol itself, so you install no plugin. The VM gets an IAM role with AWS's
+     `AmazonSSMManagedInstanceCore` policy.
+   - **SSH from your address only** (Azure, which has no Session Manager, and AWS's fallback for
+     a network that blocks Session Manager): the firewall allows TCP 22 from your public address
+     alone, and follows your address when it changes (see
+     [Security model](#security-model)).
 
 The **Monthly estimate** beside the form is the on-demand Linux price per hour from the cloud's
 own pricing API (the AWS Price List API, Azure's Retail Prices API) times 730 hours, plus the
@@ -88,12 +99,14 @@ CLI:
 ```sh
 cloudburrow cloud create --size medium --auto-stop 1h   # prints the price, then asks
 cloudburrow cloud create --region eu-west-1 --size gpu --yes
+cloudburrow cloud create --connect ssh --yes              # AWS over SSH from your address
 ```
 
 ## 3. Compute capacity
 
 **Compute capacity** (`/compute-capacity`, also in Settings and utilities) shows each VM with
-its state, region, machine type, external IP, auto-stop and price per hour. There:
+its state, region, machine type, price per hour, external IP, connection (Session Manager, or
+the one address SSH is open to and when it was set) and auto-stop. There:
 
 - **Size slider**: move it (by mouse or the arrow keys) through Small, Medium and Large and
   **Resize**; the price follows the slider. AWS resizes a stopped instance, so a running one is
@@ -102,11 +115,18 @@ its state, region, machine type, external IP, auto-stop and price per hour. Ther
   resizes only among GPU sizes: the driver is installed at create.
 - **Start** and **Stop**. A stopped VM keeps its disk. On Azure, Stop *deallocates*, so the
   compute is no longer billed.
+- **Auto-stop**: choose another idle time and **Save**. On a running VM CloudBurrow rewrites the
+  setting over its connection at once; on a stopped VM it is recorded and written when the VM
+  next starts.
+- **Allow my address** (SSH connections): moves the firewall's SSH rule to this machine's
+  current public address now. CloudBurrow also does so before each connection and reconnection,
+  and every three minutes while the instance runs.
 - **Delete** (type the instance's name to confirm).
 - **View resources**: everything tagged `cloudburrow-instance=<name>`.
 
-CLI: `cloudburrow cloud status|scale --size large|start|stop|delete|resources`. Each takes
-`--name` for the instance.
+CLI: `cloudburrow cloud status|scale --size large|start|stop|delete|resources`,
+`cloudburrow cloud set [<instance>] --auto-stop 30m` (`0` is never) and
+`cloudburrow cloud allow-my-ip [<instance>]`. Each takes `--name` for the instance.
 
 ## 4. Move a running instance onto the VM
 
@@ -169,7 +189,8 @@ Every resource carries the tag `cloudburrow-instance=<instance name>`:
 | | AWS | Azure |
 |---|---|---|
 | Network | a VPC `10.209.0.0/16`, a subnet, an internet gateway and a route table | a resource group `cloudburrow-<name>`, a VNet `10.209.0.0/16` and a subnet |
-| Firewall | a security group allowing **only TCP 22 from your public address /32** | a network security group allowing **only TCP 22 from your public address**, then Azure's default deny |
+| Firewall | a security group allowing **nothing inbound** (Session Manager), or **only TCP 22 from your public address /32** (`--connect ssh`) | a network security group allowing **only TCP 22 from your public address**, then Azure's default deny |
+| Session Manager | an IAM role `cloudburrow-<name>-ssm` trusted by EC2, with `AmazonSSMManagedInstanceCore` attached, and its instance profile; not made with `--connect ssh` | none |
 | VM | Ubuntu 24.04 (Canonical's image), `InstanceInitiatedShutdownBehavior=stop`, IMDSv2 required | Ubuntu 24.04 (Canonical), a system-assigned managed identity |
 | Disk | an encrypted gp3 EBS root volume, deleted with the instance | a Premium SSD managed OS disk, deleted with the VM |
 | Address | a public IPv4 | a Standard static public IP |
@@ -183,12 +204,17 @@ Every resource carries the tag `cloudburrow-instance=<instance name>`:
 - on the GPU presets: NVIDIA's `580-server` driver through `ubuntu-drivers`, and the NVIDIA
   Container Toolkit `1.20.2` (its key checked), set as Docker's default runtime; the VM reboots
   once to load the driver;
-- with auto-stop: a systemd timer that, every minute, checks for an established SSH connection
-  (CloudBurrow's tunnel is one) and stops the VM after the chosen idle time. Time before the
-  latest boot does not count. On Azure it deallocates through the VM's managed identity, and
-  shuts the OS down only if that is refused.
+- in Session Manager mode, AWS's SSM agent: Ubuntu's images ship it as the `amazon-ssm-agent`
+  snap; cloud-init makes sure it is installed, enabled and running;
+- auto-stop: a systemd timer that, every minute, reads the idle time from
+  `/var/lib/cloudburrow/auto-stop` (minutes; `0` is never; owned by the login user, so
+  CloudBurrow rewrites it when you change the setting), checks for an established SSH connection
+  (CloudBurrow's tunnel is one, through Session Manager too) and stops the VM after that idle
+  time. Time before the latest boot does not count. On Azure it deallocates through the VM's
+  managed identity, and shuts the OS down only if that is refused.
 
-Nothing else listens on the VM.
+Nothing else listens on the VM; in Session Manager mode nothing at all is reachable from the
+internet.
 
 ## How to delete
 
@@ -228,22 +254,36 @@ If you ever need to clean up by hand: on AWS, search the EC2 and VPC consoles fo
   verified, not trusted on first use. The host key's private half is in the VM's user data,
   which anyone in your account allowed to read instance attributes can read; that is the
   cloud's normal boundary.
-- **No inbound access but SSH from your address.** Your public address is read from
-  `https://checkip.amazonaws.com` at create. If it changes, SSH is refused until the firewall is
-  updated (a gap, below). No service is opened to the internet.
+- **No inbound access on AWS.** In Session Manager mode the VM's agent connects out to AWS, and
+  CloudBurrow's tunnel is a listener on `127.0.0.1` of your machine: each connection to it is a
+  stream over a Session Manager session (`StartSession` with `AWS-StartPortForwardingSession` to
+  port 22, its WebSocket signed with your credentials), and the system `ssh` signs in through it
+  against the pinned host key, as over SSH. Session Manager's own logging and IAM controls apply.
+- **SSH from your address only, elsewhere.** On Azure, and on AWS with `--connect ssh`, your
+  public address is read from `https://checkip.amazonaws.com`. When it changes (another
+  network, a new lease), CloudBurrow moves the firewall's rule to the new address before the next
+  connection or reconnection, and every three minutes while the instance runs; the old address
+  is removed. **Allow my address** and `cloudburrow cloud allow-my-ip` do it at once. No service
+  is opened to the internet.
 - **Least privilege.** The permission check lists exactly what CloudBurrow calls:
   - AWS, through IAM `SimulatePrincipalPolicy` on your role or user: `ec2:DescribeRegions`,
     `DescribeImages`, `CreateVpc`, `CreateSubnet`, `CreateInternetGateway`,
     `AttachInternetGateway`, `CreateRouteTable`, `CreateRoute`, `AssociateRouteTable`,
-    `CreateSecurityGroup`, `AuthorizeSecurityGroupIngress`, `RunInstances`, `CreateTags`,
+    `CreateSecurityGroup`, `AuthorizeSecurityGroupIngress`, `RevokeSecurityGroupIngress`,
+    `RunInstances`, `CreateTags`,
     `DescribeInstances`, `DescribeVpcs`, `DescribeSubnets`, `DescribeSecurityGroups`,
     `DescribeInternetGateways`, `DescribeRouteTables`, `DescribeVolumes`, `StartInstances`,
     `StopInstances`, `ModifyInstanceAttribute`, `TerminateInstances`, `DeleteVolume`,
     `DeleteSecurityGroup`, `DisassociateRouteTable`, `DeleteRouteTable`, `DeleteSubnet`,
-    `DetachInternetGateway`, `DeleteInternetGateway`, `DeleteVpc`, and `pricing:GetProducts`.
+    `DetachInternetGateway`, `DeleteInternetGateway`, `DeleteVpc`, and `pricing:GetProducts`;
+    for Session Manager, `iam:CreateRole`, `TagRole`, `GetRole`, `AttachRolePolicy`,
+    `DetachRolePolicy`, `DeleteRole`, `CreateInstanceProfile`, `TagInstanceProfile`,
+    `GetInstanceProfile`, `AddRoleToInstanceProfile`, `RemoveRoleFromInstanceProfile`,
+    `DeleteInstanceProfile`, `PassRole`, and `ssm:DescribeInstanceInformation`, `StartSession`,
+    `TerminateSession`.
   - Azure, through *Permissions - List* on the subscription: resource groups
     (write, read, delete), virtual networks (write, delete, `subnets/join/action`), network
-    security groups, public IP addresses and network interfaces (write, delete), virtual machines
+    security groups (write, read, delete), public IP addresses and network interfaces (write, delete), virtual machines
     (write, read, delete, `start/action`, `deallocate/action`), `disks/delete`,
     `roleAssignments/write` (for auto-stop), and `tags/read`.
 - **Nothing is sent to Google Cloud.** The cloud calls go only to the cloud you connected.
@@ -256,9 +296,17 @@ never reach a real endpoint:
 - `internal/byoc/awsprov/awsfake` and `internal/byoc/azureprov/azurefake` are local HTTP fakes
   implementing only the calls CloudBurrow makes, their request and response shapes recorded from
   each cloud's API reference (EC2 Query XML, IAM/STS query XML, the Pricing API's JSON, the SSO
-  OIDC and portal APIs; Microsoft Entra's token endpoint for MSAL, Azure Resource Manager and the
-  Retail Prices API), with failure injection: a denied action, a quota error, an expired device
-  code, a revoked token, a resource Delete cannot remove.
+  OIDC and portal APIs, Systems Manager's JSON API and the Session Manager data channel's
+  WebSocket, with a stand-in SSM agent; Microsoft Entra's token endpoint for MSAL, Azure
+  Resource Manager and the Retail Prices API), with failure injection: a denied action, a quota
+  error, an expired device code, a revoked token, a resource Delete cannot remove, an agent that
+  is not connected.
+- `internal/byoc/awsprov/ssmtunnel`'s tests check the data channel's framing, acknowledgements,
+  resending of lost frames, multiplexing, the basic mode of agents before 3.0.196.0, and a
+  session ended by the agent.
+- With the stand-in remote host (`scripts/remote-compute-standin.sh`), the system `ssh` signs in
+  to it through the Session Manager tunnel to awsfake's agent, and auto-stop changed after create
+  is checked in the host's file (`go test ./internal/remotecompute -run 'SessionManager|Provisioned'`).
 - Unit and integration tests drive the official SDKs (AWS SDK for Go v2, the Azure SDK for Go)
   against them: sign-in, credential refresh, the permission check, prices, create with rollback,
   resize, start, stop, delete and its check (`go test ./internal/byoc/... ./cmd/cloudburrow -run Cloud`).

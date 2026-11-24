@@ -43,6 +43,9 @@ type Manager struct {
 	ops     map[string]*Operation
 	opOrder []string
 	busy    map[string]string // instance -> operation id
+	tunnels map[string]Tunnel // instance -> its Session Manager tunnel
+	addrMu  sync.Mutex        // one firewall update at a time
+	addrLog map[string][]AddressChange
 }
 
 // Options configure a Manager.
@@ -74,6 +77,7 @@ func NewManager(o Options) (*Manager, error) {
 		dir: o.Dir, keys: o.Keychain, drivers: map[Cloud]Driver{}, engine: o.Engine,
 		ipLookup: o.IPLookup, browser: o.OpenBrowser, now: o.Now, zone: o.Location,
 		signIns: map[string]*signInState{}, ops: map[string]*Operation{}, busy: map[string]string{},
+		tunnels: map[string]Tunnel{},
 	}
 	for _, d := range o.Drivers {
 		m.drivers[d.Cloud()] = d
@@ -615,15 +619,7 @@ func (m *Manager) Resources(ctx context.Context, instance string) ([]Resource, e
 
 // RemoteTarget is what the remote engine needs to reach a machine.
 func (m *Manager) RemoteTarget(instance string) (RemoteTarget, error) {
-	mc, err := m.Machine(instance)
-	if err != nil {
-		return RemoteTarget{}, err
-	}
-	key, err := m.keys.Get(keyName(instance))
-	if err != nil {
-		return RemoteTarget{}, err
-	}
-	return RemoteTarget{Instance: mc.User(), Host: mc.PublicIP, Port: mc.SSHPort, User: mc.SSHUser, PrivateKey: key, HostKey: mc.HostKey}, nil
+	return m.RemoteTargetContext(context.Background(), instance, nil)
 }
 
 // SetUsedBy records that the machine is instance's compute (a move), or,
@@ -780,6 +776,9 @@ type CreateRequest struct {
 	Size            string `json:"size,omitempty"` // overrides Preset
 	AutoStopMinutes int    `json:"auto_stop_minutes"`
 	DiskGiB         int    `json:"disk_gib,omitempty"`
+	// ConnectMode is ConnectSSM or ConnectSSH; empty is SSM where the
+	// cloud offers it (AWS), else SSH.
+	ConnectMode string `json:"connect_mode,omitempty"`
 }
 
 var instanceName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,38}[a-z0-9]$`)
@@ -845,17 +844,21 @@ func (m *Manager) create(ctx context.Context, conn Connection, req CreateRequest
 		return nil, err
 	}
 
-	progress.Report("address", StepRunning, "Finding this machine's public address, the only one SSH will accept")
-	ip, err := m.ipLookup(ctx)
+	mode, err := connectModeFor(conn.Cloud, p, req.ConnectMode)
 	if err != nil {
-		progress.Report("address", StepFailed, "%v", err)
-		return nil, fmt.Errorf("finding your public address: %w", err)
+		return nil, err
 	}
-	cidr := ip + "/32"
-	if parsed := net.ParseIP(ip); parsed != nil && parsed.To4() == nil {
-		cidr = ip + "/128"
+	cidr := ""
+	if mode == ConnectSSM {
+		progress.Report("address", StepDone, "CloudBurrow connects through AWS Systems Manager Session Manager: the VM's firewall allows nothing inbound")
+	} else {
+		progress.Report("address", StepRunning, "Finding this machine's public address, the only one SSH will accept")
+		if cidr, err = m.currentCIDR(ctx); err != nil {
+			progress.Report("address", StepFailed, "%v", err)
+			return nil, err
+		}
+		progress.Report("address", StepDone, "SSH will accept %s only; the firewall follows this address when it changes", cidr)
 	}
-	progress.Report("address", StepDone, "SSH will accept %s only", cidr)
 
 	progress.Report("key", StepRunning, "Making CloudBurrow's SSH key and the VM's host key on this machine")
 	client, err := NewKeyPair("cloudburrow-" + req.Instance)
@@ -874,20 +877,23 @@ func (m *Manager) create(ctx context.Context, conn Connection, req CreateRequest
 	user := map[Cloud]string{AWS: "ubuntu", Azure: "cloudburrow"}[conn.Cloud]
 	userData, err := RenderCloudInit(CloudInitOptions{Cloud: conn.Cloud, Instance: req.Instance, User: user,
 		AuthorizedKey: client.Public, HostKeyPrivate: host.PrivatePEM, HostKeyPublic: host.Public,
-		GPU: size.Preset == GPU, AutoStopMinutes: req.AutoStopMinutes})
+		GPU: size.Preset == GPU, AutoStopMinutes: req.AutoStopMinutes, SSM: mode == ConnectSSM})
 	if err != nil {
 		_ = m.keys.Delete(keyName(req.Instance))
 		return nil, err
 	}
 	pending := Machine{Instance: req.Instance, Cloud: conn.Cloud, Connection: conn.ID, Region: req.Region, Size: size.Name,
 		Preset: size.Preset, DiskGiB: req.DiskGiB, AutoStopMinutes: req.AutoStopMinutes, State: Provisioning,
-		SSHUser: user, HostKey: host.Public, HourlyUSD: size.HourlyUSD, CreatedAt: m.now()}
+		SSHUser: user, HostKey: host.Public, HourlyUSD: size.HourlyUSD, CreatedAt: m.now(), ConnectMode: mode, SourceCIDR: cidr}
+	if cidr != "" {
+		pending.SourceUpdatedAt = pending.CreatedAt
+	}
 	if err := m.putMachine(pending); err != nil {
 		return nil, err
 	}
 	mc, err := p.Create(ctx, MachineSpec{Instance: req.Instance, Region: req.Region, Size: size.Name, Preset: size.Preset,
 		DiskGiB: req.DiskGiB, AutoStopMinutes: req.AutoStopMinutes, SSHUser: user, SSHPublicKey: client.Public,
-		SourceCIDR: cidr, UserData: userData}, progress)
+		SourceCIDR: cidr, ConnectMode: mode, UserData: userData}, progress)
 	if err != nil {
 		// The provider removed what it made; so is the record and the key.
 		_ = m.dropMachine(req.Instance)
@@ -896,6 +902,7 @@ func (m *Manager) create(ctx context.Context, conn Connection, req CreateRequest
 	}
 	mc.Connection, mc.Cloud, mc.HostKey, mc.SSHUser = conn.ID, conn.Cloud, host.Public, user
 	mc.Preset, mc.AutoStopMinutes, mc.CreatedAt = size.Preset, req.AutoStopMinutes, pending.CreatedAt
+	mc.ConnectMode, mc.SourceCIDR = mode, cidr
 	if mc.HourlyUSD == 0 {
 		mc.HourlyUSD = size.HourlyUSD
 	}
@@ -911,12 +918,16 @@ func (m *Manager) handOver(ctx context.Context, mc Machine, progress Progress) {
 	if mc.State != Running {
 		return
 	}
-	t, err := m.RemoteTarget(mc.Instance)
+	t, err := m.RemoteTargetContext(ctx, mc.Instance, progress)
 	if err != nil {
 		progress.Report("remote", StepFailed, "%v", err)
 		return
 	}
-	progress.Report("remote", StepRunning, "Connecting the instance's Docker to %s over SSH", mc.PublicIP)
+	via := "over SSH"
+	if t.Via == ConnectSSM {
+		via = "over SSH through Session Manager"
+	}
+	progress.Report("remote", StepRunning, "Connecting the instance's Docker to %s %s", mc.PublicIP, via)
 	if err := m.engine.Connect(ctx, t); err != nil {
 		if errors.Is(err, ErrMoveNeeded) {
 			progress.Report("remote", StepDone, "The VM is ready. %s still runs on this machine: Move it to the VM to carry its state there (`cloudburrow cloud move %s --to %s`)",
@@ -927,6 +938,11 @@ func (m *Manager) handOver(ctx context.Context, mc Machine, progress Progress) {
 		return
 	}
 	progress.Report("remote", StepDone, "The instance's Docker runs on %s", mc.PublicIP)
+	// The auto-stop setting is the record's; a change made while the VM
+	// was stopped reaches it now.
+	if err := m.pushAutoStop(ctx, t, mc.AutoStopMinutes); err != nil {
+		progress.Report("auto-stop", StepFailed, "Could not set auto-stop on the VM: %v", err)
+	}
 }
 
 // Scale resizes a machine to a preset or a named size.
@@ -999,6 +1015,7 @@ func (m *Manager) power(kind, instance string, wait bool, also Progress) (Operat
 			got, err = p.Start(ctx, mc)
 		} else {
 			_ = m.engine.Close(mc.User())
+			m.closeTunnel(instance)
 			progress.Report("stop", StepRunning, "Stopping %s; its disk is kept", instance)
 			got, err = p.Stop(ctx, mc)
 		}
@@ -1030,6 +1047,7 @@ func (m *Manager) Delete(ctx context.Context, instance string, wait bool, also P
 			return nil, err
 		}
 		_ = m.engine.Close(mc.User())
+		m.closeTunnel(instance)
 		mc.State = Deleting
 		_ = m.putMachine(mc)
 		if err := p.Delete(ctx, instance, mc.Region, progress); err != nil {

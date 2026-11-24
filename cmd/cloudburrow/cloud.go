@@ -46,8 +46,17 @@ Commands:
   disconnect <connection> [--force]
               Remove a connection's credentials from the keychain
   create [--connection ID] [--region R] [--size small|medium|large|gpu]
-         [--auto-stop 60m|0] [--yes]
-              Show the hourly price, then create the instance's VM
+         [--auto-stop 60m|0] [--connect ssm|ssh] [--yes]
+              Show the hourly price, then create the instance's VM. On AWS
+              CloudBurrow connects through Session Manager (nothing inbound
+              open); --connect ssh opens SSH to your address only instead,
+              as on Azure, and the firewall follows your address
+  set [<instance>] --auto-stop 30m|2h|0
+              Change the VM's auto-stop after create (0 is never); a running
+              VM's setting changes at once, a stopped one's at its next start
+  allow-my-ip [<instance>]
+              Move the firewall's SSH rule to your current public address now
+              (CloudBurrow also does so before each connection)
   status [--format json]
               Connections, and the instance's VM read from its cloud
   scale --size small|medium|large [--yes]
@@ -123,6 +132,8 @@ func runCloud(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// Session Manager tunnels this command opened end with it.
+	defer m.CloseTunnels()
 	ctx := context.Background()
 	c := cloudCmd{m: m, cfg: cfg, flags: flags, args: positional, stdout: stdout, stderr: stderr, in: bufio.NewReader(cloudStdin)}
 	switch sub {
@@ -144,6 +155,10 @@ func runCloud(args []string, stdout, stderr io.Writer) error {
 		return c.resources(ctx)
 	case "move":
 		return c.move(ctx)
+	case "set":
+		return c.set(ctx)
+	case "allow-my-ip":
+		return c.allowMyIP(ctx)
 	}
 	fmt.Fprintf(stderr, "unknown cloud command %q\n\n%s", sub, cloudUsage)
 	return errUsage
@@ -154,7 +169,8 @@ func cloudFlags(sub string, args []string) (map[string]string, []string, error) 
 	names := map[string][]string{
 		"connect":    {"start-url", "sso-region", "account", "tenant", "subscription", "access-key!"},
 		"disconnect": {"force!"},
-		"create":     {"connection", "region", "size", "auto-stop", "disk-gib", "yes!"},
+		"create":     {"connection", "region", "size", "auto-stop", "disk-gib", "connect", "yes!"},
+		"set":        {"auto-stop"},
 		"status":     {"format"},
 		"scale":      {"size", "yes!"},
 		"delete":     {"yes!"},
@@ -384,6 +400,16 @@ func (c cloudCmd) create(ctx context.Context) error {
 	} else {
 		fmt.Fprintln(c.stdout, "  Auto-stop: never (billed until you stop it)")
 	}
+	mode, err := byoc.ParseConnectMode(c.flags["connect"])
+	if err != nil {
+		return err
+	}
+	switch {
+	case mode == byoc.ConnectSSH || (mode == "" && conn.Cloud != byoc.AWS):
+		fmt.Fprintln(c.stdout, "  Connect: SSH, the firewall open to your public address only (it follows your address)")
+	default:
+		fmt.Fprintln(c.stdout, "  Connect: AWS Systems Manager Session Manager, nothing inbound open")
+	}
 	ok, err := c.confirm("Create it?")
 	if err != nil || !ok {
 		if err == nil {
@@ -392,7 +418,7 @@ func (c cloudCmd) create(ctx context.Context) error {
 		return err
 	}
 	op, err := c.m.Create(ctx, byoc.CreateRequest{Instance: c.cfg.Name, Connection: conn.ID, Region: region, Preset: preset,
-		AutoStopMinutes: autoStop, DiskGiB: disk}, true, c.printEvent)
+		AutoStopMinutes: autoStop, DiskGiB: disk, ConnectMode: mode}, true, c.printEvent)
 	if err != nil {
 		return err
 	}
@@ -476,6 +502,12 @@ func (c cloudCmd) status(ctx context.Context) error {
 	if refreshErr != nil {
 		fmt.Fprintf(c.stdout, "(as last recorded: %v)\n", refreshErr)
 	}
+	if mc.ConnectMode == byoc.ConnectSSM {
+		fmt.Fprintln(c.stdout, "Connect: Session Manager; nothing inbound is open")
+	} else {
+		fmt.Fprintf(c.stdout, "Connect: SSH from %s only\n", orUnknown(mc.SourceCIDR))
+	}
+	fmt.Fprintf(c.stdout, "Auto-stop: %s\n", byoc.AutoStopWords(mc.AutoStopMinutes))
 	if st, err := c.m.Engine().Status(ctx, mc.Instance); err == nil && st.Message != "" {
 		fmt.Fprintln(c.stdout, st.Message)
 	}
@@ -553,4 +585,57 @@ func (c cloudCmd) resources(ctx context.Context) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", r.Type, r.ID, r.Region, r.State)
 	}
 	return tw.Flush()
+}
+
+func orUnknown(s string) string {
+	if s == "" {
+		return "an unrecorded address"
+	}
+	return s
+}
+
+// instanceArg is the command's instance: its one positional argument, or
+// --name's.
+func (c cloudCmd) instanceArg() (string, error) {
+	switch len(c.args) {
+	case 0:
+		return c.cfg.Name, nil
+	case 1:
+		return c.args[0], nil
+	}
+	return "", fmt.Errorf("one instance at most, got %v", c.args)
+}
+
+func (c cloudCmd) set(ctx context.Context) error {
+	inst, err := c.instanceArg()
+	if err != nil {
+		return err
+	}
+	v, ok := c.flags["auto-stop"]
+	if !ok {
+		return fmt.Errorf("set what? --auto-stop 30m|2h|0 (the size is `cloudburrow cloud scale --size`)")
+	}
+	minutes, err := parseAutoStop(v)
+	if err != nil {
+		return err
+	}
+	op, err := c.m.SetAutoStop(ctx, inst, minutes, true, c.printEvent)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(c.stdout, "%s: auto-stop %s.\n", inst, byoc.AutoStopWords(op.Machine.AutoStopMinutes))
+	return nil
+}
+
+func (c cloudCmd) allowMyIP(ctx context.Context) error {
+	inst, err := c.instanceArg()
+	if err != nil {
+		return err
+	}
+	op, err := c.m.AllowMyAddress(ctx, inst, true, c.printEvent)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(c.stdout, "%s: SSH is open to %s only.\n", inst, op.Machine.SourceCIDR)
+	return nil
 }

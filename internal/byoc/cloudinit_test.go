@@ -20,7 +20,7 @@ func TestCloudInitPinsAndKeys(t *testing.T) {
 		"#cloud-config\n", "ssh_pwauth: false", "ssh_genkeytypes: []", "ed25519_public: '" + host.Public + "'",
 		"- '" + client.Public + "'", "docker-ce='" + DockerVersion + "'", "containerd.io='" + ContainerdVersion + "'",
 		DockerKeyFingerprint, KindSHA256 + "  /tmp/kind' | sha256sum -c -", "kind/releases/download/" + KindVersion + "/",
-		"limit=2700", "shutdown -h now", "cloudburrow-idle.timer", "usermod -aG docker ubuntu", "GatewayPorts clientspecified",
+		"printf '%d\\n' 45 > " + AutoStopFile, "chown ubuntu:ubuntu " + AutoStopFile, "minutes=$(cat " + AutoStopFile, "limit=$((minutes * 60))", "shutdown -h now", "cloudburrow-idle.timer", "usermod -aG docker ubuntu", "GatewayPorts clientspecified",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("cloud-init lacks %q", want)
@@ -33,6 +33,14 @@ func TestCloudInitPinsAndKeys(t *testing.T) {
 	}
 	if strings.Contains(out, "nvidia") {
 		t.Error("a CPU size installs the NVIDIA driver")
+	}
+	if strings.Contains(out, "amazon-ssm-agent") {
+		t.Error("an SSH-mode VM runs the SSM agent")
+	}
+	ssm, err := RenderCloudInit(CloudInitOptions{Cloud: AWS, Instance: "dev", User: "ubuntu", AuthorizedKey: client.Public,
+		HostKeyPrivate: host.PrivatePEM, HostKeyPublic: host.Public, SSM: true})
+	if err != nil || !strings.Contains(ssm, "snap start --enable amazon-ssm-agent.amazon-ssm-agent") {
+		t.Errorf("an SSM-mode VM does not start the SSM agent (%v)", err)
 	}
 }
 
@@ -54,8 +62,10 @@ func TestCloudInitGPUAndAzureDeallocate(t *testing.T) {
 func TestCloudInitWithoutAutoStopAndRefusals(t *testing.T) {
 	host, _ := NewKeyPair("")
 	out, err := RenderCloudInit(CloudInitOptions{Cloud: AWS, User: "ubuntu", AuthorizedKey: "ssh-ed25519 AAAA", HostKeyPrivate: host.PrivatePEM, HostKeyPublic: host.Public})
-	if err != nil || strings.Contains(out, "cloudburrow-idle") {
-		t.Fatalf("auto-stop 0 still installs the idle check: %v", err)
+	// Auto-stop 0 is "never", written to the setting the idle check
+	// reads, so it can be turned on after create.
+	if err != nil || !strings.Contains(out, "printf '%d\\n' 0 > "+AutoStopFile) || !strings.Contains(out, `if [ "$minutes" -eq 0 ]; then exit 0; fi`) {
+		t.Fatalf("auto-stop 0 is not written as never: %v", err)
 	}
 	if _, err := RenderCloudInit(CloudInitOptions{User: "bad user", AuthorizedKey: "k", HostKeyPrivate: "p", HostKeyPublic: "q"}); err == nil {
 		t.Error("a user with a space was accepted")

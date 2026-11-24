@@ -12301,6 +12301,31 @@ async function renderComputeCreate(view) {
   const sizes = el("div", { id: "compute-sizes", role: "radiogroup", "aria-labelledby": "compute-size-legend" });
   const autoStop = el("select", { id: "compute-autostop" },
     ...AUTO_STOP_CHOICES.map(([v, t]) => el("option", { value: String(v), text: t, selected: v === 60 })));
+  // How CloudBurrow reaches the VM (#2209): on AWS, Session Manager with
+  // nothing inbound, or SSH to the user's address; Azure has SSH only.
+  const connectSSM = el("input", { type: "radio", name: "compute-connect", id: "compute-connect-ssm", value: "ssm", checked: true });
+  const connectSSH = el("input", { type: "radio", name: "compute-connect", id: "compute-connect-ssh", value: "ssh" });
+  const connectHelp = el("p", { class: "form-help", id: "compute-connect-help" });
+  const connectGroup = el("fieldset", { class: "form-row compute-connect", id: "compute-connect", "aria-describedby": "compute-connect-help" },
+    el("legend", { text: "Connect" }),
+    el("div", { class: "radio-row" }, connectSSM, el("label", { for: "compute-connect-ssm", text: "Session Manager: nothing open to the internet" })),
+    el("div", { class: "radio-row" }, connectSSH, el("label", { for: "compute-connect-ssh", text: "SSH from your address only" })),
+    connectHelp);
+  const drawConnect = () => {
+    const c = data.connections.find((x) => x.id === connection.value);
+    const aws = !c || c.cloud === "aws";
+    connectSSM.disabled = !aws;
+    if (!aws) connectSSH.checked = true;
+    connectHelp.textContent = !aws
+      ? "Azure has no Session Manager: SSH is open to your public address only, and the firewall follows your address when it changes."
+      : connectSSM.checked
+        ? "The VM's SSM agent dials out to AWS and CloudBurrow reaches SSH through it: the firewall allows nothing inbound. The VM gets an IAM role with AmazonSSMManagedInstanceCore."
+        : "For a network that blocks Session Manager: SSH is open to your public address only, and the firewall follows your address when it changes.";
+  };
+  connection.addEventListener("change", drawConnect);
+  connectSSM.addEventListener("change", drawConnect);
+  connectSSH.addEventListener("change", drawConnect);
+  drawConnect();
   const permissions = el("div", { id: "compute-permissions", role: "status" });
   const error = el("p", { class: "form-error", role: "alert", id: "compute-create-error", hidden: true });
   const create = el("button", { type: "submit", class: "primary", id: "compute-create-submit", text: "Create", disabled: true });
@@ -12407,7 +12432,8 @@ async function renderComputeCreate(view) {
     const op = recordOperation(`Create VM ${name}`);
     try {
       const started = await computeJSON("/api/compute/machines", { method: "POST", body: {
-        instance: name, connection: connection.value, region: region.value, preset: s.preset, auto_stop_minutes: Number(autoStop.value) } });
+        instance: name, connection: connection.value, region: region.value, preset: s.preset, auto_stop_minutes: Number(autoStop.value),
+        connect_mode: connectSSH.checked ? "ssh" : "ssm" } });
       op.succeeded(name);
       navigate(`/settings/compute/operation?id=${encodeURIComponent(started.id)}`);
     } catch (err) {
@@ -12431,7 +12457,9 @@ async function renderComputeCreate(view) {
         sizes,
         el("h2", { class: "form-section-title", text: "Auto-stop" }),
         el("div", { class: "form-row" }, el("label", { for: "compute-autostop", text: "Stop the VM" }), autoStop,
-          el("p", { class: "form-help", text: "Idle means no connection from CloudBurrow. A stopped VM keeps its disk, and the cluster's state on it." })),
+          el("p", { class: "form-help", text: "Idle means no connection from CloudBurrow. A stopped VM keeps its disk, and the cluster's state on it. You can change it later on Compute capacity." })),
+        el("h2", { class: "form-section-title", text: "Connection" }),
+        connectGroup,
         el("h2", { class: "form-section-title", text: "Permissions" }),
         permissions,
         error,
@@ -12506,6 +12534,13 @@ async function renderComputeOperation(view) {
 }
 
 // ---- Compute capacity ----
+
+// autoStopWords says an auto-stop setting as byoc.AutoStopWords does.
+function autoStopWords(n) {
+  if (!n) return "Never";
+  if (n % 60 === 0) return `After ${n / 60} hour${n === 60 ? "" : "s"} idle`;
+  return `After ${n} minutes idle`;
+}
 
 async function renderComputeCapacity(view) {
   closeSettingsPanel();
@@ -12609,6 +12644,24 @@ function computeMachineCard(m, data, running, redraw) {
       onConfirm: async () => { act("Delete", base, undefined, "DELETE"); },
     }) });
   const move = computeMoveButton(m, data, idp, busy, progress, showError, redraw);
+  // Auto-stop, editable after create: a running VM's setting changes at
+  // once, a stopped one's at its next start.
+  const autoStop = el("select", { id: `${idp}-autostop`, disabled: busy },
+    ...AUTO_STOP_CHOICES.map(([v, t]) => el("option", { value: String(v), text: t, selected: v === m.auto_stop_minutes })));
+  if (!AUTO_STOP_CHOICES.some(([v]) => v === m.auto_stop_minutes)) {
+    autoStop.prepend(el("option", { value: String(m.auto_stop_minutes), text: autoStopWords(m.auto_stop_minutes), selected: true }));
+  }
+  const saveAutoStop = el("button", { type: "button", class: "secondary", id: `${idp}-autostop-save`, text: "Save", disabled: true,
+    onclick: () => act("Change auto-stop", `${base}/settings`, { auto_stop_minutes: Number(autoStop.value) }) });
+  autoStop.addEventListener("change", () => { saveAutoStop.disabled = busy || Number(autoStop.value) === m.auto_stop_minutes; });
+  const ssm = m.connect_mode === "ssm";
+  const allow = ssm ? null : el("button", { type: "button", class: "secondary", id: `${idp}-allow-address`, text: "Allow my address",
+    disabled: busy || m.state !== "running" && m.state !== "stopped",
+    onclick: () => act("Allow my address", `${base}/allow-my-address`, {}) });
+  const connectText = ssm
+    ? "Session Manager; nothing inbound is open"
+    : `SSH from ${m.source_cidr || "an unrecorded address"} only` +
+      (m.source_updated_at ? ` (updated ${new Date(m.source_updated_at).toLocaleString()})` : "");
   const resourcesOut = el("div", { id: `${idp}-resources` });
   const resources = el("button", { type: "button", class: "link-button", id: `${idp}-resources-button`, text: "View resources",
     onclick: async () => {
@@ -12632,7 +12685,15 @@ function computeMachineCard(m, data, running, redraw) {
       el("dt", { text: "Machine type" }), el("dd", { id: `${idp}-type`, text: m.size }),
       el("dt", { text: "Price" }), el("dd", { id: `${idp}-price`, text: m.hourly_usd ? `${usdFormat.format(m.hourly_usd)}/hour while running` : "unavailable" }),
       el("dt", { text: "External IP" }), el("dd", { text: m.public_ip || "None" }),
-      el("dt", { text: "Auto-stop" }), el("dd", { text: m.auto_stop_minutes ? `After ${m.auto_stop_minutes} minutes idle` : "Never" })),
+      el("dt", { text: "Connection" }), el("dd", { id: `${idp}-connect`, text: connectText }),
+      el("dt", { text: "Auto-stop" }), el("dd", { id: `${idp}-autostop-value`, text: autoStopWords(m.auto_stop_minutes) })),
+    el("div", { class: "form-row compute-autostop" },
+      el("label", { for: `${idp}-autostop`, text: "Auto-stop" }), autoStop, saveAutoStop,
+      el("p", { class: "form-help", id: `${idp}-autostop-help`, text: m.state === "running"
+        ? "Idle means no connection from CloudBurrow. The VM's setting changes as soon as you save."
+        : "The VM is not running: the new setting is written when it next starts." })),
+    allow ? el("div", { class: "form-row compute-address" }, allow,
+      el("p", { class: "form-help", text: "CloudBurrow moves the firewall to this machine's public address before each connection and every few minutes; this does it now." })) : null,
     el("div", { class: "form-row compute-slider" },
       el("label", { for: `${idp}-size`, text: "Size" }), slider, sliderValue,
       el("p", { class: "form-help", text: m.cloud === "aws"

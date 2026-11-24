@@ -284,7 +284,13 @@ Authentication Library for Go
 Microsoft Corporation, under the MIT License; and
 github.com/zalando/go-keyring, Copyright (c) 2016 Zalando SE, under the MIT
 License, with github.com/godbus/dbus/v5 (BSD 2-Clause License) and
-github.com/alessio/shellescape (MIT License). The VM it creates in the
+github.com/alessio/shellescape (MIT License). Its Session Manager tunnel
+(internal/byoc/awsprov/ssmtunnel) speaks the protocol of AWS's
+session-manager-plugin (https://github.com/aws/session-manager-plugin,
+Apache License 2.0), reimplemented, with github.com/xtaci/smux, Copyright
+(c) 2016-2017 xtaci, under the MIT License, and github.com/gorilla/websocket,
+Copyright (c) 2023 The Gorilla Authors, under the BSD 2-Clause License. The
+VM it creates in the
 user's own account installs Docker, kind and, for GPU sizes, NVIDIA's driver
 and container toolkit from their publishers; CloudBurrow redistributes none
 of them.

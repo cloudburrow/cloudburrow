@@ -410,6 +410,21 @@ func (s *Server) handleComputeAction(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		op, err = s.cloud.Scale(r.Context(), instance, p, in.Size, false, nil)
+	case "settings":
+		// Editable after create (#2209): auto-stop; the size is "scale".
+		var in struct {
+			AutoStopMinutes *int `json:"auto_stop_minutes"`
+		}
+		if !readJSONBody(w, r, &in) {
+			return
+		}
+		if in.AutoStopMinutes == nil {
+			badRequest(w, "auto_stop_minutes is required (0 is never)")
+			return
+		}
+		op, err = s.cloud.SetAutoStop(r.Context(), instance, *in.AutoStopMinutes, false, nil)
+	case "allow-my-address":
+		op, err = s.cloud.AllowMyAddress(r.Context(), instance, false, nil)
 	case "start":
 		op, err = s.cloud.Start(r.Context(), instance, false, nil)
 	case "stop":
@@ -418,7 +433,14 @@ func (s *Server) handleComputeAction(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no action " + action})
 		return
 	}
-	s.computeLog(strings.ToUpper(action[:1])+action[1:]+" compute VM", instance, err)
+	kind := strings.ToUpper(action[:1]) + action[1:] + " compute VM"
+	switch action {
+	case "settings":
+		kind = "Change compute VM settings"
+	case "allow-my-address":
+		kind = "Allow my address on compute VM"
+	}
+	s.computeLog(kind, instance, err)
 	if err != nil {
 		if errors.Is(err, byoc.ErrNotFound) {
 			computeError(w, err)

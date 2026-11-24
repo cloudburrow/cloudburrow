@@ -25,6 +25,10 @@ type Record struct {
 	// keychain and its host key is pinned, both read from the provisioner
 	// at each connect, and Target follows the VM's address.
 	Provisioned bool `json:"provisioned,omitempty"`
+	// Via is how a provisioned VM is reached: "ssh" to its address, or
+	// "ssm", a Session Manager tunnel this process opens on 127.0.0.1
+	// (Target's port is then that tunnel's, made again at each connect).
+	Via string `json:"via,omitempty"`
 	// Machine is the provisioned VM's name in the provisioner when it is
 	// not the instance's own (`cloudburrow cloud move <instance> --to
 	// <vm>`); empty is the instance's name.

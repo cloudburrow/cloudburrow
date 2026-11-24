@@ -33,12 +33,18 @@ type Cloud struct {
 	Boot      func(spec byoc.MachineSpec, m *byoc.Machine) error
 	approved  chan struct{}
 	approveMu sync.Once
+	// Sources is each instance's firewall source, as Create and
+	// UpdateSourceAddress set it ("address" in FailOn fails the update).
+	Sources map[string]string
+	// Tunnel, when set, makes the cloud offer Session Manager-style
+	// tunnels (byoc.Tunneler), so creates default to ConnectSSM.
+	Tunnel func(m byoc.Machine, port int) (byoc.Tunnel, error)
 }
 
 // New is an empty fake cloud of kind c.
 func New(c byoc.Cloud) *Cloud {
 	return &Cloud{Kind: c, FailOn: map[string]error{}, resources: map[string][]byoc.Resource{},
-		machines: map[string]byoc.Machine{}, approved: make(chan struct{})}
+		machines: map[string]byoc.Machine{}, approved: make(chan struct{}), Sources: map[string]string{}}
 }
 
 // Approve completes the pending browser sign-in.
@@ -100,7 +106,34 @@ func (c *Cloud) Open(_ context.Context, conn byoc.Connection, secret []byte, _ f
 	if len(secret) == 0 {
 		return nil, &byoc.AuthError{Message: "no credentials"}
 	}
+	if c.Tunnel != nil {
+		return &tunnelProvider{provider{c: c, conn: conn}}, nil
+	}
 	return &provider{c: c, conn: conn}, nil
+}
+
+type tunnelProvider struct{ provider }
+
+func (p *tunnelProvider) OpenTunnel(_ context.Context, m byoc.Machine, port int, _ byoc.Progress) (byoc.Tunnel, error) {
+	return p.c.Tunnel(m, port)
+}
+
+// Source is the instance's firewall source now.
+func (c *Cloud) Source(instance string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Sources[instance]
+}
+
+func (p *provider) UpdateSourceAddress(_ context.Context, m byoc.Machine, cidr string) (byoc.Machine, error) {
+	if err := p.fail("address"); err != nil {
+		return m, err
+	}
+	p.c.mu.Lock()
+	defer p.c.mu.Unlock()
+	p.c.Sources[m.Instance] = cidr
+	m.SourceCIDR = cidr
+	return m, nil
 }
 
 type provider struct {
@@ -148,6 +181,7 @@ func (p *provider) fail(op string) error {
 func (p *provider) Create(_ context.Context, spec byoc.MachineSpec, progress byoc.Progress) (byoc.Machine, error) {
 	p.c.mu.Lock()
 	p.c.Created = append(p.c.Created, spec)
+	p.c.Sources[spec.Instance] = spec.SourceCIDR
 	p.c.resources[spec.Instance] = []byoc.Resource{{Type: "network", ID: "net-1"}, {Type: "firewall", ID: "fw-1"}}
 	p.c.mu.Unlock()
 	progress.Report("network", byoc.StepDone, "network made")

@@ -107,6 +107,11 @@ func connectComputeWith(ctx context.Context, cfg config.Config, out io.Writer, r
 			t.Port = 22
 		}
 		opts.Target, opts.Key, opts.HostKey = t, remotecompute.PEMKey(vm.PrivateKey), vm.HostKey
+		// SSH mode: the VM's firewall follows this machine's address,
+		// checked before each connection. SSM mode: t is this process's
+		// Session Manager tunnel.
+		opts.BeforeConnect = vm.BeforeConnect
+		rec.Via = vm.Via
 	}
 	opts.Progress = func(e remotecompute.Event) {
 		if e.Error != "" {
@@ -120,7 +125,7 @@ func connectComputeWith(ctx context.Context, cfg config.Config, out io.Writer, r
 		return nil, fmt.Errorf("compute host %s: %w", t, err)
 	}
 	c := &computeConn{session: s, record: remotecompute.Record{Target: t, Created: time.Now().UTC(), Host: s.Status().Host, Provisioned: rec.Provisioned,
-		Machine: rec.Machine}}
+		Machine: rec.Machine, Via: rec.Via}}
 	if rec, had, _ := remotecompute.LoadRecord(cfg.InstanceDir()); had {
 		c.record.Created = rec.Created
 	}
@@ -158,7 +163,7 @@ func connectComputeWith(ctx context.Context, cfg config.Config, out io.Writer, r
 // provisionedTarget reads the instance's VM from the provisioner: its
 // address, user, key (from the keychain) and pinned host key.
 var provisionedTarget = func(cfg config.Config) (byoc.RemoteTarget, error) {
-	m, err := newCloudManager(cfg)
+	m, err := processCloudManager(cfg)
 	if err != nil {
 		return byoc.RemoteTarget{}, err
 	}
@@ -167,6 +172,24 @@ var provisionedTarget = func(cfg config.Config) (byoc.RemoteTarget, error) {
 		return byoc.RemoteTarget{}, err
 	}
 	return m.RemoteTarget(rec.MachineName(cfg.Name))
+}
+
+// cloudManagers is this process's one manager per state directory, so the
+// Session Manager tunnels it opens, and its record of the firewall's
+// address, are shared by up, the console and the compute connection.
+var cloudManagers sync.Map
+
+// processCloudManager is the process's manager for cfg's state directory.
+func processCloudManager(cfg config.Config) (*byoc.Manager, error) {
+	if v, ok := cloudManagers.Load(cfg.StateDir); ok {
+		return v.(*byoc.Manager), nil
+	}
+	m, err := newCloudManager(cfg)
+	if err != nil {
+		return nil, err
+	}
+	v, _ := cloudManagers.LoadOrStore(cfg.StateDir, m)
+	return v.(*byoc.Manager), nil
 }
 
 // localClusterExists reports whether this machine's own Docker has the

@@ -39,8 +39,8 @@ tracks it; a closed issue is named only where it says what was built.
 | Dataform | 7 | 0 | 2 | 4 | 1 |
 | Console | 9 | 7 | 2 | 0 | 0 |
 | Remote compute | 1 | 1 | 0 | 0 | 0 |
-| Bring your own cloud | 5 | 4 | 0 | 0 | 1 |
-| **Total** | **95** | **19** | **24** | **44** | **8** |
+| Bring your own cloud | 3 | 2 | 0 | 0 | 1 |
+| **Total** | **93** | **17** | **24** | **44** | **8** |
 
 ## Cloud Storage
 
@@ -394,12 +394,18 @@ volume on the host (`internal/hostmount`), and a running instance moves onto a V
 delete the VM, from the console and `cloudburrow cloud`, tested against local fakes of each
 cloud's API.
 
+Closed: AWS connects through SSM Session Manager port forwarding, the data channel's WebSocket
+protocol in Go (`internal/byoc/awsprov/ssmtunnel`, no plugin), with nothing inbound, and SSH from
+the user's address stays as `--connect ssh`; the SSH firewall (Azure, and AWS in SSH mode) follows
+the user's public address, before each connection and every few minutes, with
+`cloudburrow cloud allow-my-ip` and the console's Allow my address; auto-stop changes after create
+(`cloudburrow cloud set --auto-stop`, Compute capacity), on a running VM at once and on a stopped
+one at its next start (#2209).
+
 | Gap | Why open | Size |
 |---|---|---|
 | **Not yet tested against real AWS or Azure** (#2209): every flow runs against `awsfake` and `azurefake`, recorded from the clouds' API references; the user runs the first real-cloud check | needs live AWS/Azure (nothing here signs in to them) | M |
-| AWS connects over SSH from the user's address (security group, TCP 22 from a /32), not through SSM Session Manager port forwarding, which would need the session-manager-plugin's WebSocket protocol in Go (#2209) | not built yet | M |
-| The firewall's source address is read once, at create: when the user's public address changes, SSH is refused until the VM is deleted and created again; no "update my address" action yet (#2209) | not built yet | S |
-| Auto-stop is chosen at create only (cloud-init installs it); changing it later, and a GPU/CPU change, need a new VM (#2209) | not built yet | S |
+| A GPU/CPU change needs a new VM: the size slider moves within the VM's kind, since only a GPU VM's cloud-init installs NVIDIA's driver and container toolkit (#2209) | not built yet | S |
 | More VMs as extra nodes of one instance (multi-node over the tunnel), phase 3's "later, if needed" (#2209) | not built yet | L |
 
 ## Excluded on purpose
