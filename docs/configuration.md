@@ -63,6 +63,7 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 | `seed <file>` | Create the resources in a [seed document](#admin-api) in the running `up`. `--if-not-exists` skips resources that exist. |
 | `events` | Print the running `up`'s recent [admin events](#admin-api), newest first (`--service`, `--kind`, `--since 10m`, `--limit`, `--format json`). **Changes nothing.** |
 | `delete` | Destroy the cluster CloudBurrow created. |
+| `cloud` | Run the instance's compute on a VM in your own AWS account or Azure subscription: `cloud connect aws\|azure`, `disconnect`, `create`, `status`, `scale`, `start`, `stop`, `delete`, `resources`. **Creates billed resources in your cloud account** (it shows the price first). See [Bring your own cloud](#bring-your-own-cloud) and [byoc.md](byoc.md). |
 | `gc` | List the Docker images and volumes past CloudBurrow builds left behind; `--yes` removes them. See [Docker images and volumes](#docker-images-and-volumes). |
 | `storage-server` | Run CloudBurrow's own Cloud Storage server alone (`--listen`, default `127.0.0.1:4443`; `--host` for virtual-hosted XML; `--allow-remote` for a non-loopback address). It is built to Google's spec (#485) and is what `up` runs in the cluster (#514, #519): every JSON API method from Google's discovery document is routed, and each one not built answers **501 `notImplemented`** naming it; XML requests answer an XML `<Error>`. It is the Cloud Storage `up` serves; methods it has not built answer 501, and [compatibility.md](compatibility.md) lists which are Verified. |
 
@@ -442,6 +443,26 @@ client, err := bigquery.NewClient(ctx, os.Getenv("GOOGLE_CLOUD_PROJECT"),
     option.WithEndpoint(os.Getenv("CLOUDBURROW_BIGQUERY_ENDPOINT")),
     option.WithoutAuthentication())
 ```
+
+## Bring your own cloud
+
+The console's **Settings and utilities > Compute** (`/settings/compute`) and **Compute capacity**
+(`/compute-capacity`), and `cloudburrow cloud`, connect an AWS account or Azure subscription and
+create, resize, start, stop and delete the VM that runs an instance's compute there (#2209). The
+user guide, with what it costs, what it creates, how to delete and the security model, is
+[byoc.md](byoc.md).
+
+| What | Where |
+|---|---|
+| Connections and VMs (no secrets) | `<state dir>/byoc/byoc.json`, owner-only, shared by the console and the CLI |
+| Credentials and SSH keys | the OS keychain, service `CloudBurrow`, account `<state dir>/connection/<id>` and `<state dir>/machine/<instance>`; removed by Disconnect and Delete |
+| Instance | `--name` (the default instance otherwise): its VM's resources are tagged `cloudburrow-instance=<name>` |
+| Admin token | every Compute page and API call needs it, as the Instance page's do |
+
+`cloud create` flags: `--connection` (when several are connected), `--region` (default: the
+closest), `--size small|medium|large|gpu` (default small), `--auto-stop 60m` (default 1 hour; `0`
+for never), `--disk-gib`, and `--yes` to skip the price confirmation. `cloud scale --size`,
+`cloud delete` and `cloud status --format json` work on the instance's VM.
 
 ## Console
 

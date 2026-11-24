@@ -1203,6 +1203,30 @@
         "license": "Apache-2.0",
         "verification": "go.sum",
         "notes": "Firestore with MongoDB compatibility (#1703): the official MongoDB Go driver for the compat test, and its bson package for the wire-protocol server (internal/firestoreadmin), approved by the maintainer 2026-11-17."
+      },
+      "goAWSSDK": {
+        "module": "github.com/aws/aws-sdk-go-v2",
+        "version": "v1.48.0",
+        "source": "https://github.com/aws/aws-sdk-go-v2",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Bring your own cloud (#2209): internal/byoc/awsprov drives EC2, IAM (SimulatePrincipalPolicy, GetRole), STS, the Price List API, and IAM Identity Center's SSO OIDC device flow and portal (service/ec2, iam, sts, pricing, ssooidc, sso, with aws/smithy-go). The aws.Config is built by hand: the config package, which reads ~/.aws and the environment, is not imported. AWS's own SDK; Google publishes none for AWS."
+      },
+      "goAzureSDK": {
+        "module": "github.com/Azure/azure-sdk-for-go/sdk/azcore",
+        "version": "v1.24.0",
+        "source": "https://github.com/Azure/azure-sdk-for-go",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "Bring your own cloud (#2209): internal/byoc/azureprov drives Azure Resource Manager through azcore and the resourcemanager modules compute/armcompute/v7, network/armnetwork/v7, resources/armresources, resources/armsubscriptions and authorization/armauthorization/v2; sign-in is Microsoft's MSAL for Go (github.com/AzureAD/microsoft-authentication-library-for-go, MIT), the library azidentity's InteractiveBrowserCredential is built on, used directly so its token cache can live in the OS keychain. DefaultAzureCredential and the Azure CLI credential, which read ~/.azure, are not used. Microsoft's own SDK; Google publishes none for Azure."
+      },
+      "goKeyring": {
+        "module": "github.com/zalando/go-keyring",
+        "version": "v0.2.8",
+        "source": "https://github.com/zalando/go-keyring",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "Bring your own cloud (#2209): internal/byoc/keychain keeps cloud credentials and SSH keys in the OS keychain: /usr/bin/security on macOS with the secret on its standard input, and the Secret Service over D-Bus on Linux through github.com/godbus/dbus/v5 (BSD-2-Clause), both pure Go, so the Linux CLI stays static. Depends on github.com/alessio/shellescape (MIT) and, on Windows only, github.com/danieljoos/wincred (MIT). Google publishes no keychain library."
       }
     },
     "apiContracts": {
@@ -1937,6 +1961,38 @@
         "updateFeed": "npm",
         "verification": "npm-integrity",
         "skipDiscovery": "npm registry; depcheck only discovers GitHub-sourced components."
+      }
+    },
+    "byoc": {
+      "$comment": "What cloud-init installs, pinned, on the VM bring your own cloud creates in the user's AWS or Azure account (#2209; internal/byoc/cloudinit.go). Nothing here is downloaded by CloudBurrow itself: the VM fetches it from the source named.",
+      "dockerCE": {
+        "version": "5:29.9.3-1~ubuntu.24.04~noble",
+        "source": "https://download.docker.com/linux/ubuntu (noble stable)",
+        "license": "Apache-2.0",
+        "verification": "apt signature; key fingerprint 9DC858229FC7DD38854AE2D88D81803C0EBFCD88 checked",
+        "notes": "docker-ce and docker-ce-cli at this version, containerd.io 2.4.2-4~ubuntu.24.04~noble, held. Resolved 2026-11-24 from the repository's Packages index."
+      },
+      "kind": {
+        "version": "v0.33.0",
+        "source": "https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64",
+        "license": "Apache-2.0",
+        "verification": "release-checksum",
+        "digest": "sha256:aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d",
+        "notes": "The kind release CloudBurrow runs locally (components.cluster.kind), checked against the release's kind-linux-amd64.sha256sum."
+      },
+      "nvidiaDriver": {
+        "version": "580-server",
+        "source": "Ubuntu 24.04 archive (restricted), through ubuntu-drivers install --gpgpu nvidia:580-server",
+        "license": "NVIDIA proprietary (installed on the user's VM; not redistributed by CloudBurrow)",
+        "verification": "apt signature (Ubuntu archive)",
+        "notes": "GPU presets only. The branch is pinned; ubuntu-drivers picks the kernel's matching signed modules."
+      },
+      "nvidiaContainerToolkit": {
+        "version": "1.20.2-1",
+        "source": "https://nvidia.github.io/libnvidia-container/stable/deb",
+        "license": "Apache-2.0",
+        "verification": "apt signature; key fingerprint C95B321B61E88C1809C4F759DDCAE044F796ECB0 checked",
+        "notes": "GPU presets only: nvidia-container-toolkit, -base, libnvidia-container-tools and libnvidia-container1 at this version, held; set as Docker's default runtime."
       }
     }
   },

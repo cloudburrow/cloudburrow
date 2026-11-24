@@ -38,7 +38,8 @@ tracks it; a closed issue is named only where it says what was built.
 | App Hub | 5 | 1 | 1 | 3 | 0 |
 | Dataform | 7 | 0 | 2 | 4 | 1 |
 | Console | 9 | 7 | 2 | 0 | 0 |
-| **Total** | **89** | **14** | **24** | **44** | **7** |
+| Bring your own cloud | 6 | 5 | 0 | 0 | 1 |
+| **Total** | **95** | **19** | **24** | **44** | **8** |
 
 ## Cloud Storage
 
@@ -370,6 +371,21 @@ latency and resource charts (#1267); the Artifact Registry repository Permission
 | BigQuery Studio's Apache Spark notebooks, data preparations and pipelines (#2094): a Spark notebook's `DataprocSparkSession` is a Spark Connect session of Serverless for Apache Spark, whose sessions API CloudBurrow does not serve (<https://docs.cloud.google.com/bigquery/docs/use-spark>, read 2026-11-22); pipelines and data preparations are Dataform code assets, a pipeline's tasks a repository's `definitions/actions.yaml` (<https://docs.cloud.google.com/bigquery/docs/create-pipelines>, read 2026-11-22), which CloudBurrow's Dataform compiler does not read, and it runs no notebook or data preparation action (#2105). Home's Create new shows each disabled with its reason. Built in the 2026-11-22 round: the notebook runtime a pipeline's notebook task would run on (`internal/nbruntime`) | not built yet | L |
 | BigQuery Studio's notebook runtime reaches only the instance's BigQuery: it runs on an `--internal` Docker network, so `pip install` and any other download a Colab Enterprise runtime makes fail; Home's What's new is CloudBurrow's own list, Google's feed being Google's, and Try with templates queries this instance, Google's templates reading `bigquery-public-data`, which a local instance does not hold (#2094) | no emulator support (nothing local: Google's feed and public datasets; no egress by design) | S |
 | Cloud SQL: managed connection pooling for MySQL (a server thread pool the community MySQL server lacks; 501), and the pooler at a private IP or Private Service Connect endpoint (only the server's port is in a VM's NAT chains) (#2141) | no thread pool in community MySQL; pooler port not in the VPC model | M |
+
+## Bring your own cloud
+
+#2209 phases 2 and 3 ([byoc.md](byoc.md)): connect AWS or Azure, create, resize, start, stop and
+delete the VM, from the console and `cloudburrow cloud`, tested against local fakes of each
+cloud's API.
+
+| Gap | Why open | Size |
+|---|---|---|
+| **Not yet tested against real AWS or Azure** (#2209): every flow runs against `awsfake` and `azurefake`, recorded from the clouds' API references; the user runs the first real-cloud check | needs live AWS/Azure (nothing here signs in to them) | M |
+| The VM is not yet handed to phase 1's remote-host engine (#2209): `internal/byoc` reaches it through `RemoteEngine`, and this build wires `NoRemoteEngine`, so a created VM is reachable over SSH but the instance's Docker does not move onto it until the two branches are wired in one landing | not built yet | M |
+| AWS connects over SSH from the user's address (security group, TCP 22 from a /32), not through SSM Session Manager port forwarding, which would need the session-manager-plugin's WebSocket protocol in Go (#2209) | not built yet | M |
+| The firewall's source address is read once, at create: when the user's public address changes, SSH is refused until the VM is deleted and created again; no "update my address" action yet (#2209) | not built yet | S |
+| Auto-stop is chosen at create only (cloud-init installs it); changing it later, and a GPU/CPU change, need a new VM (#2209) | not built yet | S |
+| More VMs as extra nodes of one instance (multi-node over the tunnel), phase 3's "later, if needed" (#2209) | not built yet | L |
 
 ## Excluded on purpose
 

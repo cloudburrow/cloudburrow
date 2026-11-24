@@ -1019,6 +1019,10 @@ const ICONS = {
   activity:  '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
   // Connect: a plug.
   connect:   '<path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>',
+  // Compute (#2209): a cloud with a server under it, for a VM in your own cloud.
+  "compute-settings": '<path d="M7 11a4 4 0 0 1 .6-7.9A5 5 0 0 1 17 5a3 3 0 0 1 0 6z"/><rect x="5" y="14" width="14" height="6" rx="1"/><path d="M8 17h.01M12 11v3"/>',
+  // Compute capacity (#2209): a gauge, for a VM's size.
+  "compute-capacity": '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/><path d="M4 20h16"/>',
   dashboard: '<rect x="3" y="3" width="8" height="10" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="15" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="10" rx="1"/>',
 };
 

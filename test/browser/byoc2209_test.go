@@ -62,7 +62,7 @@ func openByoc(t *testing.T) *byocConsole {
 		t.Fatal(err)
 	}
 	s := console.New("", func(context.Context) console.Status { return console.Status{} })
-	s.SetCompute(m, "byoc-demo", func(_ context.Context, authz string) error {
+	s.SetCloudCompute(m, "byoc-demo", func(_ context.Context, authz string) error {
 		if authz != "Bearer "+byocToken {
 			return &console.InstanceRefusal{Status: http.StatusUnauthorized, Message: "missing or wrong admin token"}
 		}

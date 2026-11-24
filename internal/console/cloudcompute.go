@@ -28,8 +28,8 @@ type ComputeAuthorizer func(ctx context.Context, authorization string) error
 // SetCompute attaches bring your own cloud. instance is the name the Create
 // wizard offers; authorize checks the admin token. Without a manager the
 // pages say the console is not attached to one.
-func (s *Server) SetCompute(m *byoc.Manager, instance string, authorize ComputeAuthorizer) {
-	s.compute, s.computeInstance, s.computeAuth = m, instance, authorize
+func (s *Server) SetCloudCompute(m *byoc.Manager, instance string, authorize ComputeAuthorizer) {
+	s.cloud, s.cloudInstance, s.cloudAuth = m, instance, authorize
 }
 
 // computeBudget bounds a request that reads the cloud (regions, prices,
@@ -37,12 +37,12 @@ func (s *Server) SetCompute(m *byoc.Manager, instance string, authorize ComputeA
 const computeBudget = 60 * time.Second
 
 func (s *Server) computeReady(w http.ResponseWriter, r *http.Request) bool {
-	if s.compute == nil {
+	if s.cloud == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "Compute is not available on this console: it is not attached to a running instance"})
 		return false
 	}
-	authorize := s.computeAuth
+	authorize := s.cloudAuth
 	if authorize == nil && s.instanceSrc != nil {
 		authorize = func(ctx context.Context, authz string) error {
 			_, err := s.instanceSrc.Info(ctx, authz)
@@ -130,12 +130,12 @@ func (s *Server) handleComputeOverview(w http.ResponseWriter, r *http.Request) {
 	if !s.computeReady(w, r) {
 		return
 	}
-	conns, err := s.compute.Connections()
+	conns, err := s.cloud.Connections()
 	if err != nil {
 		computeError(w, err)
 		return
 	}
-	machines, err := s.compute.Machines()
+	machines, err := s.cloud.Machines()
 	if err != nil {
 		computeError(w, err)
 		return
@@ -146,13 +146,13 @@ func (s *Server) handleComputeOverview(w http.ResponseWriter, r *http.Request) {
 	if machines == nil {
 		machines = []byoc.Machine{}
 	}
-	ops := s.compute.Operations()
+	ops := s.cloud.Operations()
 	if ops == nil {
 		ops = []byoc.Operation{}
 	}
-	eng, _ := s.compute.Engine().Status(r.Context(), s.computeInstance)
-	writeJSON(w, http.StatusOK, computeOverview{Clouds: s.compute.Clouds(), Connections: conns, Machines: machines,
-		Operations: ops, Instance: s.computeInstance, Presets: byoc.Presets, Engine: eng})
+	eng, _ := s.cloud.Engine().Status(r.Context(), s.cloudInstance)
+	writeJSON(w, http.StatusOK, computeOverview{Clouds: s.cloud.Clouds(), Connections: conns, Machines: machines,
+		Operations: ops, Instance: s.cloudInstance, Presets: byoc.Presets, Engine: eng})
 }
 
 func (s *Server) handleComputeSignIn(w http.ResponseWriter, r *http.Request) {
@@ -185,7 +185,7 @@ func (s *Server) handleComputeSignIn(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), computeBudget)
 	defer cancel()
-	st, err := s.compute.BeginSignIn(ctx, c, byoc.SignInOptions{StartURL: in.StartURL, Region: in.Region, Tenant: in.Tenant})
+	st, err := s.cloud.BeginSignIn(ctx, c, byoc.SignInOptions{StartURL: in.StartURL, Region: in.Region, Tenant: in.Tenant})
 	if err != nil {
 		s.computeLog("Connect "+c.Title(), "", err)
 		computeError(w, err)
@@ -198,7 +198,7 @@ func (s *Server) handleComputeSignInStatus(w http.ResponseWriter, r *http.Reques
 	if !s.computeReady(w, r) {
 		return
 	}
-	st, err := s.compute.SignInStatusOf(r.PathValue("id"))
+	st, err := s.cloud.SignInStatusOf(r.PathValue("id"))
 	if err != nil {
 		computeError(w, err)
 		return
@@ -210,7 +210,7 @@ func (s *Server) handleComputeSignInCancel(w http.ResponseWriter, r *http.Reques
 	if !s.computeReady(w, r) {
 		return
 	}
-	s.compute.CancelSignIn(r.PathValue("id"))
+	s.cloud.CancelSignIn(r.PathValue("id"))
 	writeJSON(w, http.StatusOK, map[string]bool{"cancelled": true})
 }
 
@@ -226,7 +226,7 @@ func (s *Server) handleComputeChoose(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), computeBudget)
 	defer cancel()
-	conn, err := s.compute.ChooseAccount(ctx, r.PathValue("id"), in.Choice)
+	conn, err := s.cloud.ChooseAccount(ctx, r.PathValue("id"), in.Choice)
 	s.computeLog("Connect cloud account", in.Choice, err)
 	if err != nil {
 		computeError(w, err)
@@ -253,7 +253,7 @@ func (s *Server) handleComputeAccessKey(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), computeBudget)
 	defer cancel()
-	conn, err := s.compute.ConnectKey(ctx, byoc.AWS, byoc.AccessKey{AccessKeyID: strings.TrimSpace(in.AccessKeyID),
+	conn, err := s.cloud.ConnectKey(ctx, byoc.AWS, byoc.AccessKey{AccessKeyID: strings.TrimSpace(in.AccessKeyID),
 		SecretAccessKey: strings.TrimSpace(in.SecretAccessKey), SessionToken: strings.TrimSpace(in.SessionToken)})
 	s.computeLog("Connect AWS with an access key", conn.ID, err)
 	if err != nil {
@@ -268,7 +268,7 @@ func (s *Server) handleComputeDisconnect(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	id := r.PathValue("id")
-	err := s.compute.Disconnect(id, r.URL.Query().Get("force") == "true")
+	err := s.cloud.Disconnect(id, r.URL.Query().Get("force") == "true")
 	s.computeLog("Disconnect", id, err)
 	if err != nil {
 		if errors.Is(err, byoc.ErrNotFound) {
@@ -287,7 +287,7 @@ func (s *Server) handleComputeRegions(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), computeBudget)
 	defer cancel()
-	rc, err := s.compute.Regions(ctx, r.PathValue("id"))
+	rc, err := s.cloud.Regions(ctx, r.PathValue("id"))
 	if err != nil {
 		computeError(w, err)
 		return
@@ -306,7 +306,7 @@ func (s *Server) handleComputeSizes(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), computeBudget)
 	defer cancel()
-	sizes, err := s.compute.Sizes(ctx, r.PathValue("id"), region)
+	sizes, err := s.cloud.Sizes(ctx, r.PathValue("id"), region)
 	if err != nil {
 		computeError(w, err)
 		return
@@ -320,7 +320,7 @@ func (s *Server) handleComputePermissions(w http.ResponseWriter, r *http.Request
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), computeBudget)
 	defer cancel()
-	rep, err := s.compute.CheckPermissions(ctx, r.PathValue("id"), r.URL.Query().Get("region"))
+	rep, err := s.cloud.CheckPermissions(ctx, r.PathValue("id"), r.URL.Query().Get("region"))
 	if err != nil {
 		computeError(w, err)
 		return
@@ -336,7 +336,7 @@ func (s *Server) handleComputeCreate(w http.ResponseWriter, r *http.Request) {
 	if !readJSONBody(w, r, &req) {
 		return
 	}
-	op, err := s.compute.Create(r.Context(), req, false, nil)
+	op, err := s.cloud.Create(r.Context(), req, false, nil)
 	s.computeLog("Create compute VM", req.Instance, err)
 	if err != nil {
 		if errors.Is(err, byoc.ErrNotFound) {
@@ -357,7 +357,7 @@ func (s *Server) handleComputeMachine(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("refresh") == "true" {
 		ctx, cancel := context.WithTimeout(r.Context(), computeBudget)
 		defer cancel()
-		mc, err := s.compute.Refresh(ctx, instance)
+		mc, err := s.cloud.Refresh(ctx, instance)
 		if err != nil && !errors.Is(err, byoc.ErrNotFound) && mc.Instance != "" {
 			writeJSON(w, http.StatusOK, map[string]any{"machine": mc, "refresh_error": userMessage(err)})
 			return
@@ -369,7 +369,7 @@ func (s *Server) handleComputeMachine(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"machine": mc})
 		return
 	}
-	mc, err := s.compute.Machine(instance)
+	mc, err := s.cloud.Machine(instance)
 	if err != nil {
 		computeError(w, err)
 		return
@@ -402,11 +402,11 @@ func (s *Server) handleComputeAction(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		op, err = s.compute.Scale(r.Context(), instance, p, in.Size, false, nil)
+		op, err = s.cloud.Scale(r.Context(), instance, p, in.Size, false, nil)
 	case "start":
-		op, err = s.compute.Start(r.Context(), instance, false, nil)
+		op, err = s.cloud.Start(r.Context(), instance, false, nil)
 	case "stop":
-		op, err = s.compute.Stop(r.Context(), instance, false, nil)
+		op, err = s.cloud.Stop(r.Context(), instance, false, nil)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no action " + action})
 		return
@@ -428,7 +428,7 @@ func (s *Server) handleComputeDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	instance := r.PathValue("instance")
-	op, err := s.compute.Delete(r.Context(), instance, false, nil)
+	op, err := s.cloud.Delete(r.Context(), instance, false, nil)
 	s.computeLog("Delete compute VM", instance, err)
 	if err != nil {
 		if errors.Is(err, byoc.ErrNotFound) {
@@ -447,7 +447,7 @@ func (s *Server) handleComputeResources(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), computeBudget)
 	defer cancel()
-	rs, err := s.compute.Resources(ctx, r.PathValue("instance"))
+	rs, err := s.cloud.Resources(ctx, r.PathValue("instance"))
 	if err != nil {
 		computeError(w, err)
 		return
@@ -462,7 +462,7 @@ func (s *Server) handleComputeOperation(w http.ResponseWriter, r *http.Request) 
 	if !s.computeReady(w, r) {
 		return
 	}
-	op, err := s.compute.Operation(r.PathValue("id"))
+	op, err := s.cloud.Operation(r.PathValue("id"))
 	if err != nil {
 		computeError(w, err)
 		return
@@ -470,7 +470,7 @@ func (s *Server) handleComputeOperation(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, op)
 }
 
-func (s *Server) computeRoutes(mux *http.ServeMux) {
+func (s *Server) cloudRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/compute", s.handleComputeOverview)
 	mux.HandleFunc("POST /api/compute/signin", s.handleComputeSignIn)
 	mux.HandleFunc("GET /api/compute/signin/{id}", s.handleComputeSignInStatus)

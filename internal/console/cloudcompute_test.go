@@ -27,7 +27,7 @@ func computeServer(t *testing.T) (*httptest.Server, *byoctest.Cloud, *keychain.M
 		t.Fatal(err)
 	}
 	s := New("", func(context.Context) Status { return Status{} })
-	s.SetCompute(m, "dev", func(_ context.Context, authz string) error {
+	s.SetCloudCompute(m, "dev", func(_ context.Context, authz string) error {
 		if authz != "Bearer "+computeTestToken {
 			return &InstanceRefusal{Status: http.StatusUnauthorized, Message: "missing or wrong admin token"}
 		}
