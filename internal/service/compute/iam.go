@@ -51,7 +51,7 @@ func iamTarget(c call) string {
 	}
 	switch {
 	case n == 4 && p[0] == "global" && p[1] == "snapshots",
-		n == 5 && p[0] == "regions" && p[2] == "subnetworks",
+		n == 5 && p[0] == "regions" && (p[2] == "subnetworks" || p[2] == "disks"),
 		n == 5 && p[0] == "zones" && (p[2] == "instances" || p[2] == "disks"):
 		return "projects/" + c.project + "/" + strings.Join(p[:n-1], "/")
 	}
@@ -211,7 +211,7 @@ func (s *Server) PolicyResourceNames(project string) []string {
 		p := strings.Split(rest, "/")
 		switch {
 		case len(p) == 3 && p[0] == "global" && p[1] == "snapshots",
-			len(p) == 4 && p[0] == "regions" && p[2] == "subnetworks",
+			len(p) == 4 && p[0] == "regions" && (p[2] == "subnetworks" || p[2] == "disks"),
 			len(p) == 4 && p[0] == "zones" && (p[2] == "instances" || p[2] == "disks"):
 			out = append(out, k)
 		}

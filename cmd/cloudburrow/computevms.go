@@ -134,6 +134,19 @@ func pvcManifest(ns, name string, sizeGb int64, kind string) string {
 // copyPVC copies one claim's files into another with a pod of the Debian
 // image (cp -a), and waits for it.
 func (b *computeVMs) copyPVC(ctx context.Context, src, dst string) error {
+	return b.copyPVCCmd(ctx, src, dst, "cp -a /src/. /dst/ && sync")
+}
+
+// CopyDisk makes dst a copy of src: what dst held is removed first (a
+// clone, or a secondary disk taking its primary's data).
+func (b *computeVMs) CopyDisk(ctx context.Context, src, dst compute.DiskSpec) error {
+	if err := b.installer.Apply(ctx, pvcManifest(b.ns(), dst.Key, dst.SizeGb, "disk")); err != nil {
+		return err
+	}
+	return b.copyPVCCmd(ctx, src.Key, dst.Key, "find /dst -mindepth 1 -delete && cp -a /src/. /dst/ && sync")
+}
+
+func (b *computeVMs) copyPVCCmd(ctx context.Context, src, dst, script string) error {
 	ref, err := b.ensureImage(ctx, compute.PublicImages[0])
 	if err != nil {
 		return err
@@ -146,7 +159,7 @@ func (b *computeVMs) copyPVC(ctx context.Context, src, dst string) error {
 		"metadata": map[string]any{"name": name, "namespace": b.ns(), "labels": map[string]string{k8s.OwnedLabel: k8s.OwnedValue, k8s.ServiceLabel: "compute"}},
 		"spec": map[string]any{"restartPolicy": "Never", "automountServiceAccountToken": false,
 			"containers": []any{map[string]any{"name": "copy", "image": ref, "imagePullPolicy": "Never",
-				"command":      []string{"/bin/sh", "-c", "cp -a /src/. /dst/ && sync"},
+				"command":      []string{"/bin/sh", "-c", script},
 				"volumeMounts": []any{map[string]any{"name": "src", "mountPath": "/src", "readOnly": true}, map[string]any{"name": "dst", "mountPath": "/dst"}}}},
 			"volumes": []any{map[string]any{"name": "src", "persistentVolumeClaim": map[string]any{"claimName": src}},
 				map[string]any{"name": "dst", "persistentVolumeClaim": map[string]any{"claimName": dst}}}}}

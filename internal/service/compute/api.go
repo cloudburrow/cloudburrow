@@ -60,8 +60,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if c.body == nil {
 		c.body = obj{}
 	}
-	if isZoneOpWait(c) {
-		s.waitOp(r.Context(), "projects/"+c.project+"/zones/"+c.parts[1]+"/operations/"+c.parts[3])
+	if rel := opWaitTarget(c); rel != "" {
+		s.waitOp(r.Context(), rel)
 	}
 	out, err := s.Do(c)
 	if err != nil {
@@ -119,8 +119,8 @@ func (s *Server) Call(method, project, path string, query map[string][]string, b
 		parts = strings.Split(p, "/")
 	}
 	c := call{method: method, project: project, parts: parts, query: query, body: body}
-	if isZoneOpWait(c) {
-		s.waitOp(context.Background(), "projects/"+project+"/zones/"+parts[1]+"/operations/"+parts[3])
+	if rel := opWaitTarget(c); rel != "" {
+		s.waitOp(context.Background(), rel)
 	}
 	out, err := s.Do(c)
 	if err != nil || out == nil {
@@ -318,6 +318,15 @@ func (s *Server) doLocked(c call) (obj, error) {
 			}
 		case "forwardingRules":
 			return s.forwardingRulesLocked(c, region, p, get, post, del)
+		case "diskTypes":
+			return s.regionDiskTypesCall(c, region)
+		case "disks":
+			if s.opts.VMs == nil {
+				return nil, noVMs()
+			}
+			return s.regionDisks(c, region)
+		case "resourcePolicies":
+			return s.resourcePolicies(c, region)
 		case "operations":
 			return s.operation(c, rel)
 		}
@@ -446,6 +455,8 @@ func (s *Server) aggregated(c call, coll string) (obj, error) {
 		m, kind = s.res, "compute#instanceAggregatedList"
 	case "disks":
 		m, kind = s.res, "compute#diskAggregatedList"
+	case "resourcePolicies":
+		m, kind = s.res, "compute#resourcePolicyAggregatedList"
 	default:
 		return nil, unimplemented("aggregated/%s is not served", coll)
 	}
@@ -554,8 +565,12 @@ func strs(o obj, k string) []string {
 
 func lastSeg(rel string) string { return rel[strings.LastIndex(rel, "/")+1:] }
 
-// isZoneOpWait is whether c is zoneOperations.wait.
-func isZoneOpWait(c call) bool {
+// opWaitTarget is the operation a zoneOperations.wait or
+// regionOperations.wait call waits for, "" for any other call.
+func opWaitTarget(c call) string {
 	p := c.parts
-	return c.method == http.MethodPost && len(p) == 5 && p[0] == "zones" && p[2] == "operations" && p[4] == "wait"
+	if c.method == http.MethodPost && len(p) == 5 && (p[0] == "zones" || p[0] == "regions") && p[2] == "operations" && p[4] == "wait" {
+		return "projects/" + c.project + "/" + p[0] + "/" + p[1] + "/operations/" + p[3]
+	}
+	return ""
 }

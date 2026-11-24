@@ -51,7 +51,11 @@ func (s *Server) vmSpecLocked(o obj) VMSpec {
 			}
 			continue
 		}
-		sp.Disks = append(sp.Disks, AttachedDisk{Disk: ds, DeviceName: str(ad, "deviceName"), ReadOnly: str(ad, "mode") == "READ_ONLY"})
+		// A disk force-attached to another instance is fenced here: "Compute
+		// Engine prevents the original instance from writing to the
+		// regional disk" (repd-failover).
+		fenced, _ := ad[fencedKey].(bool)
+		sp.Disks = append(sp.Disks, AttachedDisk{Disk: ds, DeviceName: str(ad, "deviceName"), ReadOnly: str(ad, "mode") == "READ_ONLY" || fenced})
 	}
 	if sp.Image.Name == "" && sp.BootDisk.SourceSnapshot != "" {
 		// A boot disk made from a snapshot runs the snapshot's image.
@@ -77,7 +81,7 @@ var deviceNameRE = regexp.MustCompile(`^[a-z]([-a-z0-9]*[a-z0-9])?$`)
 // attachedDiskLocked resolves one disks[] entry of an instance insert or
 // attachDisk: an existing disk (source), or a new one (initializeParams),
 // returned unstored with created true.
-func (s *Server) attachedDiskLocked(project, zone, instance string, e map[string]any, index int, field string) (ad obj, newDisk obj, err error) {
+func (s *Server) attachedDiskLocked(project, zone, instance, machineType string, e map[string]any, index int, field string) (ad obj, newDisk obj, err error) {
 	boot, _ := e["boot"].(bool)
 	mode := str(e, "mode")
 	if mode == "" {
@@ -100,15 +104,42 @@ func (s *Server) attachedDiskLocked(project, zone, instance string, e map[string
 		if d, ok = s.res[rel]; !ok {
 			return nil, nil, notFound(rel)
 		}
-		if lastSeg(str(d, "zone")) != zone {
+		if isRegional(d) {
+			if !hasStr(replicaZones(d), zone) {
+				return nil, nil, invalid("Invalid value for field '%s.source': '%s'. You can attach regional disks only to instances that are in the same zones as the disk's replicas (%s).",
+					field, rel, strings.Join(replicaZones(d), ", "))
+			}
+			if err := regionalMachineOK(d, machineType, field); err != nil {
+				return nil, nil, err
+			}
+		} else if lastSeg(str(d, "zone")) != zone {
 			return nil, nil, invalid("Invalid value for field '%s.source': '%s'. Disk must be in the same zone as the instance.", field, rel)
 		}
 		if str(d, "status") != "READY" {
 			return nil, nil, errf(http.StatusBadRequest, "resourceNotReady", "The resource '%s' is not ready", rel)
 		}
-		if users := strs(d, "users"); len(users) > 0 && mode == "READ_WRITE" {
+		if s.syncSecondaryLocked(d) != nil {
+			return nil, nil, errf(http.StatusBadRequest, "resourceInUseByAnotherResource",
+				"The disk resource '%s' is a secondary disk in the process of replication: secondary disks can't be attached until replication stops.", rel)
+		}
+		force, _ := e["forceAttach"].(bool)
+		if force && !isRegional(d) {
+			return nil, nil, invalid("Invalid value for field '%s.forceAttach': 'true'. Force-attach applies to regional disks only: '%s' is a zonal disk.", field, rel)
+		}
+		users := strs(d, "users")
+		switch {
+		case len(users) > 0 && mode == "READ_WRITE" && force:
+			for _, u := range users {
+				if s.isBootOfLocked(u, rel) {
+					return nil, nil, errf(http.StatusBadRequest, "resourceInUseByAnotherResource",
+						"The disk resource '%s' is the boot disk of '%s': you can't simultaneously attach one boot disk to two instances.", rel, u)
+				}
+			}
+		case len(users) > 0 && mode == "READ_WRITE":
 			return nil, nil, errf(http.StatusBadRequest, "resourceInUseByAnotherResource",
 				"The disk resource '%s' is already being used by '%s'", rel, users[0])
+		case isRegional(d) && mode == "READ_ONLY" && len(users) >= 10:
+			return nil, nil, invalid("Invalid value for field '%s.source': '%s'. In read-only mode a regional disk can be attached to at most 10 instances.", field, rel)
 		}
 	case e["initializeParams"] != nil:
 		ip, _ := e["initializeParams"].(map[string]any)
@@ -124,7 +155,22 @@ func (s *Server) attachedDiskLocked(project, zone, instance string, e map[string
 		if boot && str(ip, "sourceImage") == "" && str(ip, "sourceSnapshot") == "" {
 			return nil, nil, required(field + ".initializeParams.sourceImage")
 		}
-		if d, err = s.newDiskLocked(project, zone, b, field+".initializeParams"); err != nil {
+		if rz := strs(ip, "replicaZones"); len(rz) > 0 {
+			// A regional disk made with the instance.
+			if t := str(ip, "diskType"); t != "" {
+				b["type"] = lastSeg(t)
+			}
+			b["replicaZones"] = toAny(rz)
+			if d, err = s.newRegionDiskLocked(project, regionOfZone(zone), b, field+".initializeParams"); err != nil {
+				return nil, nil, err
+			}
+			if !hasStr(replicaZones(d), zone) {
+				return nil, nil, invalid("Invalid value for field '%s.initializeParams.replicaZones': the instance's zone %s must be one of the replica zones.", field, zone)
+			}
+			if err := regionalMachineOK(d, machineType, field); err != nil {
+				return nil, nil, err
+			}
+		} else if d, err = s.newDiskLocked(project, zone, b, field+".initializeParams"); err != nil {
 			return nil, nil, err
 		}
 		newDisk = d
@@ -420,7 +466,7 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 			em["boot"] = true
 			boots++
 		}
-		ad, nd, err := s.attachedDiskLocked(c.project, zone, name, em, i, "resource.disks["+strconv.Itoa(i)+"]")
+		ad, nd, err := s.attachedDiskLocked(c.project, zone, name, mt, em, i, "resource.disks["+strconv.Itoa(i)+"]")
 		if err != nil {
 			return nil, err
 		}
@@ -505,12 +551,19 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 		s.res[str(d, "selfLink")] = norm(d)
 		created = append(created, str(d, "selfLink"))
 	}
-	for _, e := range disks {
+	var fenced []string
+	for i, e := range disks {
 		src := str(e.(obj), "source")
 		if d, ok := s.res[src]; ok && !hasStr(created, src) {
+			if em, _ := in[i].(map[string]any); em["forceAttach"] == true && str(e.(obj), "mode") == "READ_WRITE" {
+				fenced = append(fenced, s.fenceLocked(src)...)
+			}
 			d["users"] = append(toAny(strs(d, "users")), rel)
 			d["lastAttachTimestamp"] = s.stamp()
 		}
+	}
+	if err := s.remountFencedLocked(c.project, fenced); err != nil {
+		return nil, err
 	}
 	s.res[rel] = norm(o)
 	vm := s.vmSpecLocked(s.res[rel])
@@ -644,7 +697,10 @@ func (s *Server) attachDisk(c call, scope, rel string, o obj) (obj, error) {
 	if bt, _ := c.body["boot"].(bool); bt {
 		return nil, invalid("Invalid value for field 'resource.boot': 'true'. An instance has one boot disk, attached at creation.")
 	}
-	ad, nd, err := s.attachedDiskLocked(c.project, lastSeg(str(o, "zone")), str(o, "name"), c.body, len(disks), "resource")
+	if first(c.query, "forceAttach") == "true" {
+		c.body["forceAttach"] = true
+	}
+	ad, nd, err := s.attachedDiskLocked(c.project, lastSeg(str(o, "zone")), str(o, "name"), lastSeg(str(o, "machineType")), c.body, len(disks), "resource")
 	if err != nil {
 		return nil, err
 	}
@@ -661,8 +717,15 @@ func (s *Server) attachDisk(c call, scope, rel string, o obj) (obj, error) {
 	}
 	o["disks"] = append(disks, norm(ad))
 	d := s.res[str(ad, "source")]
+	var fenced []string
+	if f, _ := c.body["forceAttach"].(bool); f && str(ad, "mode") == "READ_WRITE" {
+		fenced = s.fenceLocked(str(ad, "source"))
+	}
 	d["users"] = append(toAny(strs(d, "users")), rel)
 	d["lastAttachTimestamp"] = s.stamp()
+	if err := s.remountFencedLocked(c.project, fenced); err != nil {
+		return nil, err
+	}
 	return s.remount(c.project, scope, "attachDisk", rel, o)
 }
 
@@ -773,4 +836,80 @@ func (s *Server) decorateList(list obj) {
 	for i, it := range items {
 		items[i] = s.decorate(it)
 	}
+}
+
+// fencedKey marks an attached disk that was force-attached to another
+// instance: the instance keeps it, read-only.
+const fencedKey = "_fenced"
+
+// regionalMachineOK applies the machine series a regional disk attaches
+// to: "Regional Persistent Disk is supported on only E2, N1, N2, and N2D"
+// (regional-persistent-disk, read 2026-11-24); f1-micro and g1-small are
+// N1's shared-core types.
+func regionalMachineOK(d obj, machineType, field string) error {
+	if strings.HasPrefix(lastSeg(str(d, "type")), "hyperdisk-") || machineType == "" {
+		return nil
+	}
+	series := machineType
+	if i := strings.Index(series, "-"); i > 0 {
+		series = series[:i]
+	}
+	switch series {
+	case "e2", "n1", "n2", "n2d", "f1", "g1":
+		return nil
+	}
+	return invalid("Invalid value for field '%s': machine type %s does not support Regional Persistent Disk, which is supported on only E2, N1, N2, and N2D machine types.", field, machineType)
+}
+
+// isBootOfLocked is whether disk is instance's boot disk.
+func (s *Server) isBootOfLocked(instance, disk string) bool {
+	o, ok := s.res[instance]
+	if !ok {
+		return false
+	}
+	l, _ := o["disks"].([]any)
+	for _, e := range l {
+		ad, _ := e.(map[string]any)
+		if b, _ := ad["boot"].(bool); b && str(ad, "source") == disk {
+			return true
+		}
+	}
+	return false
+}
+
+// fenceLocked fences the regional disk on the instances it is attached to
+// read-write, and returns them.
+func (s *Server) fenceLocked(disk string) []string {
+	d := s.res[disk]
+	var out []string
+	for _, u := range strs(d, "users") {
+		o, ok := s.res[u]
+		if !ok {
+			continue
+		}
+		l, _ := o["disks"].([]any)
+		for _, e := range l {
+			ad, _ := e.(map[string]any)
+			if str(ad, "source") == disk && str(ad, "mode") == "READ_WRITE" && ad[fencedKey] != true {
+				ad[fencedKey] = true
+				out = append(out, u)
+			}
+		}
+	}
+	return out
+}
+
+// remountFencedLocked restarts the running fenced instances, so their
+// guests have the disk read-only.
+func (s *Server) remountFencedLocked(project string, instances []string) error {
+	for _, u := range instances {
+		o, ok := s.res[u]
+		if !ok {
+			continue
+		}
+		if _, err := s.remount(project, "zones/"+lastSeg(str(o, "zone")), "attachDisk", u, o); err != nil {
+			return err
+		}
+	}
+	return nil
 }

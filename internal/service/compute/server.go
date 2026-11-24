@@ -345,7 +345,8 @@ func (s *Server) stamp() string {
 var linkKeys = map[string]bool{"selfLink": true, "network": true, "subnetwork": true, "region": true, "zone": true,
 	"targetLink": true, "nextHopGateway": true, "nextHopNetwork": true, "nextHopInstance": true, "nextHopVpnTunnel": true,
 	"subnetworks": true, "users": true, "zones": true, "machineType": true, "source": true, "sourceImage": true,
-	"sourceSnapshot": true, "sourceDisk": true, "type": true, "target": true}
+	"sourceSnapshot": true, "sourceDisk": true, "type": true, "target": true, "replicaZones": true, "resourcePolicies": true,
+	"disk": true, "consistencyGroupPolicy": true, "sourceConsistencyGroupPolicy": true}
 
 // renderNested makes the link fields of objects inside lists and objects
 // absolute (an instance's disks and network interfaces).

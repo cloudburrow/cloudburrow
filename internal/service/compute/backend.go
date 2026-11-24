@@ -21,6 +21,10 @@ type VMBackend interface {
 	ResizeDisk(ctx context.Context, d DiskSpec) error
 	// Snapshot copies a disk's contents into a snapshot's storage.
 	Snapshot(ctx context.Context, d DiskSpec, snapshotKey string) error
+	// CopyDisk makes dst's contents a copy of src's, what dst held before
+	// removed: a clone (sourceDisk) and Asynchronous Replication to a
+	// secondary disk.
+	CopyDisk(ctx context.Context, src, dst DiskSpec) error
 	// DeleteSnapshot removes a snapshot's storage.
 	DeleteSnapshot(ctx context.Context, snapshotKey string) error
 	// Start boots the instance (its boot disk seeded from its image on

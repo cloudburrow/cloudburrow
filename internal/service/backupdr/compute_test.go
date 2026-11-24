@@ -24,6 +24,12 @@ func (m *memVMs) CreateDisk(_ context.Context, d compute.DiskSpec) error {
 	m.data[d.Key] = m.data[d.SourceSnapshot]
 	return nil
 }
+func (m *memVMs) CopyDisk(_ context.Context, src, dst compute.DiskSpec) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.data[dst.Key] = m.data[src.Key]
+	return nil
+}
 func (m *memVMs) DeleteDisk(_ context.Context, d compute.DiskSpec) error { return nil }
 func (m *memVMs) ResizeDisk(context.Context, compute.DiskSpec) error     { return nil }
 func (m *memVMs) Snapshot(_ context.Context, d compute.DiskSpec, key string) error {

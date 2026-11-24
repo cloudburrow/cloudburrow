@@ -313,6 +313,10 @@ func (s *Server) newDiskLocked(project, zone string, b obj, field string) (obj, 
 		d["labelFingerprint"] = labelFingerprint(l)
 	}
 	minSize := lim.min
+	if ap, ok := b["asyncPrimaryDisk"].(map[string]any); ok && str(ap, "disk") != "" &&
+		(str(b, "sourceImage") != "" || str(b, "sourceSnapshot") != "" || str(b, "sourceDisk") != "") {
+		return nil, invalid("Invalid value for field '%s.asyncPrimaryDisk': secondary disks must be blank when created: they can't be created from images, snapshots, or other disks.", field)
+	}
 	switch {
 	case str(b, "sourceImage") != "":
 		img, err := LookupImage(str(b, "sourceImage"))
@@ -351,7 +355,48 @@ func (s *Server) newDiskLocked(project, zone string, b obj, field string) (obj, 
 			return nil, invalid("Invalid value for field '%s.sizeGb': '%d'. Requested disk size cannot be smaller than the snapshot size (%d GB)", field, size, ssz)
 		}
 	case str(b, "sourceDisk") != "":
-		return nil, unimplemented("disks made from another disk (sourceDisk) are not served yet (#1963); snapshot the disk and make the new disk from the snapshot.")
+		src, ok := resolveDisk(str(b, "sourceDisk"), project)
+		if !ok {
+			return nil, invalid("Invalid value for field '%s.sourceDisk': '%s'.", field, str(b, "sourceDisk"))
+		}
+		so, ok := s.res[src]
+		if !ok {
+			return nil, notFound(src)
+		}
+		// A zonal disk is cloned in its zone; a regional disk into one of
+		// its replica zones.
+		if (isRegional(so) && !hasStr(replicaZones(so), zone)) || (!isRegional(so) && lastSeg(str(so, "zone")) != zone) {
+			return nil, invalid("Invalid value for field '%s.sourceDisk': '%s'. A zonal disk can be cloned only from a disk in its own zone (or a regional disk replicated in it).", field, src)
+		}
+		if str(so, "status") != "READY" {
+			return nil, errf(http.StatusBadRequest, "resourceNotReady", "The resource '%s' is not ready", src)
+		}
+		d["sourceDisk"], d["sourceDiskId"] = src, so["id"]
+		if l, ok := so["licenses"]; ok {
+			d["licenses"] = l
+		}
+		ssz, _, _ := sizeGb(so["sizeGb"])
+		if !set {
+			size = ssz
+		}
+		if size < ssz {
+			return nil, invalid("Invalid value for field '%s.sizeGb': '%d'. Requested disk size cannot be smaller than the source disk's size (%d GB)", field, size, ssz)
+		}
+	}
+	if ap, ok := b["asyncPrimaryDisk"].(map[string]any); ok && str(ap, "disk") != "" {
+		prel, pd, err := s.asyncPrimaryLocked(project, str(ap, "disk"), regionOfZone(zone), typ, field)
+		if err != nil {
+			return nil, err
+		}
+		psz, _, _ := sizeGb(pd["sizeGb"])
+		if !set {
+			size, set = psz, true
+		}
+		if size != psz {
+			return nil, invalid("Invalid value for field '%s.sizeGb': '%d'. The primary and secondary disk must have the same size: the primary disk is %d GB.", field, size, psz)
+		}
+		d["asyncPrimaryDisk"] = obj{"disk": prel, "diskId": pd["id"]}
+		d["resourceStatus"] = obj{"asyncPrimaryDisk": obj{"state": "CREATED"}}
 	}
 	if !set && size == 0 {
 		size = 100
@@ -387,22 +432,20 @@ func (s *Server) disks(c call, zone string) (obj, error) {
 		if err != nil {
 			return nil, err
 		}
-		rel := str(d, "selfLink")
-		s.res[rel] = norm(d)
-		spec := s.diskSpecLocked(s.res[rel])
-		return s.runOpLocked(c.project, scope, "insert", rel, func(ctx context.Context) error {
-			return s.opts.VMs.CreateDisk(ctx, spec)
-		}, func(err error) {
+		if pols := strs(c.body, "resourcePolicies"); len(pols) > 0 {
+			l, err := s.checkDiskPoliciesLocked(c.project, d, pols, "resource.resourcePolicies")
 			if err != nil {
-				delete(s.res, rel)
-				return
+				return nil, err
 			}
-			if o, ok := s.res[rel]; ok {
-				o["status"] = "READY"
-			}
-		})
+			d["resourcePolicies"] = l
+		}
+		return s.insertDiskLocked(c.project, scope, d)
+	case n == 4 && post && p[3] == "bulkInsert":
+		return s.bulkInsertDisks(c.project, scope, regionOfZone(zone), c.body)
+	case n == 4 && post && p[3] == "stopGroupAsyncReplication":
+		return s.stopGroupAsyncReplication(c.project, scope, regionOfZone(zone), c.body)
 	}
-	if n < 4 || (n == 4 && !get && !del) || (n == 5 && p[4] != "resize" && p[4] != "setLabels" && p[4] != "createSnapshot") || n > 5 {
+	if n < 4 || (n == 4 && !get && !del) || (n == 5 && !(post && regionDiskVerbs[p[4]])) || n > 5 {
 		return nil, unimplemented("%s on disks/%s is not served (#1963)", c.method, strings.Join(p[3:], "/"))
 	}
 	rel := coll + "/" + p[3]
@@ -414,47 +457,28 @@ func (s *Server) disks(c call, zone string) (obj, error) {
 	case n == 4 && get:
 		return d, nil
 	case n == 4 && del:
-		if users := strs(d, "users"); len(users) > 0 {
-			return nil, errf(http.StatusBadRequest, "resourceInUseByAnotherResource",
-				"The disk resource '%s' is already being used by '%s'", rel, users[0])
-		}
-		spec := s.diskSpecLocked(d)
-		d["status"] = "DELETING"
-		return s.runOpLocked(c.project, scope, "delete", rel, func(ctx context.Context) error {
-			return s.opts.VMs.DeleteDisk(ctx, spec)
-		}, func(err error) {
-			if err == nil {
-				delete(s.res, rel)
-			} else if o, ok := s.res[rel]; ok {
-				o["status"] = "READY"
-			}
-		})
-	case n == 5 && post && p[4] == "resize":
-		size, set, err := sizeGb(c.body["sizeGb"])
-		if err != nil {
-			return nil, err
-		}
-		cur, _, _ := sizeGb(d["sizeGb"])
-		if !set {
-			return nil, required("sizeGb")
-		}
-		if size <= cur {
-			return nil, invalid("Invalid value for field 'sizeGb': '%d'. New disk size '%d' GB must be larger than existing size '%d' GB.", size, size, cur)
-		}
-		if lim := diskTypes[lastSeg(str(d, "type"))]; size > lim.max {
-			return nil, invalid("Invalid value for field 'sizeGb': '%d'. Disk size must be at most %d GB.", size, lim.max)
-		}
-		d["sizeGb"] = strconv.FormatInt(size, 10)
-		spec := s.diskSpecLocked(d)
-		return s.runOpLocked(c.project, scope, "resizeDisk", rel, func(ctx context.Context) error {
-			return s.opts.VMs.ResizeDisk(ctx, spec)
-		}, nil)
-	case n == 5 && post && p[4] == "setLabels":
-		return s.setLabelsAsync(c.project, scope, rel, c.body)
-	case n == 5 && post && p[4] == "createSnapshot":
-		return s.createSnapshot(c.project, rel, c.body, scope)
+		return s.deleteDiskLocked(c.project, scope, rel, d)
 	}
-	return nil, unimplemented("%s on disks/%s is not served (#1963)", c.method, strings.Join(p[3:], "/"))
+	return s.diskVerbLocked(c, scope, rel, d)
+}
+
+// diskVerbLocked serves a POST verb on a zonal or regional disk.
+func (s *Server) diskVerbLocked(c call, scope, rel string, d obj) (obj, error) {
+	switch c.parts[4] {
+	case "resize":
+		return s.resizeDiskLocked(c.project, scope, rel, d, c.body)
+	case "setLabels":
+		return s.setLabels(c.project, scope, rel, c.body)
+	case "createSnapshot":
+		return s.createSnapshot(c.project, rel, c.body, scope)
+	case "addResourcePolicies", "removeResourcePolicies":
+		return s.diskPolicies(c.project, scope, rel, d, c.body, c.parts[4] == "addResourcePolicies")
+	case "startAsyncReplication":
+		return s.startAsyncReplication(c.project, scope, rel, d, c.body)
+	case "stopAsyncReplication":
+		return s.stopAsyncReplication(c.project, scope, rel, d)
+	}
+	return nil, unimplemented("%s on %s/%s is not served (#2206)", c.method, rel, c.parts[4])
 }
 
 // setLabelsAsync is setLabels answered with a zonal operation.
@@ -478,9 +502,15 @@ func (s *Server) createSnapshot(project, diskRel string, b obj, scope string) (o
 	if str(d, "status") != "READY" {
 		return nil, errf(http.StatusBadRequest, "resourceNotReady", "The resource '%s' is not ready", diskRel)
 	}
+	if s.syncSecondaryLocked(d) != nil {
+		// "Secondary disks can't be attached, deleted, or snapshotted
+		// while they are in the process of replication" (async-pd/about).
+		return nil, errf(http.StatusBadRequest, "resourceInUseByAnotherResource",
+			"The disk resource '%s' is a secondary disk in the process of replication: it can't be snapshotted until replication stops.", diskRel)
+	}
 	snap := obj{"kind": "compute#snapshot", "id": newID(), "name": name, "status": "CREATING", "selfLink": rel,
 		"sourceDisk": diskRel, "sourceDiskId": d["id"], "diskSizeGb": d["sizeGb"], "storageBytes": "0",
-		"storageBytesStatus": "UP_TO_DATE", "storageLocations": []any{regionOfZone(lastSeg(str(d, "zone")))},
+		"storageBytesStatus": "UP_TO_DATE", "storageLocations": []any{diskRegion(d)},
 		"creationTimestamp": s.stamp(), "architecture": arch(), "snapshotType": "STANDARD",
 		"labelFingerprint": labelFingerprint(nil)}
 	if desc := str(b, "description"); desc != "" {
