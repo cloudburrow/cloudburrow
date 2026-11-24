@@ -139,6 +139,11 @@ func (s *Server) createBackup(name string, b *alloydbpb.Backup, requestID string
 	b.EncryptionInfo = encryptionInfo(b.GetEncryptionConfig())
 	b.Etag = etag()
 	s.backups[name] = b
+	// The backup keeps the postgres user's password, as a restore of it
+	// keeps the backed-up cluster's users (#2208): the dump has no roles.
+	if pw := s.passwords[c.GetName()]; pw != "" {
+		s.passwords[name] = pw
+	}
 	op, err := s.startOp(locationOf(name), "create", name, requestID)
 	if err != nil {
 		return nil, err
@@ -279,6 +284,7 @@ func (s *Server) DeleteBackup(_ context.Context, req *alloydbpb.DeleteBackupRequ
 		_ = os.RemoveAll(d)
 	}
 	delete(s.backups, b.GetName())
+	delete(s.passwords, b.GetName())
 	for k, d := range s.restores {
 		if d == s.backupDir(b) {
 			delete(s.restores, k)
@@ -350,6 +356,7 @@ func (s *Server) expireAutomated(c *alloydbpb.Cluster, now time.Time) {
 			_ = os.RemoveAll(d)
 		}
 		delete(s.backups, b.GetName())
+		delete(s.passwords, b.GetName())
 	}
 }
 

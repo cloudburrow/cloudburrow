@@ -682,6 +682,7 @@ func (s *Server) ResetProject(ctx context.Context, project string) error {
 		if strings.HasPrefix(k, prefix) {
 			dirs = append(dirs, s.backupDir(s.backups[k]))
 			delete(s.backups, k)
+			delete(s.passwords, k)
 		}
 	}
 	for k := range s.users {

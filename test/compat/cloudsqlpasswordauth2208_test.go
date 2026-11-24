@@ -244,8 +244,12 @@ func TestCloudSQLPasswordAuthentication(t *testing.T) {
 						t.Error("users.list lists cloudsqladmin")
 					}
 				}
+				// Hidden as users.list hides it, it is no user to change, and
+				// none can be made with its name.
 				_, err = svc.Users.Update(project, name, &sqladmin.User{Name: "cloudsqladmin", Password: "Mine-now1"}).Name("cloudsqladmin").Do()
-				wantHTTP(t, "users.update cloudsqladmin", err, 400)
+				wantHTTP(t, "users.update cloudsqladmin", err, 404)
+				_, err = svc.Users.Insert(project, name, &sqladmin.User{Name: "cloudsqladmin", Password: "Mine-now1"}).Do()
+				wantHTTP(t, "users.insert cloudsqladmin", err, 400)
 			})
 		}
 	})

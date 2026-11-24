@@ -1475,8 +1475,9 @@ the console. PostgreSQL answers `FATAL 28P01 password authentication failed for 
   rest) sign in as a management role of their own, as Google's do: `cloudsqladmin`, a superuser
   on PostgreSQL, the account above on MySQL. Its password is generated per CloudBurrow instance,
   kept owner-only in `cloudsql-postgres.json` in the instance directory, and given to the servers
-  in their pods' environment, so no user knows it; `users.list` leaves it out, and
-  `users.insert`, `update` and `delete` of it are 400. The scripts CloudBurrow runs inside a
+  in their pods' environment, so no user knows it; `users.list` leaves it out, `users.get`,
+  `update` and `delete` of it are 404 as of any user not listed, and `users.insert` of its name
+  is 400. The scripts CloudBurrow runs inside a
   PostgreSQL server's container use its socket.
 - The managed connection pooler (#2141) reads the server's `pg_shadow` as the management role, and
   checks each client's password against it, as before.
