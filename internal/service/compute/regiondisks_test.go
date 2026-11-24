@@ -310,3 +310,45 @@ func TestAsyncReplication(t *testing.T) {
 		t.Errorf("deleted policy: %v", err)
 	}
 }
+
+// TestZonalAsyncReplication (#2206): Asynchronous Replication between
+// zonal disks at the zonal paths: a zonal secondary of a zonal primary,
+// the secondary in a consistency group of its region, the group cloned in
+// the secondary's zone by disks.bulkInsert, stopGroupAsyncReplication at a
+// zonal path, and removeResourcePolicies.
+func TestZonalAsyncReplication(t *testing.T) {
+	vms := newDataVMs()
+	s, err := New(Options{VMs: vms})
+	if err != nil {
+		t.Fatal(err)
+	}
+	za, zb := "zones/us-central1-a/", "zones/us-east1-b/"
+	mustCall(t, s, "POST", za+"disks", obj{"name": "prim", "sizeGb": "10"})
+	key := func(path string) string { return vmKey("disk", mustCall(t, s, "GET", path, nil)) }
+	vms.mu.Lock()
+	vms.data[key(za+"disks/prim")] = "z1"
+	vms.mu.Unlock()
+	mustCall(t, s, "POST", zb+"disks", obj{"name": "sec", "asyncPrimaryDisk": obj{"disk": "projects/p/zones/us-central1-a/disks/prim"}})
+	mustCall(t, s, "POST", za+"disks/prim/startAsyncReplication", obj{"asyncSecondaryDisk": "projects/p/zones/us-east1-b/disks/sec"})
+	mustCall(t, s, "POST", "regions/us-east1/resourcePolicies", obj{"name": "zcg", "diskConsistencyGroupPolicy": obj{}})
+	mustCall(t, s, "POST", zb+"disks/sec/addResourcePolicies", obj{"resourcePolicies": []any{"projects/p/regions/us-east1/resourcePolicies/zcg"}})
+	vms.mu.Lock()
+	vms.data[key(za+"disks/prim")] = "z2"
+	vms.mu.Unlock()
+	mustCall(t, s, "POST", zb+"disks/bulkInsert", obj{"sourceConsistencyGroupPolicy": "projects/p/regions/us-east1/resourcePolicies/zcg"})
+	vms.mu.Lock()
+	got := vms.data[key(zb+"disks/sec-clone")]
+	vms.mu.Unlock()
+	if got != "z2" {
+		t.Errorf("the zonal clone holds %q, want the primary's z2", got)
+	}
+	mustCall(t, s, "POST", zb+"disks/stopGroupAsyncReplication", obj{"resourcePolicy": "projects/p/regions/us-east1/resourcePolicies/zcg"})
+	sec := mustCall(t, s, "GET", zb+"disks/sec", nil)
+	if sec["resourceStatus"].(map[string]any)["asyncPrimaryDisk"].(map[string]any)["state"] != "STOPPED" {
+		t.Errorf("the zonal secondary after the group stopped: %v", sec)
+	}
+	mustCall(t, s, "POST", zb+"disks/sec/removeResourcePolicies", obj{"resourcePolicies": []any{"projects/p/regions/us-east1/resourcePolicies/zcg"}})
+	if sec := mustCall(t, s, "GET", zb+"disks/sec", nil); sec["resourcePolicies"] != nil {
+		t.Errorf("the zonal secondary after removeResourcePolicies: %v", sec["resourcePolicies"])
+	}
+}

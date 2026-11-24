@@ -800,6 +800,7 @@ func (p computeDisksProvider) diskActions(d map[string]any, onPage bool) []conso
 				Help: "A disk can be made larger, never smaller."}}},
 	}
 	acts = append(acts, labelsAction(d))
+	acts = append(acts, asyncActions(d)...)
 	del := console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: onPage, Confirm: "Delete disk " + name + "?"}
 	if users := vpcStrs(d, "users"); len(users) > 0 {
 		del.Unavailable = "The disk is attached to " + vpcLast(users[0]) + ": detach it first."
@@ -896,7 +897,7 @@ func (p computeDisksProvider) Detail(ctx context.Context, project string, path [
 	if s := vpcStr(d, "sourceSnapshot"); s != "" {
 		src = "Snapshot " + vpcLast(s)
 	}
-	return console.Detail{Title: path[1],
+	det := console.Detail{Title: path[1],
 		Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: []console.Property{
 			{Label: "Status", Value: vpcStr(d, "status")}, {Label: "Type", Value: vpcLast(vpcStr(d, "type"))},
 			{Label: "Size", Value: vpcStr(d, "sizeGb") + " GB"}, locationProp(d, path),
@@ -904,7 +905,11 @@ func (p computeDisksProvider) Detail(ctx context.Context, project string, path [
 			{Label: "Labels", Value: vpcDash(vmLabelsText(d))}, {Label: "Description", Value: vpcDash(vpcStr(d, "description"))},
 			{Label: "Creation time", Value: vpcStr(d, "creationTimestamp")},
 		}}}}},
-	}, nil
+	}
+	if props := asyncProperties(d); len(props) > 0 {
+		det.Sections[0].Groups = append(det.Sections[0].Groups, console.PropertyGroup{Heading: "Asynchronous replication", Properties: props})
+	}
+	return det, nil
 }
 
 func (p computeDisksProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
@@ -921,6 +926,9 @@ func (p computeDisksProvider) DetailActions(ctx context.Context, project string,
 func (p computeDisksProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	if len(path) != 2 {
 		return fmt.Errorf("%s is not available here", action)
+	}
+	if ok, err := p.asyncAct(project, path, action, values); ok {
+		return err
 	}
 	base := diskBase(path)
 	var err error

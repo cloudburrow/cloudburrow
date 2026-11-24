@@ -87,6 +87,14 @@ The design (#1963, option A): **a VM is a systemd container** in the instance's 
 | suspend / resume | The container's cgroup is frozen on its kind node: memory and processes are kept |
 | Disk budget | A new disk, instance or snapshot is refused with `RESOURCE_EXHAUSTED` (429) below 20 GiB free, as Kubernetes Engine refuses a node |
 
+### Regional disks and Asynchronous Replication (#2206)
+
+A regional disk (`regionDisks`, `disks create --region --replica-zones`) has two replica zones, distinct and in its region, and one PersistentVolumeClaim behind it: a VM in either replica zone attaches the same files, so what a VM in one zone wrote is what a VM in the other reads. Google's failover is `instances.attachDisk` with `forceAttach=true` (gcloud `--force-attach`) from a VM in the other zone while the disk is still attached read-write: here the new VM attaches it and the old VM is restarted with the disk mounted read-only, as a forced attach leaves it unable to write. Types and sizes are Google's for regional disks (`pd-standard` from 200 GB, `pd-balanced` and `pd-ssd` from 10 GB, `hyperdisk-balanced-high-availability` from 4 GB; `regionDiskTypes`), attached to E2, N1, N2 and N2D machine types, read-only to at most 10 VMs.
+
+Asynchronous Replication pairs a primary disk with a blank secondary of its size made with `asyncPrimaryDisk`, in another region of the same continent. `startAsyncReplication` copies the primary to the secondary, and the secondary is copied again before a clone by `bulkInsert` reads it and when `stopAsyncReplication` or `stopGroupAsyncReplication` stops the pair, so a reader never sees older data than Google's one-minute RPO allows. A secondary is not attached or snapshotted while it replicates, a stopped pair does not restart, and replication must stop before either disk is deleted. Disk consistency groups (`resourcePolicies` with `diskConsistencyGroupPolicy`) group up to 128 disks of one region, primaries or secondaries but not both; other resource policy kinds are 501.
+
+Terraform: `google_compute_region_disk`, `google_compute_resource_policy` and `google_compute_region_disk_resource_policy_attachment` (`TestTerraformComputeRegionDisk`).
+
 ### VM networking and firewall rules
 
 VMs on the same VPC network reach each other at their internal IPs, across the network's subnets, and at their internal DNS names; VMs on different networks cannot (network peering is not served). The network's firewall rules are enforced on each VM as Google evaluates them (https://docs.cloud.google.com/firewall/docs/firewalls, read 2026-11-19), #1968:

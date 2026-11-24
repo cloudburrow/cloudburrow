@@ -518,6 +518,12 @@ const ROUTES = [
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/disks", service: "compute-disks", icon: "compute", title: "Disks", kind: "Disk",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  // Asynchronous Replication (#2206): Google's Asynchronous replication
+  // and Consistency groups pages.
+  { path: "/compute/asynchronousReplication", service: "compute-asyncreplication", icon: "compute", title: "Asynchronous replication", kind: "Secondary disk",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/consistencyGroups", service: "compute-consistencygroups", icon: "compute", title: "Consistency groups", kind: "Consistency group",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/snapshots", service: "compute-snapshots", icon: "compute", title: "Snapshots", kind: "Snapshot",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/images", service: "compute-images", icon: "compute", title: "Images", kind: "Image",

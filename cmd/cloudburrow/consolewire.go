@@ -443,7 +443,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			// Compute Engine (#1965): VM instances, disks, snapshots,
 			// images and machine types, over the same API.
 			computeInstancesProvider{screen}, computeDisksProvider{screen}, computeSnapshotsProvider{screen},
-			computeImagesProvider{screen}, computeMachineTypesProvider{screen}, computeMetadataProvider{screen})
+			computeImagesProvider{screen}, computeMachineTypesProvider{screen}, computeMetadataProvider{screen},
+			// Asynchronous replication and consistency groups (#2206).
+			computeAsyncReplicationProvider{screen}, computeConsistencyGroupsProvider{screen})
 	}
 	// BigQuery's Data transfers and Scheduled queries pages (#1948).
 	if d.dataTransfer != nil {

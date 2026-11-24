@@ -697,7 +697,7 @@ func (s *Server) attachDisk(c call, scope, rel string, o obj) (obj, error) {
 	if bt, _ := c.body["boot"].(bool); bt {
 		return nil, invalid("Invalid value for field 'resource.boot': 'true'. An instance has one boot disk, attached at creation.")
 	}
-	if first(c.query, "forceAttach") == "true" {
+	if strings.EqualFold(first(c.query, "forceAttach"), "true") {
 		c.body["forceAttach"] = true
 	}
 	ad, nd, err := s.attachedDiskLocked(c.project, lastSeg(str(o, "zone")), str(o, "name"), lastSeg(str(o, "machineType")), c.body, len(disks), "resource")

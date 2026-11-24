@@ -215,15 +215,26 @@ retention is within its type's range for its recurrence (AlloyDB: hourly 1-90, d
 Engine VMs: 1-366, 1-1827, 7-1827, 30-3653); a backup window must be at least six hours long; and
 `logRetentionDays` is "valid only for AlloyDB and Cloud SQL".
 
+## Regional disks (#2206)
+
+A plan for `compute.googleapis.com/RegionDisk` protects a Compute Engine regional disk
+(`projects/P/regions/R/disks/D`; a zonal path is refused). Its backup snapshots the disk as a
+zonal disk's does, and `diskBackupProperties` carries `region` and `replicaZones` in place of
+`zone`. `backups.restore` with `regionDiskTargetEnvironment` (project, region and exactly two
+replica zones of that region) makes a new regional disk; with `diskTargetEnvironment` a zonal
+one. A VM's backup keeps which of its disks are regional and restores them regional, in the
+target zone and the next zone of its region. The six-hour minimum backup window is Google's rule
+for every vaulted backup plan ("It must be at least six hours long", backup plan concepts,
+re-read 2026-11-24), so it applies to regional disks too.
+
 ## What is refused
 
 Each answers 501 UNIMPLEMENTED with the reason:
 
-- **Regional disks** (`compute.googleapis.com/RegionDisk`): Compute Engine here serves no
-  `regionDisks`, so there is no regional disk to protect. (A Compute Engine, AlloyDB or Filestore
-  plan or association without its service is FAILED_PRECONDITION, naming `--services`.)
-- **Restore settings Compute Engine here does not serve**: `regionDiskTargetEnvironment`,
-  `clearOverridesFieldMask`, and restore properties such as customer-managed disk keys, storage
+- **A resource type Backup and DR does not protect here**, such as a bucket: 501 naming the
+  workload types served. (A Compute Engine, AlloyDB or Filestore plan or association without its
+  service is FAILED_PRECONDITION, naming `--services`.)
+- **Restore settings Compute Engine here does not serve**: `clearOverridesFieldMask`, and restore properties such as customer-managed disk keys, storage
   pools, provisioned IOPS, reservations, confidential VMs and GPUs.
 - **`pointInTimeRestore` into another project** than the data source's instance's: call it with
   that project as the parent.
