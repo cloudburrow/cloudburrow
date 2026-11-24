@@ -16,11 +16,14 @@ from apache_beam.options.pipeline_options import PipelineOptions
 
 
 def fmt(row):
-    parts = [row.key.decode()]
-    for family in sorted(row.column_families):
-        for qualifier in sorted(row.column_families[family]):
-            for cell in row.column_families[family][qualifier]:
-                parts.append("%s:%s=%s" % (family, qualifier, cell.value.decode()))
+    """row is the read's google.cloud.bigtable.row.PartialRowData: its
+    row_key and its cells, by family and qualifier (bytes)."""
+    parts = [row.row_key.decode()]
+    for family in sorted(row.cells):
+        for qualifier in sorted(row.cells[family]):
+            q = qualifier.decode() if isinstance(qualifier, bytes) else qualifier
+            for cell in row.cells[family][qualifier]:
+                parts.append("%s:%s=%s" % (family, q, cell.value.decode()))
     return " ".join(parts)
 
 

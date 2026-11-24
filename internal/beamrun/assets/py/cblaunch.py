@@ -129,13 +129,14 @@ def stage_java(env, java_dir):
     return n
 
 
-def rewrite_environments(p, harness, java_harness=None, java_dir=None):
+def rewrite_environments(p, harness, java_harness=None, java_dir=None, go_harness=None, go_dir=None):
     """Points the pipeline's SDK environments at the job's worker pools:
-    Python's at the Python SDK's, Java's at the Java SDK's. A Java pipeline
-    is given a Python environment too, for the service-side transforms the
-    launcher runs in Python (cbio). Answers (the Python environment, the
-    Java SDK's major Java version or "")."""
-    python_env, java_version = None, ""
+    Python's at the Python SDK's, Java's at the Java SDK's, Go's at the Go
+    SDK's. A Java or Go pipeline is given a Python environment too, for the
+    service-side transforms the launcher runs in Python (cbio). Answers
+    (the Python environment, the Java SDK's major Java version or "",
+    whether the pipeline has a Go environment)."""
+    python_env, java_version, has_go = None, "", False
     for eid, env in p.components.environments.items():
         if env.urn == common_urns.environments.DOCKER.urn:
             dp = beam_runner_api_pb2.DockerPayload()
@@ -155,9 +156,17 @@ def rewrite_environments(p, harness, java_harness=None, java_dir=None):
                 env.payload = beam_runner_api_pb2.ExternalPayload(
                     endpoint=endpoints_pb2.ApiServiceDescriptor(url=java_harness)).SerializeToString()
                 continue
+            elif "beam_go_sdk" in dp.container_image and go_harness and go_dir:
+                # The Go SDK's worker is the pipeline's own binary, an
+                # artifact of the environment (the SDK's staged "worker"),
+                # which the Go SDK harness's boot fetches and runs.
+                has_go = True
+                env.urn = common_urns.environments.EXTERNAL.urn
+                env.payload = beam_runner_api_pb2.ExternalPayload(
+                    endpoint=endpoints_pb2.ApiServiceDescriptor(url=go_harness)).SerializeToString()
             else:
                 raise RuntimeError("The pipeline's environment %s runs the SDK container %s: CloudBurrow's local runner serves the "
-                                   "Python and Java SDKs' harnesses." % (eid, dp.container_image))
+                                   "Python, Java and Go SDKs' harnesses." % (eid, dp.container_image))
         # The SDK's staged files are URL artifacts in Cloud Storage
         # (gs://), which the artifact service reads as files: through
         # Beam's file systems, from the instance's Cloud Storage.
@@ -168,7 +177,7 @@ def rewrite_environments(p, harness, java_harness=None, java_dir=None):
                 if up.url.startswith("gs://"):
                     dep.type_urn = common_urns.artifact_types.FILE.urn
                     dep.type_payload = beam_runner_api_pb2.ArtifactFilePayload(path=up.url, sha256=up.sha256).SerializeToString()
-    if python_env is None and java_version:
+    if python_env is None and (java_version or has_go):
         python_env = "cb_python"
         env = p.components.environments[python_env]
         env.urn = common_urns.environments.EXTERNAL.urn
@@ -177,8 +186,8 @@ def rewrite_environments(p, harness, java_harness=None, java_dir=None):
         from apache_beam.transforms import environments as _envs
         env.capabilities.extend(_envs.python_sdk_capabilities())
     if python_env is None:
-        raise RuntimeError("The pipeline has no Python or Java SDK environment.")
-    return python_env, java_version
+        raise RuntimeError("The pipeline has no Python, Java or Go SDK environment.")
+    return python_env, java_version, has_go
 
 
 def java_options(opts, args):
@@ -192,6 +201,12 @@ def java_options(opts, args):
     # which reads its workers' metrics.
     o["environmentOptions"] = ["external_service_address=" + args.java_sdk_pool]
     o["credentialFactoryClass"] = "CbCredentialFactory"
+    # A Python or Go pipeline's cross-language Java transforms: their
+    # options are the other SDK's, whose project the Java SDK reads here.
+    if not o.get("project") and os.environ.get("CB_PROJECT"):
+        o["project"] = os.environ["CB_PROJECT"]
+    if not o.get("tempLocation") and o.get("temp_location"):
+        o["tempLocation"] = o["temp_location"]
     o["gcsEndpoint"] = os.environ.get("STORAGE_EMULATOR_HOST", "").rstrip("/") + "/storage/v1/"
     # BigQueryIO's clients (BigQueryOptions.bigQueryEndpoint, the API's
     # root URL): the instance's BigQuery through the relay.
@@ -252,6 +267,56 @@ def harness_metrics(directory, producers):
         if r["name"] == "ElementCount" and not r.get("step"):
             r["step"] = producers.get(r.get("pcollection", ""), "")
     return out
+
+
+def runner_metrics(stub, job_id, producers):
+    """The job's metrics as Beam's runner aggregated them from every SDK
+    worker, Python's and Java's (the job server's GetJobMetrics: the
+    attempted MonitoringInfos, which Flink's runner gathers in its
+    accumulators and answers once the job has finished): each
+    PCollection's ElementCount and the pipeline's user counters and
+    distributions, in sitecustomize's rows. None when the runner reports
+    none."""
+    from apache_beam.metrics import monitoring_infos as mi
+    try:
+        res = stub.GetJobMetrics(beam_job_api_pb2.GetJobMetricsRequest(job_id=job_id), timeout=60)
+    except Exception:
+        return None
+    totals = {}
+    for info in res.metrics.attempted:
+        labels = dict(info.labels)
+        try:
+            if info.urn == mi.ELEMENT_COUNT_URN:
+                key = ("ElementCount", "dataflow/v1b3", "", labels.get(mi.PCOLLECTION_LABEL, ""), "Sum")
+                totals[key] = totals.get(key, 0) + mi.extract_counter_value(info)
+            elif info.urn == mi.USER_COUNTER_URN:
+                key = (labels.get(mi.NAME_LABEL, ""), "user", labels.get(mi.PTRANSFORM_LABEL, ""),
+                       labels.get(mi.NAMESPACE_LABEL, ""), "Sum")
+                totals[key] = totals.get(key, 0) + mi.extract_counter_value(info)
+            elif info.urn == mi.USER_DISTRIBUTION_URN:
+                key = (labels.get(mi.NAME_LABEL, ""), "user", labels.get(mi.PTRANSFORM_LABEL, ""),
+                       labels.get(mi.NAMESPACE_LABEL, ""), "Distribution")
+                c, s, lo, hi = mi.extract_distribution(info)
+                p = totals.get(key, (0, 0, lo, hi))
+                totals[key] = (p[0] + c, p[1] + s, min(p[2], lo), max(p[3], hi))
+        except Exception:
+            continue
+    if not totals:
+        return None
+    rows = []
+    for (name, origin, step, ns, kind), v in totals.items():
+        row = {"name": name, "origin": origin, "step": step, "kind": kind}
+        if origin == "user":
+            row["namespace"] = ns
+        else:
+            row["pcollection"] = ns
+            row["step"] = producers.get(ns, "")
+        if kind == "Distribution":
+            row.update(count=v[0], total=v[1], min=v[2], max=v[3])
+        else:
+            row["value"] = v
+        rows.append(row)
+    return rows
 
 
 def producers_of(p):
@@ -384,6 +449,8 @@ def main():
     ap.add_argument("--java-harness", default="localhost:50001")
     ap.add_argument("--java-sdk-pool", default="localhost:50002")
     ap.add_argument("--java-dir", default="/cb/java")
+    ap.add_argument("--go-harness", default="localhost:50003")
+    ap.add_argument("--go-dir", default="/cb/go")
     ap.add_argument("--pipeline-url", required=True)
     ap.add_argument("--options", required=True)
     ap.add_argument("--job-name", required=True)
@@ -406,7 +473,8 @@ def main():
     p = beam_runner_api_pb2.Pipeline()
     p.ParseFromString(data)
     try:
-        env, java_version = rewrite_environments(p, args.harness, args.java_harness, args.java_dir)
+        env, java_version, has_go = rewrite_environments(p, args.harness, args.java_harness, args.java_dir,
+                                                         args.go_harness, args.go_dir)
         cbio.rewrite(p, env)
         opaque_custom_windows(p)
     except Exception as e:
@@ -426,6 +494,16 @@ def main():
             grpc.channel_ready_future(grpc.insecure_channel(pool)).result(timeout=300)
         except Exception:
             emit(event="done", state="FAILED", message="Workflow failed. Causes: The job's Java SDK harness did not start.")
+            return
+    if has_go:
+        # internal/beamrun starts the job's Go worker pool once this is here.
+        os.makedirs(args.go_dir, exist_ok=True)
+        open(os.path.join(args.go_dir, "ready"), "w").close()
+        pool = args.job_endpoint.rsplit(":", 1)[0] + ":" + args.go_harness.rsplit(":", 1)[1]
+        try:
+            grpc.channel_ready_future(grpc.insecure_channel(pool)).result(timeout=300)
+        except Exception:
+            emit(event="done", state="FAILED", message="Workflow failed. Causes: The job's Go SDK harness did not start.")
             return
     producers = producers_of(p)
 
@@ -496,7 +574,9 @@ def main():
         if time.time() - last > 5:
             last = time.time()
             emit(event="metrics", metrics=harness_metrics(args.metrics_dir, producers))
-    emit(event="metrics", metrics=harness_metrics(args.metrics_dir, producers))
+    # Once the job has finished, its metrics are the runner's own, of all
+    # its workers (the Java workers' too); while it runs, the workers'.
+    emit(event="metrics", metrics=runner_metrics(stub, job_id, producers) or harness_metrics(args.metrics_dir, producers))
     state = final.get("state") or STATE.Enum.Name(stub.GetState(beam_job_api_pb2.GetJobStateRequest(job_id=job_id)).state)
     emit(event="done", state=state, message=final.get("message", ""))
 

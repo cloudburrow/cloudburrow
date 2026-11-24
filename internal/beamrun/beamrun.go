@@ -79,6 +79,14 @@ var JavaImages = map[string]string{
 	"21": "apache/beam_java21_sdk@sha256:96816b03bebe628d9ffd2bd47f37167e055fae2ab99890ad6e941aa908440740",
 }
 
+// GoImage is Beam 2.78.0's Go SDK container. A Go job's workers are the
+// pipeline's own binary (the SDK's staged worker), which the container's
+// boot fetches from the job server and runs; the boot runs as the
+// container executable of a Beam worker pool (worker_pool_main), on
+// goPoolPort, as the Go container's own pool takes the Python pool's
+// fixed port. Its Pub/Sub reads and writes run in Python's, as Java's.
+const GoImage = "apache/beam_go_sdk@sha256:6290be71b91b975153ed86ffe7e05f3d36376c3e46ece68ea08de366fba17fab"
+
 // LauncherImage is the Python SDK container the launcher, the relay and
 // the Python worker pool of a job of another SDK run in.
 const LauncherImage = "3.12"
@@ -113,6 +121,9 @@ const (
 	// pool behind it.
 	javaPoolPort    = 50001
 	javaSDKPoolPort = 50002
+	// The Go worker pool the pipeline's environment names (cblaunch.py's
+	// --go-harness).
+	goPoolPort = 50003
 )
 
 // Job is one job to run.
@@ -238,8 +249,13 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 			return failed(fmt.Sprintf("The job was submitted by the Apache Beam SDK for Java %s: CloudBurrow's local runner has the SDK harness of Apache Beam %s.", job.SDKVersion, BeamVersion))
 		}
 		image = PythonImages[LauncherImage]
+	case "Go":
+		if job.SDKVersion != BeamVersion {
+			return failed(fmt.Sprintf("The job was submitted by the Apache Beam SDK for Go %s: CloudBurrow's local runner has the SDK harness of Apache Beam %s.", job.SDKVersion, BeamVersion))
+		}
+		image = PythonImages[LauncherImage]
 	default:
-		return failed(fmt.Sprintf("The job was submitted by the Apache Beam %s SDK: CloudBurrow's local runner serves the Python and Java SDKs' pipelines (Apache Beam %s).", job.SDK, BeamVersion))
+		return failed(fmt.Sprintf("The job was submitted by the Apache Beam %s SDK: CloudBurrow's local runner serves the Python, Java and Go SDKs' pipelines (Apache Beam %s).", job.SDK, BeamVersion))
 	}
 	live := map[string]string{}
 	if d.Live != nil {
@@ -266,7 +282,7 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	if err := os.WriteFile(filepath.Join(dir, "options.json"), opts, 0o644); err != nil {
 		return failed(err.Error())
 	}
-	for _, sub := range []string{"ctl", "metrics", "java", "flink"} {
+	for _, sub := range []string{"ctl", "metrics", "java", "go", "flink"} {
 		_ = os.Mkdir(filepath.Join(dir, sub), 0o777)
 		_ = os.Chmod(filepath.Join(dir, sub), 0o777)
 	}
@@ -355,11 +371,30 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	logCtx, stopLogs := context.WithCancel(context.Background())
 	cleanup = append(cleanup, stopLogs)
 	go d.follow(logCtx, pool, ev.Log)
-	if job.SDK == "Java" {
-		jpool := "cb-df-java-" + suffix
-		cleanup = append(cleanup, func() { bg("rm", "-f", "-v", jpool, jpool+"-fn") })
-		go d.javaPool(logCtx, dir, jpool, js, label, env, ev.Log)
-	}
+	// A Java pipeline's, and a Python pipeline's cross-language
+	// transforms' (Java environments the expansion service added): the
+	// Java worker pool starts once the launcher finds a Java environment
+	// in the pipeline (java/ready), whichever SDK submitted it.
+	jpool := "cb-df-java-" + suffix
+	cleanup = append(cleanup, func() {
+		if _, err := os.Stat(filepath.Join(dir, "java", "ready")); err == nil {
+			bg("rm", "-f", "-v", jpool, jpool+"-fn")
+		}
+	})
+	go d.javaPool(logCtx, dir, jpool, js, label, env, ev.Log)
+	// A Go pipeline's: once the launcher finds a Go environment (go/ready).
+	gpool := "cb-df-go-" + suffix
+	cleanup = append(cleanup, func() {
+		if _, err := os.Stat(filepath.Join(dir, "go", "ready")); err == nil {
+			bg("rm", "-f", "-v", gpool, gpool+"-boot")
+		}
+	})
+	// The Go SDK's Cloud Storage client reads objects through the XML
+	// API at STORAGE_EMULATOR_HOST's root, where the instance takes a
+	// .localhost host's first label for a virtual-hosted bucket: the Go
+	// workers name the relay by its address.
+	goEnv := append(append([]string{}, env...), "-e", fmt.Sprintf("STORAGE_EMULATOR_HOST=http://%s:%d", relayIP, storagePort))
+	go d.goPool(logCtx, dir, gpool, js, label, image, goEnv, ev.Log)
 
 	runArgs := append([]string{"run", "--rm", "--name", launch, "--label", label, "--network", network, "-v", dir + ":/cb"}, env...)
 	runArgs = append(runArgs, "--entrypoint", "python", image, "/cb/py/cblaunch.py",
@@ -464,6 +499,49 @@ func (d *Docker) javaPool(ctx context.Context, dir, name, js, label string, env 
 		if log != nil {
 			log("ERROR", "start the job's Java SDK harness: "+out)
 		}
+		return
+	}
+	d.follow(ctx, name, log)
+}
+
+// goPool starts the job's Go worker pool, in the job server's network
+// namespace, once the launcher has found a Go environment (go/ready): Beam's
+// worker pool (worker_pool_main, in the Python SDK's container) on
+// goPoolPort, which starts each worker with the Go SDK container's boot
+// (copied to go/boot), as the Go container's own pool would.
+func (d *Docker) goPool(ctx context.Context, dir, name, js, label, image string, env []string, log func(severity, text string)) {
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go", "ready")); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	fail := func(what, out string) {
+		if log != nil {
+			log("ERROR", what+": "+out)
+		}
+	}
+	boot := name + "-boot"
+	if out, err := d.docker(ctx, "create", "--name", boot, "--label", label, GoImage); err != nil {
+		fail("fetch the Go SDK harness", out)
+		return
+	}
+	out, err := d.docker(ctx, "cp", boot+":/opt/apache/beam/boot", filepath.Join(dir, "go", "boot"))
+	_, _ = d.docker(context.Background(), "rm", "-f", "-v", boot)
+	if err != nil {
+		fail("fetch the Go SDK harness's boot", out)
+		return
+	}
+	args := append([]string{"run", "-d", "--name", name, "--label", label, "--network", "container:" + js, "--memory", "3g",
+		"-v", dir + ":/cb:ro"}, env...)
+	args = append(args, "--entrypoint", "python", image, "-m", "apache_beam.runners.worker.worker_pool_main",
+		fmt.Sprintf("--service_port=%d", goPoolPort), "--container_executable=/cb/go/boot")
+	if out, err := d.docker(ctx, args...); err != nil {
+		fail("start the job's Go SDK harness", out)
 		return
 	}
 	d.follow(ctx, name, log)
