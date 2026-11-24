@@ -64,7 +64,7 @@ func (s *computeService) startNetworkConnectivity(api *compute.Server, computeAP
 			g.ServeHTTP(w, r)
 			return
 		}
-		if networkconnectivity.IsPath(r) {
+		if nc.Handles(r) {
 			rest.ServeHTTP(w, r)
 			return
 		}
