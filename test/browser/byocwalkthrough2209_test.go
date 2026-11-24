@@ -315,6 +315,7 @@ func TestByocFirstRunWalkThrough(t *testing.T) {
 	}
 
 	// 5. From the AWS VM to the Azure VM: across clouds, the service with it.
+	p.navigate("/compute-capacity")
 	w.clickWhenEnabled("capacity-" + w.vmB + "-move")
 	var detail string
 	p.waitFor(`document.querySelector(".modal") !== null`)
