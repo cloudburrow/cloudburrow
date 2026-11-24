@@ -57,7 +57,10 @@ cloudburrow version
 **Install script.** It detects your OS and architecture, verifies the SHA-256 against
 `checksums.txt`, and verifies the attestation too when the GitHub CLI (`gh`) is installed. It
 installs to `~/.local/bin`, or to `<dir>/bin` with `--prefix <dir>`. **It refuses to install an
-archive whose checksum does not match, or that has no entry in `checksums.txt`.**
+archive whose checksum does not match, or that has no entry in `checksums.txt`.** On a Mac with
+Apple silicon it also installs the archive's Apple GPU (Metal) runner for Gemma generation to
+`~/.local/libexec/cloudburrow/litert-lm` (`<dir>/libexec/cloudburrow/litert-lm`), the layout
+Homebrew uses and where the CLI looks by default, so no variable is needed.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cloudburrow/cloudburrow/main/scripts/install.sh | sh
@@ -853,6 +856,7 @@ and `--state-dir` it was started with.
    ```sh
    brew uninstall cloudburrow && brew untap cloudburrow/tap   # Homebrew
    rm "$HOME/.local/bin/cloudburrow"                          # install.sh, or <prefix>/bin with --prefix
+   rm -r "$HOME/.local/libexec/cloudburrow"                   # install.sh on Apple silicon: the GPU runner
    ```
 
 4. **Host-side state**, including any directory you passed as `--state-dir`. It also holds the

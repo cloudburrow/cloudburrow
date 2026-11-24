@@ -94,10 +94,15 @@ jobs:
     # past 30 for v0.6.0's (45266437647, cancelled with every test passing so
     # far) once the race and WASM timeouts grew.
     timeout-minutes: 75
+    permissions:
+      contents: read
+      # The release notes' fallback What's new reads closed issues' titles.
+      issues: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.RELEASE_REF }}
+          fetch-depth: 0 # the notes' What's new reads the previous tag (scripts/release-notes.sh)
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # Exact patch, so the compiler that builds a release is recorded:
@@ -119,6 +124,9 @@ jobs:
       - name: Release notes from CHANGELOG.md
         env:
           DRY_RUN_TAG: ${{ inputs.tag }}
+          # The fallback What's new reads closed issues' titles with gh.
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES_REPO: ${{ github.repository }}
         run: |
           if [ -n "${RELEASE_TAG}" ]; then
             TAG="${RELEASE_TAG}"
@@ -752,10 +760,12 @@ jobs:
       # workflow's OIDC identity: nothing long-lived to hold or leak.
       id-token: write
       attestations: write
+      issues: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.RELEASE_REF }}
+          fetch-depth: 0 # the notes' What's new reads the previous tag (scripts/release-notes.sh)
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -783,6 +793,7 @@ jobs:
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES_REPO: ${{ github.repository }}
           LOCAL_AI_DIGEST: ${{ needs.runtime-image-publish.outputs.digest }}
           MACOS_SIGNED: ${{ needs.sign-macos.outputs.signed }}
         run: |
@@ -924,6 +935,11 @@ jobs:
           brew install --formula cloudburrow-smoke/local/cloudburrow
           brew test cloudburrow-smoke/local/cloudburrow
           brew audit --strict --formula cloudburrow-smoke/local/cloudburrow
+          # The formula's Apple GPU runner, where the CLI looks for it.
+          if [ "${{ matrix.platform }}" = darwin/arm64 ]; then
+            runner="$(brew --prefix cloudburrow-smoke/local/cloudburrow)/libexec/cloudburrow/litert-lm/cloudburrow_generate"
+            [ -x "${runner}" ] || { echo "::error::the formula did not install the Apple GPU runner at ${runner}" >&2; exit 1; }
+          fi
 
   # The setup-cloudburrow action at this tag, driving the CLI this run just
   # published, as a workflow pinned to the tag with `version: <tag>` would
