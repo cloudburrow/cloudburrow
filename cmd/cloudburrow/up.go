@@ -423,6 +423,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if dataformSvc != nil {
 		dataformSvc.secrets = secretsSvc
 		dataformSvc.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
+		dataformSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+		// v1beta1's account_connector (#2105): the caller's token from
+		// Developer Connect's account connector. A call without a principal
+		// is the instance's own user, as on Developer Connect's side.
+		dataformSvc.accountToken = func(ctx context.Context, connector, user string) (string, error) {
+			if user == "" || user == "developer@cloudburrow.local" {
+				user = creds.Email
+			}
+			return (&runadapter.DeveloperConnectServer{}).UserAccessToken(ctx, connector, user)
+		}
 		if runSvc != nil {
 			dataformSvc.gitBase = func() string {
 				if a := runSvc.Addr(); a != "" {
@@ -1181,6 +1191,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	metaSrv.WithOAuth(&authplatform.Endpoints{Store: authPlatformRef, User: creds.Email, LocalRedirect: computeSvc.iapLocalRedirect})
 	// IAP's browser sign-in (#2160) is that authorization endpoint's.
 	computeSvc.useIAPSignIn(authPlatformRef, metaSrv.Addr)
+	// Developer Connect's account connectors (#2105) connect a user's
+	// account through that authorization server, as its GOOGLE provider,
+	// and hand out tokens the instance's credentials mint for the account.
+	runadapter.SetDeveloperConnectOAuth(runadapter.DeveloperConnectOAuth{Store: authPlatformRef,
+		AuthBase: func() string {
+			if a := metaSrv.Addr(); a != "" {
+				return hostURL(a)
+			}
+			return ""
+		},
+		Mint: func(email string) string { return creds.MintAccessTokenFor(email, metadata.TokenTTL) }, TTL: metadata.TokenTTL})
 	// IAM enforcement (#1879) of Resource Manager, IAM, deny and
 	// organization policies, on this port.
 	useIAMEnforcement11(iamEnforcer, rmSrv, func() *resourcemanager.Registry { return projects })
@@ -1410,11 +1431,45 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// them, so it cannot answer from a store of its own.
 	// BigQuery Studio's notebook runtimes (#2094), deleted when up stops.
 	notebooks := &nbruntime.Manager{Instance: cfg.Name,
-		Logf: func(format string, args ...any) { fmt.Fprintf(stdout, "cloudburrow: "+format+"\n", args...) }}
+		Logf: func(format string, args ...any) { fmt.Fprintf(stdout, "cloudburrow: "+format+"\n", args...) },
+		BigQuery: func() string {
+			if f := forwarderFor(forwarders, "bigquery"); f != nil {
+				return f.HostAddr()
+			}
+			return ""
+		}}
 	// An Apache Spark notebook's sessions are Serverless for Apache
 	// Spark's (#2156).
 	notebooks.Dataproc = dataprocSvc.Addr
 	defer notebooks.Close()
+	// Colab Enterprise's runtime templates and runtimes (#2105), on the
+	// local Vertex AI endpoint, run on them.
+	if localAISrv != nil {
+		localAISrv.SetNotebookRuntimes(colabHost{m: notebooks}, filepath.Join(cfg.StateDir, "vertexai", "notebookruntimes.json"))
+		// Vertex AI Workbench instances (#2173), each a notebook runtime too.
+		localAISrv.SetWorkbench(colabHost{m: notebooks}, filepath.Join(cfg.StateDir, "vertexai", "workbench.json"))
+		// Their notebook executions and schedules read and write Cloud
+		// Storage and Dataform's single-file notebook repositories.
+		colabExec := colabExecutor{m: notebooks,
+			storage:  func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
+			dataform: dataformSvc.API}
+		localAISrv.SetNotebookExecutor(colabExec)
+		// Vertex AI pipeline jobs and their schedules (#2173): each task's
+		// container on Docker, its artifacts in Cloud Storage.
+		localAISrv.SetPipelineRunner(colabPipelines{colabExecutor: colabExec, instance: cfg.Name})
+		// Executions, schedules and pipeline jobs run as the identity they
+		// name (#2173), with actAs checked on it.
+		localAISrv.SetIdentity(runIdentity(iamEnforcer, iameval.VertexAI, creds, func() *resourcemanager.Registry { return projectRegistry }))
+	}
+	// Dataform's notebook actions run on them too (#2105), on a runtime
+	// template's settings when one is named.
+	if dataformSvc != nil {
+		// Strict act-as and invocations run as their service account
+		// (#2173).
+		dataformSvc.identity = runIdentity(iamEnforcer, iameval.DataformActAs, creds, func() *resourcemanager.Registry { return projectRegistry })
+		dataformSvc.notebooks = notebooks
+		dataformSvc.runtimeTemplates = colabTemplates(localAISrv)
+	}
 	consoleSrv := buildConsole(consoleDeps{
 		cfg: cfg, iam: iamEnforcer, notebooks: notebooks, assetOut: assetOut, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
 		hfModels: hfModels, garden: garden,

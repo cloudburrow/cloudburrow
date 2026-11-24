@@ -11,6 +11,7 @@ import (
 	betapb "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	"cloud.google.com/go/documentai/apiv1/documentaipb"
 	documentaibetapb "cloud.google.com/go/documentai/apiv1beta3/documentaipb"
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	speechv1pb "cloud.google.com/go/speech/apiv1/speechpb"
 	"cloud.google.com/go/speech/apiv2/speechpb"
@@ -57,12 +58,18 @@ func (s *Server) newGRPCServer() *grpc.Server {
 	// return (#1840): this endpoint's own, so not in RegisterGRPC, which a
 	// server holding another service's Operations may call.
 	longrunningpb.RegisterOperationsServer(srv, &operations{s: s})
+	// The IAM policies of Colab Enterprise's runtime templates (#2105,
+	// notebookiam.go): this endpoint's own, as Operations is.
+	iampb.RegisterIAMPolicyServer(srv, &notebookIAM{s: s})
 	return srv
 }
 
 // RegisterGRPC registers PredictionService on srv.
 func (s *Server) RegisterGRPC(srv *grpc.Server) {
 	aiplatformpb.RegisterPredictionServiceServer(srv, &predictionService{s: s})
+	// Colab Enterprise's runtime templates and runtimes (#2105,
+	// notebookruntimes.go).
+	s.registerNotebooks(srv)
 	// Model Garden's Deploy, Endpoints, Models, operations and v1beta1
 	// ChatCompletions (#1840, modelgarden.go).
 	s.registerModelGarden(srv)

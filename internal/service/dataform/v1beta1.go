@@ -13,6 +13,7 @@ package dataform
 
 import (
 	"context"
+	"regexp"
 	"strings"
 
 	dfpb "cloud.google.com/go/dataform/apiv1/dataformpb"
@@ -178,12 +179,24 @@ func (s *Server) betaThroughV1(ctx context.Context, name string, v1m grpc.Method
 	var after func(proto.Message) error
 	switch r := in.(type) {
 	case *b1pb.CreateRepositoryRequest:
-		if err := refuseAccountConnector(r.GetRepository()); err != nil {
+		ac, err := checkAccountConnector(r.GetRepository())
+		if err != nil {
 			return nil, err
 		}
+		if ac != "" {
+			after = func(out proto.Message) error { return s.setConnector(out.(*dfpb.Repository).GetName(), ac) }
+		}
 	case *b1pb.UpdateRepositoryRequest:
-		if err := refuseAccountConnector(r.GetRepository()); err != nil {
+		ac, err := checkAccountConnector(r.GetRepository())
+		if err != nil {
 			return nil, err
+		}
+		set := len(r.GetUpdateMask().GetPaths()) == 0
+		for _, p := range r.GetUpdateMask().GetPaths() {
+			set = set || p == "git_remote_settings" || p == "git_remote_settings.account_connector"
+		}
+		if set {
+			after = func(out proto.Message) error { return s.setConnector(out.(*dfpb.Repository).GetName(), ac) }
 		}
 	case *b1pb.CreateWorkspaceRequest:
 		x, err := checkWorkspaceExtra(r.GetWorkspace())
@@ -285,6 +298,12 @@ func (s *Server) betaOut(v1 proto.Message, outT protoreflect.MessageType) (proto
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch o := out.(type) {
+	case *b1pb.Repository:
+		s.decorateRepository(o)
+	case *b1pb.ListRepositoriesResponse:
+		for _, r := range o.GetRepositories() {
+			s.decorateRepository(r)
+		}
 	case *b1pb.Workspace:
 		s.decorateWorkspace(o)
 	case *b1pb.ListWorkspacesResponse:
@@ -340,13 +359,46 @@ func (s *Server) decorateWorkflow(w *b1pb.WorkflowConfig) {
 	}
 }
 
-// refuseAccountConnector: an Account Connector authenticates a Google end
-// user (personal authentication), which no local instance holds.
-func refuseAccountConnector(r *b1pb.Repository) error {
-	if r.GetGitRemoteSettings().GetAccountConnector() != "" {
-		return apierror.Unimplemented("git_remote_settings.account_connector (personal authentication through a Developer Connect Account Connector) needs a Google end user's OAuth credentials, which a local instance does not hold; use authentication_token_secret_version or git_repository_link")
+// checkAccountConnector validates git_remote_settings.account_connector,
+// "the Account Connector used for personal authentication": git runs with
+// the calling user's token from that Developer Connect account connector
+// (git.go), the user having connected through its OAuth flow, which
+// CloudBurrow's Developer Connect models on the instance's own sign-in.
+func checkAccountConnector(r *b1pb.Repository) (string, error) {
+	gr := r.GetGitRemoteSettings()
+	ac := gr.GetAccountConnector()
+	if ac == "" {
+		return "", nil
 	}
-	return nil
+	if !accountConnectorRE.MatchString(ac) {
+		return "", apierror.InvalidArgument("git_remote_settings.account_connector %q must be projects/*/locations/*/accountConnectors/*", ac)
+	}
+	if gr.GetAuthenticationTokenSecretVersion() != "" || gr.GetGitRepositoryLink() != "" || gr.GetSshAuthenticationConfig() != nil {
+		return "", apierror.InvalidArgument("git_remote_settings.account_connector cannot be set with authentication_token_secret_version, git_repository_link or ssh_authentication_config")
+	}
+	return ac, nil
+}
+
+var accountConnectorRE = regexp.MustCompile(`^projects/[^/]+/locations/[^/]+/accountConnectors/[^/]+$`)
+
+// setConnector records a repository's account connector ("" clears it).
+func (s *Server) setConnector(repo, ac string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ac == "" {
+		delete(s.connectors, repo)
+	} else {
+		s.connectors[repo] = ac
+	}
+	return s.save()
+}
+
+// decorateRepository sets a repository's account connector; the caller
+// holds mu.
+func (s *Server) decorateRepository(r *b1pb.Repository) {
+	if ac := s.connectors[r.GetName()]; ac != "" && r.GetGitRemoteSettings() != nil {
+		r.GitRemoteSettings.AccountConnector = proto.String(ac)
+	}
 }
 
 func checkWorkspaceExtra(w *b1pb.Workspace) (*workspaceExtra, error) {

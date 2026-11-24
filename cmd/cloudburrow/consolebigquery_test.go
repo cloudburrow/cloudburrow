@@ -12,7 +12,7 @@ import (
 //
 // BigQuery has no read-only transaction and the emulator's dry run calls every
 // statement SELECT, so the editor's guard is lexical (#698). It is an
-// allowlist — the statement must begin with SELECT or WITH and be the only
+// allowlist — the statement must begin with SELECT, WITH or FROM and be the only
 // one — and quoted text and comments are not read as keywords or separators.
 func TestTheBigQueryEditorRunsOnlyOneSelect(t *testing.T) {
 	for _, stmt := range []string{
@@ -29,6 +29,7 @@ func TestTheBigQueryEditorRunsOnlyOneSelect(t *testing.T) {
 		`SELECT "x;y", r'\'; DROP', b'z;' FROM t`,
 		"SELECT '''multi\n; line''' AS s",
 		"SELECT * FROM `my-project.ds.t;x`",
+		"FROM `p.ds.src`\n|> WHERE v > 1\n|> LIMIT 100",
 	} {
 		if err := readOnlyBigQuery(stmt); err != nil {
 			t.Errorf("refused %q: %v", stmt, err)

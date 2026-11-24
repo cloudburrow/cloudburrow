@@ -7,8 +7,10 @@
 # BigQuery is the instance's: the client's endpoint is CB_BIGQUERY_ENDPOINT,
 # its credentials anonymous (the instance takes every caller to be its one
 # identity) and its project GOOGLE_CLOUD_PROJECT, set for
-# google.cloud.bigquery.Client() and %%bigquery alike. The container has no
-# route but that one (an --internal Docker network).
+# google.cloud.bigquery.Client() and %%bigquery alike. A run that executes
+# as a service account or a user (#2173) is given that identity's bearer
+# token in CB_ACCESS_TOKEN, which the clients send instead. The container
+# has no route but that one (an --internal Docker network).
 import io
 import json
 import os
@@ -17,6 +19,7 @@ import sys
 
 PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 ENDPOINT = os.environ.get("CB_BIGQUERY_ENDPOINT", "")
+TOKEN = os.environ.pop("CB_ACCESS_TOKEN", "")
 DATAPROC = os.environ.get("CB_DATAPROC_ENDPOINT", "")
 MAX_TEXT = 1 << 20
 
@@ -97,9 +100,19 @@ class Shell(InteractiveShell):
 shell = Shell.instance()
 
 
+def run_credentials():
+    """The run's credentials: its identity's token, else anonymous."""
+    from google.auth.credentials import AnonymousCredentials
+
+    if not TOKEN:
+        return AnonymousCredentials()
+    from google.oauth2.credentials import Credentials
+
+    return Credentials(token=TOKEN)
+
+
 def setup_bigquery():
     from google.api_core.client_options import ClientOptions
-    from google.auth.credentials import AnonymousCredentials
     from google.cloud import bigquery
 
     init = bigquery.Client.__init__
@@ -108,7 +121,7 @@ def setup_bigquery():
         if not args and kwargs.get("project") is None:
             kwargs["project"] = PROJECT
         if len(args) < 2 and kwargs.get("credentials") is None:
-            kwargs["credentials"] = AnonymousCredentials()
+            kwargs["credentials"] = run_credentials()
         opts = kwargs.get("client_options")
         if opts is None:
             kwargs["client_options"] = ClientOptions(api_endpoint=ENDPOINT)
@@ -125,7 +138,7 @@ def setup_bigquery():
 
     ctx = bigquery_magics.context
     ctx.project = PROJECT
-    ctx.credentials = AnonymousCredentials()
+    ctx.credentials = run_credentials()
     ctx.bigquery_client_options = ClientOptions(api_endpoint=ENDPOINT)
     try:
         ctx.progress_bar_type = None
@@ -153,10 +166,10 @@ def setup_dataproc():
     class LocalCredentials(gcreds.Credentials):
         def __init__(self):
             super().__init__()
-            self.token = "cloudburrow-local"
+            self.token = TOKEN or "cloudburrow-local"
 
         def refresh(self, request):
-            self.token = "cloudburrow-local"
+            self.token = TOKEN or "cloudburrow-local"
 
     creds = LocalCredentials()
 

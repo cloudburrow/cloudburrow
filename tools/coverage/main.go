@@ -113,6 +113,7 @@ import (
 	_ "cloud.google.com/go/networkconnectivity/apiv1/networkconnectivitypb"
 	_ "cloud.google.com/go/networksecurity/apiv1/networksecuritypb"
 	_ "cloud.google.com/go/networkservices/apiv1/networkservicespb"
+	_ "cloud.google.com/go/notebooks/apiv2/notebookspb"
 	_ "cloud.google.com/go/parametermanager/apiv1/parametermanagerpb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	_ "cloud.google.com/go/redis/apiv1/redispb"
@@ -241,7 +242,20 @@ var areas = []area{
 		// countTokens and computeTokens (#1937).
 		"google.cloud.aiplatform.v1.LlmUtilityService",
 		// Context caching (#2107).
-		"google.cloud.aiplatform.v1.GenAiCacheService"}},
+		"google.cloud.aiplatform.v1.GenAiCacheService",
+		// Colab Enterprise's runtime templates and runtimes (#2105), and
+		// its schedules of notebook executions.
+		"google.cloud.aiplatform.v1.NotebookService", "google.cloud.aiplatform.v1.ScheduleService",
+		// Vertex AI Pipelines' pipeline jobs (#2173).
+		"google.cloud.aiplatform.v1.PipelineService"},
+		// The runtime templates' IAM policies (#2105): the IAMPolicy mixin,
+		// whose keys the kms area holds, so named by their discovery IDs.
+		Extra: []string{"aiplatform.projects.locations.notebookRuntimeTemplates.getIamPolicy",
+			"aiplatform.projects.locations.notebookRuntimeTemplates.setIamPolicy",
+			"aiplatform.projects.locations.notebookRuntimeTemplates.testIamPermissions"}},
+	// Vertex AI Workbench instances (#2173), notebooks.googleapis.com v2 on
+	// the same port.
+	{Key: "workbench", Title: "Vertex AI Workbench", Own: true, Services: []string{"google.cloud.notebooks.v2.NotebookService"}},
 	// v1beta1's PredictionService, for ChatCompletions on those endpoints
 	// (#1840) and v1's methods bridged (#1937): a page of its own, since
 	// its method names repeat v1's.

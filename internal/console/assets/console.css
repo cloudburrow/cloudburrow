@@ -2810,6 +2810,38 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .bq-nb-image { display: block; max-width: 100%; height: auto; background: #fff; }
 .bq-nb-html { display: block; width: 100%; min-height: 60px; border: 1px solid var(--border); border-radius: var(--radius-control); background: #fff; }
 .bq-nb-html-wrap { overflow-x: auto; }
+/* Pipelines, data preparations and schedules (#2105), in Google's layout. */
+.bq-dp-layout, .bq-pl-layout { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr); gap: 16px; margin-top: 12px; }
+@media (max-width: 800px) { .bq-dp-layout, .bq-pl-layout { grid-template-columns: 1fr; } }
+/* A wide sample or SQLX never widens the page: the grid tracks shrink. */
+.bq-dp-layout > *, .bq-pl-layout > * { min-width: 0; }
+.bq-dp-steps, .bq-pl-tasks, .bq-dp-graph { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.bq-dp-step, .bq-pl-task { width: 100%; text-align: left; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); padding: 8px 12px; font: inherit; cursor: pointer; }
+.bq-dp-step:hover, .bq-pl-task:hover { background: var(--state-hover); }
+.bq-dp-step.is-selected, .bq-pl-task.is-selected { border-color: var(--accent); background: var(--nav-selected); color: var(--nav-selected-text); }
+.bq-dp-form, .bq-pl-details { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; margin-top: 8px; background: var(--surface); }
+/* Gemini's suggestion cards in the Steps list, each with Preview, Edit and Apply. */
+.bq-dp-suggestions { margin-top: 8px; }
+.bq-dp-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.bq-dp-card { border: 1px dashed var(--accent); border-radius: var(--radius); padding: 8px 12px; background: var(--surface); }
+.bq-dp-card-title { margin: 0 0 4px; font-weight: 500; }
+.bq-dp-card-step { margin: 0 0 6px; color: var(--text-muted); overflow-wrap: anywhere; }
+.bq-dp-col { font: inherit; font-weight: 500; }
+.bq-dp-node { display: flex; flex-direction: column; align-items: flex-start; }
+.bq-dp-node > span:first-child { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; background: var(--surface-alt); }
+.bq-dp-edge { color: var(--text-muted); padding-left: 16px; }
+.bq-dp-sqlx, .bq-nb-source-view { white-space: pre-wrap; background: var(--surface-alt); border-radius: var(--radius-control); padding: 8px; margin: 0; }
+.bq-dp-runs, .bq-pl-runs, .bq-sched-runs { margin-top: 16px; }
+.bq-exec-summary { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0; }
+.bq-exec-summary dt { color: var(--text-muted); }
+.bq-exec-summary dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+/* The scroll box holds its cells' screen-reader text too: positioned, it is
+   the containing block of their absolutely positioned .sr-only spans, which
+   would otherwise widen the page past a narrow window. */
+.bq-sched-wrap { position: relative; }
+.bq-auth, .bq-nb-options, .bq-frequency, .bq-pl-after, .bq-pl-settings fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; margin: 8px 0; }
+.input-with-button { display: flex; gap: 8px; align-items: center; }
+.input-with-button input { flex: 1; }
 .bq-canvas-row, .bq-canvas-actions, .bq-files-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
 .bq-canvas-row input[type="search"], .bq-canvas-row input[type="text"] { flex: 1 1 200px; min-width: 0; }
 .bq-canvas-found { list-style: none; padding: 0; margin: 4px 0; }

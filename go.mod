@@ -41,6 +41,7 @@ require (
 	cloud.google.com/go/networkconnectivity v1.30.1
 	cloud.google.com/go/networksecurity v0.21.1
 	cloud.google.com/go/networkservices v1.8.1
+	cloud.google.com/go/notebooks v1.20.1
 	cloud.google.com/go/observability v0.1.1
 	cloud.google.com/go/orgpolicy v1.22.1
 	cloud.google.com/go/parametermanager v1.2.1

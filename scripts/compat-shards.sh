@@ -255,8 +255,10 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # deliver to a Cloud Run service, and Document AI's and Speech-to-Text's
 # (TestDocumentAI*, TestSpeech*, #1930), served by the local AI
 # endpoint Cloud Run starts, and Workflows' (TestWorkflows*, #1986), whose
-# instance is the run shard's, and Dataform's (TestDataform*, #2105), whose
-# invocations run on its BigQuery, and App Hub's (TestAppHub*, #2110), served
+# instance is the run shard's, and Dataform's (TestDataform*, #2105) and Colab Enterprise's (TestColab*, #2105) and Workbench's
+# (TestWorkbench*, #2173), whose
+# invocations run on its BigQuery, and App Hub's (TestAppHub*, #2110) and Developer
+# Connect's (TestDeveloperConnect*, #2105, on the Run port), served
 # only by the run shard's instance; the BigQuery,
 # Firestore, Datastore (#854) and Spanner screens and the Bigtable screen's
 # actions (#1198) only by the emulators shard's; the Memorystore screens
@@ -316,8 +318,8 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 COMPAT_BROWSER_SHARDS="storage served run crossservice emulators memorystore sql localai"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|AppHub)'
-COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS='^Test(KMS|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|AppHub)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipelines|Workbench|AppHub|DeveloperConnect)'
+COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS='^Test(KMS|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipelines|Workbench|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
 # Private Service Connect's Connection Policies with Cloud SQL's create
@@ -590,9 +592,10 @@ compat_shard() {
       # renders as the parameter's identity (#2054); the Firebase Rules API,
       # served with Firestore, whose releases govern client SDK calls,
       # which IAM does not (#2048); App Hub, whose methods are checked
-      # (#2110).
-      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows,logging,monitoring,memorystore,cloudsql,privateca,gke,compute,firestore,datastore,spanner,bigtable,backupdr,parametermanager,apphub
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,PRIVATECA,GKE,COMPUTE,APIKEYS,SERVICEUSAGE,LOCALAI,FIRESTORE,DATASTORE,SPANNER,BIGTABLE,DATATRANSFER,BACKUPDR,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,IAM_ENFORCEMENT,PARAMETERMANAGER,FIREBASERULES,APPHUB
+      # (#2110); Dataform, whose strict act-as mode checks actAs on a
+      # repository's service account (#2173).
+      SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows,logging,monitoring,memorystore,cloudsql,privateca,gke,compute,firestore,datastore,spanner,bigtable,backupdr,parametermanager,apphub,dataform
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,PRIVATECA,GKE,COMPUTE,APIKEYS,SERVICEUSAGE,LOCALAI,FIRESTORE,DATASTORE,SPANNER,BIGTABLE,DATATRANSFER,BACKUPDR,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,IAM_ENFORCEMENT,PARAMETERMANAGER,FIREBASERULES,APPHUB,DATAFORM
       UP_FLAGS=(--iam-enforcement=on)
       # And Workload Identity Federation's federated principal reading a
       # bucket, refused until it is granted (#1941), and Workforce Identity

@@ -283,6 +283,26 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}
 		providers = append(providers, vertexModelsProvider{api: api}, vertexEndpointsProvider{api: api})
 	}
+	if enabled[config.ServiceRun] || d.localAI != nil {
+		// Colab Enterprise's Runtimes and Runtime templates (#2105), on the
+		// local Vertex AI endpoint, whose runtimes are the instance's
+		// notebook runtimes.
+		var api vertexAPI
+		if d.localAI != nil {
+			api.addr = d.localAI.Addr
+		}
+		providers = append(providers, colabRuntimesProvider{api: api}, colabTemplatesProvider{api: api, enforced: d.cfg.IAMEnforced()},
+			// My notebooks, Executions and Schedules (consolecolabexec.go).
+			colabNotebooksProvider{api: api, df: d.dataform.API}, colabExecutionsProvider{api: api}, colabSchedulesProvider{api: api},
+			// Vertex AI Pipelines' Runs and Schedules (consolepipelines.go, #2173).
+			pipelineRunsProvider{api: api, storage: map[bool]string{true: storageAddr}[enabled[config.ServiceStorage]]}, pipelineSchedulesProvider{colabSchedulesProvider{api: api}})
+		// Vertex AI Workbench's Instances (consoleworkbench.go, #2173).
+		wb := workbenchProvider{api: api}
+		if d.localAI != nil {
+			wb.exec = d.localAI.WorkbenchExecute
+		}
+		providers = append(providers, wb)
+	}
 	if enabled[config.ServiceRun] {
 		// Two screens of one product: services, and jobs with their
 		// executions (#785).
@@ -333,6 +353,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			buildSettingsProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}, registry: d.projects},
 			// Secure Source Manager's instances and repositories (#1527).
 			sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
+			// Developer Connect's Account connectors (#2105).
+			devConnectAccountsProvider{ssm: sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}}},
 			// Artifact Registry's repositories are served on the Run port (#1347).
 			artifactRegistryProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)},
 			// Its Settings page (#1855).

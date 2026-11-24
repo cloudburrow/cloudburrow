@@ -67,6 +67,7 @@
         "patches/bigquery-emulator/0100-typed-null-array-struct-parameters.patch",
         "patches/bigquery-emulator/0101-exact-query-job-id.patch",
         "patches/bigquery-emulator/0102-reads-beside-a-running-statement.patch",
+        "patches/bigquery-emulator/0103-keep-query-priority.patch",
         "patches/bigquery-emulator/0110-change-table-reads-take-the-write-lock.patch"
       ]
     },
