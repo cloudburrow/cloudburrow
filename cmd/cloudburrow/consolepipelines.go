@@ -15,12 +15,13 @@ package main
 //     options menu has Pause (Active), Resume (Paused) and Delete, whose
 //     dialog's Delete confirms it.
 //
-// UNVERIFIED (re-read 2026-11-22): the Runs list's columns and a run's page
-// (Google's docs show neither; a run's page here has its tasks and their
-// states); "Select from existing pipelines" and "Select a Template Gallery
-// pipeline" are not offered (templates are not served); the pipeline
-// parameters are entered as one JSON object; Caching configuration is not
-// offered (caching is not run).
+//   - a run's page is its runtime graph with the Pipeline run analysis
+//     pane (consolepipelinegraph.go, #2205).
+//
+// UNVERIFIED (re-read 2026-11-22): the Runs list's columns (Google's docs
+// do not show them); "Select from existing pipelines" and "Select a
+// Template Gallery pipeline" are not offered (templates are not served);
+// the pipeline parameters are entered as one JSON object.
 
 import (
 	"context"
@@ -185,31 +186,29 @@ func (p pipelineRunsProvider) Detail(ctx context.Context, project string, path [
 	if e := j.GetError(); e != nil && e.GetCode() != 0 {
 		d.Summary = append(d.Summary, console.Property{Label: "Error", Value: e.GetMessage()})
 	}
-	tasks := console.Listing{Columns: []string{"Task", "State", "Started", "Ended", "Outputs", "Error"}, NameColumn: "ID", Noun: "tasks"}
-	for _, t := range j.GetJobDetail().GetTaskDetails() {
-		if t.GetParentTaskId() == 0 {
-			continue
+	// The Pipeline run analysis pane: the run's details and parameters.
+	// The parameters the run used: runtime_config's, else the pipeline's
+	// defaults.
+	used := map[string]*structpb.Value{}
+	defs := j.GetPipelineSpec().GetFields()["root"].GetStructValue().GetFields()["inputDefinitions"].GetStructValue().GetFields()["parameters"].GetStructValue()
+	for k, def := range defs.GetFields() {
+		if v, ok := def.GetStructValue().GetFields()["defaultValue"]; ok {
+			used[k] = v
 		}
-		var outs []string
-		for _, k := range sortedKeysOf(t.GetOutputs()) {
-			for _, a := range t.GetOutputs()[k].GetArtifacts() {
-				outs = append(outs, k+": "+a.GetUri())
-			}
-		}
-		tasks.Items = append(tasks.Items, console.Resource{Name: fmt.Sprint(t.GetTaskId()), Fields: map[string]string{
-			"Task": t.GetTaskName(), "State": pipelineTaskStateText(t.GetState()),
-			"Started": colabOptTime(t.GetStartTime(), t.GetStartTime() != nil), "Ended": colabOptTime(t.GetEndTime(), t.GetEndTime() != nil),
-			"Outputs": dashIfEmpty(strings.Join(outs, ", ")), "Error": dashIfEmpty(t.GetError().GetMessage())}})
 	}
-	tasks.Total = len(tasks.Items)
-	params := map[string]any{}
 	for k, v := range j.GetRuntimeConfig().GetParameterValues() {
-		params[k] = v.AsInterface()
+		used[k] = v
 	}
-	pb, _ := json.MarshalIndent(params, "", "  ")
+	var params []console.Property
+	for _, k := range sortedKeysOf(used) {
+		params = append(params, console.Property{Label: k, Value: valueText(used[k])})
+	}
+	summary := []console.PropertyGroup{{Heading: "Run details", Properties: d.Summary}}
+	if len(params) > 0 {
+		summary = append(summary, console.PropertyGroup{Heading: "Run parameters", Properties: params})
+	}
 	d.Sections = []console.Section{
-		{ID: "tasks", Label: "Tasks", Listing: tasks},
-		{ID: "parameters", Label: "Pipeline parameters", Kind: console.KindText, Text: string(pb)},
+		{ID: "graph", Label: "Runtime graph", Kind: console.KindPipelineGraph, Pipeline: pipelineGraph(j, summary, project)},
 	}
 	return d, nil
 }
@@ -238,6 +237,9 @@ func (pipelineRunsProvider) CreateForm() (string, []console.Field) {
 			Help: "The run's identity; you need the Service Account User role on it. Empty: the Compute Engine default service account."},
 		{Name: "output", Label: "Cloud storage location", Type: "text", Required: true, Section: "Runtime configuration", Pattern: `^(gs://)?[a-z0-9][\-a-z0-9._]{1,221}(/.*)?$`,
 			Help: "gs://BUCKET/folder: the root output directory of the pipeline, where its artifacts are written."},
+		{Name: "caching", Label: "Caching configuration", Type: "select", Section: "Runtime configuration", Options: []string{"default", "enabled", "disabled"}, Default: "default",
+			OptionLabels: map[string]string{"default": "Use the pipeline's settings", "enabled": "Enable execution caching", "disabled": "Disable execution caching"},
+			Help:         "Whether the run's steps reuse the outputs of earlier executions with the same inputs, as PipelineJob's enable_caching sets every step's caching option."},
 		{Name: "failurePolicy", Label: "Failure policy", Type: "select", Section: "Runtime configuration", Options: []string{"slow", "fast"}, Default: "slow",
 			OptionLabels: map[string]string{"slow": "Run all steps to completion", "fast": "Fail the pipeline run after one step fails"}},
 		{Name: "parameters", Label: "Pipeline parameters", Type: "textarea", Section: "Runtime configuration",
@@ -302,6 +304,9 @@ func (p pipelineRunsProvider) Create(ctx context.Context, project string, values
 	spec, err := pipelineSpecOf(text)
 	if err != nil {
 		return "", err
+	}
+	if c := values["caching"]; c == "enabled" || c == "disabled" {
+		setPipelineCaching(spec, c == "enabled")
 	}
 	out := strings.TrimSpace(values["output"])
 	if !strings.HasPrefix(out, "gs://") {
@@ -463,4 +468,20 @@ func (p pipelineSchedulesProvider) Detail(ctx context.Context, project string, p
 		{Label: "Last scheduled run", Value: last},
 		{Label: "Created", Value: vertexTime(s.GetCreateTime())},
 	}}, nil
+}
+
+// setPipelineCaching sets every task's cachingOptions.enableCache, as the
+// Vertex AI SDK's PipelineJob(enable_caching=...) does.
+func setPipelineCaching(spec *structpb.Struct, on bool) {
+	comps := []*structpb.Struct{spec.GetFields()["root"].GetStructValue()}
+	for _, c := range spec.GetFields()["components"].GetStructValue().GetFields() {
+		comps = append(comps, c.GetStructValue())
+	}
+	for _, c := range comps {
+		for _, t := range c.GetFields()["dag"].GetStructValue().GetFields()["tasks"].GetStructValue().GetFields() {
+			if ts := t.GetStructValue(); ts != nil {
+				ts.Fields["cachingOptions"] = structpb.NewStructValue(&structpb.Struct{Fields: map[string]*structpb.Value{"enableCache": structpb.NewBoolValue(on)}})
+			}
+		}
+	}
 }

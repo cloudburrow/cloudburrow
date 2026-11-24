@@ -2540,12 +2540,43 @@ var parityRows = []parityRow{
 		Methods: []string{"PipelineService/CreatePipelineJob", "PipelineService/GetPipelineJob", "PipelineService/ListPipelineJobs",
 			"PipelineService/CancelPipelineJob", "PipelineService/DeletePipelineJob"},
 		Provider: "vertex-pipeline-runs", Offers: "Pipelines' Runs: a Region menu, Create run (Create pipeline run: Upload file or Import from Cloud Storage, " +
-			"Run name, Run schedule, Advanced options' service account, Cloud storage location, Failure policy, Pipeline parameters), a run's tasks, Cancel and Delete; " +
+			"Run name, Run schedule, Advanced options' service account, Cloud storage location, Caching configuration, Failure policy, Pipeline parameters), " +
+			"a run's page (its runtime graph: nested DAGs, conditions and loops expanded in place, Expand artifacts, and the Pipeline run analysis pane's " +
+			"run details, run parameters and each node's Node info), Cancel and Delete; " +
 			"the Schedules tab (vertex-pipeline-schedules, the schedule methods' Colab row) with Pause, Resume and Delete",
-		Tests: []string{"TestVertexAIPipelinesThroughThePages"}},
+		Tests: []string{"TestVertexAIPipelinesThroughThePages", "TestVertexAIPipelineRunGraphThroughThePages"}},
 	{Resource: "Vertex AI Pipelines: batch delete and cancel", Service: "vertexai",
 		Methods:  []string{"PipelineService/BatchDeletePipelineJobs", "PipelineService/BatchCancelPipelineJobs"},
 		Excluded: "Google's Pipelines docs describe no bulk action (https://docs.cloud.google.com/vertex-ai/docs/pipelines/run-pipeline); the API's batch methods are served"},
+	// Vertex ML Metadata (#2205).
+	{Resource: "Vertex ML Metadata: artifacts", Service: "vertexai",
+		Methods:  []string{"MetadataService/ListArtifacts", "MetadataService/GetArtifact", "MetadataService/QueryArtifactLineageSubgraph", "MetadataService/DeleteArtifact"},
+		Provider: "vertex-metadata-artifacts", Offers: "Metadata's Artifacts: a Region menu, the default store's artifacts, an artifact's page " +
+			"(its properties, Lineage: the artifacts and executions of its lineage, each opening its page; Executions: those that produced or consumed it; Metadata as JSON) and Delete",
+		Tests: []string{"TestVertexAIMetadataThroughThePages"}},
+	{Resource: "Vertex ML Metadata: executions", Service: "vertexai",
+		Methods:  []string{"MetadataService/ListExecutions", "MetadataService/GetExecution", "MetadataService/QueryExecutionInputsAndOutputs", "MetadataService/DeleteExecution"},
+		Provider: "vertex-metadata-executions", Offers: "Metadata's Executions: an execution's page (its properties, Input artifacts, Output artifacts, Metadata) and Delete",
+		Tests: []string{"TestVertexAIMetadataThroughThePages"}},
+	{Resource: "Vertex ML Metadata: contexts", Service: "vertexai",
+		Methods:  []string{"MetadataService/ListContexts", "MetadataService/GetContext", "MetadataService/DeleteContext"},
+		Provider: "vertex-metadata-contexts", Offers: "Metadata's Contexts: a context's page (its properties, parent contexts, Artifacts, Executions, Child contexts, Metadata) and Delete",
+		Tests: []string{"TestVertexAIMetadataThroughThePages"}},
+	{Resource: "Vertex ML Metadata: stores", Service: "vertexai",
+		Methods:  []string{"MetadataService/CreateMetadataStore", "MetadataService/GetMetadataStore", "MetadataService/ListMetadataStores", "MetadataService/DeleteMetadataStore"},
+		Excluded: "Google's Metadata page \"lists the artifacts that have been created in the default metadata store\" (https://docs.cloud.google.com/vertex-ai/docs/pipelines/lineage) and offers no store management; the API's store methods are served"},
+	{Resource: "Vertex ML Metadata: create, update and purge", Service: "vertexai",
+		Methods: []string{"MetadataService/CreateArtifact", "MetadataService/UpdateArtifact", "MetadataService/PurgeArtifacts",
+			"MetadataService/CreateExecution", "MetadataService/UpdateExecution", "MetadataService/PurgeExecutions",
+			"MetadataService/CreateContext", "MetadataService/UpdateContext", "MetadataService/PurgeContexts"},
+		Excluded: "Google's docs do these \"Use either REST or the Vertex AI SDK for Python\" and purges with REST only (https://docs.cloud.google.com/vertex-ai/docs/ml-metadata/managing-metadata); Vertex AI Pipelines records its runs' nodes itself"},
+	{Resource: "Vertex ML Metadata: events and context membership", Service: "vertexai",
+		Methods: []string{"MetadataService/AddExecutionEvents", "MetadataService/AddContextArtifactsAndExecutions", "MetadataService/AddContextChildren",
+			"MetadataService/RemoveContextChildren", "MetadataService/QueryContextLineageSubgraph"},
+		Excluded: "events and a context's artifacts, executions and children are recorded through REST or the SDK (https://docs.cloud.google.com/vertex-ai/docs/ml-metadata/tracking); the console's lineage graph is an artifact's (https://docs.cloud.google.com/vertex-ai/docs/pipelines/lineage), and a context's page lists its members with the list filters"},
+	{Resource: "Vertex ML Metadata: schemas", Service: "vertexai",
+		Methods:  []string{"MetadataService/CreateMetadataSchema", "MetadataService/GetMetadataSchema", "MetadataService/ListMetadataSchemas"},
+		Excluded: "Google's ML Metadata docs describe metadata schemas through the API only (https://docs.cloud.google.com/vertex-ai/docs/ml-metadata/managing-metadata, https://docs.cloud.google.com/vertex-ai/docs/ml-metadata/tracking); no console page shows them"},
 	{Resource: "Colab Enterprise: runtime upgrade", Service: "vertexai", Methods: []string{"NotebookService/UpgradeNotebookRuntime"},
 		Excluded: "a runtime here is always on the instance's runtime image (is_upgradable false), so Google's Upgrade, offered only for an upgradable runtime, never shows"},
 	// Vertex AI Workbench instances (#2173).

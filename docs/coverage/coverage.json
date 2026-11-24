@@ -6707,7 +6707,8 @@
         "method": "google.cloud.aiplatform.v1.MetadataService/CreateArtifact",
         "status": "Verified",
         "tests": [
-          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata",
+          "test/compat/pipelines2205_test.go:283 TestVertexAIPipelineResolverAndLimits"
         ]
       },
       {
@@ -6875,7 +6876,8 @@
         "method": "google.cloud.aiplatform.v1.MetadataService/QueryExecutionInputsAndOutputs",
         "status": "Verified",
         "tests": [
-          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata",
+          "test/compat/pipelines2205_test.go:283 TestVertexAIPipelineResolverAndLimits"
         ]
       },
       {
@@ -7188,7 +7190,8 @@
         "method": "google.cloud.aiplatform.v1.PipelineService/CancelPipelineJob",
         "status": "Verified",
         "tests": [
-          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs"
+          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs",
+          "test/compat/pipelines2205_test.go:283 TestVertexAIPipelineResolverAndLimits"
         ]
       },
       {
@@ -7200,7 +7203,9 @@
         "method": "google.cloud.aiplatform.v1.PipelineService/CreatePipelineJob",
         "status": "Verified",
         "tests": [
-          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs"
+          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs",
+          "test/compat/pipelines2205_test.go:283 TestVertexAIPipelineResolverAndLimits",
+          "test/compat/pipelines2205_test.go:74 TestPythonKFPControlFlow"
         ]
       },
       {
@@ -7224,7 +7229,9 @@
         "method": "google.cloud.aiplatform.v1.PipelineService/GetPipelineJob",
         "status": "Verified",
         "tests": [
-          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs"
+          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs",
+          "test/compat/pipelines2205_test.go:283 TestVertexAIPipelineResolverAndLimits",
+          "test/compat/pipelines2205_test.go:74 TestPythonKFPControlFlow"
         ]
       },
       {

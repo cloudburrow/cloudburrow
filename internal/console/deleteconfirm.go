@@ -234,6 +234,13 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// UNVERIFIED (re-read 2026-11-22): deleting a pipeline run from the
 	// console is not described (run-pipeline, schedule-pipeline-run).
 	"vertex-pipeline-runs": unverified,
+	// UNVERIFIED (re-read 2026-11-24): deleting an artifact, execution or
+	// context is done "Use either REST or the Vertex AI SDK for Python"
+	// (https://docs.cloud.google.com/vertex-ai/docs/ml-metadata/managing-metadata);
+	// the Metadata page's delete is not described (.../pipelines/lineage).
+	"vertex-metadata-artifacts":  unverified,
+	"vertex-metadata-executions": unverified,
+	"vertex-metadata-contexts":   unverified,
 	// Vertex AI Workbench instances (#2173): "click Delete ... To confirm,
 	// click Confirm"
 	// (https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart).

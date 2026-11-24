@@ -143,8 +143,27 @@ function agentPlatformRoutes() {
       instead: "Start CloudBurrow with --services including run and storage." }),
     absent(`${AP}/experiments`, "Experiments", "Model development", "projects.locations.metadataStores (experiments)",
       "Experiment runs and their parameters and metrics", AP_DOCS + "machine-learning"),
-    absent(`${AP}/metadata`, "Metadata", "Model development", "projects.locations.metadataStores",
-      "Artifacts, executions and contexts of ML workflows", AP_DOCS + "machine-learning"),
+    // Vertex ML Metadata (#2205): "go to the Metadata page", which "lists
+    // the artifacts that have been created in the default metadata store",
+    // with a Region drop-down list
+    // (https://docs.cloud.google.com/vertex-ai/docs/pipelines/lineage, read
+    // 2026-11-24). The Executions and Contexts tabs are CloudBurrow's
+    // (UNVERIFIED, re-read 2026-11-24: the same page).
+    page(`${AP}/metadata/artifacts`, "Metadata", "Model development", { service: "vertex-metadata-artifacts", listedWhenOff: true, tabTitle: "Artifacts",
+      pageTabs: [`${AP}/metadata/artifacts`, `${AP}/metadata/executions`, `${AP}/metadata/contexts`], kind: "Artifact",
+      api: "projects.locations.metadataStores.artifacts", about: "Artifacts, executions and contexts of ML workflows, with each artifact's lineage",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/pipelines/lineage",
+      instead: "Start CloudBurrow with --services including run, which starts the local Vertex AI endpoint." }),
+    page(`${AP}/metadata/executions`, "Metadata", "Model development", { service: "vertex-metadata-executions", listedWhenOff: true, tabTitle: "Executions",
+      navHidden: true, navAs: `${AP}/metadata/artifacts`, pageTabs: [`${AP}/metadata/artifacts`, `${AP}/metadata/executions`, `${AP}/metadata/contexts`], kind: "Execution",
+      api: "projects.locations.metadataStores.executions", about: "Executions, each with its input and output artifacts",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/ml-metadata/tracking",
+      instead: "Start CloudBurrow with --services including run." }),
+    page(`${AP}/metadata/contexts`, "Metadata", "Model development", { service: "vertex-metadata-contexts", listedWhenOff: true, tabTitle: "Contexts",
+      navHidden: true, navAs: `${AP}/metadata/artifacts`, pageTabs: [`${AP}/metadata/artifacts`, `${AP}/metadata/executions`, `${AP}/metadata/contexts`], kind: "Context",
+      api: "projects.locations.metadataStores.contexts", about: "Contexts grouping artifacts and executions, such as a pipeline run",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/ml-metadata/tracking",
+      instead: "Start CloudBurrow with --services including run." }),
     absent(`${AP}/ray`, "Ray on Agent Platform", "Model development", "projects.locations.persistentResources (Ray clusters)",
       "Ray clusters for distributed training and serving", AP_DOCS + "machine-learning"),
     // Deploy and use.
@@ -4533,6 +4552,10 @@ async function renderDetail(view, route, resourcePath) {
         return drawAnalyticsSection(panel, section, note);
       case "media":
         return drawMediaSection(panel, section, note);
+      case "pipelinegraph":
+        // A pipeline run's runtime graph and its Pipeline run analysis
+        // pane (#2205).
+        return setChildren(panel, note, pipelineGraphView(section.pipeline || {}));
       case "result": {
         // An action's answer on a page of its own (#2084): Document AI's
         // analysis page, drawn as its result dialog draws it.
@@ -9634,6 +9657,156 @@ function wfStepsVisualization(source, items) {
   const details = el("details", { class: "wf-visualization", open: true },
     el("summary", { text: "Visualization" }), graph.node);
   return details;
+}
+
+// pipelineGraphView is a pipeline run's runtime graph (#2205), as
+// Google's run page draws it: the run's steps top to bottom, each DAG (a
+// nested pipeline, a condition, a loop and its iterations) a node that
+// expands in place, Expand artifacts drawing each step's artifacts after
+// it, and the Pipeline run analysis pane beside the graph, its summary
+// the run's details and parameters, and choosing a node its Node info.
+// The nodes are one list of buttons: Tab reaches the chosen one, the
+// arrow keys, Home and End move along them, Enter or Space opens its Node
+// info, and a DAG node's own Expand button opens it.
+function pipelineGraphView(graph) {
+  const nodes = graph.nodes || [];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const state = { artifacts: false, open: new Set(), chosen: "" };
+  const stateClass = (s) => "is-" + String(s || "").toLowerCase().replace(/[^a-z]+/g, "-");
+  const canvas = el("div", { class: "pl-canvas" });
+  const pane = el("aside", { class: "pl-pane", "aria-labelledby": "pl-pane-title" });
+  const toggle = el("input", { type: "checkbox", id: "pl-expand-artifacts" });
+  const groups = (gs) => (gs || []).filter((g) => (g.properties || []).length).map((g) =>
+    el("div", { class: "pl-pane-group" }, g.heading ? el("h3", { text: g.heading }) : null,
+      el("dl", {}, ...g.properties.flatMap((p) => [el("dt", { text: p.label }), propertyValue(p)]))));
+  const drawPane = () => {
+    const n = byId.get(state.chosen);
+    const body = el("div", { class: "pl-pane-body", "aria-live": "polite" });
+    if (n) {
+      setChildren(body, el("p", { class: "pl-pane-node" }, el("span", { class: `pl-dot ${stateClass(n.state)}`, "aria-hidden": "true" }),
+        el("strong", { text: n.name }), ` ${n.kind === "artifact" ? "artifact" : "step"}`), ...groups(n.info),
+        el("button", { type: "button", class: "link-button pl-pane-back", text: "Back to run summary",
+          onclick: () => { const id = state.chosen; state.chosen = ""; drawPane(); focusNode(id); } }));
+    } else {
+      setChildren(body, ...groups(graph.summary));
+    }
+    setChildren(pane, el("h2", { id: "pl-pane-title", text: n ? "Node info" : "Pipeline run analysis" }), body);
+  };
+  // The nodes drawn inside parent, in rows by how deep their upstream goes.
+  const level = (parent) => {
+    const kids = nodes.filter((n) => (n.parent || "") === parent && (state.artifacts || n.kind !== "artifact"));
+    const ids = new Set(kids.map((n) => n.id));
+    const deps = (n) => [...(n.after || []), ...(state.artifacts ? (n.inputs || []) : [])].filter((d) => ids.has(d));
+    const depth = new Map();
+    const depthOf = (n, seen = new Set()) => {
+      if (depth.has(n.id)) return depth.get(n.id);
+      if (seen.has(n.id)) return 0;
+      seen.add(n.id);
+      const d = Math.max(-1, ...deps(n).map((id) => depthOf(byId.get(id), seen))) + 1;
+      depth.set(n.id, d);
+      return d;
+    };
+    kids.forEach((n) => depthOf(n));
+    const rows = [];
+    for (const n of kids) (rows[depth.get(n.id)] = rows[depth.get(n.id)] || []).push(n);
+    const box = el("div", { class: "pl-level", "data-parent": parent });
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "pl-edges");
+    svg.setAttribute("aria-hidden", "true");
+    box.append(svg);
+    for (const row of rows.filter(Boolean)) {
+      box.append(el("div", { class: "pl-row" }, ...row.sort((a, b) => a.name.localeCompare(b.name)).map(nodeView)));
+    }
+    box._edges = kids.flatMap((n) => deps(n).map((d) => [d, n.id]));
+    return box;
+  };
+  const nodeView = (n) => {
+    const expandable = n.kind === "dag" || n.kind === "loop" || n.kind === "iteration";
+    const kindText = { dag: "DAG", loop: "Loop", iteration: "Iteration", artifact: "Artifact", task: "Step" }[n.kind] || "Step";
+    const button = el("button", { type: "button", class: `pl-node ${stateClass(n.state)} is-${n.kind}`, "data-node": n.id,
+      tabindex: "-1", "aria-pressed": state.chosen === n.id ? "true" : "false",
+      "aria-label": `${n.name}, ${kindText}, ${n.state}`,
+      onclick: () => { state.chosen = n.id; drawPane(); markChosen(); } },
+      el("span", { class: `pl-dot ${stateClass(n.state)}`, "aria-hidden": "true" }),
+      el("span", { class: "pl-node-name", text: n.name }),
+      el("span", { class: "pl-node-state", text: n.kind === "artifact" ? n.state : `${kindText} · ${n.state}` }));
+    const wrap = el("div", { class: "pl-node-wrap", "data-wrap": n.id }, button);
+    if (expandable) {
+      const open = state.open.has(n.id);
+      wrap.append(el("button", { type: "button", class: "link-button pl-expand", "aria-expanded": open ? "true" : "false",
+        "aria-label": `${open ? "Collapse" : "Expand"} ${n.name}`, text: open ? "Collapse" : "Expand",
+        onclick: () => { open ? state.open.delete(n.id) : state.open.add(n.id); draw(); focusExpand(n.id); } }));
+      if (open) wrap.append(el("div", { class: "pl-group" }, level(n.id)));
+    }
+    return wrap;
+  };
+  const allButtons = () => [...canvas.querySelectorAll("button.pl-node")];
+  const roving = (focusId) => {
+    const bs = allButtons();
+    const pick = bs.find((b) => b.dataset.node === (focusId || state.chosen)) || bs[0];
+    bs.forEach((b) => b.setAttribute("tabindex", b === pick ? "0" : "-1"));
+    return pick;
+  };
+  const focusNode = (id) => { const b = roving(id); if (b) b.focus(); };
+  const focusExpand = (id) => {
+    const b = canvas.querySelector(`[data-wrap="${CSS.escape(id)}"] > .pl-expand`);
+    if (b) b.focus();
+  };
+  const markChosen = () => {
+    allButtons().forEach((b) => b.setAttribute("aria-pressed", b.dataset.node === state.chosen ? "true" : "false"));
+    roving(state.chosen);
+  };
+  canvas.addEventListener("keydown", (e) => {
+    const bs = allButtons();
+    const i = bs.indexOf(document.activeElement);
+    if (i < 0) return;
+    const next = e.key === "ArrowDown" || e.key === "ArrowRight" ? i + 1 : e.key === "ArrowUp" || e.key === "ArrowLeft" ? i - 1
+      : e.key === "Home" ? 0 : e.key === "End" ? bs.length - 1 : null;
+    if (next === null) return;
+    e.preventDefault();
+    const b = bs[Math.max(0, Math.min(bs.length - 1, next))];
+    bs.forEach((x) => x.setAttribute("tabindex", x === b ? "0" : "-1"));
+    b.focus();
+  });
+  // Each level's edges, from the bottom of a node to the top of the one
+  // after it, drawn once the layout is known.
+  const drawEdges = () => {
+    for (const box of canvas.querySelectorAll(".pl-level")) {
+      const svg = box.querySelector(":scope > svg.pl-edges");
+      const at = box.getBoundingClientRect();
+      svg.setAttribute("width", Math.ceil(at.width));
+      svg.setAttribute("height", Math.ceil(at.height));
+      svg.replaceChildren();
+      for (const [from, to] of box._edges || []) {
+        const a = box.querySelector(`:scope > .pl-row > [data-wrap="${CSS.escape(from)}"] > .pl-node`);
+        const b = box.querySelector(`:scope > .pl-row > [data-wrap="${CSS.escape(to)}"] > .pl-node`);
+        if (!a || !b) continue;
+        const ra = a.parentElement.getBoundingClientRect(), rb = b.getBoundingClientRect();
+        const x1 = ra.left + ra.width / 2 - at.left, y1 = ra.bottom - at.top;
+        const x2 = rb.left + rb.width / 2 - at.left, y2 = rb.top - at.top;
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        const my = (y1 + y2) / 2;
+        path.setAttribute("d", `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`);
+        svg.append(path);
+      }
+    }
+  };
+  const draw = () => {
+    setChildren(canvas, level(""));
+    roving();
+    requestAnimationFrame(drawEdges);
+  };
+  toggle.addEventListener("change", () => { state.artifacts = toggle.checked; draw(); });
+  if (typeof ResizeObserver === "function") new ResizeObserver(() => requestAnimationFrame(drawEdges)).observe(canvas);
+  draw();
+  drawPane();
+  const tools = el("div", { class: "pl-tools" },
+    el("span", { class: "pl-tools-title", text: "Runtime graph" }),
+    el("label", { class: "pl-switch", for: "pl-expand-artifacts" }, toggle, " Expand artifacts"));
+  return el("div", { class: "pl-split" },
+    el("section", { class: "pl-graph", "aria-label": "Runtime graph" }, tools,
+      el("div", { class: "pl-scroll", role: "group", "aria-label": "Pipeline steps", tabindex: null }, canvas)),
+    pane);
 }
 
 // wfStepPanel is an execution's step detail panel (#2011): the step entry
