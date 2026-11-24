@@ -355,7 +355,8 @@ never reach a real endpoint:
   VM, deploy a Cloud Run service from the console there, move the instance from AWS to Azure
   (the revision comes back on the Azure VM's node), scale, stop and start the Azure VM, move it
   back to this machine, and delete both VMs, nothing left in either cloud, with WCAG and keyboard
-  subtests. `CLOUDBURROW_BYOC_FAKES` is refused unless every endpoint is a loopback address, and
+  subtests. It passes through the Cloud Run deploy on the AWS VM; the steps after it wait on the
+  move back to this machine ([gaps.md](gaps.md#bring-your-own-cloud)). `CLOUDBURROW_BYOC_FAKES` is refused unless every endpoint is a loopback address, and
   keeps the fakes' credentials in a directory, never the keychain.
 - Moves are tested for real against the stand-ins: `TestStandInInterruptedMoveResumes` cuts a
   carry off half way, resumes it with the data whole, and rolls a second one back from its
