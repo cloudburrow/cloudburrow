@@ -127,7 +127,10 @@ func (v *shieldedVM) must(cmd string) string {
 // reads it over HTTPS too; getShieldedInstanceIdentity, through Google's
 // compute client, returns the vTPM's endorsement and signing keys, whose
 // certificates certify those keys; guest attributes are held to their
-// size and rate limits.
+// size and rate limits; updateShieldedInstanceConfig is refused while the
+// VM runs and, stopped, turns Secure Boot on.
+//
+// covers: compute.instances.getShieldedInstanceIdentity, compute.instances.setShieldedInstanceIntegrityPolicy, compute.instances.updateShieldedInstanceConfig
 func TestShieldedVMHTTPSMetadataServer2179(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h)
@@ -152,7 +155,9 @@ func TestShieldedVMHTTPSMetadataServer2179(t *testing.T) {
 	sa := "vm-shielded@" + h.Project() + ".iam.gserviceaccount.com"
 	v := newShieldedVM(t, h, ctx, insts, "svm", []*computepb.Items{
 		{Key: proto.String("disable-https-mds-setup"), Value: proto.String("FALSE")},
-		{Key: proto.String("enable-guest-attributes"), Value: proto.String("TRUE")}},
+		{Key: proto.String("enable-guest-attributes"), Value: proto.String("TRUE")},
+		// The attribute the probe reads (testdata/vmmetadata).
+		{Key: proto.String("role"), Value: proto.String("web")}},
 		&computepb.ServiceAccount{Email: proto.String(sa), Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}},
 		&computepb.ShieldedInstanceConfig{EnableVtpm: proto.Bool(true), EnableIntegrityMonitoring: proto.Bool(true)})
 
@@ -195,8 +200,9 @@ func TestShieldedVMHTTPSMetadataServer2179(t *testing.T) {
 		// The agent's debug log: restarted with log_level 4, its
 		// setup is logged again.
 		diag, _ := v.run(`sudo sed -i 's/^\[Core\]$/[Core]\nlog_level = 4\nlog_verbosity = 3/' /etc/default/instance_configs.cfg; `+
-			`sudo systemctl restart google-guest-agent-manager; sleep 60; ls -l /run/google-mds-mtls/ 2>&1; `+
-			`sudo journalctl -b --no-pager -u google-guest-agent-manager 2>&1 | grep -v -i 'acs client\|metric\|telemetry\|mwlid' | tail -120`, nil)
+			`S=$(date +%s); sudo systemctl restart google-guest-agent-manager; sleep 60; ls -l /run/google-mds-mtls/ 2>&1; `+
+			`sudo journalctl --since @$S --no-pager -u google-guest-agent-manager 2>&1 | grep -v -i 'acs client\|metric\|telemetry\|mwlid\|Found RSS\|smaps\|getconf\|longpoll\|get status\|_monitor\|cfg.go\|pluginmanager.go\|cleanup.go' | head -200; `+
+			`ls -l /sys/firmware/efi/efivars/ 2>&1 | grep -i a2858e46; cat /etc/default/instance_configs.cfg | head -5`, nil)
 		t.Fatalf("Google's guest agent wrote no HTTPS metadata server credentials: %s\n%s", out, diag)
 	}
 	for _, c := range []struct{ what, cmd, want string }{
@@ -216,7 +222,7 @@ func TestShieldedVMHTTPSMetadataServer2179(t *testing.T) {
 		t.Fatalf("copy the probe: %v: %s", err, out)
 	}
 	out := v.must("/tmp/vmmetadata https")
-	for _, want := range []string{"transport=https", "name=" + v.name + "\n", "email=" + sa + "\n", "token=Bearer expires_in=", "OK"} {
+	for _, want := range []string{"transport=https", "name=" + v.name + "\n", "email=" + sa + "\n", "role=web\n", "token=Bearer expires_in=", "OK"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the metadata package over HTTPS: no %q in %s", strings.TrimSpace(want), out)
 		}
@@ -248,6 +254,28 @@ func TestShieldedVMHTTPSMetadataServer2179(t *testing.T) {
 	if _, err := insts.UpdateShieldedInstanceConfig(ctx, &computepb.UpdateShieldedInstanceConfigInstanceRequest{Project: v.p, Zone: v.zone, Instance: v.name,
 		ShieldedInstanceConfigResource: &computepb.ShieldedInstanceConfig{EnableSecureBoot: proto.Bool(true)}}); err == nil {
 		t.Errorf("updateShieldedInstanceConfig on a running VM succeeded")
+	}
+	stop, err := insts.Stop(ctx, &computepb.StopInstanceRequest{Project: v.p, Zone: v.zone, Instance: v.name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stop.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	upd, err := insts.UpdateShieldedInstanceConfig(ctx, &computepb.UpdateShieldedInstanceConfigInstanceRequest{Project: v.p, Zone: v.zone, Instance: v.name,
+		ShieldedInstanceConfigResource: &computepb.ShieldedInstanceConfig{EnableSecureBoot: proto.Bool(true)}})
+	if err != nil {
+		t.Fatalf("updateShieldedInstanceConfig on a stopped VM: %v", err)
+	}
+	if err := upd.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := insts.Get(ctx, &computepb.GetInstanceRequest{Project: v.p, Zone: v.zone, Instance: v.name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sc := got.GetShieldedInstanceConfig(); !sc.GetEnableSecureBoot() || !sc.GetEnableVtpm() || !sc.GetEnableIntegrityMonitoring() {
+		t.Errorf("shieldedInstanceConfig after the update: %v", sc)
 	}
 }
 

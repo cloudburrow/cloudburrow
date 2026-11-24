@@ -15638,9 +15638,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 277,
+      "Implemented": 274,
       "Unimplemented": 84,
-      "Verified": 223
+      "Verified": 226
     },
     "rows": [
       {
@@ -16869,8 +16869,10 @@
       },
       {
         "method": "compute.instances.getShieldedInstanceIdentity",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/shieldedvm2179_test.go:134 TestShieldedVMHTTPSMetadataServer2179"
+        ]
       },
       {
         "method": "compute.instances.insert",
@@ -16974,8 +16976,10 @@
       },
       {
         "method": "compute.instances.setShieldedInstanceIntegrityPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/shieldedvm2179_test.go:134 TestShieldedVMHTTPSMetadataServer2179"
+        ]
       },
       {
         "method": "compute.instances.setTags",
@@ -17044,8 +17048,10 @@
       },
       {
         "method": "compute.instances.updateShieldedInstanceConfig",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/shieldedvm2179_test.go:134 TestShieldedVMHTTPSMetadataServer2179"
+        ]
       },
       {
         "method": "compute.machineImages.delete",
