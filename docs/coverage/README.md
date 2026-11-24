@@ -48,7 +48,7 @@ Do not edit these files by hand.
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [API Keys API (v2)](apikeys.md) | 9 | 9 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Firebase Rules API (v1)](firebaserules.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Compute Engine API (v1): VPC networking](compute.md) | 584 | 225 | 0 | 82 | 277 | 0 | 0 | 0 |
+| [Compute Engine API (v1): VPC networking](compute.md) | 584 | 227 | 0 | 82 | 275 | 0 | 0 | 0 |
 | [Network Connectivity API (v1)](networkconnectivity.md) | 62 | 18 | 0 | 44 | 0 | 0 | 0 | 0 |
 | [Cloud Storage companion APIs (Batch Operations, Insights, Transfer v1)](storagejobs.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Backup and DR Service API (v1)](backupdr.md) | 61 | 47 | 0 | 14 | 0 | 0 | 0 | 0 |

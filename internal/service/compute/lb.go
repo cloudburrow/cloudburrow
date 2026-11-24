@@ -287,7 +287,7 @@ func (s *Server) lbPatch(lc *lbColl, x lbCtx, b obj, replace bool) (obj, error) 
 	if !ok {
 		return nil, notFound(x.rel)
 	}
-	if fp := str(b, "fingerprint"); lc.fingerprint && fp != "" && fp != str(old, "fingerprint") {
+	if fp := str(b, "fingerprint"); lc.fingerprint && fp != "" && !sameFingerprint(fp, str(old, "fingerprint")) {
 		return nil, errf(http.StatusPreconditionFailed, "conditionNotMet",
 			"Supplied fingerprint does not match current metadata fingerprint.")
 	}

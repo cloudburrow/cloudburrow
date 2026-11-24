@@ -442,7 +442,7 @@ func (s *Server) probeOnce(ctx context.Context, t lbProbeTask) error {
 
 // endpointHealthyLocked is whether ep may take traffic from set.
 func (s *Server) endpointHealthyLocked(set lbBackendSet, ep lbEndpoint) bool {
-	if !ep.running {
+	if !ep.running || ep.draining {
 		return false
 	}
 	if set.hc == "" || (ep.kind != "vm" && ep.kind != "ip") {
@@ -450,6 +450,18 @@ func (s *Server) endpointHealthyLocked(set lbBackendSet, ep lbEndpoint) bool {
 	}
 	st, ok := s.lb.health.get(probeKeyOf(set.hc, set.probe, ep, s.probePortLocked(set.probe, ep)))
 	return ok && st.healthy
+}
+
+// endpointStateLocked is ep's healthState under set: DRAINING while it
+// drains (#2226), else HEALTHY or UNHEALTHY.
+func (s *Server) endpointStateLocked(set lbBackendSet, ep lbEndpoint) string {
+	switch {
+	case ep.draining:
+		return "DRAINING"
+	case s.endpointHealthyLocked(set, ep):
+		return "HEALTHY"
+	}
+	return "UNHEALTHY"
 }
 
 // lbHealthLocked are getHealth's statuses of one backend group.
@@ -467,9 +479,14 @@ func (s *Server) lbHealthLocked(bsRel, group string) []obj {
 			if ep.kind != "vm" && ep.kind != "ip" {
 				continue
 			}
-			state := "UNHEALTHY"
-			if s.endpointHealthyLocked(set, ep) {
-				state = "HEALTHY"
+			// getHealth's healthState is HEALTHY or UNHEALTHY only
+			// (HealthStatus in the REST reference, and gcloud's enum):
+			// a draining VM, which takes no new requests, is UNHEALTHY
+			// there; DRAINING is network endpoints' and managed
+			// instances' (#2226).
+			state := s.endpointStateLocked(set, ep)
+			if state == "DRAINING" {
+				state = "UNHEALTHY"
 			}
 			h := obj{"healthState": state, "ipAddress": ep.ip, "port": float64(ep.port)}
 			if ep.instance != "" {
@@ -527,11 +544,7 @@ func (s *Server) endpointHealthsLocked(neg string, e obj) []any {
 				if str(g.backend, "group") != neg || endpointKey(e) != endpointKey(obj{"instance": lastSeg(ep.instance), "ipAddress": ep.ip, "fqdn": ep.fqdn, "port": float64(ep.port)}) {
 					continue
 				}
-				state := "UNHEALTHY"
-				if s.endpointHealthyLocked(set, ep) {
-					state = "HEALTHY"
-				}
-				h := obj{"healthState": state, "backendService": obj{"backendService": u}}
+				h := obj{"healthState": s.endpointStateLocked(set, ep), "backendService": obj{"backendService": u}}
 				if set.hc != "" {
 					h["healthCheck"] = obj{"healthCheck": set.hc}
 				}

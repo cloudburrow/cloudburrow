@@ -150,6 +150,7 @@ func (s *Server) instanceGroups(c call, l igLoc) (obj, error) {
 			return nil, invalid("Invalid value for field 'instanceGroup': '%s'. A managed instance group's instances are added and removed by its manager.", rel)
 		}
 		members := groupMembersLocked(g)
+		var removed []string
 		for i, e := range listOf(c.body["instances"]) {
 			im, _ := e.(map[string]any)
 			ir := Rel(str(im, "instance"), c.project)
@@ -172,9 +173,17 @@ func (s *Server) instanceGroups(c call, l igLoc) (obj, error) {
 				members = append(members, ir)
 				continue
 			}
+			if hasStr(members, ir) {
+				removed = append(removed, ir)
+			}
+		}
+		if len(removed) > 0 {
+			// Connection draining (#2226): a running member drains,
+			// staying a member until its timeout passes.
+			now := s.drainMembersLocked(rel, g, removed)
 			var keep []string
 			for _, m := range members {
-				if m != ir {
+				if !hasStr(now, m) {
 					keep = append(keep, m)
 				}
 			}
@@ -390,7 +399,7 @@ func (s *Server) instanceGroupManagers(c call, l igLoc) (obj, error) {
 			}
 		}
 		for _, vm := range s.liveManagedLocked(rel) {
-			if err := s.deleteManagedLocked(c.project, vm); err != nil {
+			if err := s.deleteManagedNowLocked(c.project, vm); err != nil {
 				return nil, err
 			}
 		}
@@ -548,6 +557,9 @@ func (s *Server) baseActionLocked(vm string, o obj) string {
 		delete(o, "_mgrAction")
 	}
 	switch {
+	case o["_drain"] != nil:
+		// Draining before its manager deletes or recreates it (#2226).
+		return str(drainOf(o), "action")
 	case o["_deleting"] == true:
 		return "DELETING"
 	case str(o, "_mgrAction") != "":
@@ -791,8 +803,19 @@ func (s *Server) removeMemberLocked(project string, m obj, vm string) error {
 	return s.deleteManagedLocked(project, vm)
 }
 
-// deleteManagedLocked deletes one of a manager's VMs.
+// deleteManagedLocked deletes one of a manager's VMs, once it has drained
+// (#2226): DELETING meanwhile.
 func (s *Server) deleteManagedLocked(project, vm string) error {
+	o := s.res[vm]
+	if s.beginDrainLocked(vm, o, "DELETING", obj{"do": "delete"}) {
+		o["_deleting"] = true
+		return nil
+	}
+	return s.deleteManagedNowLocked(project, vm)
+}
+
+// deleteManagedNowLocked deletes one of a manager's VMs at once.
+func (s *Server) deleteManagedNowLocked(project, vm string) error {
 	o := s.res[vm]
 	if _, err := s.deleteInstance(project, "zones/"+lastSeg(str(o, "zone")), vm, o); err != nil {
 		return err
@@ -920,6 +943,15 @@ func (s *Server) recreateManagedLocked(project, mgr string, m obj, vm string, o 
 // recreateManagedFromLocked re-creates a managed VM from template tpl, by
 // the same name.
 func (s *Server) recreateManagedFromLocked(project, mgr string, m obj, vm string, o obj, tpl string) error {
+	if s.beginDrainLocked(vm, o, "RECREATING", obj{"do": "recreate", "template": tpl}) {
+		return nil // once it has drained (#2226)
+	}
+	return s.recreateManagedFromNowLocked(project, mgr, m, vm, o, tpl)
+}
+
+// recreateManagedFromNowLocked re-creates a managed VM from template tpl
+// at once.
+func (s *Server) recreateManagedFromNowLocked(project, mgr string, m obj, vm string, o obj, tpl string) error {
 	if instanceTemplateOf(o) == tpl {
 		if _, err := s.recreateLocked(project, "zones/"+lastSeg(str(o, "zone")), vm, o); err != nil {
 			return err
@@ -927,7 +959,7 @@ func (s *Server) recreateManagedFromLocked(project, mgr string, m obj, vm string
 		mgrAction(o, "RECREATING")
 		return nil
 	}
-	return s.remakeManagedLocked(project, mgr, m, vm, o, tpl)
+	return s.remakeManagedNowLocked(project, mgr, m, vm, o, tpl)
 }
 
 // remakeManagedLocked deletes a managed VM and makes it again, by the same
@@ -935,6 +967,14 @@ func (s *Server) recreateManagedFromLocked(project, mgr string, m obj, vm string
 // made (its creation retried while it fails, #2220). Autohealing recreates
 // VMs this way (#2225).
 func (s *Server) remakeManagedLocked(project, mgr string, m obj, vm string, o obj, tpl string) error {
+	if s.beginDrainLocked(vm, o, "RECREATING", obj{"do": "remake", "template": tpl}) {
+		return nil // once it has drained (#2226)
+	}
+	return s.remakeManagedNowLocked(project, mgr, m, vm, o, tpl)
+}
+
+// remakeManagedNowLocked is remakeManagedLocked at once.
+func (s *Server) remakeManagedNowLocked(project, mgr string, m obj, vm string, o obj, tpl string) error {
 	zone, name := lastSeg(str(o, "zone")), str(o, "name")
 	op, err := s.deleteInstance(project, "zones/"+zone, vm, o)
 	if err != nil {

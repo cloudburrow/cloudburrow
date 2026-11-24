@@ -165,6 +165,9 @@ func (s *Server) autohealProbesLocked() []lbProbeTask {
 // detailedHealthLocked is a managed VM's detailedHealthState under its
 // group's autohealing health check.
 func (s *Server) detailedHealthLocked(m obj, vm string) string {
+	if drainOf(s.res[vm]) != nil {
+		return "DRAINING" // connection draining (#2226)
+	}
 	t, ok := s.autohealProbeLocked(m, vm)
 	if !ok {
 		return "UNKNOWN"

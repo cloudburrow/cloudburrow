@@ -554,7 +554,7 @@ func (s *Server) deleteLBRule(x lbCtx, o obj) (obj, error) {
 // change in place (allowGlobalAccess, and the network tier of a rule of an
 // external passthrough load balancer).
 func (s *Server) patchLBRule(x lbCtx, o, b obj) (obj, error) {
-	if fp := str(b, "fingerprint"); fp != "" && fp != str(o, "fingerprint") {
+	if fp := str(b, "fingerprint"); fp != "" && !sameFingerprint(fp, str(o, "fingerprint")) {
 		return nil, errf(http.StatusPreconditionFailed, "conditionNotMet", "Supplied fingerprint does not match current metadata fingerprint.")
 	}
 	for k := range b {

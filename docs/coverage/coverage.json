@@ -15638,9 +15638,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 277,
+      "Implemented": 275,
       "Unimplemented": 82,
-      "Verified": 225
+      "Verified": 227
     },
     "rows": [
       {
@@ -15838,7 +15838,8 @@
         "method": "compute.backendServices.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
+          "test/compat/connectiondraining2226_test.go:329 TestTerraformComputeConnectionDraining2226"
         ]
       },
       {
@@ -15853,6 +15854,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
+          "test/compat/connectiondraining2226_test.go:329 TestTerraformComputeConnectionDraining2226",
+          "test/compat/connectiondraining2226_test.go:61 TestComputeConnectionDraining2226",
           "test/compat/custommetrics2160_test.go:35 TestCustomMetricsBalancingThroughTheGoClient"
         ]
       },
@@ -15867,7 +15870,8 @@
         "method": "compute.backendServices.getHealth",
         "status": "Verified",
         "tests": [
-          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
+          "test/compat/connectiondraining2226_test.go:61 TestComputeConnectionDraining2226"
         ]
       },
       {
@@ -15880,6 +15884,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
+          "test/compat/connectiondraining2226_test.go:329 TestTerraformComputeConnectionDraining2226",
+          "test/compat/connectiondraining2226_test.go:61 TestComputeConnectionDraining2226",
           "test/compat/proxylesssec2160_test.go:91 TestProxylessGRPCClientTLSOverXDSOverTLS"
         ]
       },
@@ -15900,6 +15906,8 @@
           "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient",
           "test/compat/computelb2160_test.go:337 TestCloudCDNCachesThroughTheGoClient",
           "test/compat/computelb2160_test.go:404 TestIAPGuardsALoadBalancerThroughTheGoClient",
+          "test/compat/connectiondraining2226_test.go:329 TestTerraformComputeConnectionDraining2226",
+          "test/compat/connectiondraining2226_test.go:61 TestComputeConnectionDraining2226",
           "test/compat/custommetrics2160_test.go:35 TestCustomMetricsBalancingThroughTheGoClient",
           "test/compat/iap2160_test.go:55 TestIAPBrowserSignInThroughAGoClient"
         ]
@@ -16564,8 +16572,10 @@
       },
       {
         "method": "compute.instanceGroupManagers.deleteInstances",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/connectiondraining2226_test.go:61 TestComputeConnectionDraining2226"
+        ]
       },
       {
         "method": "compute.instanceGroupManagers.deletePerInstanceConfigs",
@@ -16608,7 +16618,8 @@
         "tests": [
           "test/compat/computemigautoheal2225_test.go:30 TestComputeMIGAutohealing2225",
           "test/compat/computemigretry2220_test.go:77 TestComputeMIGCreationRetries2220",
-          "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139"
+          "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139",
+          "test/compat/connectiondraining2226_test.go:61 TestComputeConnectionDraining2226"
         ]
       },
       {
@@ -17423,13 +17434,16 @@
         "method": "compute.regionBackendServices.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/connectiondraining2226_test.go:329 TestTerraformComputeConnectionDraining2226",
           "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
         ]
       },
       {
         "method": "compute.regionBackendServices.get",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/connectiondraining2226_test.go:329 TestTerraformComputeConnectionDraining2226"
+        ]
       },
       {
         "method": "compute.regionBackendServices.getHealth",
@@ -17445,6 +17459,7 @@
         "method": "compute.regionBackendServices.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/connectiondraining2226_test.go:329 TestTerraformComputeConnectionDraining2226",
           "test/compat/lbipv6rules2140_test.go:33 TestRegionalAndInternalIPv6ForwardingRules2140",
           "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
         ]

@@ -480,7 +480,7 @@ func (s *Server) settledLocked(rel string) bool {
 	}
 	for _, vm := range s.managedLocked(rel) {
 		o := s.res[vm]
-		if o == nil || o["_deleting"] == true || s.queued[vm] > 0 || str(o, "status") != stRunning {
+		if o == nil || o["_deleting"] == true || o["_drain"] != nil || s.queued[vm] > 0 || str(o, "status") != stRunning {
 			return false
 		}
 	}
@@ -709,6 +709,10 @@ func (s *Server) rollOnce() {
 	defer s.mu.Unlock()
 	// Retry the VMs groups failed to make (#2220).
 	changed := s.retryManagersLocked()
+	// Connection draining's ends (#2226).
+	if s.finishDrainsLocked() {
+		changed = true
+	}
 	// Autohealing (#2225).
 	if s.autohealLocked() {
 		changed = true
