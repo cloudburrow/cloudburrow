@@ -33,11 +33,9 @@ import (
 // calls itself takes its start for the first window, and keeps its
 // pseudo-columns. A view is read as its query, rewritten the same way.
 //
-// The stateful operations (JOIN, aggregation and windowing), a Preview of
-// which BigQuery documents "some ... but not all" of, are not run here:
-// each window's rows alone would make them answer differently from
-// BigQuery, which keeps their state across windows. They are refused 501
-// (gaps.md, #2193).
+// The stateful operations (JOINs, window aggregation and TUMBLE) read
+// their sources further back, and keep only what the run closes:
+// continuousstateful.go.
 
 // cqSource is a table a continuous query reads, at [pos, end) of its text.
 type cqSource struct {
@@ -51,12 +49,26 @@ type cqSource struct {
 	start string
 	// view is the view's query, rewritten, when the table is a view.
 	view *cqQuery
+	// tumbleInput is a table TUMBLE reads, which keeps _CHANGE_TIMESTAMP.
+	tumbleInput bool
+	// startMs is where a stateful query reads the source from, set when
+	// the job starts: its APPENDS start, or the job's start for a table;
+	// startNull is an APPENDS start of NULL.
+	startMs   int64
+	startNull bool
 }
 
 // cqQuery is a query whose sources each window rewrites.
 type cqQuery struct {
 	text    string
 	sources []cqSource
+	// The stateful operations (continuousstateful.go): TUMBLE calls, the
+	// SELECTs that join streams, how far back, in microseconds, the JOINs'
+	// intervals reach, and whether it aggregates.
+	tumbles    []cqTumble
+	joins      []cqJoinScope
+	lookbackUs int64
+	aggregates bool
 }
 
 // cqPlan is a continuous query's statement.
@@ -94,20 +106,14 @@ func cqInvalid(format string, a ...any) *cqRefusal {
 var cqAllowedML = map[string]bool{"AI.GENERATE": true, "AI.GENERATE_TEXT": true, "ML.GENERATE_TEXT": true,
 	"ML.UNDERSTAND_TEXT": true, "ML.TRANSLATE": true, "ML.NORMALIZER": true}
 
-// cqAggregates are GoogleSQL's aggregate functions, a call of which (with
-// no OVER, refused on its own) aggregates.
-var cqAggregates = map[string]bool{"COUNT": true, "SUM": true, "AVG": true, "MIN": true, "MAX": true, "ARRAY_AGG": true,
-	"STRING_AGG": true, "ANY_VALUE": true, "COUNTIF": true, "LOGICAL_AND": true, "LOGICAL_OR": true, "BIT_AND": true,
-	"BIT_OR": true, "BIT_XOR": true, "ARRAY_CONCAT_AGG": true, "APPROX_COUNT_DISTINCT": true, "APPROX_QUANTILES": true,
-	"APPROX_TOP_COUNT": true, "APPROX_TOP_SUM": true, "STDDEV": true, "STDDEV_POP": true, "STDDEV_SAMP": true,
-	"VARIANCE": true, "VAR_POP": true, "VAR_SAMP": true, "CORR": true, "COVAR_POP": true, "COVAR_SAMP": true,
-	"HLL_COUNT.INIT": true, "HLL_COUNT.MERGE": true, "JSON_AGG": true, "MAX_BY": true, "MIN_BY": true, "GROUPING": true}
-
 // parseContinuous reads a continuous query's text.
 func parseContinuous(sql string) (*cqPlan, error) {
 	toks, ok := lex(sql)
 	if !ok {
 		return nil, &cqRefusal{400, "Syntax error: the query cannot be read"}
+	}
+	if err := unknownWindowTVF(sql, toks); err != nil {
+		return nil, err
 	}
 	var stmts [][]token
 	for _, s := range splitStatements(toks) {
@@ -353,12 +359,6 @@ func parseCQQuery(q string) (*cqQuery, error) {
 			return nil, cqInvalid("window function calls")
 		case t.is("INFORMATION_SCHEMA"), t.kind == tokQuoted && strings.Contains(strings.ToUpper(t.text), "INFORMATION_SCHEMA"):
 			return nil, cqInvalid("INFORMATION_SCHEMA views as sources")
-		case t.is("JOIN"):
-			return nil, &cqRefusal{501, "Not implemented here: JOINs in a continuous query, a stateful operation (Preview) BigQuery runs " +
-				"with state kept across the rows as they arrive; this instance runs stateless continuous queries only (#2193)"}
-		case t.is("GROUP") && next(1).is("BY"):
-			return nil, &cqRefusal{501, "Not implemented here: aggregation in a continuous query, a stateful operation (Preview) BigQuery runs " +
-				"with state kept across the rows as they arrive; this instance runs stateless continuous queries only (#2193)"}
 		case (t.kind == tokWord) && next(1).punct("("):
 			name := strings.ToUpper(t.text)
 			if i >= 2 && toks[i-1].punct(".") {
@@ -369,14 +369,6 @@ func parseCQQuery(q string) (*cqQuery, error) {
 			}
 			if i > 0 && toks[i-1].punct(".") && name != "HLL_COUNT.INIT" && name != "HLL_COUNT.MERGE" {
 				break
-			}
-			if cqAggregates[name] {
-				return nil, &cqRefusal{501, "Not implemented here: the aggregate function " + name + " in a continuous query, a stateful " +
-					"operation (Preview) BigQuery runs with state kept across the rows as they arrive; this instance runs stateless continuous queries only (#2193)"}
-			}
-			if name == "TUMBLE" || name == "HOP" || name == "SESSION" {
-				return nil, &cqRefusal{501, "Not implemented here: windowing (" + name + ") in a continuous query, a stateful operation (Preview); " +
-					"this instance runs stateless continuous queries only (#2193)"}
 			}
 		}
 	}
@@ -449,22 +441,8 @@ func parseCQQuery(q string) (*cqQuery, error) {
 		case t.is("FROM"):
 			fromAt[depth] = true
 			err = addAt(i + 1)
-		case t.punct(",") && fromAt[depth]:
-			if i+1 < len(toks) && toks[i+1].is("UNNEST") {
-				break
-			}
-			// A comma between two tables is a cross join.
-			if j := i + 1; j < len(toks) && (toks[j].kind == tokWord || toks[j].kind == tokQuoted) && !reservedWords[strings.ToUpper(toks[j].text)] {
-				parts, _ := path(toks, j)
-				if len(parts) > 1 || len(parts) == 1 && !ctes[strings.ToLower(parts[0])] {
-					// An alias.array path (t.arr) is an implicit UNNEST.
-					if len(parts) == 2 && aliasedIn(out.sources, toks, parts[0]) {
-						break
-					}
-				}
-			}
-			return nil, &cqRefusal{501, "Not implemented here: JOINs in a continuous query (a comma join), a stateful operation (Preview); " +
-				"this instance runs stateless continuous queries only (#2193)"}
+		case t.is("JOIN"):
+			err = addAt(i + 1)
 		case t.is("WHERE") || t.is("GROUP") || t.is("HAVING") || t.is("QUALIFY") || t.is("WINDOW") || t.is("ORDER") ||
 			t.is("LIMIT") || t.is("UNION") || t.is("ON") || t.is("USING") || t.is("SELECT"):
 			delete(fromAt, depth)
@@ -472,6 +450,9 @@ func parseCQQuery(q string) (*cqQuery, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
+	if err := analyzeStateful(out, toks); err != nil {
+		return nil, err
 	}
 	sortSources(out.sources)
 	return out, nil
@@ -494,24 +475,6 @@ func isExtractArg(t []token, i int) bool {
 	return false
 }
 
-// aliasedIn reports whether name is the alias (or last name) of a source
-// already read.
-func aliasedIn(sources []cqSource, toks []token, name string) bool {
-	for _, s := range sources {
-		if strings.EqualFold(s.parts[len(s.parts)-1], name) {
-			return true
-		}
-		for k, t := range toks {
-			if t.pos == s.end || k > 0 && toks[k-1].end == s.end {
-				if t.is("AS") && k+1 < len(toks) && strings.EqualFold(toks[k+1].text, name) || strings.EqualFold(t.text, name) {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
 func sortSources(s []cqSource) {
 	for i := 1; i < len(s); i++ {
 		for j := i; j > 0 && s[j].pos < s[j-1].pos; j-- {
@@ -522,52 +485,115 @@ func sortSources(s []cqSource) {
 
 // cqWindow is one run's window of the instance's clock, in milliseconds:
 // [low, high); first marks the job's first run, where a call's own start
-// stands.
+// stands. A stateful query's run also has read, where its sources are
+// read from (milliseconds), and the watermark's move from prevWM to curWM
+// (microseconds), which closes windows.
 type cqWindow struct {
 	low, high int64
 	first     bool
+
+	stateful      bool
+	read          int64
+	prevWM, curWM int64
+	// joinOnce keeps each JOIN pair to the run that reads its later row:
+	// a stateful query with no window, which would keep them once.
+	joinOnce bool
+}
+
+// cqEdit replaces q.text[pos:end].
+type cqEdit struct {
+	pos, end int
+	text     string
 }
 
 // render writes q for window w: each source read as its rows appended in
 // the window (above). dataset is the default dataset.
 func (q *cqQuery) render(w cqWindow, dataset string) string {
-	var b strings.Builder
-	last := 0
-	ts := func(ms int64) string { return "TIMESTAMP_MILLIS(" + strconv.FormatInt(ms, 10) + ")" }
+	var edits []cqEdit
 	for _, s := range q.sources {
-		if s.pos < last {
-			continue
+		if s.tumbleInput {
+			continue // in its TUMBLE's
 		}
-		b.WriteString(q.text[last:s.pos])
-		parts := s.parts
-		if len(parts) == 1 && dataset != "" {
-			parts = []string{dataset, parts[0]}
+		edits = append(edits, cqEdit{s.pos, s.end, q.renderSource(s, w, dataset)})
+	}
+	if w.stateful {
+		for _, t := range q.tumbles {
+			edits = append(edits, cqEdit{t.pos, t.end, q.renderTumble(t, w, dataset)})
 		}
-		name := quotePath(parts)
-		switch {
-		case s.call != "":
-			low := ts(w.low)
-			if w.first {
-				low = "NULL"
-				if s.start != "" {
-					low = "(" + s.start + ")"
+		if w.joinOnce && !w.first {
+			for _, js := range q.joins {
+				if js.where >= 0 {
+					edits = append(edits, cqEdit{js.where, js.where + len("WHERE"), "WHERE (" + joinFilter(js, w) + ") AND ("},
+						cqEdit{js.whereEnd, js.whereEnd, ") "})
+				} else {
+					edits = append(edits, cqEdit{js.fromEnd, js.fromEnd, " WHERE " + joinFilter(js, w) + " "})
 				}
 			}
-			fmt.Fprintf(&b, "%s(TABLE %s, %s, %s)", s.call, name, low, ts(w.high))
-		case s.view != nil:
-			b.WriteString("(" + s.view.render(w, dataset) + ")")
-			if !s.alias {
-				b.WriteString(" AS " + quotePath([]string{s.parts[len(s.parts)-1]}))
-			}
-		default:
-			fmt.Fprintf(&b, "(SELECT * EXCEPT (_CHANGE_TYPE, _CHANGE_TIMESTAMP) FROM APPENDS(TABLE %s, %s, %s))", name, ts(w.low), ts(w.high))
-			if !s.alias {
-				b.WriteString(" AS " + quotePath([]string{s.parts[len(s.parts)-1]}))
-			}
 		}
-		last = s.end
+	}
+	for i := 1; i < len(edits); i++ {
+		for j := i; j > 0 && (edits[j].pos < edits[j-1].pos || edits[j].pos == edits[j-1].pos && edits[j].end > edits[j-1].end); j-- {
+			edits[j], edits[j-1] = edits[j-1], edits[j]
+		}
+	}
+	var b strings.Builder
+	last := 0
+	for _, e := range edits {
+		if e.pos < last {
+			continue // within an edit already made
+		}
+		b.WriteString(q.text[last:e.pos])
+		b.WriteString(e.text)
+		last = e.end
 	}
 	b.WriteString(q.text[last:])
+	return b.String()
+}
+
+// renderSource writes one source for window w.
+func (q *cqQuery) renderSource(s cqSource, w cqWindow, dataset string) string {
+	ts := func(ms int64) string { return "TIMESTAMP_MILLIS(" + strconv.FormatInt(ms, 10) + ")" }
+	parts := s.parts
+	if len(parts) == 1 && dataset != "" {
+		parts = []string{dataset, parts[0]}
+	}
+	name := quotePath(parts)
+	low := ts(w.low)
+	switch {
+	case w.stateful:
+		// Back by the windows and the JOINs' intervals, not before the
+		// source's start.
+		switch {
+		case s.startNull && w.read <= 0:
+			low = "NULL"
+		case s.startNull:
+			low = ts(w.read)
+		default:
+			low = ts(max(w.read, s.startMs))
+		}
+	case w.first && s.call != "":
+		low = "NULL"
+		if s.start != "" {
+			low = "(" + s.start + ")"
+		}
+	}
+	var b strings.Builder
+	switch {
+	case s.call != "":
+		fmt.Fprintf(&b, "%s(TABLE %s, %s, %s)", s.call, name, low, ts(w.high))
+	case s.view != nil:
+		b.WriteString("(" + s.view.render(w, dataset) + ")")
+		if !s.alias {
+			b.WriteString(" AS " + quotePath([]string{s.parts[len(s.parts)-1]}))
+		}
+	case s.tumbleInput:
+		fmt.Fprintf(&b, "(SELECT * EXCEPT (_CHANGE_TYPE) FROM APPENDS(TABLE %s, %s, %s))", name, low, ts(w.high))
+	default:
+		fmt.Fprintf(&b, "(SELECT * EXCEPT (_CHANGE_TYPE, _CHANGE_TIMESTAMP) FROM APPENDS(TABLE %s, %s, %s))", name, low, ts(w.high))
+		if !s.alias {
+			b.WriteString(" AS " + quotePath([]string{s.parts[len(s.parts)-1]}))
+		}
+	}
 	return b.String()
 }
 
