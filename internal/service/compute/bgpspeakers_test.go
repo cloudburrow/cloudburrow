@@ -29,7 +29,17 @@ func TestRouterApplianceBGP(t *testing.T) {
 			"canIpForward":      forward,
 			"disks":             []any{obj{"boot": true, "initializeParams": obj{"sourceImage": "projects/debian-cloud/global/images/family/debian-12"}}},
 			"networkInterfaces": []any{obj{"network": "global/networks/default"}}})
-		o := s.res["projects/"+project+"/zones/"+zone+"/instances/"+name]
+		rel := "projects/" + project + "/zones/" + zone + "/instances/" + name
+		// The VM starts after insert's operation: a route's next hop is
+		// only a forwarder once its VM runs (forwarderLocked).
+		waitFor(t, name+" RUNNING", func() bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return str(s.res[rel], "status") == "RUNNING"
+		})
+		s.mu.Lock()
+		o := s.res[rel]
+		s.mu.Unlock()
 		return o, str(sliceOf(o["networkInterfaces"])[0].(map[string]any), "networkIP")
 	}
 	appliance, aip := vm("appliance", zone, true)
