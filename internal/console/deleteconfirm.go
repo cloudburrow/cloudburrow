@@ -70,6 +70,16 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"bigquery-sharing": unverified,
 	// More actions > Delete, then enter delete to confirm (docs read 2026-11-21).
 	"bigquery-clean-rooms": {Style: DeleteConfirmWord, Source: "https://docs.cloud.google.com/bigquery/docs/data-clean-rooms", Verified: true},
+	// Capacity management and BI Engine (#2193): Google's reservations,
+	// commitments and BI Engine guides say "click Delete" and describe no
+	// dialog (UNVERIFIED (re-read 2026-11-23:
+	// https://docs.cloud.google.com/bigquery/docs/reservations-tasks,
+	// https://docs.cloud.google.com/bigquery/docs/reservations-commitments,
+	// https://docs.cloud.google.com/bigquery/docs/bi-engine-reserve-capacity)).
+	"bigquery-capacity":           unverified,
+	"bigquery-commitments":        unverified,
+	"bigquery-reservation-groups": unverified,
+	"bigquery-bi-engine":          unverified,
 	// UNVERIFIED: "Select the checkbox for the roles ... click Delete." No dialog described (docs re-read 2026-11-19).
 	"iam-roles": unverified,
 	// "Confirm that you want to delete the group by clicking Confirm in the confirmation dialog."

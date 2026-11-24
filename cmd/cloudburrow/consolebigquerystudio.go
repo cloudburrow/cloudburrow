@@ -59,6 +59,10 @@ type studioQuery struct {
 	// "optional" (Optional job creation) or "continuous" (Continuous
 	// query).
 	QueryMode string `json:"queryMode"`
+	// ServiceAccount is Query settings' Continuous query > Use service
+	// account (#2193): the continuous query runs as it, sent as the
+	// connection property service_account.
+	ServiceAccount string `json:"serviceAccount"`
 }
 
 type studioField struct {
@@ -257,6 +261,9 @@ func (p bigqueryProvider) studioRun(ctx context.Context, svc *bqv2.Service, q st
 	case "":
 	case "continuous":
 		cfg.Continuous = true
+		if sa := strings.TrimSpace(q.ServiceAccount); sa != "" {
+			cfg.ConnectionProperties = append(cfg.ConnectionProperties, &bqv2.ConnectionProperty{Key: "service_account", Value: sa})
+		}
 	case "optional":
 		// jobs.query, the only call that takes jobCreationMode; a
 		// destination table or batch priority needs a job's configuration,
@@ -296,6 +303,9 @@ func (p bigqueryProvider) studioRun(ctx context.Context, svc *bqv2.Service, q st
 	ref := inserted.JobReference
 	if ref == nil || ref.JobId == "" {
 		return nil, errors.New("BigQuery answered without a job reference")
+	}
+	if cfg.Continuous {
+		return p.studioContinuous(ctx, svc, res, ref)
 	}
 	return p.studioResults(ctx, svc, res, ref)
 }

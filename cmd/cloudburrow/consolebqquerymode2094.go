@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	bqv2 "google.golang.org/api/bigquery/v2"
@@ -66,5 +67,30 @@ func (p bigqueryProvider) studioRunOptional(ctx context.Context, svc *bqv2.Servi
 		{Label: "Bytes processed", Value: studioBytes(resp.TotalBytesProcessed)},
 		{Label: "Use legacy SQL", Value: fmt.Sprint(cfg.UseLegacySql != nil && *cfg.UseLegacySql)},
 	}
+	return res, nil
+}
+
+// studioContinuous answers a continuous query's Run (#2193). The job runs
+// until it is cancelled, so there are no results to wait for: the editor
+// shows its job, running, with where to follow and cancel it, as Google's
+// "the query runs until cancelled; to cancel it, click Cancel" does
+// (https://docs.cloud.google.com/bigquery/docs/continuous-queries, read
+// 2026-11-23). A query that failed at once is that failure.
+func (p bigqueryProvider) studioContinuous(ctx context.Context, svc *bqv2.Service, res *studioResult, ref *bqv2.JobReference) (*studioResult, error) {
+	res.JobID, res.Location = ref.JobId, ref.Location
+	full, err := svc.Jobs.Get(p.project, ref.JobId).Location(ref.Location).Context(ctx).Do()
+	if err != nil {
+		return nil, bigqueryRefusal(err)
+	}
+	if full.Status != nil && full.Status.ErrorResult != nil {
+		return nil, errors.New(full.Status.ErrorResult.Message)
+	}
+	res.Job = studioJobInfo(full)
+	state := "RUNNING"
+	if full.Status != nil && full.Status.State != "" {
+		state = full.Status.State
+	}
+	res.Message = fmt.Sprintf("Continuous query %s (%s): it processes new rows as they arrive until it is cancelled. "+
+		"Personal history shows it, with Cancel job.", ref.JobId, state)
 	return res, nil
 }
