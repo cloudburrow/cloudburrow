@@ -188,7 +188,9 @@ def java_options(opts, args):
         "runner", "dataflowEndpoint", "apiRootUrl", "pipelineUrl", "templateLocation", "sdkContainerImage",
         "workerHarnessContainerImage", "dataflowJobFile", "update", "transformNameMapping", "filesToStage",
         "jobName", "credentialFactoryClass", "experiments")}
-    o["environmentOptions"] = ["external_service_address=" + args.java_harness]
+    # The Java SDK's own pool, behind cbfnproxy's (on --java-harness),
+    # which reads its workers' metrics.
+    o["environmentOptions"] = ["external_service_address=" + args.java_sdk_pool]
     o["credentialFactoryClass"] = "CbCredentialFactory"
     o["gcsEndpoint"] = os.environ.get("STORAGE_EMULATOR_HOST", "").rstrip("/") + "/storage/v1/"
     # BigQueryIO's clients (BigQueryOptions.bigQueryEndpoint, the API's
@@ -380,6 +382,7 @@ def main():
     ap.add_argument("--artifact-endpoint", required=True)
     ap.add_argument("--harness", default="localhost:50000")
     ap.add_argument("--java-harness", default="localhost:50001")
+    ap.add_argument("--java-sdk-pool", default="localhost:50002")
     ap.add_argument("--java-dir", default="/cb/java")
     ap.add_argument("--pipeline-url", required=True)
     ap.add_argument("--options", required=True)

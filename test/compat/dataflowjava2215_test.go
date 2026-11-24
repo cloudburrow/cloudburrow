@@ -42,7 +42,7 @@ func buildBeamJava(t *testing.T, ctx context.Context) string {
 		t.Fatal(err)
 	}
 	script := "mvn -q -B -Dmaven.repo.local=/w/m2 dependency:copy-dependencies -DoutputDirectory=/w/deps -DincludeScope=runtime" +
-		" && mkdir -p /w/classes && javac -nowarn -d /w/classes -cp '/w/deps/*' $(find /w/src -name '*.java')" +
+		" && mkdir -p /w/classes && javac -nowarn --release 11 -d /w/classes -cp '/w/deps/*' $(find /w/src -name '*.java')" +
 		" && rm -rf /w/m2 && chmod -R a+rwX /w"
 	out, err := exec.CommandContext(ctx, "docker", "run", "--rm", "-v", work+":/w", "-w", "/w", "--entrypoint", "sh",
 		beamJavaBuildImage, "-c", script).CombinedOutput()
@@ -98,7 +98,7 @@ func javaJobID(t *testing.T, out string) string {
 	return ""
 }
 
-// covers: google.dataflow.v1beta3.JobsV1Beta3/CreateJob, google.dataflow.v1beta3.JobsV1Beta3/GetJob
+// covers: google.dataflow.v1beta3.JobsV1Beta3/CreateJob, google.dataflow.v1beta3.JobsV1Beta3/GetJob, google.dataflow.v1beta3.MetricsV1Beta3/GetJobMetrics
 //
 // TestJavaDataflowWordCount (#2215): a word count written with Apache
 // Beam's Java SDK, submitted with its DataflowRunner against the instance
@@ -106,8 +106,9 @@ func javaJobID(t *testing.T, out string) string {
 // and pipeline in the instance's Cloud Storage and creates the job; the
 // job runs on the local Flink runner in the Beam Java 17 SDK harness,
 // reading and writing Cloud Storage. The counts are right, the job is
-// DONE with the Java SDK's version, and its graph has the pipeline's
-// transforms.
+// DONE with the Java SDK's version, its metrics are its Java workers'
+// (element counts and its counter of lines), and its graph has the
+// pipeline's transforms.
 func TestJavaDataflowWordCount(t *testing.T) {
 	h, _, c := dataflowEnv(t)
 	storageAddr := h.Endpoint(EnvStorage)
@@ -167,6 +168,24 @@ func TestJavaDataflowWordCount(t *testing.T) {
 	if j.Type != dataflowpb.JobType_JOB_TYPE_BATCH || j.Name != name || j.GetJobMetadata().GetSdkVersion().GetVersion() != "2.78.0" ||
 		!strings.Contains(j.GetJobMetadata().GetSdkVersion().GetVersionDisplayName(), "Java") {
 		t.Errorf("job = %s %s sdk %v", j.Type, j.Name, j.GetJobMetadata().GetSdkVersion())
+	}
+	// The Java workers' metrics (cbfnproxy): the PCollections' element
+	// counts and the pipeline's own counter of lines.
+	m, err := c.metrics.GetJobMetrics(ctx, &dataflowpb.GetJobMetricsRequest{ProjectId: project, Location: "us-central1", JobId: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	counted, lines := false, -1.0
+	for _, u := range m.Metrics {
+		switch {
+		case u.GetName().GetName() == "ElementCount" && u.GetName().GetOrigin() == "dataflow/v1b3" && u.GetScalar().GetNumberValue() > 0:
+			counted = true
+		case u.GetName().GetName() == "lines" && u.GetName().GetOrigin() == "user":
+			lines = u.GetScalar().GetNumberValue()
+		}
+	}
+	if !counted || lines != 3 {
+		t.Errorf("GetJobMetrics = %v; want ElementCount and the user counter lines = 3", m.Metrics)
 	}
 	var names []string
 	for _, tr := range j.GetPipelineDescription().GetOriginalPipelineTransform() {

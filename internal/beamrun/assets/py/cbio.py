@@ -235,10 +235,41 @@ def _leaves(mini):
     return order
 
 
+def resource_name(path):
+    """A Pub/Sub topic or subscription's resource name. The Java SDK's
+    payloads name them in PubsubIO's own path form (PubsubClient's
+    TopicPath and SubscriptionPath: /topics/PROJECT/TOPIC,
+    /subscriptions/PROJECT/SUBSCRIPTION), which the Pub/Sub API does not
+    take; Python's are already projects/PROJECT/topics/TOPIC."""
+    parts = path.split("/")
+    if len(parts) == 4 and parts[0] == "" and parts[1] in ("topics", "subscriptions"):
+        return "projects/%s/%s/%s" % (parts[2], parts[1], parts[3])
+    return path
+
+
+def _drop(pipeline, tid, keep):
+    """Removes transform tid and its parts from the pipeline, with the
+    PCollections they made that are not in keep."""
+    ts = pipeline.components.transforms
+    if tid not in ts:
+        return
+    t = ts[tid]
+    for s in list(t.subtransforms):
+        _drop(pipeline, s, keep)
+    for pc in t.outputs.values():
+        if pc not in keep:
+            pipeline.components.pcollections.pop(pc, None)
+    del ts[tid]
+
+
 def rewrite(pipeline, env_id):
     """Replaces the pipeline's Pub/Sub reads and writes in place."""
     n = 0
     for tid in list(pipeline.components.transforms):
+        if tid not in pipeline.components.transforms:
+            # A part of a replaced read or write (indexing a protobuf map
+            # would make it again).
+            continue
         t = pipeline.components.transforms[tid]
         urn = t.spec.urn
         if urn not in (common_urns.composites.PUBSUB_READ.urn, common_urns.composites.PUBSUB_WRITE.urn):
@@ -250,13 +281,13 @@ def rewrite(pipeline, env_id):
             pl = beam_runner_api_pb2.PubSubReadPayload()
             pl.ParseFromString(t.spec.payload)
             _ = (mp | "Impulse" >> beam.Impulse()
-                 | "Read" >> beam.ParDo(ReadPubSubFn(pl.topic, pl.subscription, pl.with_attributes,
+                 | "Read" >> beam.ParDo(ReadPubSubFn(resource_name(pl.topic), resource_name(pl.subscription), pl.with_attributes,
                                                      pl.timestamp_attribute, pl.id_attribute)).with_output_types(bytes))
         else:
             pl = beam_runner_api_pb2.PubSubWritePayload()
             pl.ParseFromString(t.spec.payload)
             _ = (mp | "Impulse" >> beam.Impulse()
-                 | "Write" >> beam.ParDo(WritePubSubFn(pl.topic)))
+                 | "Write" >> beam.ParDo(WritePubSubFn(resource_name(pl.topic))))
         mini = mp.to_runner_api()
         leaves = _leaves(mini)
         added = _splice(pipeline, mini, prefix, env_id)
@@ -275,6 +306,12 @@ def rewrite(pipeline, env_id):
             del pipeline.components.pcollections[dead]
             keep = [leaves[-1]]
         t.ClearField("spec")
+        # The SDK's own expansion of the read or write (the Java SDK's
+        # PubsubUnboundedSource and Sink are composites) is replaced: its
+        # parts go, as their names are the replacement's.
+        boundary = set(t.inputs.values()) | set(t.outputs.values())
+        for s in list(t.subtransforms):
+            _drop(pipeline, s, boundary)
         del t.subtransforms[:]
         t.environment_id = ""
         for k in keep:

@@ -15,6 +15,7 @@ import (
 
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/dataflow/apiv1beta3/dataflowpb"
+	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
@@ -32,16 +33,19 @@ import (
 //     a Cloud Storage file's words into Cloud Storage;
 //   - GCS_Text_to_BigQuery (templates/provided/cloud-storage-to-bigquery)
 //     loads a CSV file through a JavaScript UDF into a new BigQuery table;
+//   - PubSub_Subscription_to_BigQuery and PubSub_to_BigQuery
+//     (templates/provided/pubsub-to-bigquery) stream a subscription's or
+//     topic's JSON messages into an existing BigQuery table, and drain.
 //
-// GetTemplate answers each template's metadata (its parameters), also
-// PubSub_Subscription_to_BigQuery's, which is built and staged but whose
-// job does not run yet (docs/gaps.md), and a name Google does not provide
-// is not a template.
+// GetTemplate answers each template's metadata (its parameters), and a
+// name Google does not provide is not a template.
 func TestDataflowProvidedTemplates(t *testing.T) {
 	h, _, c := dataflowEnv(t)
 	h.Endpoint(EnvStorage)
 	h.Endpoint(EnvBigQuery)
+	h.Endpoint(EnvPubSub)
 	bq, project := bigqueryClient(t, h)
+	ps := pubsubClient(t, h)
 	sc := storageClient(t, h)
 	// The first use builds DataflowTemplates with Maven.
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Minute)
@@ -133,6 +137,72 @@ func TestDataflowProvidedTemplates(t *testing.T) {
 			t.Errorf("the table has %s; want ADA=36,GRACE=45", got)
 		}
 	})
+	for _, tc := range []struct{ name, param string }{{"PubSub_Subscription_to_BigQuery", "inputSubscription"}, {"PubSub_to_BigQuery", "inputTopic"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ds := fmt.Sprintf("provided_ps_%s_%s", strings.ToLower(tc.param), suffix)
+			if err := bq.Dataset(ds).Create(ctx, nil); err != nil {
+				t.Fatal(err)
+			}
+			schema := bigquery.Schema{{Name: "name", Type: bigquery.StringFieldType}, {Name: "age", Type: bigquery.IntegerFieldType}}
+			if err := bq.Dataset(ds).Table("people").Create(ctx, &bigquery.TableMetadata{Schema: schema}); err != nil {
+				t.Fatal(err)
+			}
+			topic := fmt.Sprintf("projects/%s/topics/prov-%s-%s", project, strings.ToLower(tc.param), suffix)
+			sub := fmt.Sprintf("projects/%s/subscriptions/prov-%s-%s", project, strings.ToLower(tc.param), suffix)
+			if _, err := ps.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topic}); err != nil {
+				t.Fatal(err)
+			}
+			input := topic
+			if tc.param == "inputSubscription" {
+				if _, err := ps.SubscriptionAdminClient.CreateSubscription(ctx, &pubsubpb.Subscription{Name: sub, Topic: topic}); err != nil {
+					t.Fatal(err)
+				}
+				input = sub
+			}
+			resp, err := c.tmpl.LaunchTemplate(ctx, &dataflowpb.LaunchTemplateRequest{ProjectId: project, Location: "us-central1",
+				Template: &dataflowpb.LaunchTemplateRequest_GcsPath{GcsPath: base + tc.name},
+				LaunchParameters: &dataflowpb.LaunchTemplateParameters{JobName: "provided-ps-" + strings.ToLower(tc.param) + "-" + suffix, Parameters: map[string]string{
+					tc.param:          input,
+					"outputTableSpec": project + ":" + ds + ".people",
+				}, Environment: &dataflowpb.RuntimeEnvironment{TempLocation: "gs://" + bucket + "/tmp"}}})
+			if err != nil {
+				t.Fatalf("LaunchTemplate: %v", err)
+			}
+			id := resp.GetJob().GetId()
+			j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_RUNNING, dataflowpb.JobState_JOB_STATE_FAILED)
+			if j.CurrentState != dataflowpb.JobState_JOB_STATE_RUNNING || j.Type != dataflowpb.JobType_JOB_TYPE_STREAMING {
+				t.Fatalf("%s's job is %s %s:\n%s", tc.name, j.CurrentState, j.Type, jobMessages(t, ctx, c, project, id))
+			}
+			// A topic read's subscription is the job's own, made as it
+			// starts: what is published before it reads is not its.
+			want := "Ada=36,Grace=45"
+			for deadline := time.Now().Add(10 * time.Minute); ; {
+				for _, m := range []string{`{"name": "Ada", "age": 36}`, `{"name": "Grace", "age": 45}`} {
+					if _, err := ps.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: topic, Messages: []*pubsubpb.PubsubMessage{{Data: []byte(m)}}}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				time.Sleep(15 * time.Second)
+				got := providedRows(t, ctx, bq, "SELECT DISTINCT name, age FROM `"+project+"."+ds+".people` ORDER BY name")
+				if got == want {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("the table has %s; want %s:\n%s", got, want, jobMessages(t, ctx, c, project, id))
+				}
+				if tc.param == "inputSubscription" {
+					time.Sleep(15 * time.Second)
+				}
+			}
+			if _, err := c.jobs.UpdateJob(ctx, &dataflowpb.UpdateJobRequest{ProjectId: project, Location: "us-central1", JobId: id,
+				Job: &dataflowpb.Job{RequestedState: dataflowpb.JobState_JOB_STATE_DRAINED}}); err != nil {
+				t.Fatalf("drain: %v", err)
+			}
+			if j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DRAINED, dataflowpb.JobState_JOB_STATE_FAILED, dataflowpb.JobState_JOB_STATE_CANCELLED); j.CurrentState != dataflowpb.JobState_JOB_STATE_DRAINED {
+				t.Fatalf("%s's job ended %s:\n%s", tc.name, j.CurrentState, jobMessages(t, ctx, c, project, id))
+			}
+		})
+	}
 }
 
 // readPrefix is the lines of the bucket's objects under prefix, sorted.

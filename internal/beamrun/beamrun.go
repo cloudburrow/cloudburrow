@@ -50,7 +50,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed assets/relay.py assets/py/cblaunch.py assets/py/cbio.py assets/py/sitecustomize.py assets/java/pool.sh assets/java/CbCredentialFactory.java
+//go:embed assets/relay.py assets/py/cblaunch.py assets/py/cbio.py assets/py/sitecustomize.py assets/py/cbfnproxy.py assets/java/pool.sh assets/java/CbCredentialFactory.java
 var assets embed.FS
 
 // The pinned images (dependencies.json components.dataflow).
@@ -108,6 +108,11 @@ const (
 	spannerPort    = 9005
 	dataflowPort   = 80
 	workerPoolPort = 50000
+	// The Java worker pool the pipeline's environment names
+	// (cblaunch.py's --java-harness), cbfnproxy's, and the Java SDK's own
+	// pool behind it.
+	javaPoolPort    = 50001
+	javaSDKPoolPort = 50002
 )
 
 // Job is one job to run.
@@ -352,7 +357,7 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	go d.follow(logCtx, pool, ev.Log)
 	if job.SDK == "Java" {
 		jpool := "cb-df-java-" + suffix
-		cleanup = append(cleanup, func() { bg("rm", "-f", "-v", jpool) })
+		cleanup = append(cleanup, func() { bg("rm", "-f", "-v", jpool, jpool+"-fn") })
 		go d.javaPool(logCtx, dir, jpool, js, label, env, ev.Log)
 	}
 
@@ -439,6 +444,20 @@ func (d *Docker) javaPool(ctx context.Context, dir, name, js, label string, env 
 		}
 		return
 	}
+	// The pool the runner starts workers through is cbfnproxy's, which
+	// reads their metrics; it starts each on the Java SDK's own pool.
+	proxy := name + "-fn"
+	pargs := []string{"run", "-d", "--name", proxy, "--label", label, "--network", "container:" + js, "-v", dir + ":/cb:ro",
+		"-v", filepath.Join(dir, "metrics") + ":/cb/metrics", "-e", "PYTHONPATH=/cb/py", "--entrypoint", "python",
+		PythonImages[LauncherImage], "/cb/py/cbfnproxy.py", "--listen", fmt.Sprintf("0.0.0.0:%d", javaPoolPort),
+		"--target", fmt.Sprintf("localhost:%d", javaSDKPoolPort), "--metrics", "/cb/metrics"}
+	if out, err := d.docker(ctx, pargs...); err != nil {
+		if log != nil {
+			log("ERROR", "start the job's Java worker pool: "+out)
+		}
+		return
+	}
+	go d.follow(ctx, proxy, log)
 	args := append([]string{"run", "-d", "--name", name, "--label", label, "--network", "container:" + js, "--memory", "3g", "-v", dir + ":/cb:ro"}, env...)
 	args = append(args, "--entrypoint", "sh", image, "/cb/java/pool.sh")
 	if out, err := d.docker(ctx, args...); err != nil {
@@ -672,7 +691,7 @@ func (d *Docker) waitLog(ctx context.Context, name, want string, wait time.Durat
 }
 
 func writeAssets(dir string) error {
-	for _, name := range []string{"relay.py", "py/cblaunch.py", "py/cbio.py", "py/sitecustomize.py", "java/pool.sh", "java/CbCredentialFactory.java"} {
+	for _, name := range []string{"relay.py", "py/cblaunch.py", "py/cbio.py", "py/sitecustomize.py", "py/cbfnproxy.py", "java/pool.sh", "java/CbCredentialFactory.java"} {
 		b, err := assets.ReadFile("assets/" + name)
 		if err != nil {
 			return err
