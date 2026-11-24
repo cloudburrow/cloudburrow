@@ -71,9 +71,9 @@ func TestCloudSQLBackupLifecycle(t *testing.T) {
 	if code, _ := call(t, s, "POST", loc+"/backupVaults?backupVaultId=v", `{"backupMinimumEnforcedRetentionDuration":"86400s"}`); code != http.StatusConflict {
 		t.Errorf("a second vault create: %d", code)
 	}
-	if code, out := call(t, s, "POST", loc+"/backupPlans?backupPlanId=gce", strings.Replace(planBody, "sqladmin.googleapis.com/Instance", "compute.googleapis.com/RegionDisk", 1)); code != 501 ||
-		!strings.Contains(out["error"].(map[string]any)["message"].(string), "regional disks") {
-		t.Errorf("a regional disk plan: %d %v", code, out)
+	if code, out := call(t, s, "POST", loc+"/backupPlans?backupPlanId=gce", strings.Replace(planBody, "sqladmin.googleapis.com/Instance", "storage.googleapis.com/Bucket", 1)); code != 501 ||
+		!strings.Contains(out["error"].(map[string]any)["message"].(string), "another workload type") {
+		t.Errorf("a bucket plan: %d %v", code, out)
 	}
 	if code, out := call(t, s, "POST", loc+"/backupPlans?backupPlanId=plan", planBody); code != 200 {
 		t.Fatalf("plan create: %d %v", code, out)

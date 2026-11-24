@@ -285,6 +285,7 @@ func (p computeInstancesProvider) diskActions(o map[string]any) []console.Action
 		project = strings.SplitN(project[i+len("projects/"):], "/", 2)[0]
 	}
 	var free []string
+	labels := map[string]string{}
 	if l, err := p.list(project, "zones/"+zone+"/disks"); err == nil {
 		for _, d := range l {
 			if len(vpcStrs(d, "users")) == 0 {
@@ -292,13 +293,35 @@ func (p computeInstancesProvider) diskActions(o map[string]any) []console.Action
 			}
 		}
 	}
+	// Regional disks replicated in the VM's zone (#2206), attached ones
+	// too: a regional disk is force-attached for failover.
+	region := zone
+	if i := strings.LastIndex(zone, "-"); i > 0 {
+		region = zone[:i]
+	}
+	regional := false
+	if l, err := p.list(project, "regions/"+region+"/disks"); err == nil {
+		for _, d := range l {
+			for _, z := range vpcStrs(d, "replicaZones") {
+				if vpcLast(z) == zone {
+					free = append(free, "regions/"+region+"/disks/"+vpcStr(d, "name"))
+					labels["regions/"+region+"/disks/"+vpcStr(d, "name")] = vpcStr(d, "name") + " (regional)"
+					regional = true
+				}
+			}
+		}
+	}
 	var acts []console.Action
 	attach := console.Action{ID: "attachdisk", Label: "Attach existing disk", Submit: "Save", Fields: []console.Field{
-		{Name: "disk", Label: "Disk", Type: "select", Required: true, Options: free},
+		{Name: "disk", Label: "Disk", Type: "select", Required: true, Options: free, OptionLabels: labels},
 		{Name: "deviceName", Label: "Device name", Type: "text", Pattern: `^$|` + computeNamePattern,
 			Help: "Optional: the disk is mounted at /mnt/disks/DEVICE in the guest; empty uses the disk's name."},
 		{Name: "mode", Label: "Mode", Type: "radio", Default: "Read/write", Options: []string{"Read/write", "Read only"}},
 	}}
+	if regional {
+		attach.Fields = append(attach.Fields, console.Field{Name: "forceAttach", Label: "Force-attach disk", Type: "checkbox",
+			Help: "For a regional disk attached to a VM in its other replica zone (failover): that VM can no longer write to it."})
+	}
 	if len(free) == 0 {
 		attach.Unavailable = "No disk in " + zone + " is free to attach: create one on the Disks page."
 		attach.Fields = nil
@@ -694,11 +717,19 @@ func (p computeInstancesProvider) ActAtResult(ctx context.Context, project strin
 		_, err = p.call("DELETE", project, base, nil, nil)
 	case "attachdisk":
 		d := strings.TrimSpace(values["disk"])
-		b := map[string]any{"source": "zones/" + path[0] + "/disks/" + d, "deviceName": vpcOr(strings.TrimSpace(values["deviceName"]), d)}
+		src := "zones/" + path[0] + "/disks/" + d
+		if strings.HasPrefix(d, "regions/") {
+			src = d
+		}
+		b := map[string]any{"source": src, "deviceName": vpcOr(strings.TrimSpace(values["deviceName"]), vpcLast(d))}
 		if values["mode"] == "Read only" {
 			b["mode"] = "READ_ONLY"
 		}
-		_, err = p.call("POST", project, base+"/attachDisk", nil, b)
+		var q url.Values
+		if checkboxOn(values["forceAttach"]) {
+			q = url.Values{"forceAttach": {"true"}}
+		}
+		_, err = p.call("POST", project, base+"/attachDisk", q, b)
 	case "detachdisk":
 		_, err = p.call("POST", project, base+"/detachDisk", url.Values{"deviceName": {strings.TrimSpace(values["deviceName"])}}, nil)
 	default:
@@ -735,6 +766,16 @@ func (p computeDisksProvider) List(ctx context.Context, project string) (console
 	for _, d := range aggregatedItems(m, "disks") {
 		zone := zoneOf(vpcStr(d, "zone"))
 		target := []string{zone, vpcStr(d, "name")}
+		if r := vpcStr(d, "region"); r != "" {
+			// A regional disk: its replica zones, as Google's list shows
+			// them, opened at [region, name].
+			var zs []string
+			for _, z := range vpcStrs(d, "replicaZones") {
+				zs = append(zs, vpcLast(z))
+			}
+			zone = strings.Join(zs, ", ")
+			target = []string{vpcLast(r), vpcStr(d, "name")}
+		}
 		var users []string
 		for _, u := range vpcStrs(d, "users") {
 			users = append(users, vpcLast(u))
@@ -774,13 +815,18 @@ func (p computeDisksProvider) CreateForm() (string, []console.Field) {
 	return "Create disk", []console.Field{
 		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp},
 		{Name: "description", Label: "Description", Type: "textarea"},
+		{Name: "location", Label: "Location", Type: "radio", Default: "Single zone", Options: []string{"Single zone", "Regional"},
+			Help: "A regional disk is replicated in two zones of its region, and can be attached to a VM in either."},
 		vmZoneField("zone"),
+		{Name: "replicaZone", Label: "Replica zone", Type: "select", Options: vmZones(), Default: "us-central1-b",
+			VisibleWhen: map[string]string{"location": "Regional"}, Help: "The second zone, in the same region as the zone."},
 		{Name: "source", Label: "Disk source type", Type: "radio", Section: "Disk settings", Default: "Blank disk", Options: []string{"Blank disk", "Image", "Snapshot"}},
 		{Name: "image", Label: "Source image", Type: "select", Section: "Disk settings", Default: "debian-cloud/debian-12", Options: imageFamilies(),
 			OptionLabels: imageFamilyLabels(), VisibleWhen: map[string]string{"source": "Image"}},
 		{Name: "snapshot", Label: "Source snapshot", Type: "text", Section: "Disk settings", VisibleWhen: map[string]string{"source": "Snapshot"},
 			Help: "The name of a snapshot on the Snapshots page."},
-		{Name: "type", Label: "Disk type", Type: "select", Section: "Disk settings", Default: "pd-balanced", Options: diskTypeNames()},
+		{Name: "type", Label: "Disk type", Type: "select", Section: "Disk settings", Default: "pd-balanced", Options: diskTypeNames(),
+			Help: "A regional disk is pd-balanced, pd-ssd, pd-standard (200 GB or more) or hyperdisk-balanced-high-availability."},
 		{Name: "sizeGb", Label: "Size (GB)", Type: "text", Section: "Disk settings", Default: "10", Pattern: `^[0-9]{1,5}$`},
 		vmLabelsField(nil, "Disk settings"),
 	}
@@ -793,6 +839,14 @@ func (p computeDisksProvider) Create(ctx context.Context, project string, values
 		return "", fmt.Errorf("zone: %q is not a zone", zone)
 	}
 	b := map[string]any{"name": name, "type": "zones/" + zone + "/diskTypes/" + vpcOr(values["type"], "pd-balanced")}
+	coll := "zones/" + zone + "/disks"
+	if values["location"] == "Regional" {
+		region := zone[:strings.LastIndex(zone, "-")]
+		rz := strings.TrimSpace(values["replicaZone"])
+		b["type"] = "regions/" + region + "/diskTypes/" + vpcOr(values["type"], "pd-balanced")
+		b["replicaZones"] = []any{"zones/" + zone, "zones/" + rz}
+		coll = "regions/" + region + "/disks"
+	}
 	if s := strings.TrimSpace(values["sizeGb"]); s != "" {
 		b["sizeGb"] = s
 	}
@@ -817,7 +871,7 @@ func (p computeDisksProvider) Create(ctx context.Context, project string, values
 		}
 		b["labels"] = l
 	}
-	if _, err := p.call("POST", project, "zones/"+zone+"/disks", nil, b); err != nil {
+	if _, err := p.call("POST", project, coll, nil, b); err != nil {
 		return "", err
 	}
 	return name, nil
@@ -830,7 +884,7 @@ func (p computeDisksProvider) Detail(ctx context.Context, project string, path [
 	if len(path) != 2 {
 		return console.DeeperThan(2, path), nil
 	}
-	d, err := p.call("GET", project, "zones/"+path[0]+"/disks/"+path[1], nil, nil)
+	d, err := p.call("GET", project, diskBase(path), nil, nil)
 	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
@@ -845,7 +899,7 @@ func (p computeDisksProvider) Detail(ctx context.Context, project string, path [
 	return console.Detail{Title: path[1],
 		Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: []console.Property{
 			{Label: "Status", Value: vpcStr(d, "status")}, {Label: "Type", Value: vpcLast(vpcStr(d, "type"))},
-			{Label: "Size", Value: vpcStr(d, "sizeGb") + " GB"}, {Label: "Zone", Value: path[0]},
+			{Label: "Size", Value: vpcStr(d, "sizeGb") + " GB"}, locationProp(d, path),
 			{Label: "In use by", Value: vpcDash(strings.Join(users, ", "))}, {Label: "Source", Value: vpcDash(src)},
 			{Label: "Labels", Value: vpcDash(vmLabelsText(d))}, {Label: "Description", Value: vpcDash(vpcStr(d, "description"))},
 			{Label: "Creation time", Value: vpcStr(d, "creationTimestamp")},
@@ -857,7 +911,7 @@ func (p computeDisksProvider) DetailActions(ctx context.Context, project string,
 	if p.api() == nil || len(path) != 2 {
 		return nil
 	}
-	d, err := p.call("GET", project, "zones/"+path[0]+"/disks/"+path[1], nil, nil)
+	d, err := p.call("GET", project, diskBase(path), nil, nil)
 	if err != nil {
 		return nil
 	}
@@ -868,7 +922,7 @@ func (p computeDisksProvider) ActAt(ctx context.Context, project string, path []
 	if len(path) != 2 {
 		return fmt.Errorf("%s is not available here", action)
 	}
-	base := "zones/" + path[0] + "/disks/" + path[1]
+	base := diskBase(path)
 	var err error
 	switch action {
 	case "snapshot":
@@ -1178,4 +1232,26 @@ func (p computeMetadataProvider) ActAt(ctx context.Context, project string, path
 	}
 	_, err = p.call("POST", project, "setCommonInstanceMetadata", nil, map[string]any{"items": items, "fingerprint": values["fingerprint"]})
 	return err
+}
+
+// diskBase is a disk page's API path: [zone, name], or [region, name] for
+// a regional disk (#2206).
+func diskBase(path []string) string {
+	if compute.IsRegion(path[0]) {
+		return "regions/" + path[0] + "/disks/" + path[1]
+	}
+	return "zones/" + path[0] + "/disks/" + path[1]
+}
+
+// locationProp is a disk's Zone, or a regional disk's Region and replica
+// zones.
+func locationProp(d map[string]any, path []string) console.Property {
+	if !compute.IsRegion(path[0]) {
+		return console.Property{Label: "Zone", Value: path[0]}
+	}
+	var zs []string
+	for _, z := range vpcStrs(d, "replicaZones") {
+		zs = append(zs, vpcLast(z))
+	}
+	return console.Property{Label: "Replica zones", Value: path[0] + " (" + strings.Join(zs, ", ") + ")"}
 }

@@ -81,7 +81,7 @@ func (s *Server) SetWorkload(typ string, api func() Workload) {
 func isWorkload(typ string) bool { return typ == AlloyDBResourceType || typ == FilestoreResourceType }
 
 func isCompute(typ string) bool {
-	return typ == ComputeInstanceResourceType || typ == ComputeDiskResourceType
+	return typ == ComputeInstanceResourceType || isDiskType(typ)
 }
 
 // workloadName is the service a type's resources belong to, for messages.
@@ -527,9 +527,11 @@ func (e *apiError) GoogleStatus() string { return e.status }
 var planLimits = map[string]map[string][2]int64{
 	ComputeInstanceResourceType: {"HOURLY": {1, 366}, "DAILY": {1, 1827}, "WEEKLY": {7, 1827}, "MONTHLY": {30, 3653}},
 	ComputeDiskResourceType:     {"HOURLY": {1, 90}, "DAILY": {1, 186}, "WEEKLY": {7, 366}, "MONTHLY": {30, 732}},
-	CloudSQLResourceType:        {"HOURLY": {1, 90}, "DAILY": {1, 186}, "WEEKLY": {7, 366}, "MONTHLY": {30, 732}},
-	AlloyDBResourceType:         {"HOURLY": {1, 90}, "DAILY": {1, 186}, "WEEKLY": {7, 365}, "MONTHLY": {30, 365}},
-	FilestoreResourceType:       {"HOURLY": {1, 90}, "DAILY": {1, 186}, "WEEKLY": {7, 366}, "MONTHLY": {30, 732}},
+	// A regional disk is a disk: the overview lists "Disk" once.
+	ComputeRegionDiskResourceType: {"HOURLY": {1, 90}, "DAILY": {1, 186}, "WEEKLY": {7, 366}, "MONTHLY": {30, 732}},
+	CloudSQLResourceType:          {"HOURLY": {1, 90}, "DAILY": {1, 186}, "WEEKLY": {7, 366}, "MONTHLY": {30, 732}},
+	AlloyDBResourceType:           {"HOURLY": {1, 90}, "DAILY": {1, 186}, "WEEKLY": {7, 365}, "MONTHLY": {30, 365}},
+	FilestoreResourceType:         {"HOURLY": {1, 90}, "DAILY": {1, 186}, "WEEKLY": {7, 366}, "MONTHLY": {30, 732}},
 }
 
 // checkRuleRetention checks a rule's retention against its type's range.

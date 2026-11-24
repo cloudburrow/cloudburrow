@@ -30,10 +30,10 @@ import (
 // Engine's VMs and disks (#2075), AlloyDB clusters and Filestore instances
 // (#1524), each served here while its service is (docs/backupdr.md).
 var bdrResourceTypes = []string{backupdr.CloudSQLResourceType, "compute.googleapis.com/Instance", "compute.googleapis.com/Disk",
-	"alloydb.googleapis.com/Cluster", "file.googleapis.com/Instance"}
+	backupdr.ComputeRegionDiskResourceType, "alloydb.googleapis.com/Cluster", "file.googleapis.com/Instance"}
 
 var bdrResourceTypeLabels = map[string]string{backupdr.CloudSQLResourceType: "Cloud SQL", "compute.googleapis.com/Instance": "Compute Engine",
-	"compute.googleapis.com/Disk": "Disk", "alloydb.googleapis.com/Cluster": "AlloyDB", "file.googleapis.com/Instance": "Filestore"}
+	"compute.googleapis.com/Disk": "Disk", backupdr.ComputeRegionDiskResourceType: "Regional disk", "alloydb.googleapis.com/Cluster": "AlloyDB", "file.googleapis.com/Instance": "Filestore"}
 
 func bdrTypeLabel(t string) string {
 	if l := bdrResourceTypeLabels[t]; l != "" {
@@ -99,7 +99,7 @@ func (s bdrSource) instance() string {
 		return str(nested(g, "filestoreInstanceDatasourceProperties"), "name")
 	case backupdr.ComputeInstanceResourceType:
 		return str(nested(g, "computeInstanceDatasourceProperties"), "name")
-	case backupdr.ComputeDiskResourceType:
+	case backupdr.ComputeDiskResourceType, backupdr.ComputeRegionDiskResourceType:
 		return str(nested(g, "diskDatasourceProperties"), "name")
 	}
 	return str(nested(g, "cloudSqlInstanceDatasourceProperties"), "name")
@@ -491,7 +491,7 @@ func bdrLastState(s string) string {
 
 // CreateForm implements console.Creator: Google's Schedule backup.
 func (p bdrVaultedProvider) CreateForm() (string, []console.Field) {
-	return "Schedule backup", p.scheduleFields(bdrScheduleFields(nil, nil, nil, nil, nil, nil, nil, nil), nil, nil, nil, nil)
+	return "Schedule backup", p.scheduleFields(bdrScheduleFields(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil), nil, nil, nil, nil)
 }
 
 // scheduleFields are Schedule backup's fields with AlloyDB's clusters and
@@ -505,7 +505,7 @@ func (p bdrVaultedProvider) scheduleFields(f []console.Field, clusters []string,
 }
 
 func bdrScheduleFields(instances []string, instLabels map[string]string, plans []string, planLabels map[string]string,
-	vms []string, vmLabels map[string]string, disks []string, diskLabels map[string]string) []console.Field {
+	vms []string, vmLabels map[string]string, disks []string, diskLabels map[string]string, rdisks []string, rdiskLabels map[string]string) []console.Field {
 	regions := backupdr.Regions
 	return []console.Field{
 		{Name: "resourceType", Label: "Resource Type", Type: "radio", Required: true, Section: "Choose resources",
@@ -519,6 +519,8 @@ func bdrScheduleFields(instances []string, instLabels map[string]string, plans [
 			ShowWhen: "resourceType=" + backupdr.ComputeInstanceResourceType, Help: "The Compute Engine VM to back up, in the region chosen: each of its disks, and its configuration."},
 		{Name: "disk", Label: "Disks", Type: "select", Section: "Choose resources", Options: disks, OptionLabels: diskLabels,
 			ShowWhen: "resourceType=" + backupdr.ComputeDiskResourceType, Help: "The disk to back up, in the region chosen."},
+		{Name: "regionDisk", Label: "Regional disks", Type: "select", Section: "Choose resources", Options: rdisks, OptionLabels: rdiskLabels,
+			ShowWhen: "resourceType=" + backupdr.ComputeRegionDiskResourceType, Help: "The regional disk to back up, in the region chosen."},
 		{Name: "plan", Label: "Backup plan", Type: "select", Required: true, Section: "Apply backup plan", Options: plans,
 			OptionLabels: planLabels, Help: "A backup plan for the resource type, in the resource's region."},
 	}
@@ -535,9 +537,10 @@ func (p bdrVaultedProvider) CreateFormFor(ctx context.Context, project string) [
 	plans, planLabels := p.api.planOptions(ctx, project)
 	vms, vmLabels := bdrResourceOptions(p.api.computeResources(project, "instances"))
 	disks, diskLabels := bdrResourceOptions(p.api.computeResources(project, "disks"))
+	rdisks, rdiskLabels := bdrResourceOptions(p.api.computeRegionDisks(project))
 	clusters, clusterLabels := bdrWorkloadOptions(p.api.workloadResources(ctx, project, backupdr.AlloyDBResourceType))
 	fs, fsLabels := bdrWorkloadOptions(p.api.workloadResources(ctx, project, backupdr.FilestoreResourceType))
-	return p.scheduleFields(bdrScheduleFields(sortedKeysOf(inst), labels, plans, planLabels, vms, vmLabels, disks, diskLabels), clusters, clusterLabels, fs, fsLabels)
+	return p.scheduleFields(bdrScheduleFields(sortedKeysOf(inst), labels, plans, planLabels, vms, vmLabels, disks, diskLabels, rdisks, rdiskLabels), clusters, clusterLabels, fs, fsLabels)
 }
 
 func (bdrVaultedProvider) CreateOnPage() bool   { return true }

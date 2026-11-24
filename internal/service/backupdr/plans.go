@@ -13,9 +13,9 @@ import (
 // refused.
 func workloadWhy(typ string) string {
 	return "CloudBurrow's Backup and DR Service protects Cloud SQL instances (" + CloudSQLResourceType + "), Compute Engine " +
-		"instances and disks (" + ComputeInstanceResourceType + ", " + ComputeDiskResourceType + "), AlloyDB clusters (" +
-		AlloyDBResourceType + ") and Filestore instances (" + FilestoreResourceType + "); " + typ +
-		" is another workload type (such as regional disks, which Compute Engine here does not serve) (docs/backupdr.md)"
+		"instances, disks and regional disks (" + ComputeInstanceResourceType + ", " + ComputeDiskResourceType + ", " +
+		ComputeRegionDiskResourceType + "), AlloyDB clusters (" + AlloyDBResourceType + ") and Filestore instances (" +
+		FilestoreResourceType + "); " + typ + " is another workload type (docs/backupdr.md)"
 }
 
 var recurrences = map[string]bool{"HOURLY": true, "DAILY": true, "WEEKLY": true, "MONTHLY": true, "YEARLY": true}

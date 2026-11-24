@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/locations"
 )
 
 // Compute Engine instances and disks (#2075). A backup plan for either
@@ -27,6 +29,11 @@ const (
 	ComputeInstanceResourceType = "compute.googleapis.com/Instance"
 	// ComputeDiskResourceType is a zonal Persistent Disk.
 	ComputeDiskResourceType = "compute.googleapis.com/Disk"
+	// ComputeRegionDiskResourceType is a regional Persistent Disk or
+	// Hyperdisk Balanced High Availability volume (#2206): "Regional
+	// Persistent Disk and Hyperdisk volumes (compute.googleapis.com/RegionDisk)"
+	// (restore-data/automated-restore-verification).
+	ComputeRegionDiskResourceType = "compute.googleapis.com/RegionDisk"
 	// computeRunPrefix starts a Compute Engine backup's run ID, so the
 	// runs it shares with Cloud SQL's are told apart.
 	computeRunPrefix = "compute-"
@@ -101,28 +108,47 @@ func googleStatus(code int) string {
 
 // collection is the compute collection of a resource type.
 func collection(typ string) string {
-	if typ == ComputeDiskResourceType {
+	if isDiskType(typ) {
 		return "disks"
 	}
 	return "instances"
 }
 
+// isDiskType is whether typ is a zonal or a regional disk.
+func isDiskType(typ string) bool {
+	return typ == ComputeDiskResourceType || typ == ComputeRegionDiskResourceType
+}
+
+// scopeKind is the compute scope collection of a resource type: zones, or
+// regions for a regional disk.
+func scopeKind(typ string) string {
+	if typ == ComputeRegionDiskResourceType {
+		return "regions"
+	}
+	return "zones"
+}
+
 // computeResource parses an association's resource, a resource name
-// ("projects/my-project/zones/us-central1-a/instances/my-instance") or a
-// full one (//compute.googleapis.com/... or https://www.googleapis.com/compute/v1/...).
+// ("projects/my-project/zones/us-central1-a/instances/my-instance",
+// projects/P/regions/R/disks/D for a regional disk) or a full one
+// (//compute.googleapis.com/... or https://www.googleapis.com/compute/v1/...);
+// zone is the region of a regional disk.
 func computeResource(res, typ string) (project, zone, name string, ok bool) {
 	for _, p := range []string{"//compute.googleapis.com/", "https://www.googleapis.com/compute/v1/", "https://compute.googleapis.com/compute/v1/"} {
 		res = strings.TrimPrefix(res, p)
 	}
 	p := strings.Split(res, "/")
-	if len(p) != 6 || p[0] != "projects" || p[2] != "zones" || p[4] != collection(typ) || p[1] == "" || p[3] == "" || p[5] == "" {
+	if len(p) != 6 || p[0] != "projects" || p[2] != scopeKind(typ) || p[4] != collection(typ) || p[1] == "" || p[3] == "" || p[5] == "" {
 		return "", "", "", false
 	}
 	return p[1], p[3], p[5], true
 }
 
-// regionOfZone is us-central1 for us-central1-a.
+// regionOfZone is us-central1 for us-central1-a, and a region itself.
 func regionOfZone(zone string) string {
+	if strings.Count(zone, "-") < 2 {
+		return zone
+	}
 	if i := strings.LastIndex(zone, "-"); i > 0 {
 		return zone[:i]
 	}
@@ -145,7 +171,7 @@ func gb(v any) int64 {
 // computeProps are a VM's or disk's dataSourceGcpResource properties
 // (ComputeInstanceDataSourceProperties, DiskDataSourceProperties).
 func computeProps(typ, rel string, o map[string]any) map[string]any {
-	if typ == ComputeDiskResourceType {
+	if isDiskType(typ) {
 		return map[string]any{"name": rel, "description": str(o, "description"), "type": str(o, "type"),
 			"sizeGb": strconv.FormatInt(gb(o["sizeGb"]), 10)}
 	}
@@ -160,14 +186,20 @@ func computeProps(typ, rel string, o map[string]any) map[string]any {
 }
 
 func (d *dataSource) computeRel() string {
-	return "projects/" + d.Project + "/zones/" + d.Zone + "/" + collection(d.Kind) + "/" + d.Instance
+	return "projects/" + d.Project + "/" + d.computePath()
+}
+
+// computePath is the resource's path under its project:
+// zones/Z/instances/I, zones/Z/disks/D or regions/R/disks/D.
+func (d *dataSource) computePath() string {
+	return scopeKind(d.Kind) + "/" + d.Zone + "/" + collection(d.Kind) + "/" + d.Instance
 }
 
 // computeGcpResource is a Compute Engine data source's dataSourceGcpResource.
 func (d *dataSource) computeGcpResource() map[string]any {
 	out := map[string]any{"gcpResourcename": "//compute.googleapis.com/" + d.computeRel(), "location": d.Zone, "type": d.Kind}
 	key := "computeInstanceDatasourceProperties"
-	if d.Kind == ComputeDiskResourceType {
+	if isDiskType(d.Kind) {
 		key = "diskDatasourceProperties"
 	}
 	out[key] = d.Props
@@ -193,6 +225,8 @@ type computeDisk struct {
 	Boot, AutoDelete                                      bool
 	Labels                                                map[string]any `json:",omitempty"`
 	Licenses                                              []any          `json:",omitempty"`
+	// ReplicaZones are a regional disk's.
+	ReplicaZones []string `json:",omitempty"`
 }
 
 // runLocked is a backup run's state: a Compute Engine backup's, or Cloud
@@ -260,7 +294,8 @@ func (s *Server) createComputeAssociation(loc, id, planName, resource, typ strin
 			resource, strings.TrimSuffix(collection(typ), "s"), collection(typ))
 	}
 	// "The backup plan ... must be in the same region as the resource":
-	// a zonal resource is protected from its zone's region.
+	// a zonal resource is protected from its zone's region, a regional
+	// disk from its region.
 	if l := locationOfName(loc + "/x"); l != regionOfZone(zone) {
 		return nil, invalid("backupPlanAssociation %s is in %s: a resource in zone %s is protected by a backup plan association in its region, %s.",
 			loc+"/backupPlanAssociations/"+id, l, zone, regionOfZone(zone))
@@ -269,8 +304,9 @@ func (s *Server) createComputeAssociation(loc, id, planName, resource, typ strin
 	if err != nil {
 		return nil, err
 	}
-	rel := "projects/" + project + "/zones/" + zone + "/" + collection(typ) + "/" + rname
-	o, err := c.Call(http.MethodGet, project, "zones/"+zone+"/"+collection(typ)+"/"+rname, nil, nil)
+	path := scopeKind(typ) + "/" + zone + "/" + collection(typ) + "/" + rname
+	rel := "projects/" + project + "/" + path
+	o, err := c.Call(http.MethodGet, project, path, nil, nil)
 	if err != nil {
 		return nil, computeError(err)
 	}
@@ -328,6 +364,8 @@ func jobResourceType(kind string) string {
 		return "Compute Engine"
 	case ComputeDiskResourceType:
 		return "Disk"
+	case ComputeRegionDiskResourceType:
+		return "Regional Disk"
 	case AlloyDBResourceType:
 		return "AlloyDB"
 	case FilestoreResourceType:
@@ -435,9 +473,13 @@ func (s *Server) computeBackup(assocName, planName, ruleID string, onDemand bool
 	return opName, out, nil
 }
 
-// waitCompute waits for a compute zonal operation to finish, and returns
-// its error.
+// waitCompute waits for a compute zonal (or, scope regions/R, regional)
+// operation to finish, and returns its error.
 func waitCompute(c Compute, project, zone string, op map[string]any) error {
+	scope := "zones/" + zone
+	if strings.Count(zone, "-") < 2 {
+		scope = "regions/" + zone
+	}
 	name := str(op, "name")
 	deadline := time.Now().Add(30 * time.Minute)
 	for {
@@ -456,7 +498,7 @@ func waitCompute(c Compute, project, zone string, op map[string]any) error {
 		if time.Now().After(deadline) {
 			return errorf(http.StatusGatewayTimeout, "DEADLINE_EXCEEDED", "the Compute Engine operation %s did not finish", name)
 		}
-		next, err := c.Call(http.MethodPost, project, "zones/"+zone+"/operations/"+name+"/wait", nil, nil)
+		next, err := c.Call(http.MethodPost, project, scope+"/operations/"+name+"/wait", nil, nil)
 		if err != nil {
 			return computeError(err)
 		}
@@ -468,8 +510,9 @@ func waitCompute(c Compute, project, zone string, op map[string]any) error {
 // into snapshots only the vault lists. On failure the snapshots made so far
 // are deleted.
 func takeComputeBackup(c Compute, kind, project, zone, name, runID string) (map[string]any, []computeDisk, map[string]any, error) {
-	rel := "projects/" + project + "/zones/" + zone + "/" + collection(kind) + "/" + name
-	o, err := c.Call(http.MethodGet, project, "zones/"+zone+"/"+collection(kind)+"/"+name, nil, nil)
+	path := scopeKind(kind) + "/" + zone + "/" + collection(kind) + "/" + name
+	rel := "projects/" + project + "/" + path
+	o, err := c.Call(http.MethodGet, project, path, nil, nil)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("the %s %s cannot be backed up: %w", jobResourceType(kind), rel, computeError(err))
 	}
@@ -479,14 +522,15 @@ func takeComputeBackup(c Compute, kind, project, zone, name, runID string) (map[
 	}
 	var srcs []src
 	var inst map[string]any
-	if kind == ComputeDiskResourceType {
-		srcs = []src{{name, map[string]any{"deviceName": name}}}
+	if isDiskType(kind) {
+		srcs = []src{{path, map[string]any{"deviceName": name}}}
 	} else {
 		inst = o
 		l, _ := o["disks"].([]any)
 		for _, e := range l {
 			ad, _ := e.(map[string]any)
-			srcs = append(srcs, src{lastSeg(str(ad, "source")), ad})
+			// A VM's disk may be regional (regions/R/disks/D).
+			srcs = append(srcs, src{diskPath(str(ad, "source"), zone), ad})
 		}
 	}
 	var out []computeDisk
@@ -496,16 +540,16 @@ func takeComputeBackup(c Compute, kind, project, zone, name, runID string) (map[
 		}
 	}
 	for i, sd := range srcs {
-		disk, err := c.Call(http.MethodGet, project, "zones/"+zone+"/disks/"+sd.disk, nil, nil)
+		disk, err := c.Call(http.MethodGet, project, sd.disk, nil, nil)
 		if err != nil {
 			cleanup()
 			return nil, nil, nil, fmt.Errorf("disk %s cannot be backed up: %w", sd.disk, computeError(err))
 		}
 		snap := "bdr-" + strings.TrimPrefix(runID, computeRunPrefix) + "-" + strconv.Itoa(i)
-		op, err := c.Call(http.MethodPost, project, "zones/"+zone+"/disks/"+sd.disk+"/createSnapshot", nil,
+		op, err := c.Call(http.MethodPost, project, sd.disk+"/createSnapshot", nil,
 			map[string]any{"name": snap, "description": "Backup and DR backup of " + rel, VaultSnapshotQuery: true})
 		if err == nil {
-			err = waitCompute(c, project, zone, op)
+			err = waitCompute(c, project, strings.Split(sd.disk, "/")[1], op)
 		}
 		if err != nil {
 			cleanup()
@@ -515,11 +559,31 @@ func takeComputeBackup(c Compute, kind, project, zone, name, runID string) (map[
 		auto, _ := sd.ad["autoDelete"].(bool)
 		lic, _ := disk["licenses"].([]any)
 		lab, _ := disk["labels"].(map[string]any)
+		var rz []string
+		if l, ok := disk["replicaZones"].([]any); ok {
+			for _, z := range l {
+				if zs, ok := z.(string); ok {
+					rz = append(rz, lastSeg(zs))
+				}
+			}
+		}
 		out = append(out, computeDisk{DeviceName: str(sd.ad, "deviceName"), Snapshot: snap, Source: str(disk, "selfLink"),
 			Type: lastSeg(str(disk, "type")), Description: str(disk, "description"), Mode: str(sd.ad, "mode"), SizeGb: gb(disk["sizeGb"]),
-			Boot: boot, AutoDelete: auto, Labels: lab, Licenses: lic})
+			Boot: boot, AutoDelete: auto, Labels: lab, Licenses: lic, ReplicaZones: rz})
 	}
 	return inst, out, computeProps(kind, rel, o), nil
+}
+
+// diskPath is the path, under its project, of an attached disk's source
+// (zones/Z/disks/D or regions/R/disks/D); a bare name is in zone.
+func diskPath(source, zone string) string {
+	p := strings.Split(source, "/")
+	for i := 0; i+3 < len(p); i++ {
+		if (p[i] == "zones" || p[i] == "regions") && p[i+2] == "disks" {
+			return strings.Join(p[i:i+4], "/")
+		}
+	}
+	return "zones/" + zone + "/disks/" + lastSeg(source)
 }
 
 // computeBackupJSON sets a Compute Engine backup's fields on out:
@@ -532,12 +596,25 @@ func (s *Server) computeBackupJSON(b *backup, d *dataSource, out map[string]any)
 	if r == nil {
 		return
 	}
-	if d.Kind == ComputeDiskResourceType {
-		p := map[string]any{"sourceDisk": d.computeRel(), "zone": "projects/" + d.Project + "/zones/" + d.Zone,
-			"architecture": "X86_64", "physicalBlockSizeBytes": "4096"}
+	if isDiskType(d.Kind) {
+		p := map[string]any{"sourceDisk": d.computeRel(), "architecture": "X86_64", "physicalBlockSizeBytes": "4096"}
+		// "Region and zone are mutually exclusive fields" (DiskBackupProperties).
+		scope := "projects/" + d.Project + "/" + scopeKind(d.Kind) + "/" + d.Zone
+		if d.Kind == ComputeRegionDiskResourceType {
+			p["region"] = scope
+		} else {
+			p["zone"] = scope
+		}
 		if len(r.Disks) == 1 {
 			dk := r.Disks[0]
-			p["sizeGb"], p["type"], p["description"] = strconv.FormatInt(dk.SizeGb, 10), "projects/"+d.Project+"/zones/"+d.Zone+"/diskTypes/"+dk.Type, dk.Description
+			p["sizeGb"], p["type"], p["description"] = strconv.FormatInt(dk.SizeGb, 10), scope+"/diskTypes/"+dk.Type, dk.Description
+			if len(dk.ReplicaZones) > 0 {
+				var rz []any
+				for _, z := range dk.ReplicaZones {
+					rz = append(rz, "projects/"+d.Project+"/zones/"+z)
+				}
+				p["replicaZones"] = rz
+			}
 			if len(dk.Licenses) > 0 {
 				p["licenses"] = dk.Licenses
 			}
@@ -557,7 +634,7 @@ func (s *Server) computeBackupJSON(b *backup, d *dataSource, out map[string]any)
 	for _, dk := range r.Disks {
 		disks = append(disks, map[string]any{"deviceName": dk.DeviceName, "boot": dk.Boot, "autoDelete": dk.AutoDelete,
 			"mode": dk.Mode, "diskSizeGb": strconv.FormatInt(dk.SizeGb, 10), "type": "PERSISTENT",
-			"diskType": "projects/" + d.Project + "/zones/" + d.Zone + "/diskTypes/" + dk.Type,
+			"diskType": diskTypeLink(d.Project, d.Zone, dk),
 			"source":   dk.Source})
 	}
 	p := map[string]any{"sourceInstance": d.computeRel(), "machineType": str(i, "machineType"), "description": str(i, "description"),
@@ -610,10 +687,6 @@ func (s *Server) restoreCompute(name string, body map[string]any) (any, error) {
 		return nil, err
 	}
 	mapOf := func(k string) (map[string]any, bool) { m, ok := body[k].(map[string]any); return m, ok }
-	if _, ok := mapOf("regionDiskTargetEnvironment"); ok {
-		return nil, unimplemented("restoring into a regional disk (regionDiskTargetEnvironment)",
-			"Compute Engine here serves zonal disks only; use diskTargetEnvironment")
-	}
 	if m := str(body, "clearOverridesFieldMask"); m != "" {
 		return nil, unimplemented("clearOverridesFieldMask", "every restored field is the backup's or its override")
 	}
@@ -633,31 +706,57 @@ func (s *Server) restoreCompute(name string, body map[string]any) (any, error) {
 	kind := d.Kind
 	s.mu.Unlock()
 	instEnv, hasInst := mapOf("computeInstanceTargetEnvironment")
-	diskEnv, hasDisk := mapOf("diskTargetEnvironment")
+	diskEnv, hasZonal := mapOf("diskTargetEnvironment")
+	regionEnv, hasRegional := mapOf("regionDiskTargetEnvironment")
+	hasDisk := hasZonal || hasRegional
+	targets := 0
+	for _, h := range []bool{hasInst, hasZonal, hasRegional} {
+		if h {
+			targets++
+		}
+	}
 	switch {
-	case hasInst && hasDisk:
-		return nil, invalid("Give computeInstanceTargetEnvironment or diskTargetEnvironment, not both.")
-	case kind == ComputeDiskResourceType && hasInst:
-		return nil, invalid("Backup %s is a disk's backup: restore it with diskTargetEnvironment and diskRestoreProperties.", name)
+	case targets > 1:
+		return nil, invalid("Give one of computeInstanceTargetEnvironment, diskTargetEnvironment and regionDiskTargetEnvironment.")
+	case isDiskType(kind) && hasInst:
+		return nil, invalid("Backup %s is a disk's backup: restore it with diskTargetEnvironment or regionDiskTargetEnvironment, and diskRestoreProperties.", name)
 	case kind == ComputeInstanceResourceType && !hasInst && !hasDisk:
-		return nil, invalid("computeInstanceTargetEnvironment is required to restore a Compute Engine instance's backup (or diskTargetEnvironment, for one of its disks).")
-	case kind == ComputeDiskResourceType && !hasDisk:
-		return nil, invalid("diskTargetEnvironment is required to restore a disk's backup.")
+		return nil, invalid("computeInstanceTargetEnvironment is required to restore a Compute Engine instance's backup (or diskTargetEnvironment or regionDiskTargetEnvironment, for one of its disks).")
+	case isDiskType(kind) && !hasDisk:
+		return nil, invalid("diskTargetEnvironment or regionDiskTargetEnvironment is required to restore a disk's backup.")
 	}
-	env := instEnv
-	if hasDisk {
-		env = diskEnv
+	env, envField, locField := instEnv, "computeInstanceTargetEnvironment", "zone"
+	switch {
+	case hasZonal:
+		env, envField = diskEnv, "diskTargetEnvironment"
+	case hasRegional:
+		env, envField, locField = regionEnv, "regionDiskTargetEnvironment", "region"
 	}
-	envField := "computeInstanceTargetEnvironment"
-	if hasDisk {
-		envField = "diskTargetEnvironment"
-	}
-	project, zone := str(env, "project"), str(env, "zone")
+	project, zone := str(env, "project"), str(env, locField)
 	if project == "" {
 		return nil, invalid("%s.project is required.", envField)
 	}
 	if zone == "" {
-		return nil, invalid("%s.zone is required.", envField)
+		return nil, invalid("%s.%s is required.", envField, locField)
+	}
+	var replicaZones []any
+	if hasRegional {
+		// "Target URLs of the replica zones for the disk" (required): two
+		// zones of the region, as gcloud's --replica-zones takes them.
+		l, _ := env["replicaZones"].([]any)
+		if len(l) == 0 {
+			return nil, invalid("regionDiskTargetEnvironment.replicaZones is required.")
+		}
+		if len(l) != 2 {
+			return nil, invalid("regionDiskTargetEnvironment.replicaZones must list exactly 2 zones, not %d.", len(l))
+		}
+		for i, z := range l {
+			zs, _ := z.(string)
+			if regionOfZone(lastSeg(zs)) != zone {
+				return nil, invalid("regionDiskTargetEnvironment.replicaZones[%d] %q is not a zone of region %s.", i, zs, zone)
+			}
+			replicaZones = append(replicaZones, "zones/"+lastSeg(zs))
+		}
 	}
 	c, err := s.computeAPI()
 	if err != nil {
@@ -665,12 +764,21 @@ func (s *Server) restoreCompute(name string, body map[string]any) (any, error) {
 	}
 	var target, typ, path string
 	var insert map[string]any
-	if hasDisk {
+	switch {
+	case hasRegional:
 		props, _ := mapOf("diskRestoreProperties")
-		insert, err = diskInsert(name, run, props, kind, zone)
+		insert, err = diskInsert(name, run, props, kind, "regions/"+zone)
+		if err == nil {
+			insert["replicaZones"] = replicaZones
+		}
+		typ, path = ComputeRegionDiskResourceType, "regions/"+zone+"/disks"
+		target = "projects/" + project + "/regions/" + zone + "/disks/" + str(insert, "name")
+	case hasZonal:
+		props, _ := mapOf("diskRestoreProperties")
+		insert, err = diskInsert(name, run, props, kind, "zones/"+zone)
 		typ, path = ComputeDiskResourceType, "zones/"+zone+"/disks"
 		target = "projects/" + project + "/zones/" + zone + "/disks/" + str(insert, "name")
-	} else {
+	default:
 		props, _ := mapOf("computeInstanceRestoreProperties")
 		insert, err = instanceInsert(run, props, project, zone)
 		typ, path = ComputeInstanceResourceType, "zones/"+zone+"/instances"
@@ -711,8 +819,9 @@ func snapshotRel(run computeRun, d computeDisk) string {
 	return "projects/" + run.Project + "/global/snapshots/" + d.Snapshot
 }
 
-// diskInsert is the disks.insert body of a disk restore.
-func diskInsert(name string, run computeRun, props map[string]any, kind, zone string) (map[string]any, error) {
+// diskInsert is the disks.insert (or regionDisks.insert) body of a disk
+// restore into scope, zones/Z or regions/R.
+func diskInsert(name string, run computeRun, props map[string]any, kind, scope string) (map[string]any, error) {
 	if err := knownKeys("diskRestoreProperties", props, "name", "sizeGb", "type", "description", "labels", "architecture",
 		"licenses", "guestOsFeature", "physicalBlockSizeBytes", "instanceBackupSource"); err != nil {
 		return nil, err
@@ -727,7 +836,7 @@ func diskInsert(name string, run computeRun, props map[string]any, kind, zone st
 		return nil, invalid("diskRestoreProperties.physicalBlockSizeBytes %s is not supported: it is 4096.", p)
 	}
 	var src *computeDisk
-	if kind == ComputeDiskResourceType {
+	if isDiskType(kind) {
 		if _, ok := props["instanceBackupSource"]; ok {
 			return nil, invalid("Backup %s is a disk's backup: diskRestoreProperties.instanceBackupSource applies to a Compute Engine instance's backup.", name)
 		}
@@ -765,7 +874,7 @@ func diskInsert(name string, run computeRun, props map[string]any, kind, zone st
 		typ = lastSeg(t)
 	}
 	ins := map[string]any{"name": str(props, "name"), "sourceSnapshot": snapshotRel(run, *src), "sizeGb": strconv.FormatInt(size, 10),
-		"type": "zones/" + zone + "/diskTypes/" + typ}
+		"type": scope + "/diskTypes/" + typ}
 	if v := str(props, "description"); v != "" {
 		ins["description"] = v
 	} else if src.Description != "" {
@@ -886,6 +995,12 @@ func instanceInsert(run computeRun, props map[string]any, project, zone string) 
 		}
 		ip := map[string]any{"diskName": dname, "sourceSnapshot": snapshotRel(run, dk), "diskType": "zones/" + zone + "/diskTypes/" + dk.Type,
 			"diskSizeGb": strconv.FormatInt(dk.SizeGb, 10)}
+		if len(dk.ReplicaZones) > 0 {
+			// "Source regional persistent disks will be restored with
+			// default replica zones if not specified": the VM's zone and
+			// the region's next.
+			ip["replicaZones"] = defaultReplicaZones(zone)
+		}
 		ad := map[string]any{"boot": dk.Boot, "autoDelete": dk.AutoDelete, "deviceName": dk.DeviceName}
 		if dk.Mode != "" {
 			ad["mode"] = dk.Mode
@@ -909,4 +1024,25 @@ func instanceInsert(run computeRun, props map[string]any, project, zone string) 
 	}
 	ins["disks"] = disks
 	return ins, nil
+}
+
+// diskTypeLink is a backed-up disk's type, under its zone or, for a
+// regional disk, its region.
+func diskTypeLink(project, zone string, dk computeDisk) string {
+	if len(dk.ReplicaZones) > 0 {
+		return "projects/" + project + "/regions/" + regionOfZone(zone) + "/diskTypes/" + dk.Type
+	}
+	return "projects/" + project + "/zones/" + zone + "/diskTypes/" + dk.Type
+}
+
+// defaultReplicaZones are a regional disk's replica zones restored with a
+// VM in zone: zone, and the first other zone of its region.
+func defaultReplicaZones(zone string) []any {
+	out := []any{"zones/" + zone}
+	for _, z := range locations.Zones(regionOfZone(zone)) {
+		if z != zone {
+			return append(out, "zones/"+z)
+		}
+	}
+	return out
 }
