@@ -118,9 +118,14 @@ const (
 	bigqueryPort = 9002
 	// The database emulators Google's Datastore, Bigtable and Spanner
 	// connectors reach through their emulator variables.
-	datastorePort  = 9003
-	bigtablePort   = 9004
-	spannerPort    = 9005
+	datastorePort = 9003
+	bigtablePort  = 9004
+	spannerPort   = 9005
+	// registryPort is the instance's Artifact Registry (its package
+	// formats' protocols), routed for Flex Template launchers only: a
+	// Python template's packages are installed from its Python
+	// repositories.
+	registryPort   = 9006
 	dataflowPort   = 80
 	workerPoolPort = 50000
 	// The Java worker pool the pipeline's environment names
@@ -598,7 +603,7 @@ func (d *Docker) jobNetwork(ctx context.Context, network, relay, dir, image, lab
 		name string
 		port int
 	}{{"storage", storagePort}, {"pubsub", pubsubPort}, {"bigquery", bigqueryPort}, {"dataflow", dataflowPort},
-		{"datastore", datastorePort}, {"bigtable", bigtablePort}, {"spanner", spannerPort}} {
+		{"datastore", datastorePort}, {"bigtable", bigtablePort}, {"spanner", spannerPort}, {"registry", registryPort}} {
 		if a := live[r.name]; a != "" {
 			targets = append(targets, a)
 			ports = append(ports, r.port)

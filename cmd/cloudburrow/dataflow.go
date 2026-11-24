@@ -194,7 +194,9 @@ func (r *dataflowResetter) ResetProject(_ context.Context, project string) error
 type flexLauncher struct{ d *beamrun.Docker }
 
 func (l flexLauncher) Launch(ctx context.Context, f dataflow.FlexLaunch) error {
-	return l.d.LaunchFlex(ctx, beamrun.Flex{Project: f.Project, Location: f.Location, JobName: f.JobName, Image: f.Image, Args: f.Args})
+	return l.d.LaunchFlex(ctx, beamrun.Flex{Project: f.Project, Location: f.Location, JobName: f.JobName, Image: f.Image, Args: f.Args,
+		TempLocation: f.TempLocation, StagingLocation: f.StagingLocation, MaxWorkers: f.MaxWorkers, Update: f.Update,
+		TransformNameMapping: f.TransformNameMapping})
 }
 
 // dataflowEngine runs the API's jobs on beamrun.

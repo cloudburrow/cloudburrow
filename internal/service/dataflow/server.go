@@ -80,9 +80,16 @@ type FlexLaunch struct {
 	// Image is the template's container image (an Artifact Registry
 	// image), Env its environment for the launcher (FLEX_TEMPLATE_*).
 	Image string
-	// Args are the pipeline's arguments: the template's parameters and
-	// the runner's options.
+	// Args are the template's parameters, as --NAME=VALUE.
 	Args []string
+	// TempLocation, StagingLocation, MaxWorkers, Update and
+	// TransformNameMapping (JSON) are the launch's environment and
+	// update, which the launcher gives the program as its SDK's runner
+	// options; zero values are not given.
+	TempLocation, StagingLocation string
+	MaxWorkers                    int32
+	Update                        bool
+	TransformNameMapping          string
 }
 
 // Options are the server's collaborators.

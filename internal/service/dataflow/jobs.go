@@ -81,6 +81,8 @@ func firstNonEmpty(v ...string) string {
 // create stores job in project's loc and starts it; replace is the job it
 // replaces ("" none).
 func (s *Server) create(project, loc string, job *dataflowpb.Job, replace string, view dataflowpb.JobView) (*dataflowpb.Job, error) {
+	// The rule is Job.name's in the REST reference (projects.jobs); Google
+	// publishes no message for a name that breaks it (searched 2026-11-24).
 	if !validName(job.GetName()) {
 		return nil, apierror.InvalidArgument("(%s): Invalid job name: %q. Job names must match the regular expression [a-z]([-a-z0-9]{0,1022}[a-z0-9])?", project, job.GetName())
 	}
@@ -344,7 +346,10 @@ func (s *Server) UpdateJob(_ context.Context, req *dataflowpb.UpdateJobRequest) 
 		// JOB_STATE_DRAINING; Google drains on either.
 		want = dataflowpb.JobState_JOB_STATE_DRAINED
 		if j.Type != dataflowpb.JobType_JOB_TYPE_STREAMING {
-			return nil, apierror.FailedPrecondition("Workflow modification failed. Causes: Draining is supported for streaming jobs only: job %s is a batch job.", j.Id) // UNVERIFIED (docs re-read 2026-11-24)
+			// The cause is the stopping guide's own sentence ("Draining a
+			// job is not supported for batch pipelines."); Google quotes no
+			// server text for it (searched 2026-11-24).
+			return nil, apierror.FailedPrecondition("Workflow modification failed. Causes: Draining a job is not supported for batch pipelines.")
 		}
 		if terminal(j.CurrentState) || j.CurrentState == dataflowpb.JobState_JOB_STATE_CANCELLING {
 			return nil, apierror.FailedPrecondition("Workflow modification failed. Causes: Cannot drain job %s: it is in the state %s.", j.Id, j.CurrentState) // UNVERIFIED (docs re-read 2026-11-24)

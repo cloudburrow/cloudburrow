@@ -84,17 +84,69 @@ func checkParameters(meta *dataflowpb.TemplateMetadata, params map[string]string
 	}
 	sort.Strings(unknown)
 	sort.Strings(missing)
-	if len(missing) > 0 || len(unknown) > 0 {
+	// Parameters the template does not declare fail as Dataflow fails
+	// them, 400 with "The workflow could not be created. Causes: Found
+	// unexpected parameters: ['input' (perhaps you meant 'runner')]"
+	// (quoted in Apache Beam's issue BEAM-2470, 2017; a close match is
+	// suggested). Google publishes no text for a missing required one:
+	// UNVERIFIED (searched 2026-11-24: the templates guides, the REST
+	// reference, gcloud's reference and Beam's sources).
+	if len(unknown) > 0 {
+		names := make([]string, 0, len(unknown))
+		for _, u := range unknown {
+			n := "'" + u + "'"
+			if near := nearest(u, known); near != "" {
+				n += " (perhaps you meant '" + near + "')"
+			}
+			names = append(names, n)
+		}
+		return apierror.InvalidArgument("The workflow could not be created. Causes: Found unexpected parameters: [%s]", strings.Join(names, ", "))
+	}
+	if len(missing) > 0 {
 		var violations []string
 		for _, m := range missing {
 			violations = append(violations, fmt.Sprintf("The template parameters are invalid. Missing required parameter: %s", m))
 		}
-		for _, u := range unknown {
-			violations = append(violations, fmt.Sprintf("The template parameters are invalid. Unrecognized parameter: %s", u))
-		}
-		return apierror.InvalidArgument("%s", strings.Join(violations, "; "))
+		return apierror.InvalidArgument("%s", strings.Join(violations, "; ")) // UNVERIFIED (searched 2026-11-24)
 	}
 	return nil
+}
+
+// nearest is the known name closest to name by edit distance, if it is
+// within a third of name's length (at least 2); "" for none.
+func nearest(name string, known map[string]bool) string {
+	best, bestD := "", max(2, len(name)/3)+1
+	keys := make([]string, 0, len(known))
+	for k := range known {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if d := editDistance(name, k); d < bestD {
+			best, bestD = k, d
+		}
+	}
+	return best
+}
+
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			c := 1
+			if a[i-1] == b[j-1] {
+				c = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+c)
+		}
+		prev = cur
+	}
+	return prev[len(b)]
 }
 
 // fromTemplate is the job a classic template launches: its file's job
@@ -372,7 +424,8 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 		j := r.job
 		if j.ProjectId == job.ProjectId && j.Location == loc && j.Name == job.Name && active(j.CurrentState) && !lp.GetUpdate() {
 			s.mu.Unlock()
-			return nil, apierror.AlreadyExists("There is already an active job named %s. If you want to submit a second job, try again by setting a different name.", job.Name) // UNVERIFIED (docs re-read 2026-11-24)
+			// Dataflow's 409, as quoted in Apache Beam's issue BEAM-12673.
+			return nil, apierror.AlreadyExists("The workflow could not be created. Causes: There is already an active job named %s. If you want to submit a second job, try again by setting a different name.", job.Name)
 		}
 	}
 	r := &jobRec{job: job, flex: true, flexTemp: env.GetTempLocation()}
@@ -391,27 +444,17 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 	for _, k := range keys {
 		args = append(args, "--"+k+"="+lp.GetParameters()[k])
 	}
-	args = append(args, "--job_name="+job.Name, "--project="+job.ProjectId, "--region="+loc)
-	if env.GetTempLocation() != "" {
-		args = append(args, "--temp_location="+env.GetTempLocation())
-	}
-	if env.GetStagingLocation() != "" {
-		args = append(args, "--staging_location="+env.GetStagingLocation())
-	}
-	if env.GetMaxWorkers() > 0 {
-		args = append(args, fmt.Sprintf("--max_num_workers=%d", env.GetMaxWorkers()))
-	}
-	if lp.GetUpdate() {
-		args = append(args, "--update")
-	}
+	fl := FlexLaunch{Project: job.ProjectId, Location: loc, JobName: job.Name, Image: image, Args: args,
+		TempLocation: env.GetTempLocation(), StagingLocation: env.GetStagingLocation(), MaxWorkers: env.GetMaxWorkers(),
+		Update: lp.GetUpdate()}
 	if len(lp.GetTransformNameMappings()) > 0 {
 		b, _ := json.Marshal(lp.GetTransformNameMappings())
-		args = append(args, "--transform_name_mapping="+string(b))
+		fl.TransformNameMapping = string(b)
 	}
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		err := s.opts.Launcher.Launch(context.Background(), FlexLaunch{Project: job.ProjectId, Location: loc, JobName: job.Name, Image: image, Args: args})
+		err := s.opts.Launcher.Launch(context.Background(), fl)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		// Unless the program's job took the launch's place (adopted).

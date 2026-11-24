@@ -340,8 +340,9 @@ func TestTemplates(t *testing.T) {
 	if _, err := launch(nil, false); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("launch without a required parameter = %v; want INVALID_ARGUMENT", err)
 	}
-	if _, err := launch(map[string]string{"input": "x", "nope": "y"}, false); status.Code(err) != codes.InvalidArgument {
-		t.Errorf("launch with an unknown parameter = %v; want INVALID_ARGUMENT", err)
+	if _, err := launch(map[string]string{"input": "x", "nope": "y", "inptu": "z"}, false); status.Code(err) != codes.InvalidArgument ||
+		status.Convert(err).Message() != "The workflow could not be created. Causes: Found unexpected parameters: ['inptu' (perhaps you meant 'input'), 'nope']" {
+		t.Errorf("launch with unknown parameters = %v; want INVALID_ARGUMENT, Dataflow's Found unexpected parameters", err)
 	}
 	if r, err := launch(map[string]string{"input": "x"}, true); err != nil || r.GetJob().GetId() != "" {
 		t.Errorf("validateOnly = %v, %v; want no job", r, err)
@@ -456,7 +457,8 @@ func TestFlexTemplates(t *testing.T) {
 		t.Errorf("the launched job is %s; want QUEUED", r.GetJob().GetCurrentState())
 	}
 	f := <-got
-	if f.Image != "us-central1-docker.pkg.dev/p/r/flex:1" || !strings.Contains(strings.Join(f.Args, " "), "--input=gs://b/in.txt --job_name=flex --project=p --region=us-central1 --temp_location=gs://b/tmp --max_num_workers=2") {
+	if f.Image != "us-central1-docker.pkg.dev/p/r/flex:1" || strings.Join(f.Args, " ") != "--input=gs://b/in.txt" ||
+		f.JobName != "flex" || f.Project != "p" || f.Location != "us-central1" || f.TempLocation != "gs://b/tmp" || f.MaxWorkers != 2 {
 		t.Errorf("the launcher was given %+v", f)
 	}
 	// The program's job is the launch's: one job, its ID, run to the end.
