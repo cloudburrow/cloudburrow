@@ -87,11 +87,12 @@ type computeService struct {
 	// IAP TCP forwarding's tunnels; tunnel is their relay.
 	callerOf func(string) iameval.Caller
 	tunnel   *iap.Tunnel
-	// vms runs the VM instances (#1963); guestBase and metadataHost are
-	// set by up once the cluster host is known.
-	vms          *computeVMs
-	guestBase    func() string
-	metadataHost func() string
+	// vms runs the VM instances (#1963); guestBase is set by up once the
+	// cluster host is known, and tokens (the instance's credentials) mint
+	// a VM's service account tokens on its metadata server (#2177).
+	vms       *computeVMs
+	guestBase func() string
+	tokens    compute.GuestTokens
 	// relayAt is the VM relay's in-cluster address (#2160), set by up.
 	relayAt func() string
 	// firewallLog writes Firewall Rules Logging records to this
@@ -205,12 +206,6 @@ func (s *computeService) Start(ctx context.Context) error {
 		}
 		return s.guestBase()
 	}
-	s.vms.metadataHost = func() string {
-		if s.metadataHost == nil {
-			return ""
-		}
-		return s.metadataHost()
-	}
 	s.svcIPs = &serviceIPs{kubeconfig: s.cfg.KubeconfigPath(), namespace: s.cfg.Cluster.Namespace}
 	dir := func(name string) string {
 		if state == "" {
@@ -264,7 +259,7 @@ func (s *computeService) Start(ctx context.Context) error {
 				return ""
 			}
 			return s.guestReach(loopback)
-		}})
+		}, Tokens: s.tokens})
 	if err != nil {
 		return err
 	}

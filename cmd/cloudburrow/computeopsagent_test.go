@@ -36,7 +36,7 @@ func TestOpsAgentEnv(t *testing.T) {
 func TestOpsAgentUnitsAreFenced(t *testing.T) {
 	for _, u := range []string{"google-cloud-ops-agent-fluent-bit", "google-cloud-ops-agent-opentelemetry-collector", "google-cloud-ops-agent"} {
 		b := readGuestFile(t, "etc/systemd/system/"+u+".service.d/zz-cloudburrow.conf")
-		for _, want := range []string{"Requires=cloudburrow-ops-agent-fence.service cloudburrow-ops-agent-metadata.service",
+		for _, want := range []string{"Requires=cloudburrow-ops-agent-fence.service cloudburrow-metadata-server.service",
 			"Group=cloudburrow-opsagent", "ExecCondition=+/usr/lib/cloudburrow/ops-agent condition", "\nExecStartPre=\n"} {
 			if !strings.Contains(b, want) {
 				t.Errorf("%s: no %q", u, want)

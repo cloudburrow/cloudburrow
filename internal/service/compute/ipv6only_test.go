@@ -83,10 +83,11 @@ func TestIPv6OnlySubnetsAndInstances(t *testing.T) {
 	// The metadata server's interface keys.
 	s.mu.Lock()
 	inst := s.res["projects/p2139/zones/us-central1-a/instances/a"]
-	if v, ok := nicValue(inst, "0/ipv6s"); !ok || v != str(na, "ipv6Address")+"\n" {
+	root := s.guestTreeLocked(inst, "p2139")
+	if v, _, ok := guestBody(root, "instance/network-interfaces/0/ipv6s", nil); !ok || v != str(na, "ipv6Address")+"\n" {
 		t.Errorf("ipv6s = %q, %v", v, ok)
 	}
-	if v, _ := nicValue(inst, "0/mac"); !strings.HasPrefix(v, "42:02:") {
+	if v, _, _ := guestBody(root, "instance/network-interfaces/0/mac", nil); !strings.HasPrefix(v, "42:02:") {
 		t.Errorf("mac = %q", v)
 	}
 	for _, n := range []string{"b", "c"} {

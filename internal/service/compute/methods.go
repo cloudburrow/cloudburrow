@@ -167,7 +167,7 @@ var Methods = []Method{
 	{"compute.instances.bulkInsert", false},
 	{"compute.instances.deleteAccessConfig", true},
 	{"compute.instances.getEffectiveFirewalls", false},
-	{"compute.instances.getGuestAttributes", false},
+	{"compute.instances.getGuestAttributes", true},
 	{"compute.instances.getIamPolicy", true},
 	{"compute.instances.getScreenshot", false},
 	{"compute.instances.getShieldedInstanceIdentity", false},

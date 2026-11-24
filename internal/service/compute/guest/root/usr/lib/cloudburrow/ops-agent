@@ -31,10 +31,9 @@
 #                     left in the configuration, fails the unit: the agent
 #                     does not start.
 #
-# The metadata relay (ops-agent-metadata, 127.0.0.1:8169) answers the
-# agent's metadata reads for this instance: its own attributes from the
-# Compute Engine port, its service account's tokens from the metadata
-# server.
+# The metadata server relay (metadata-server, 127.0.0.1:8169) answers the
+# agent's metadata reads for this instance, its service account's tokens
+# included, from the instance's own metadata server (#2177).
 set -u
 RUN=/run/cloudburrow-ops-agent
 RELAY=http://127.0.0.1:8169

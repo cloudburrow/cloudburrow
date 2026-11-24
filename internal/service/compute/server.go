@@ -140,6 +140,10 @@ type Options struct {
 	// endpoints are carried from VMs to their listeners through it
 	// (vpcservices.go). nil carries neither.
 	GuestReach func(loopback string) string
+	// Tokens mints the access and identity tokens a VM's metadata server
+	// hands out for its service account (#2177, guestmetadata.go); nil
+	// answers them 503.
+	Tokens GuestTokens
 }
 
 // PrivateService is one private services access endpoint: its address and

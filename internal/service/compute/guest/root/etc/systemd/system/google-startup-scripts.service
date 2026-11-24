@@ -1,6 +1,6 @@
 [Unit]
 Description=Google Compute Engine Startup Scripts
-After=network-online.target cloudburrow-network.service cloudburrow-guest-agent.service
+After=network-online.target cloudburrow-network.service cloudburrow-metadata-server.service cloudburrow-guest-agent.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes

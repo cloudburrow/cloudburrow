@@ -257,6 +257,8 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		return s.deleteInstance(c.project, scope, rel, o)
 	case get && verb == "serialPort":
 		return s.serialPort(c, rel, o)
+	case get && verb == "getGuestAttributes":
+		return s.getGuestAttributes(c, rel, o)
 	case post && verb == "start":
 		if status == stRunning {
 			return s.done(c.project, scope, "start", rel, o["id"])
@@ -366,7 +368,7 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 }
 
 // servedInstanceVerbs are the instance methods served under instances/NAME/.
-var servedInstanceVerbs = map[string]bool{"serialPort": true, "start": true, "stop": true, "reset": true, "suspend": true,
+var servedInstanceVerbs = map[string]bool{"serialPort": true, "getGuestAttributes": true, "start": true, "stop": true, "reset": true, "suspend": true,
 	"resume": true, "setMetadata": true, "setLabels": true, "setTags": true, "setDeletionProtection": true,
 	"setMachineType": true, "attachDisk": true, "detachDisk": true, "addResourcePolicies": true, "removeResourcePolicies": true,
 	"setScheduling": true, "addAccessConfig": true, "deleteAccessConfig": true}

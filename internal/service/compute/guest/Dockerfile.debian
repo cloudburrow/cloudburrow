@@ -27,7 +27,7 @@ COPY root/ /
 RUN chmod 0755 /usr/lib/cloudburrow/* \
  && systemctl mask systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket getty.target console-getty.service systemd-logind.service \
  && systemctl enable cloudburrow-network.service cloudburrow-vpc.service cloudburrow-relay6.service cloudburrow-guest-agent.service google-startup-scripts.service \
-    cloudburrow-ops-agent-fence.service cloudburrow-ops-agent-metadata.service google-cloud-ops-agent.service \
+    cloudburrow-ops-agent-fence.service cloudburrow-metadata-server.service google-cloud-ops-agent.service \
  && (systemctl enable ssh.service 2>/dev/null || systemctl enable sshd.service) \
  && echo '%google-sudoers ALL=(ALL:ALL) NOPASSWD:ALL' > /etc/sudoers.d/google_sudoers && chmod 0440 /etc/sudoers.d/google_sudoers \
  && groupadd -f google-sudoers
