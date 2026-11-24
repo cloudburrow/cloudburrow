@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -300,10 +301,9 @@ func (b *computeVMs) Start(ctx context.Context, vm compute.VMSpec) error {
 	if _, err := b.kubectl(ctx, "wait", "--for=condition=Ready", "pod/"+vm.Key, "--timeout=10m"); err != nil {
 		return fmt.Errorf("boot %s: %w", vm.Name, err)
 	}
-	f := netfwd.New(netfwd.Target{Name: vm.Key, Namespace: b.ns(), ServicePort: 22, Label: "ssh-" + vm.Key},
-		b.cfg.KubeconfigPath(), b.cfg.BindAddress)
-	if err := f.Start(b.bg); err != nil {
-		return fmt.Errorf("forward %s's SSH port: %w", vm.Name, err)
+	f, err := b.forwardSSH(ctx, vm)
+	if err != nil {
+		return err
 	}
 	b.mu.Lock()
 	old := b.tunnel[vm.Key]
@@ -313,6 +313,37 @@ func (b *computeVMs) Start(ctx context.Context, vm compute.VMSpec) error {
 		_ = old.Stop(context.Background())
 	}
 	return nil
+}
+
+// vmSSHWait bounds how long a started instance's sshd may take to listen.
+// A pod is Ready once its container starts, while the guest is still
+// booting systemd: on a loaded machine (CI's run shard, main run
+// 45382531465) sshd listened more than netfwd's 15 s start wait after
+// that, the start failed, and the instance's insert was undone, which
+// left a managed instance group one VM short.
+var vmSSHWait = 5 * time.Minute
+
+// forwardSSH starts the tunnel to the instance's port 22, starting it
+// again while the guest's sshd does not listen yet, for up to vmSSHWait.
+func (b *computeVMs) forwardSSH(ctx context.Context, vm compute.VMSpec) (*netfwd.Forwarder, error) {
+	deadline := time.Now().Add(vmSSHWait)
+	for {
+		f := netfwd.New(netfwd.Target{Name: vm.Key, Namespace: b.ns(), ServicePort: 22, Label: "ssh-" + vm.Key},
+			b.cfg.KubeconfigPath(), b.cfg.BindAddress)
+		err := f.Start(b.bg)
+		if err == nil {
+			return f, nil
+		}
+		_ = f.Stop(context.Background())
+		if !errors.Is(err, netfwd.ErrForwardFailed) || time.Now().After(deadline) {
+			return nil, fmt.Errorf("forward %s's SSH port: %w", vm.Name, err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("forward %s's SSH port: %w", vm.Name, ctx.Err())
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 func (b *computeVMs) Stop(ctx context.Context, vm compute.VMSpec) error {
