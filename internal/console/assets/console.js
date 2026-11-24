@@ -21460,7 +21460,12 @@ function bqMenu(label, items) {
     const b = el("button", {
       type: "button", role: it.checked ? "menuitemcheckbox" : "menuitem", class: "bq-menu-item" + (it.danger ? " danger" : "") + (it.checked ? " bq-menu-check" : ""),
       text: it.label, disabled: it.disabled || null, title: it.title || null,
-      onclick: (e) => { e.stopPropagation(); close(); it.run(); },
+      // Focus goes back to the menu's button before the item runs, as a
+      // menu's activation returns it: hiding the menu would otherwise drop
+      // it to the document, so a pane the item opens (Export as scheduled
+      // query) had no control to give it back to on Cancel, and the next
+      // Tab started past the end of the page.
+      onclick: (e) => { e.stopPropagation(); close(); button.focus(); it.run(); },
     });
     if (it.checked) {
       const mark = el("span", { class: "bq-menu-mark", "aria-hidden": "true" });
