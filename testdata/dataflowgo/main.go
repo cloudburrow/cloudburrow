@@ -116,7 +116,29 @@ func scoresFn(_ []byte, emit func(Score)) {
 	}
 }
 
-func formatScoreFn(s Score) string { return fmt.Sprintf("%s=%d", s.Name, s.Score) }
+// formatScoreFn formats a row the cross-language read produced. The Go
+// harness decodes the Java read's schema rows by their schema alone, as an
+// unnamed struct of the table's columns (pointers for NULLABLE ones), not
+// as the Score the read asked for (Apache Beam issue 21784; Beam's own
+// xlang BigQuery test reads into unnamed struct types for this reason), so
+// the row's name and score fields are read by reflection.
+func formatScoreFn(row beam.X) string {
+	v := reflect.Indirect(reflect.ValueOf(row))
+	field := func(name string) any {
+		f := v.FieldByName(name)
+		if !f.IsValid() {
+			return nil
+		}
+		if f.Kind() == reflect.Pointer {
+			if f.IsNil() {
+				return nil
+			}
+			f = f.Elem()
+		}
+		return f.Interface()
+	}
+	return fmt.Sprintf("%v=%v", field("Name"), field("Score"))
+}
 
 func init() {
 	register.Function3x0(extractFn)
