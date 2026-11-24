@@ -56,7 +56,10 @@ func TestStandInConnectInstallsOwnKeyAndForwards(t *testing.T) {
 	state := t.TempDir()
 	var stages []string
 	s, err := Connect(ctx, Options{Target: tg, StateDir: state, Instance: "standin", SSHConfig: sshConfig,
-		Progress: func(e Event) { stages = append(stages, string(e.Stage)); t.Logf("%s: %s %s", e.Stage, e.Message, e.Error) }})
+		Progress: func(e Event) {
+			stages = append(stages, string(e.Stage))
+			t.Logf("%s: %s %s", e.Stage, e.Message, e.Error)
+		}})
 	if err != nil {
 		t.Fatal(err)
 	}

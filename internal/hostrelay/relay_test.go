@@ -78,3 +78,38 @@ func TestRelayToADeadTargetEndsTheConnection(t *testing.T) {
 		t.Error("a connection to a dead target stayed open")
 	}
 }
+
+type fakeTunnel struct {
+	listen, target string
+	cancelled      bool
+}
+
+func (f *fakeTunnel) Reverse(_ context.Context, listen, target string) (string, func() error, error) {
+	f.listen, f.target = listen, target
+	return "172.18.0.1:40001", func() error { f.cancelled = true; return nil }, nil
+}
+
+// With a Tunnel (#2209) a relay binds nothing here: its listen is handed to
+// the tunnel, its address is the one bound on the compute host, and Close
+// cancels the forward.
+func TestRelayOverATunnel(t *testing.T) {
+	ft := &fakeTunnel{}
+	SetRemote(ft)
+	t.Cleanup(func() { SetRemote(nil) })
+	r := &Relay{Listen: "172.18.0.1:0", Target: "127.0.0.1:9001"}
+	if err := r.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if ft.listen != "172.18.0.1:0" || ft.target != "127.0.0.1:9001" {
+		t.Fatalf("the tunnel was asked for %s -> %s", ft.listen, ft.target)
+	}
+	if r.Addr() != "172.18.0.1:40001" {
+		t.Fatalf("Addr = %q, want the address bound on the host", r.Addr())
+	}
+	if err := r.Close(); err != nil || !ft.cancelled {
+		t.Fatalf("Close = %v, cancelled %v", err, ft.cancelled)
+	}
+	if r.Addr() != "" {
+		t.Fatalf("Addr after Close = %q", r.Addr())
+	}
+}

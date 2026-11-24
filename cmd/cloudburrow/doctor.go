@@ -68,6 +68,14 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		}
 	}
 	report := doctor.Run(ctx, env, doctorOptions(cfg))
+	if len(remote) > 0 {
+		for i, r := range report.Results {
+			// The engine doctor classifies is the compute host's.
+			if r.Name == "docker engine" {
+				report.Results[i].Detail = strings.ReplaceAll(r.Detail, "on this host", "on the compute host")
+			}
+		}
+	}
 	report.Results = append(remote, report.Results...)
 	arch := daemonArch(ctx, prefetch.ExecRunner{})
 	report.Results = append(report.Results, storageEmbedResult(cfg, arch), bigQueryEmbedResult(cfg, arch))

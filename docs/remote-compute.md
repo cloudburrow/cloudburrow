@@ -220,8 +220,16 @@ the network.
 - `test/compat`'s `TestRemoteCompute*` (`remotecompute_test.go`), against an instance started with
   `--compute` on the stand-in, check that the instance's kind node is on the host and not on this
   machine's Docker. They then drive Storage, Pub/Sub, Cloud Tasks, Cloud Run (deploy and invoke)
-  and Secret Manager with Google's Go clients, and a Cloud SQL instance, all served from the host.
-  The rest of the compat suite runs unchanged against such an instance.
-- `test/browser`'s `TestRemoteComputeConsole` opens the Instance page's Compute card and the
-  console's terminal against that instance. It runs with TestWelcomePage and
-  TestSelectAProjectAndTheNewProjectPage.
+  and Secret Manager with Google's Go clients, all served from the host. The rest of the compat
+  suite runs unchanged against such an instance, with the `DOCKER_HOST` that `cloudburrow env`
+  exports (so `kind load` reaches the host); `TestCloudSQLInstanceWrites`,
+  `TestAPodReachesTheCLIHostedServices` and the Storage, Pub/Sub, Tasks, Run and Secret Manager
+  tests were run that way, and the pod-to-CLI test again after the host's sshd session was killed
+  and the supervisor reconnected.
+- `test/browser`'s `TestRemoteComputeConsole` (`CLOUDBURROW_TEST_REMOTE_COMPUTE` names the host)
+  checks the Instance page's Compute card (host, size, system, connection, forwarded ports),
+  that Reconnect is refused without the admin token, and that Reconnect with it brings the
+  connection back; its WCAG and keyboard subtests check names, contrast and Tab-then-Enter. It runs
+  with `TestWelcomePage`, `TestSelectAProjectAndTheNewProjectPage`,
+  `TestTerminalRunsACommandAndKeepsTheSession` and, with `bigquery` and `dataform` served,
+  `TestBigQueryStudioNotebookRuntimeThroughThePage`, whose runtime container runs on the host.

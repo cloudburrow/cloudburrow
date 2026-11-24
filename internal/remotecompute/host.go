@@ -127,7 +127,9 @@ func (s *Session) DiskFree(ctx context.Context, path string) (uint64, string, er
 	if err != nil {
 		return 0, "", fmt.Errorf("df gave %q", strings.TrimSpace(out))
 	}
-	return kb << 10, f[5] + " on " + s.opts.Target.Host, nil
+	// The path asked about, not df's mount point: in a container the mount
+	// column can name a bind mount that says nothing to the reader.
+	return kb << 10, path + " on " + s.opts.Target.Host, nil
 }
 
 // Checks reads the host and says, check by check, whether it can run an

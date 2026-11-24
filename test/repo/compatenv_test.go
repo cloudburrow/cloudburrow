@@ -32,7 +32,12 @@ var compatEnvExceptions = map[string]string{
 	// The host is a Mac with Apple silicon whose GPU a test may use, and
 	// may download about 800 MB of models and runtimes (#2155); no instance
 	// reports what the host may download.
-	"CLOUDBURROW_TEST_METAL": "opt-in switch: darwin/arm64 host deploys GGUF and MLX models on the Apple GPU",
+	// An instance on the stand-in remote compute host (#2209): the
+	// stand-in is a container scripts/remote-compute-standin.sh starts, and
+	// no instance reports the container it runs in.
+	"CLOUDBURROW_TEST_REMOTE_STANDIN": "set by scripts/remote-compute-standin.sh: the stand-in host's container name",
+	"CLOUDBURROW_TEST_REMOTE_INGRESS": "set by hand with CLOUDBURROW_TEST_REMOTE_STANDIN: the remote instance's --port-ingress, forwarded from the host",
+	"CLOUDBURROW_TEST_METAL":          "opt-in switch: darwin/arm64 host deploys GGUF and MLX models on the Apple GPU",
 	// Test data, not an instance: internal/isoconformance downloads ISO's
 	// conformance files only when it is set (#1754).
 	"CLOUDBURROW_TEST_DOWNLOADS": "opt-in switch: tests may download test data not cached yet",

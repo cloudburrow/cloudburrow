@@ -42,6 +42,11 @@ type sshTransport struct {
 	ctl        string // ControlPath
 	knownHosts string
 	config     string // -F, when set
+	// agent serves a stored key (Options.Key); key is unused then.
+	agent *keyAgent
+	// hostAlias names the host in a known_hosts that pins its one key
+	// (Options.HostKey); empty is trust on first use.
+	hostAlias string
 
 	mu  sync.Mutex
 	cmd *exec.Cmd
@@ -56,19 +61,23 @@ func (s *sshTransport) common() []string {
 	if s.target.Port != 0 {
 		a = append(a, "-p", strconv.Itoa(s.target.Port))
 	}
-	return append(a,
-		"-o", "BatchMode=yes",
-		"-o", "ConnectTimeout=15",
-		// Trust on first use, recorded beside the key; the user's own
-		// known_hosts is read too, and a changed host key is refused.
-		"-o", "StrictHostKeyChecking=accept-new",
-		"-o", "UserKnownHostsFile="+s.knownHosts+" ~/.ssh/known_hosts",
-		"-o", "LogLevel=ERROR",
-	)
+	a = append(a, "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "LogLevel=ERROR")
+	if s.hostAlias != "" {
+		// The provisioner's host key and no other.
+		return append(a, "-o", "StrictHostKeyChecking=yes", "-o", "HostKeyAlias="+s.hostAlias,
+			"-o", "UserKnownHostsFile="+s.knownHosts, "-o", "GlobalKnownHostsFile=/dev/null")
+	}
+	// Trust on first use, recorded beside the key; the user's own
+	// known_hosts is read too, and a changed host key is refused.
+	return append(a, "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile="+s.knownHosts+" ~/.ssh/known_hosts")
 }
 
 // own are the options that sign in with CloudBurrow's key and no other.
 func (s *sshTransport) own() []string {
+	if s.agent != nil {
+		return []string{"-o", "IdentitiesOnly=yes", "-o", "IdentityFile=" + s.agent.pubFile, "-o", "IdentityAgent=" + s.agent.sock,
+			"-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no"}
+	}
 	return []string{"-o", "IdentitiesOnly=yes", "-o", "IdentityFile=" + s.key.Path, "-o", "PasswordAuthentication=no",
 		"-o", "KbdInteractiveAuthentication=no"}
 }
@@ -100,6 +109,15 @@ func installScript(pub string) string {
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 func (s *sshTransport) Authorize(ctx context.Context) (bool, error) {
+	if s.agent != nil {
+		// A stored key is in place already (the VM's cloud-init put it
+		// there): signing in is all there is to check.
+		args := append(append(s.common(), s.own()...), s.target.destination(), "true")
+		if _, err := s.run(ctx, nil, args...); err != nil {
+			return false, fmt.Errorf("could not sign in to %s with CloudBurrow's key: %w", s.target, err)
+		}
+		return false, nil
+	}
 	// The key is installed once, and remembered beside it: whether the
 	// host accepts it cannot be asked of ssh alone, since keys the user's
 	// config names are offered too.

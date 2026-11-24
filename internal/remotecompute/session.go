@@ -64,6 +64,17 @@ type Options struct {
 	// SkipPrerequisites leaves the host's checks to the caller (doctor
 	// reports them itself).
 	SkipPrerequisites bool
+	// Key is CloudBurrow's key for the host. Nil is the FileKey under
+	// StateDir, which CloudBurrow installs on the host once through the
+	// user's own agent and config. Any other source (StoredKey, PEMKey) is
+	// a key the host already accepts, as a provisioned VM's cloud-init put
+	// it there; it is served to ssh by an in-process agent and never
+	// written to disk.
+	Key KeySource
+	// HostKey, when set, is the only host key accepted for the host
+	// (authorized_keys form): the one the provisioner made for the VM.
+	// Empty trusts the host's key on first use and refuses a change.
+	HostKey string
 
 	// transport replaces the system ssh (tests).
 	transport transport
@@ -111,6 +122,7 @@ type Session struct {
 	tr     transport
 	runDir string
 	sock   string
+	agent  *keyAgent // serves a stored key to ssh; nil for a FileKey
 
 	mu         sync.Mutex
 	forwards   []*forward
@@ -162,25 +174,42 @@ func Connect(ctx context.Context, opts Options) (*Session, error) {
 	}
 	s := &Session{opts: opts, kick: make(chan struct{}, 1)}
 	s.emit(StageKey, "Preparing CloudBurrow's SSH key for "+opts.Target.String(), nil)
-	key, err := EnsureKey(opts.StateDir, opts.Target, "cloudburrow-"+opts.Instance)
-	if err != nil {
-		s.emit(StageFailed, "CloudBurrow's SSH key could not be prepared", err)
-		return nil, err
-	}
 	dir, err := shortDir(opts.StateDir + opts.Target.String())
 	if err != nil {
 		return nil, err
 	}
 	s.runDir, s.sock = dir, filepath.Join(dir, "docker.sock")
-	s.tr = opts.transport
-	if s.tr == nil {
-		s.tr = &sshTransport{ssh: opts.SSH, target: opts.Target, key: key, ctl: filepath.Join(dir, "ctl"),
-			knownHosts: filepath.Join(remoteDir(opts.StateDir, opts.Target), "known_hosts"), config: opts.SSHConfig}
-	}
 	fail := func(msg string, err error) (*Session, error) {
 		s.emit(StageFailed, msg, err)
+		_ = s.agent.Close()
 		_ = os.RemoveAll(s.runDir)
 		return nil, err
+	}
+	s.tr = opts.transport
+	if s.tr == nil {
+		st := &sshTransport{ssh: opts.SSH, target: opts.Target, ctl: filepath.Join(dir, "ctl"), config: opts.SSHConfig,
+			knownHosts: filepath.Join(remoteDir(opts.StateDir, opts.Target), "known_hosts")}
+		if opts.Key == nil {
+			if st.key, err = EnsureKey(opts.StateDir, opts.Target, "cloudburrow-"+opts.Instance); err != nil {
+				return fail("CloudBurrow's SSH key could not be prepared", err)
+			}
+		} else {
+			pemKey, err := opts.Key.PrivateKey()
+			if err != nil {
+				return fail("CloudBurrow's SSH key could not be read", err)
+			}
+			if s.agent, err = startAgent(dir, pemKey); err != nil {
+				return fail("CloudBurrow's SSH key could not be prepared", err)
+			}
+			st.agent = s.agent
+		}
+		if opts.HostKey != "" {
+			st.hostAlias = "cloudburrow-" + opts.Target.keyName()
+			if st.knownHosts, err = pinnedHosts(dir, st.hostAlias, opts.HostKey); err != nil {
+				return fail("The host's key could not be recorded", err)
+			}
+		}
+		s.tr = st
 	}
 	s.emit(StageConnecting, "Connecting to "+opts.Target.String(), nil)
 	installed, err := s.tr.Authorize(ctx)
@@ -392,6 +421,7 @@ func (s *Session) Close() error {
 	s.connected = false
 	s.mu.Unlock()
 	s.emit(StageClosed, "Disconnected from "+s.opts.Target.String(), nil)
+	_ = s.agent.Close()
 	return os.RemoveAll(s.runDir)
 }
 
