@@ -1,7 +1,10 @@
 package dataflow
 
 import (
+	"compress/gzip"
+	"io"
 	"net/http"
+	"strings"
 
 	"cloud.google.com/go/dataflow/apiv1beta3/dataflowpb"
 	"google.golang.org/grpc"
@@ -29,5 +32,36 @@ func Transcoder() *rest.Transcoder {
 func NewRESTHandler(s *Server) http.Handler {
 	t := Transcoder()
 	s.Register(t)
-	return t
+	return gunzipRequests(t)
+}
+
+// maxInflatedBody bounds a gzip request body once inflated.
+const maxInflatedBody = 64 << 20
+
+// gunzipRequests inflates a request body sent with Content-Encoding:
+// gzip, as Google's front ends accept it: the Java SDK's DataflowRunner
+// (google-api-client) gzips every request body it sends.
+func gunzipRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body == nil || !strings.EqualFold(strings.TrimSpace(r.Header.Get("Content-Encoding")), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		zr, err := gzip.NewReader(r.Body)
+		if err != nil {
+			http.Error(w, `{"error":{"code":400,"message":"the request body is not valid gzip","status":"INVALID_ARGUMENT"}}`, http.StatusBadRequest)
+			return
+		}
+		b, err := io.ReadAll(io.LimitReader(zr, maxInflatedBody+1))
+		_ = zr.Close()
+		if err != nil || len(b) > maxInflatedBody {
+			http.Error(w, `{"error":{"code":400,"message":"the request body is not valid gzip or is too large","status":"INVALID_ARGUMENT"}}`, http.StatusBadRequest)
+			return
+		}
+		r2 := r.Clone(r.Context())
+		r2.Header.Del("Content-Encoding")
+		r2.Body = io.NopCloser(strings.NewReader(string(b)))
+		r2.ContentLength = int64(len(b))
+		next.ServeHTTP(w, r2)
+	})
 }

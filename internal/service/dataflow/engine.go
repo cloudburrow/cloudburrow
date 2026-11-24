@@ -41,6 +41,9 @@ type Run struct {
 	// Drain is closed when the job is to drain: its sources stop reading
 	// and what they read is processed and written.
 	Drain <-chan struct{}
+	// SnapshotID is the snapshot the job is created from
+	// (createdFromSnapshotId): its state is restored from it.
+	SnapshotID string
 }
 
 // Outcome is how a run ended.

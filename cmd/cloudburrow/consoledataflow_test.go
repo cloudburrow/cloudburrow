@@ -149,7 +149,7 @@ func TestConsoleDataflow(t *testing.T) {
 	}
 
 	acts := p.DetailActions(ctx, project, []string{name})
-	if len(acts) != 1 || acts[0].ID != "stop" || strings.Join(acts[0].Fields[0].Options, ",") != "cancel,drain" {
+	if len(acts) != 2 || acts[0].ID != "stop" || acts[1].ID != "snapshot" || strings.Join(acts[0].Fields[0].Options, ",") != "cancel,drain" {
 		t.Fatalf("a running streaming job's actions are %+v", acts)
 	}
 	if err := p.ActAt(ctx, project, []string{name}, "stop", map[string]string{"mode": "drain"}); err != nil {

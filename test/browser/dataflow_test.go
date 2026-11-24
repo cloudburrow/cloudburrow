@@ -150,3 +150,41 @@ func TestDataflowThroughThePage(t *testing.T) {
 		{"Dataflow job logs", jobPath, settled, ""},
 	})
 }
+
+// TestDataflowSnapshotsPage (#2215): Dataflow's Snapshots page, offered
+// beside Jobs in Dataflow's own navigation as Google's, lists a project's snapshots
+// under Google's columns (Snapshot ID, Description, Source job, Status,
+// Region, Creation time, Expiration time), its controls are reached from
+// the keyboard, and it passes the accessibility audit. (A snapshot's
+// rows, Delete and a job's Create snapshot are driven by
+// TestConsoleDataflowSnapshots and TestDataflowSnapshots.)
+func TestDataflowSnapshotsPage(t *testing.T) {
+	needService(t, "dataflow")
+	project := uniqueProject(t)
+	p := open(t)
+	p.navigateByDrawer("Databases", "/dataflow/jobs", "Dataflow")
+	// The product's own navigation offers Snapshots beside Jobs.
+	p.waitFor(`[...document.querySelectorAll('a[href^="/dataflow/snapshots"]')].some((a) => a.textContent.includes("Snapshots"))`)
+	p.navigate("/dataflow/snapshots?project=" + project)
+	p.waitFor(`document.querySelector("#view h1") !== null && document.querySelector("#view h1").textContent.includes("Snapshots")`)
+	var heads string
+	p.waitFor(`document.querySelectorAll("#view thead th").length > 0`)
+	p.eval(`[...document.querySelectorAll("#view thead th")].map((h) => h.textContent.trim()).join(",")`, &heads)
+	for _, c := range []string{"Snapshot ID", "Description", "Source job", "Status", "Region", "Creation time", "Expiration time"} {
+		if !strings.Contains(heads, c) {
+			t.Errorf("the Snapshots page's columns are %q; want %q", heads, c)
+		}
+	}
+	// From the keyboard: Tab leaves the page title and reaches a control
+	// of the page, with a focus indicator.
+	p.eval(`document.querySelector("#view h1").setAttribute("tabindex", "-1"), document.querySelector("#view h1").focus(), true`, nil)
+	reached := false
+	for i := 0; i < 40 && !reached; i++ {
+		p.run(chromedp.KeyEvent(kb.Tab))
+		p.eval(`document.querySelector("#view").contains(document.activeElement) && document.activeElement.matches("a, button, input, select, [tabindex]")`, &reached)
+	}
+	if !reached {
+		t.Fatal("Tab never reaches a control of the Snapshots page")
+	}
+	auditScreens(t, []a11yPage{screen("Dataflow snapshots", "/dataflow/snapshots", project)})
+}

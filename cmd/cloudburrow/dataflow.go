@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -46,7 +47,10 @@ type dataflowService struct {
 	registryToken func() string
 	server        *grpctransport.Server
 	api           *dataflow.Server
-	docker        *beamrun.Docker
+	// snapTmp is an ephemeral instance's snapshots directory, removed
+	// when it stops.
+	snapTmp string
+	docker  *beamrun.Docker
 }
 
 func newDataflowService(cfg config.Config) *dataflowService {
@@ -99,15 +103,23 @@ func (s *dataflowService) liveAddrs() map[string]string {
 }
 
 func (s *dataflowService) Start(ctx context.Context) error {
-	state := ""
+	state, snaps := "", ""
 	if s.cfg.Mode == config.ModePersistent {
 		state = filepath.Join(s.cfg.InstanceDir(), "dataflow.json")
+		snaps = filepath.Join(s.cfg.InstanceDir(), "dataflow-snapshots")
+	} else {
+		d, err := os.MkdirTemp("", "cb-dataflow-snapshots-")
+		if err != nil {
+			return err
+		}
+		snaps, s.snapTmp = d, d
 	}
 	s.docker = &beamrun.Docker{Instance: s.cfg.Name, Live: s.liveAddrs,
 		// A Flex Template's image is read from the instance's Artifact
 		// Registry (Cloud Run's) as the instance's account.
 		Registry:      func() string { return s.liveAddrs()["run"] },
 		RegistryToken: s.registryToken,
+		Snapshots:     snaps,
 		Logf:          func(format string, args ...any) { fmt.Printf("cloudburrow: "+format+"\n", args...) }}
 	opts := dataflow.Options{State: state, Engine: dataflowEngine{d: s.docker}, Launcher: flexLauncher{d: s.docker},
 		Logf: func(format string, args ...any) { fmt.Printf("cloudburrow: "+format+"\n", args...) }}
@@ -153,6 +165,9 @@ func (s *dataflowService) Stop(ctx context.Context) error {
 	sctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	beamrun.RemoveInstance(sctx, s.cfg.Name)
+	if s.snapTmp != "" {
+		errs = append(errs, os.RemoveAll(s.snapTmp))
+	}
 	return errors.Join(errs...)
 }
 
@@ -186,7 +201,7 @@ var pythonVersionRE = regexp.MustCompile(`Python (\d+\.\d+)`)
 func (e dataflowEngine) Run(ctx context.Context, run dataflow.Run, r dataflow.Reporter) dataflow.Outcome {
 	job := beamrun.Job{Project: run.Project, JobID: run.JobID, Name: run.Name, Streaming: run.Streaming,
 		PipelineURL: run.PipelineURL, Options: run.Options, SDK: run.SDK, SDKVersion: run.SDKVersion,
-		Workers: run.MaxWorkers, Drain: run.Drain}
+		Workers: run.MaxWorkers, Drain: run.Drain, Snapshot: run.SnapshotID}
 	if m := pythonVersionRE.FindStringSubmatch(sdkName(run)); m != nil {
 		job.PythonVersion = m[1]
 	}
@@ -232,6 +247,14 @@ func (e dataflowEngine) Run(ctx context.Context, run dataflow.Run, r dataflow.Re
 	}
 	return dataflow.Outcome{State: st, Message: res.Message}
 }
+
+// Snapshot takes a Flink savepoint of a running job (beamrun).
+func (e dataflowEngine) Snapshot(ctx context.Context, jobID, id string) (int64, error) {
+	return e.d.Snapshot(ctx, jobID, id)
+}
+
+// DeleteSnapshot removes a snapshot's savepoint.
+func (e dataflowEngine) DeleteSnapshot(id string) error { return e.d.DeleteSnapshot(id) }
 
 // sdkName is the job's SDK's name ("Apache Beam Python 3.12 SDK").
 func sdkName(run dataflow.Run) string { return run.SDKName }

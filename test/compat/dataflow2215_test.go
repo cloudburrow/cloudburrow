@@ -457,13 +457,12 @@ func TestPythonDataflowStreamingDrain(t *testing.T) {
 	}
 }
 
-// covers: google.dataflow.v1beta3.JobsV1Beta3/SnapshotJob (unimplemented)
-//
 // TestDataflowJobsAPI (#2215): the Go client's failure paths, as the v1b3
 // reference documents them: an invalid name is INVALID_ARGUMENT, an
 // unknown job NOT_FOUND, a job with no staged pipeline fails with its
 // reason as its error message, a second active job of a name answers the
-// first, and a pending batch job is cancelled.
+// first, a pending batch job is cancelled, and a batch job is not
+// snapshotted (guides/using-snapshots: streaming jobs only).
 func TestDataflowJobsAPI(t *testing.T) {
 	h, _, c := dataflowEnv(t)
 	ctx := h.Context()
@@ -488,7 +487,7 @@ func TestDataflowJobsAPI(t *testing.T) {
 	if msgs := jobMessages(t, ctx, c, project, j.Id); !strings.Contains(msgs, "pipelineUrl") {
 		t.Errorf("the failed job's messages do not say why:\n%s", msgs)
 	}
-	if _, err := c.jobs.SnapshotJob(ctx, &dataflowpb.SnapshotJobRequest{ProjectId: project, Location: "us-central1", JobId: j.Id}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("SnapshotJob = %v; want UNIMPLEMENTED", err)
+	if _, err := c.jobs.SnapshotJob(ctx, &dataflowpb.SnapshotJobRequest{ProjectId: project, Location: "us-central1", JobId: j.Id}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("SnapshotJob of a failed batch job = %v; want FAILED_PRECONDITION", err)
 	}
 }

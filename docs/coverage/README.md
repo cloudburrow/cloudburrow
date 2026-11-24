@@ -63,7 +63,7 @@ Do not edit these files by hand.
 | [Dataform (v1)](dataform.md) | 74 | 74 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Dataform (v1beta1)](dataformv1beta1.md) | 81 | 81 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Dataproc (v1): clusters, jobs, workflow templates, autoscaling policies and Serverless for Apache Spark](dataproc.md) | 44 | 44 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Dataflow (v1b3): jobs, messages, metrics, snapshots and templates](dataflow.md) | 18 | 14 | 0 | 4 | 0 | 0 | 0 | 0 |
+| [Dataflow (v1b3): jobs, messages, metrics, snapshots and templates](dataflow.md) | 18 | 18 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [App Hub (v1)](apphub.md) | 31 | 31 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [AlloyDB for PostgreSQL (v1)](alloydb.md) | 37 | 37 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Filestore (v1)](filestore.md) | 18 | 18 | 0 | 0 | 0 | 0 | 0 | 0 |

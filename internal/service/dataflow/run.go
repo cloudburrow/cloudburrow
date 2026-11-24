@@ -19,7 +19,8 @@ func (s *Server) startLocked(key string, r *jobRec) {
 	run := Run{Project: j.ProjectId, Location: j.Location, JobID: j.Id, Name: j.Name,
 		Streaming:   j.Type == dataflowpb.JobType_JOB_TYPE_STREAMING,
 		PipelineURL: optString(opts, "pipelineUrl", "pipeline_url"),
-		Options:     opts, SDK: lowerSDK(sdk), SDKVersion: ver, SDKName: sdk, MaxWorkers: maxWorkers(j)}
+		Options:     opts, SDK: lowerSDK(sdk), SDKVersion: ver, SDKName: sdk, MaxWorkers: maxWorkers(j),
+		SnapshotID: j.CreatedFromSnapshotId}
 	ctx, cancel := context.WithCancel(context.Background())
 	drain := make(chan struct{})
 	r.cancel, r.drain, r.drained, r.done = cancel, drain, false, make(chan struct{})

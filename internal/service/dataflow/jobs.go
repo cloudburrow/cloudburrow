@@ -122,6 +122,9 @@ func (s *Server) create(project, loc string, job *dataflowpb.Job, replace string
 			return nil, apierror.FailedPrecondition("The workflow could not be created. Causes: Updating a batch job is not supported: only streaming jobs can be updated.") // UNVERIFIED (docs re-read 2026-11-24)
 		}
 	}
+	if err := s.restoreSnapshotLocked(project, loc, job); err != nil {
+		return nil, err
+	}
 	now := s.now()
 	job.Id = newJobID(now)
 	job.ProjectId, job.Location = project, loc
@@ -449,12 +452,6 @@ func (s *Server) CheckActiveJobs(_ context.Context, req *dataflowpb.CheckActiveJ
 		}
 	}
 	return &dataflowpb.CheckActiveJobsResponse{}, nil
-}
-
-// SnapshotJob is UNIMPLEMENTED: the runner keeps no snapshot of a
-// streaming job's state that a new job could start from.
-func (s *Server) SnapshotJob(context.Context, *dataflowpb.SnapshotJobRequest) (*dataflowpb.Snapshot, error) {
-	return nil, apierror.Unimplemented("Dataflow snapshots are not supported by CloudBurrow: the local Apache Flink runner keeps no snapshot of a streaming job's state that a new job can be created from.")
 }
 
 func optString(opts map[string]any, keys ...string) string {

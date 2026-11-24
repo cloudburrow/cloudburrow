@@ -1,18 +1,22 @@
 package dataflow
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/dataflow/apiv1beta3/dataflowpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -38,6 +42,113 @@ func (e *fakeEngine) Run(ctx context.Context, run Run, r Reporter) Outcome {
 		return Outcome{State: dataflowpb.JobState_JOB_STATE_DONE}
 	case <-ctx.Done():
 		return Outcome{State: dataflowpb.JobState_JOB_STATE_CANCELLED}
+	}
+}
+
+// snapEngine is a fakeEngine that snapshots.
+type snapEngine struct {
+	fakeEngine
+	mu      sync.Mutex
+	saved   map[string]string
+	deleted []string
+}
+
+func (e *snapEngine) Snapshot(_ context.Context, jobID, id string) (int64, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.saved == nil {
+		e.saved = map[string]string{}
+	}
+	e.saved[id] = jobID
+	return 4096, nil
+}
+
+func (e *snapEngine) DeleteSnapshot(id string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.deleted = append(e.deleted, id)
+	return nil
+}
+
+// TestSnapshots: a running streaming job is snapshotted (PENDING, then
+// READY with its size), listed by region and job, and a job is created
+// from it with its ID reaching the engine; batch jobs and missing
+// snapshots are refused; deleting one removes its saved state.
+func TestSnapshots(t *testing.T) {
+	ctx := context.Background()
+	runs := make(chan Run, 4)
+	eng := &snapEngine{fakeEngine: fakeEngine{runs: runs}}
+	s := newTestServer(t, Options{Engine: eng})
+	j, err := s.CreateJob(ctx, &dataflowpb.CreateJobRequest{ProjectId: "p", Job: job("stream", true)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-runs
+	waitState(t, s, j.Id, dataflowpb.JobState_JOB_STATE_RUNNING)
+	if _, err := s.SnapshotJob(ctx, &dataflowpb.SnapshotJobRequest{ProjectId: "p", JobId: "nope"}); status.Code(err) != codes.NotFound {
+		t.Errorf("SnapshotJob of a missing job = %v; want NOT_FOUND", err)
+	}
+	if _, err := s.SnapshotJob(ctx, &dataflowpb.SnapshotJobRequest{ProjectId: "p", JobId: j.Id, Ttl: durationpb.New(31 * 24 * time.Hour)}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("SnapshotJob with a 31-day ttl = %v; want INVALID_ARGUMENT", err)
+	}
+	sn, err := s.SnapshotJob(ctx, &dataflowpb.SnapshotJobRequest{ProjectId: "p", JobId: j.Id, Description: "before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sn.SourceJobId != j.Id || sn.Region != DefaultLocation || sn.Description != "before" || sn.GetTtl().AsDuration() != 7*24*time.Hour || sn.Id == "" {
+		t.Errorf("snapshot = %v", sn)
+	}
+	var got *dataflowpb.Snapshot
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		if got, err = s.GetSnapshot(ctx, &dataflowpb.GetSnapshotRequest{ProjectId: "p", SnapshotId: sn.Id}); err != nil {
+			t.Fatal(err)
+		}
+		if got.State == dataflowpb.SnapshotState_READY || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got.State != dataflowpb.SnapshotState_READY || got.DiskSizeBytes != 4096 {
+		t.Errorf("snapshot = %s %d; want READY 4096", got.State, got.DiskSizeBytes)
+	}
+	for _, jobID := range []string{"", j.Id} {
+		l, err := s.ListSnapshots(ctx, &dataflowpb.ListSnapshotsRequest{ProjectId: "p", JobId: jobID})
+		if err != nil || len(l.Snapshots) != 1 || l.Snapshots[0].Id != sn.Id {
+			t.Errorf("ListSnapshots(job %q) = %v, %v", jobID, l, err)
+		}
+	}
+	if l, _ := s.ListSnapshots(ctx, &dataflowpb.ListSnapshotsRequest{ProjectId: "p", JobId: "other"}); len(l.GetSnapshots()) != 0 {
+		t.Errorf("ListSnapshots(other job) = %v", l)
+	}
+	from := job("restored", true)
+	from.CreatedFromSnapshotId = sn.Id
+	j2, err := s.CreateJob(ctx, &dataflowpb.CreateJobRequest{ProjectId: "p", Job: from})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := <-runs; r.SnapshotID != sn.Id || j2.CreatedFromSnapshotId != sn.Id {
+		t.Errorf("the restored job's run has snapshot %q (job %q); want %q", r.SnapshotID, j2.CreatedFromSnapshotId, sn.Id)
+	}
+	batch := job("batch-from", false)
+	batch.CreatedFromSnapshotId = sn.Id
+	if _, err := s.CreateJob(ctx, &dataflowpb.CreateJobRequest{ProjectId: "p", Job: batch}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("a batch job from a snapshot = %v; want FAILED_PRECONDITION", err)
+	}
+	missing := job("missing-from", true)
+	missing.CreatedFromSnapshotId = "none"
+	if _, err := s.CreateJob(ctx, &dataflowpb.CreateJobRequest{ProjectId: "p", Job: missing}); status.Code(err) != codes.NotFound {
+		t.Errorf("a job from a missing snapshot = %v; want NOT_FOUND", err)
+	}
+	if _, err := s.DeleteSnapshot(ctx, &dataflowpb.DeleteSnapshotRequest{ProjectId: "p", SnapshotId: sn.Id}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetSnapshot(ctx, &dataflowpb.GetSnapshotRequest{ProjectId: "p", SnapshotId: sn.Id}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetSnapshot after delete = %v; want NOT_FOUND", err)
+	}
+	eng.mu.Lock()
+	defer eng.mu.Unlock()
+	if len(eng.deleted) != 1 || eng.deleted[0] != sn.Id || eng.saved[sn.Id] != j.Id {
+		t.Errorf("engine saved %v, deleted %v", eng.saved, eng.deleted)
 	}
 }
 
@@ -254,8 +365,8 @@ func TestTemplates(t *testing.T) {
 	if _, err := s.LaunchFlexTemplate(ctx, &dataflowpb.LaunchFlexTemplateRequest{ProjectId: "p"}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("LaunchFlexTemplate without a launcher = %v; want FAILED_PRECONDITION", err)
 	}
-	if _, err := s.SnapshotJob(ctx, &dataflowpb.SnapshotJobRequest{ProjectId: "p", JobId: j.Id}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("SnapshotJob = %v; want UNIMPLEMENTED", err)
+	if _, err := s.SnapshotJob(ctx, &dataflowpb.SnapshotJobRequest{ProjectId: "p", JobId: j.Id}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("SnapshotJob of a finished batch job = %v; want FAILED_PRECONDITION", err)
 	}
 }
 
@@ -372,5 +483,31 @@ func TestFlexTemplates(t *testing.T) {
 		MinimumImportance: dataflowpb.JobMessageImportance_JOB_MESSAGE_ERROR})
 	if len(m.GetJobMessages()) == 0 || !strings.Contains(m.JobMessages[len(m.JobMessages)-1].MessageText, "ModuleNotFoundError") {
 		t.Errorf("the failed launch's messages are %v", m.GetJobMessages())
+	}
+}
+
+// TestRESTGzipBody: a request body sent gzipped (Content-Encoding: gzip,
+// as the Java SDK's google-api-client sends every body) is inflated.
+func TestRESTGzipBody(t *testing.T) {
+	s := newTestServer(t, Options{})
+	h := NewRESTHandler(s)
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, _ = zw.Write([]byte(`{"name": "gz-job", "type": "JOB_TYPE_BATCH"}`))
+	_ = zw.Close()
+	req := httptest.NewRequest(http.MethodPost, "/v1b3/projects/p/locations/us-central1/jobs", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"gz-job"`) {
+		t.Fatalf("gzipped create = %d %s", rec.Code, rec.Body.String())
+	}
+	bad := httptest.NewRequest(http.MethodPost, "/v1b3/projects/p/locations/us-central1/jobs", strings.NewReader("not gzip"))
+	bad.Header.Set("Content-Encoding", "gzip")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, bad)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("a body that is not gzip = %d; want 400", rec.Code)
 	}
 }

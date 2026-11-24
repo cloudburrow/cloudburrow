@@ -1,0 +1,26 @@
+// The Java SDK harness's credentials on a Dataflow job's network
+// (internal/beamrun, #2215): a fixed access token of the instance
+// (CB_ACCESS_TOKEN), as no metadata server is reachable and the instance
+// takes every caller to be its account. Compiled in the job's Java worker
+// pool against the job's staged jars, and named by its pipeline options'
+// credentialFactoryClass.
+import com.google.auth.Credentials;
+import com.google.auth.oauth2.AccessToken;
+import com.google.auth.oauth2.GoogleCredentials;
+import org.apache.beam.sdk.extensions.gcp.auth.CredentialFactory;
+import org.apache.beam.sdk.options.PipelineOptions;
+
+public class CbCredentialFactory implements CredentialFactory {
+  public static CbCredentialFactory fromOptions(PipelineOptions options) {
+    return new CbCredentialFactory();
+  }
+
+  @Override
+  public Credentials getCredential() {
+    String token = System.getenv("CB_ACCESS_TOKEN");
+    if (token == null || token.isEmpty()) {
+      token = "cloudburrow-dataflow";
+    }
+    return GoogleCredentials.create(new AccessToken(token, null));
+  }
+}

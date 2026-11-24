@@ -42,6 +42,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -49,7 +50,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed assets/relay.py assets/py/cblaunch.py assets/py/cbio.py assets/py/sitecustomize.py
+//go:embed assets/relay.py assets/py/cblaunch.py assets/py/cbio.py assets/py/sitecustomize.py assets/java/pool.sh assets/java/CbCredentialFactory.java
 var assets embed.FS
 
 // The pinned images (dependencies.json components.dataflow).
@@ -65,6 +66,22 @@ const (
 var PythonImages = map[string]string{
 	"3.12": "apache/beam_python3.12_sdk@sha256:bf536d721f825259329a396a20947b81ce8d0bbe08472b26f3f149c9957c1e56",
 }
+
+// JavaImages are Beam 2.78.0's Java SDK containers, by Java major
+// version. A Java job's workers run in the one its pipeline's environment
+// names (beam_javaNN_sdk), as Beam's Java worker pool
+// (org.apache.beam.fn.harness.ExternalWorkerService) on the job's staged
+// jars; its Pub/Sub reads and writes, which Dataflow's service runs itself,
+// run in the Python SDK's harness beside it.
+var JavaImages = map[string]string{
+	"11": "apache/beam_java11_sdk@sha256:20c289f6288972c9bbbe63effdda9d8b1f207b5597c96bb42c83012cb5e7f532",
+	"17": "apache/beam_java17_sdk@sha256:8acfe1acfd173b80474c12833397ca1d19b432a3aa5d0d160c5f8fd4abf95126",
+	"21": "apache/beam_java21_sdk@sha256:96816b03bebe628d9ffd2bd47f37167e055fae2ab99890ad6e941aa908440740",
+}
+
+// LauncherImage is the Python SDK container the launcher, the relay and
+// the Python worker pool of a job of another SDK run in.
+const LauncherImage = "3.12"
 
 // MaxParallelism bounds a job's Flink parallelism, whatever its
 // maxNumWorkers: one local machine runs every job.
@@ -108,6 +125,8 @@ type Job struct {
 	Workers int
 	// Drain is closed to drain the job.
 	Drain <-chan struct{}
+	// Snapshot is the snapshot the job's state is restored from ("" none).
+	Snapshot string
 }
 
 // Events receives what a job does.
@@ -168,6 +187,12 @@ type Docker struct {
 	// for none. RegistryToken is the token it is read with.
 	Registry, RegistryToken func() string
 	Logf                    func(format string, args ...any)
+	// Snapshots is the directory the jobs' snapshots (Flink savepoints)
+	// are kept in, one directory each ("": none are taken).
+	Snapshots string
+
+	runMu   sync.Mutex
+	running map[string]string // job ID: its directory
 
 	probeMu sync.Mutex
 	probed  bool
@@ -196,12 +221,20 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return failed("docker is not on PATH: Dataflow jobs run on a local Apache Flink runner in Docker.")
 	}
-	if job.SDK != "Python" {
-		return failed(fmt.Sprintf("The job was submitted by the Apache Beam %s SDK: CloudBurrow's local runner serves the Python SDK's pipelines (Apache Beam %s, Python %s).", job.SDK, BeamVersion, strings.Join(pythonVersions(), ", ")))
-	}
-	image := PythonImages[job.PythonVersion]
-	if image == "" || job.SDKVersion != BeamVersion {
-		return failed(fmt.Sprintf("The job was submitted by Apache Beam %s on Python %s: CloudBurrow's local runner has the SDK harness of Apache Beam %s on Python %s only.", job.SDKVersion, job.PythonVersion, BeamVersion, strings.Join(pythonVersions(), ", ")))
+	var image string
+	switch job.SDK {
+	case "Python":
+		image = PythonImages[job.PythonVersion]
+		if image == "" || job.SDKVersion != BeamVersion {
+			return failed(fmt.Sprintf("The job was submitted by Apache Beam %s on Python %s: CloudBurrow's local runner has the SDK harness of Apache Beam %s on Python %s only.", job.SDKVersion, job.PythonVersion, BeamVersion, strings.Join(pythonVersions(), ", ")))
+		}
+	case "Java":
+		if job.SDKVersion != BeamVersion {
+			return failed(fmt.Sprintf("The job was submitted by the Apache Beam SDK for Java %s: CloudBurrow's local runner has the SDK harness of Apache Beam %s.", job.SDKVersion, BeamVersion))
+		}
+		image = PythonImages[LauncherImage]
+	default:
+		return failed(fmt.Sprintf("The job was submitted by the Apache Beam %s SDK: CloudBurrow's local runner serves the Python and Java SDKs' pipelines (Apache Beam %s).", job.SDK, BeamVersion))
 	}
 	live := map[string]string{}
 	if d.Live != nil {
@@ -228,10 +261,41 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	if err := os.WriteFile(filepath.Join(dir, "options.json"), opts, 0o644); err != nil {
 		return failed(err.Error())
 	}
-	for _, sub := range []string{"ctl", "metrics"} {
+	for _, sub := range []string{"ctl", "metrics", "java", "flink"} {
 		_ = os.Mkdir(filepath.Join(dir, sub), 0o777)
 		_ = os.Chmod(filepath.Join(dir, sub), 0o777)
 	}
+	// The embedded Flink cluster's REST API on a fixed port of the job's
+	// network, which the launcher takes savepoints through (snapshots).
+	var savepoint string
+	if job.Snapshot != "" {
+		loc, err := d.snapshotLocation(job.Snapshot)
+		if err != nil {
+			return failed(err.Error())
+		}
+		savepoint = loc
+	}
+	conf := flinkConfig
+	if savepoint != "" {
+		// Beam's Flink runner applies its savepoint_path option to a
+		// remote cluster only: the embedded one ([local]) is restored
+		// through Flink's own configuration.
+		conf += "execution.savepoint.path: " + savepoint + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, "flink", "config.yaml"), []byte(conf), 0o644); err != nil {
+		return failed(err.Error())
+	}
+	d.runMu.Lock()
+	if d.running == nil {
+		d.running = map[string]string{}
+	}
+	d.running[job.JobID] = dir
+	d.runMu.Unlock()
+	cleanup = append(cleanup, func() {
+		d.runMu.Lock()
+		delete(d.running, job.JobID)
+		d.runMu.Unlock()
+	})
 
 	suffix := nameSafe.ReplaceAllString(strings.ToLower(job.JobID), "-")
 	if len(suffix) > 30 {
@@ -259,8 +323,16 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	if parallelism > MaxParallelism {
 		parallelism = MaxParallelism
 	}
-	if out, err := d.docker(ctx, "run", "-d", "--name", js, "--label", label, "--network", network, "--memory", "3g",
-		JobServerImage, "--flink-master=[local]", "--job-host=0.0.0.0"); err != nil {
+	jsArgs := []string{"run", "-d", "--name", js, "--label", label, "--network", network, "--memory", "3g",
+		"-v", filepath.Join(dir, "flink") + ":/cb-flink:ro"}
+	if d.Snapshots != "" {
+		if err := os.MkdirAll(d.Snapshots, 0o777); err != nil {
+			return failed(err.Error())
+		}
+		jsArgs = append(jsArgs, "-v", d.Snapshots+":"+snapshotMount)
+	}
+	jsArgs = append(jsArgs, JobServerImage, "--flink-master=[local]", "--job-host=0.0.0.0", "--flink-conf-dir=/cb-flink")
+	if out, err := d.docker(ctx, jsArgs...); err != nil {
 		return failed("start the Flink job server: " + out)
 	}
 	cleanup = append(cleanup, func() { bg("rm", "-f", "-v", js) })
@@ -278,12 +350,21 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	logCtx, stopLogs := context.WithCancel(context.Background())
 	cleanup = append(cleanup, stopLogs)
 	go d.follow(logCtx, pool, ev.Log)
+	if job.SDK == "Java" {
+		jpool := "cb-df-java-" + suffix
+		cleanup = append(cleanup, func() { bg("rm", "-f", "-v", jpool) })
+		go d.javaPool(logCtx, dir, jpool, js, label, env, ev.Log)
+	}
 
 	runArgs := append([]string{"run", "--rm", "--name", launch, "--label", label, "--network", network, "-v", dir + ":/cb"}, env...)
 	runArgs = append(runArgs, "--entrypoint", "python", image, "/cb/py/cblaunch.py",
 		"--job-endpoint", js+":8099", "--artifact-endpoint", js+":8098",
 		"--pipeline-url", job.PipelineURL, "--options", "/cb/options.json", "--job-name", job.Name,
-		"--parallelism", fmt.Sprint(parallelism), "--cancel-file", "/cb/ctl/cancel")
+		"--parallelism", fmt.Sprint(parallelism), "--cancel-file", "/cb/ctl/cancel",
+		"--flink-rest", js+":"+fmt.Sprint(flinkRESTPort))
+	if savepoint != "" {
+		runArgs = append(runArgs, "--savepoint-path", savepoint)
+	}
 	if job.Streaming {
 		runArgs = append(runArgs, "--streaming")
 	}
@@ -334,6 +415,48 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 		return failed(msg)
 	}
 	return res
+}
+
+// javaPool starts the job's Java worker pool, in the job server's network
+// namespace, once the launcher has copied the job's jars and written its
+// options and Java version (java/ready); the launcher waits for it.
+func (d *Docker) javaPool(ctx context.Context, dir, name, js, label string, env []string, log func(severity, text string)) {
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "java", "ready")); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	v, _ := os.ReadFile(filepath.Join(dir, "java", "version"))
+	image := JavaImages[strings.TrimSpace(string(v))]
+	if image == "" {
+		if log != nil {
+			log("ERROR", fmt.Sprintf("The pipeline runs on Java %s: CloudBurrow's local runner has the Apache Beam %s SDK harness for Java %s.", strings.TrimSpace(string(v)), BeamVersion, strings.Join(javaVersions(), ", ")))
+		}
+		return
+	}
+	args := append([]string{"run", "-d", "--name", name, "--label", label, "--network", "container:" + js, "--memory", "3g", "-v", dir + ":/cb:ro"}, env...)
+	args = append(args, "--entrypoint", "sh", image, "/cb/java/pool.sh")
+	if out, err := d.docker(ctx, args...); err != nil {
+		if log != nil {
+			log("ERROR", "start the job's Java SDK harness: "+out)
+		}
+		return
+	}
+	d.follow(ctx, name, log)
+}
+
+func javaVersions() []string {
+	var out []string
+	for v := range JavaImages {
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func pythonVersions() []string {
@@ -549,7 +672,7 @@ func (d *Docker) waitLog(ctx context.Context, name, want string, wait time.Durat
 }
 
 func writeAssets(dir string) error {
-	for _, name := range []string{"relay.py", "py/cblaunch.py", "py/cbio.py", "py/sitecustomize.py"} {
+	for _, name := range []string{"relay.py", "py/cblaunch.py", "py/cbio.py", "py/sitecustomize.py", "java/pool.sh", "java/CbCredentialFactory.java"} {
 		b, err := assets.ReadFile("assets/" + name)
 		if err != nil {
 			return err

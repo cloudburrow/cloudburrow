@@ -367,6 +367,9 @@ const ROUTES = [
   // Create job from template.
   { path: "/dataflow/jobs", service: "dataflow", icon: "dataflow", title: "Jobs", kind: "Job",
     section: "Databases", product: "dataflow", productTitle: "Dataflow" },
+  // Snapshots (#2215): a project's snapshots of streaming jobs.
+  { path: "/dataflow/snapshots", service: "dataflow-snapshots", icon: "dataflow", title: "Snapshots", kind: "Snapshot",
+    section: "Databases", product: "dataflow", productTitle: "Dataflow" },
 
   // Storage Transfer Service (#1957), Google's Data Transfer pages: Transfer
   // jobs, with each job's run history, and Agent pools for POSIX file

@@ -13,6 +13,7 @@ metrics, message and, last, done.
 import argparse
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -75,20 +76,88 @@ def graph(p):
     return out
 
 
-def rewrite_environments(p, harness):
-    """Points the pipeline's Python environment at the worker pool."""
-    python_env = None
+def _java_major(image):
+    m = re.search(r"beam_java(\d+)_sdk", image)
+    return m.group(1) if m else ""
+
+
+def _fetch(url, dest):
+    """Copies url (gs://, through Beam's file systems: the instance's Cloud
+    Storage) to dest."""
+    with FileSystems.open(url, compression_type="uncompressed") as src, open(dest, "wb") as out:
+        while True:
+            b = src.read(1 << 20)
+            if not b:
+                break
+            out.write(b)
+
+
+def _staged_name(dep, fallback):
+    if dep.role_urn == common_urns.artifact_roles.STAGING_TO.urn:
+        rp = beam_runner_api_pb2.ArtifactStagingToRolePayload()
+        rp.ParseFromString(dep.role_payload)
+        if rp.staged_name:
+            return os.path.basename(rp.staged_name)
+    return os.path.basename(fallback)
+
+
+def stage_java(env, java_dir):
+    """The Java environment's staged jars, copied to java_dir/jars: the
+    job's Java worker pool (Beam's ExternalWorkerService, which runs each
+    worker in its own JVM's threads, so takes the pipeline's classes on its
+    class path) starts on them."""
+    jars = os.path.join(java_dir, "jars")
+    os.makedirs(jars, exist_ok=True)
+    n = 0
+    for dep in env.dependencies:
+        if dep.type_urn == common_urns.artifact_types.URL.urn:
+            pl = beam_runner_api_pb2.ArtifactUrlPayload()
+            pl.ParseFromString(dep.type_payload)
+            src = pl.url
+        elif dep.type_urn == common_urns.artifact_types.FILE.urn:
+            pl = beam_runner_api_pb2.ArtifactFilePayload()
+            pl.ParseFromString(dep.type_payload)
+            src = pl.path
+        else:
+            continue
+        name = _staged_name(dep, src)
+        if not name.endswith(".jar"):
+            continue
+        n += 1
+        _fetch(src, os.path.join(jars, "%04d-%s" % (n, name)))
+    del env.dependencies[:]
+    return n
+
+
+def rewrite_environments(p, harness, java_harness=None, java_dir=None):
+    """Points the pipeline's SDK environments at the job's worker pools:
+    Python's at the Python SDK's, Java's at the Java SDK's. A Java pipeline
+    is given a Python environment too, for the service-side transforms the
+    launcher runs in Python (cbio). Answers (the Python environment, the
+    Java SDK's major Java version or "")."""
+    python_env, java_version = None, ""
     for eid, env in p.components.environments.items():
         if env.urn == common_urns.environments.DOCKER.urn:
             dp = beam_runner_api_pb2.DockerPayload()
             dp.ParseFromString(env.payload)
-            if "python" not in dp.container_image:
-                raise RuntimeError("The pipeline's environment %s runs the SDK container %s: only the Python SDK's harness is served by "
-                                   "CloudBurrow's local runner." % (eid, dp.container_image))
-            env.urn = common_urns.environments.EXTERNAL.urn
-            env.payload = beam_runner_api_pb2.ExternalPayload(
-                endpoint=endpoints_pb2.ApiServiceDescriptor(url=harness)).SerializeToString()
-            python_env = python_env or eid
+            if "python" in dp.container_image:
+                env.urn = common_urns.environments.EXTERNAL.urn
+                env.payload = beam_runner_api_pb2.ExternalPayload(
+                    endpoint=endpoints_pb2.ApiServiceDescriptor(url=harness)).SerializeToString()
+                python_env = python_env or eid
+            elif "java" in dp.container_image and java_harness and java_dir:
+                v = _java_major(dp.container_image) or "17"
+                if java_version and v != java_version:
+                    raise RuntimeError("The pipeline's Java environments run Java %s and %s: one Java version per job is served." % (java_version, v))
+                java_version = v
+                stage_java(env, java_dir)
+                env.urn = common_urns.environments.EXTERNAL.urn
+                env.payload = beam_runner_api_pb2.ExternalPayload(
+                    endpoint=endpoints_pb2.ApiServiceDescriptor(url=java_harness)).SerializeToString()
+                continue
+            else:
+                raise RuntimeError("The pipeline's environment %s runs the SDK container %s: CloudBurrow's local runner serves the "
+                                   "Python and Java SDKs' harnesses." % (eid, dp.container_image))
         # The SDK's staged files are URL artifacts in Cloud Storage
         # (gs://), which the artifact service reads as files: through
         # Beam's file systems, from the instance's Cloud Storage.
@@ -99,9 +168,34 @@ def rewrite_environments(p, harness):
                 if up.url.startswith("gs://"):
                     dep.type_urn = common_urns.artifact_types.FILE.urn
                     dep.type_payload = beam_runner_api_pb2.ArtifactFilePayload(path=up.url, sha256=up.sha256).SerializeToString()
+    if python_env is None and java_version:
+        python_env = "cb_python"
+        env = p.components.environments[python_env]
+        env.urn = common_urns.environments.EXTERNAL.urn
+        env.payload = beam_runner_api_pb2.ExternalPayload(
+            endpoint=endpoints_pb2.ApiServiceDescriptor(url=harness)).SerializeToString()
+        from apache_beam.transforms import environments as _envs
+        env.capabilities.extend(_envs.python_sdk_capabilities())
     if python_env is None:
-        raise RuntimeError("The pipeline has no Python SDK environment.")
-    return python_env
+        raise RuntimeError("The pipeline has no Python or Java SDK environment.")
+    return python_env, java_version
+
+
+def java_options(opts, args):
+    """The Java worker pool's pipeline options (PIPELINE_OPTIONS): the
+    job's, with the pool's address and the instance's credentials."""
+    o = {k: v for k, v in opts.items() if k not in (
+        "runner", "dataflowEndpoint", "apiRootUrl", "pipelineUrl", "templateLocation", "sdkContainerImage",
+        "workerHarnessContainerImage", "dataflowJobFile", "update", "transformNameMapping", "filesToStage",
+        "jobName", "credentialFactoryClass", "experiments")}
+    o["environmentOptions"] = ["external_service_address=" + args.java_harness]
+    o["credentialFactoryClass"] = "CbCredentialFactory"
+    o["gcsEndpoint"] = os.environ.get("STORAGE_EMULATOR_HOST", "").rstrip("/") + "/storage/v1/"
+    o["parallelism"] = args.parallelism
+    o["jobName"] = args.job_name
+    if args.streaming:
+        o["streaming"] = True
+    return {"options": o}
 
 
 def options_struct(opts, args):
@@ -115,13 +209,15 @@ def options_struct(opts, args):
     if args.streaming:
         o["streaming"] = True
         o["checkpointing_interval"] = 10000
-        # A drained job ends: its reads stop, and its sources, idle once
-        # they have emitted, shut down, so the watermark reaches the end
-        # of time, every window fires and the Flink job finishes (Flink
-        # checkpoints after tasks finish).
-        o["shutdown_sources_after_idle_ms"] = 1000
+        # The sources keep running until the job is drained (a source that
+        # shut down when idle would leave its reads' operators finishing,
+        # which no checkpoint or savepoint completes through): a drain
+        # stops the Flink job with --drain (drain()).
     o["job_name"] = args.job_name
     o["flink_master"] = "[local]"
+    if args.savepoint_path:
+        # Created from a snapshot: the Flink job starts from its savepoint.
+        o["savepoint_path"] = args.savepoint_path
     return job_utils.dict_to_struct({"beam:option:%s:v1" % k: v for k, v in o.items() if v is not None})
 
 
@@ -195,11 +291,71 @@ def opaque_custom_windows(p):
         del c.component_coder_ids[:]
 
 
+def _rest(base, method, path, body=None):
+    import urllib.request
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(base + path, data=data, method=method, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read() or b"{}")
+
+
+def savepoint(rest, snapshot_id, out):
+    """Takes a savepoint of the job server's running Flink job (the
+    job's), into /cb-snapshots/<snapshot_id>, through Flink's REST API,
+    and writes its location (or error) to out."""
+    res = {}
+    try:
+        base = "http://" + rest
+        running = [j["id"] for j in _rest(base, "GET", "/jobs").get("jobs", []) if j.get("status") == "RUNNING"]
+        if not running:
+            raise RuntimeError("the job's Flink job is not running")
+        fid = running[0]
+        trig = _rest(base, "POST", "/jobs/%s/savepoints" % fid,
+                     {"target-directory": "file:///cb-snapshots/%s" % snapshot_id, "cancel-job": False})
+        rid = trig["request-id"]
+        deadline = time.time() + 540
+        while True:
+            st = _rest(base, "GET", "/jobs/%s/savepoints/%s" % (fid, rid))
+            if st.get("status", {}).get("id") == "COMPLETED":
+                op = st.get("operation", {})
+                if op.get("location"):
+                    res["location"] = op["location"]
+                else:
+                    res["error"] = str(op.get("failure-cause", {}).get("stack-trace", "no location"))[:2000]
+                break
+            if time.time() > deadline:
+                res["error"] = "the savepoint did not complete"
+                break
+            time.sleep(0.5)
+    except Exception as e:
+        res["error"] = str(e)
+    tmp = out + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(res, f)
+    os.rename(tmp, out)
+
+
+def drain(rest):
+    """Drains the job server's Flink job: Flink's stop with --drain, which
+    takes a savepoint, stops the sources and advances the watermark to the
+    end of time, so every window fires before the job finishes (the reads,
+    which watch the drain file, stop with it)."""
+    try:
+        base = "http://" + rest
+        for j in _rest(base, "GET", "/jobs").get("jobs", []):
+            if j.get("status") == "RUNNING":
+                _rest(base, "POST", "/jobs/%s/stop" % j["id"], {"drain": True, "targetDirectory": "file:///tmp/cb-drain"})
+    except Exception as e:
+        emit(event="message", importance="JOB_MESSAGE_WARNING", text="Draining the Flink job: %s" % e)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--job-endpoint", required=True)
     ap.add_argument("--artifact-endpoint", required=True)
     ap.add_argument("--harness", default="localhost:50000")
+    ap.add_argument("--java-harness", default="localhost:50001")
+    ap.add_argument("--java-dir", default="/cb/java")
     ap.add_argument("--pipeline-url", required=True)
     ap.add_argument("--options", required=True)
     ap.add_argument("--job-name", required=True)
@@ -207,6 +363,8 @@ def main():
     ap.add_argument("--streaming", action="store_true")
     ap.add_argument("--cancel-file", required=True)
     ap.add_argument("--metrics-dir", default="/cb/metrics")
+    ap.add_argument("--flink-rest", default="")
+    ap.add_argument("--savepoint-path", default="")
     args = ap.parse_args()
 
     with open(args.options) as f:
@@ -220,13 +378,27 @@ def main():
     p = beam_runner_api_pb2.Pipeline()
     p.ParseFromString(data)
     try:
-        env = rewrite_environments(p, args.harness)
+        env, java_version = rewrite_environments(p, args.harness, args.java_harness, args.java_dir)
         cbio.rewrite(p, env)
         opaque_custom_windows(p)
     except Exception as e:
         emit(event="done", state="FAILED", message="Workflow failed. Causes: %s" % e)
         return
     emit(event="graph", transforms=graph(p))
+    if java_version:
+        # internal/beamrun starts the job's Java worker pool, in the job
+        # server's network namespace, once its jars and options are here.
+        with open(os.path.join(args.java_dir, "options.json"), "w") as f:
+            json.dump(java_options(opts, args), f)
+        with open(os.path.join(args.java_dir, "version"), "w") as f:
+            f.write(java_version)
+        open(os.path.join(args.java_dir, "ready"), "w").close()
+        pool = args.job_endpoint.rsplit(":", 1)[0] + ":" + args.java_harness.rsplit(":", 1)[1]
+        try:
+            grpc.channel_ready_future(grpc.insecure_channel(pool)).result(timeout=300)
+        except Exception:
+            emit(event="done", state="FAILED", message="Workflow failed. Causes: The job's Java SDK harness did not start.")
+            return
     producers = producers_of(p)
 
     deadline = time.time() + 120
@@ -273,6 +445,8 @@ def main():
     t.start()
     cancelled = False
     last = 0
+    taken = set()
+    drained = False
     while t.is_alive():
         t.join(1)
         if not cancelled and os.path.exists(args.cancel_file):
@@ -281,6 +455,16 @@ def main():
                 stub.Cancel(beam_job_api_pb2.CancelJobRequest(job_id=job_id))
             except Exception:
                 pass
+        if args.flink_rest and args.streaming and not drained and os.path.exists(os.environ.get("CB_DRAIN", "/cb/ctl/drain")):
+            drained = True
+            threading.Thread(target=drain, args=(args.flink_rest,), daemon=True).start()
+        if args.flink_rest:
+            ctl = os.path.dirname(args.cancel_file)
+            for name in os.listdir(ctl):
+                if name.startswith("savepoint-") and "." not in name and name not in taken:
+                    taken.add(name)
+                    threading.Thread(target=savepoint, args=(args.flink_rest, name[len("savepoint-"):],
+                                                             os.path.join(ctl, name + ".json")), daemon=True).start()
         if time.time() - last > 5:
             last = time.time()
             emit(event="metrics", metrics=harness_metrics(args.metrics_dir, producers))

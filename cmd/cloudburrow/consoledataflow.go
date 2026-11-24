@@ -526,16 +526,30 @@ func (p dataflowProvider) DetailActions(ctx context.Context, project string, pat
 		modes = append(modes, "drain")
 		help += " Drain stops reading new data, finishes what has been read, closes the open windows, and then stops the job."
 	}
-	return []console.Action{{ID: "stop", Label: "Stop", Title: "Stop job", Submit: "Stop job", Destructive: true, Fields: []console.Field{
+	acts := []console.Action{{ID: "stop", Label: "Stop", Title: "Stop job", Submit: "Stop job", Destructive: true, Fields: []console.Field{
 		{Name: "mode", Label: "Stop the job by", Type: "radio", Default: "cancel", Options: modes, OptionLabels: labels, Help: help}}}}
+	if j.GetType() == dataflowpb.JobType_JOB_TYPE_STREAMING && j.GetCurrentState() == dataflowpb.JobState_JOB_STATE_RUNNING {
+		// guides/using-snapshots: a running streaming job's Create snapshot.
+		acts = append(acts, console.Action{ID: "snapshot", Label: "Create snapshot", Title: "Create a snapshot", Submit: "Create", Fields: []console.Field{
+			{Name: "description", Label: "Description", Help: "Optional. A description of the snapshot."},
+			{Name: "sources", Label: "Snapshot", Type: "radio", Default: "without", Options: []string{"without", "with"},
+				OptionLabels: map[string]string{"without": "Without data sources", "with": "With data sources"},
+				Help:         "With data sources also snapshots the job's Pub/Sub sources."}}})
+	}
+	return acts
 }
 
 func (p dataflowProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
-	if len(path) != 1 || action != "stop" {
+	if len(path) != 1 || (action != "stop" && action != "snapshot") {
 		return errors.New("no such action")
 	}
 	s, j, err := p.job(ctx, project, path[0])
 	if err != nil {
+		return err
+	}
+	if action == "snapshot" {
+		_, err := s.SnapshotJob(ctx, &dataflowpb.SnapshotJobRequest{ProjectId: j.GetProjectId(), Location: j.GetLocation(), JobId: j.GetId(),
+			Description: values["description"], SnapshotSources: values["sources"] == "with"})
 		return err
 	}
 	st := dataflowpb.JobState_JOB_STATE_CANCELLED

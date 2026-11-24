@@ -116,7 +116,12 @@ type Server struct {
 	mu   sync.Mutex
 	// jobs by key (project/location/id).
 	jobs map[string]*jobRec
-	wg   sync.WaitGroup
+	// base is cancelled by Close: it ends the snapshots being taken.
+	base     context.Context
+	stopBase context.CancelFunc
+	// snaps are the snapshots by key (project/location/id).
+	snaps map[string]*snapRec
+	wg    sync.WaitGroup
 }
 
 // jobRec is one job and what it reported.
@@ -146,7 +151,8 @@ type jobRec struct {
 
 // NewServer returns the server, loading opts.State.
 func NewServer(opts Options) (*Server, error) {
-	s := &Server{opts: opts, jobs: map[string]*jobRec{}}
+	s := &Server{opts: opts, jobs: map[string]*jobRec{}, snaps: map[string]*snapRec{}}
+	s.base, s.stopBase = context.WithCancel(context.Background())
 	if err := s.load(); err != nil {
 		return nil, err
 	}
@@ -186,6 +192,7 @@ func newJobID(t time.Time) string {
 
 // Close cancels every running job and waits for their runs to end.
 func (s *Server) Close() {
+	s.stopBase()
 	s.mu.Lock()
 	for _, r := range s.jobs {
 		if r.cancel != nil {
@@ -210,6 +217,11 @@ func (s *Server) Reset(project string) error {
 			wait = append(wait, r.done)
 		}
 		delete(s.jobs, k)
+	}
+	for k, r := range s.snaps {
+		if project == "" || r.snap.GetProjectId() == project {
+			s.dropSnapLocked(k, r)
+		}
 	}
 	err := s.saveLocked()
 	s.mu.Unlock()
@@ -248,7 +260,8 @@ type persistedJob struct {
 }
 
 type persisted struct {
-	Jobs []persistedJob `json:"jobs"`
+	Jobs      []persistedJob    `json:"jobs"`
+	Snapshots []json.RawMessage `json:"snapshots,omitempty"`
 }
 
 func (s *Server) load() error {
@@ -295,6 +308,18 @@ func (s *Server) load() error {
 		}
 		s.jobs[jobKey(j.ProjectId, j.Location, j.Id)] = r
 	}
+	for _, raw := range p.Snapshots {
+		var sn dataflowpb.Snapshot
+		if protojson.Unmarshal(raw, &sn) != nil {
+			continue
+		}
+		if sn.State == dataflowpb.SnapshotState_PENDING || sn.State == dataflowpb.SnapshotState_RUNNING {
+			// Taken by the last run of the CLI, which stopped before it
+			// was saved.
+			sn.State = dataflowpb.SnapshotState_FAILED
+		}
+		s.snaps[snapKey(sn.ProjectId, sn.Region, sn.Id)] = &snapRec{snap: &sn}
+	}
 	return nil
 }
 
@@ -322,6 +347,15 @@ func (s *Server) saveLocked() error {
 			pj.Scaling = append(pj.Scaling, b)
 		}
 		p.Jobs = append(p.Jobs, pj)
+	}
+	skeys := make([]string, 0, len(s.snaps))
+	for k := range s.snaps {
+		skeys = append(skeys, k)
+	}
+	sort.Strings(skeys)
+	for _, k := range skeys {
+		b, _ := m.Marshal(s.snaps[k].snap)
+		p.Snapshots = append(p.Snapshots, b)
 	}
 	b, err := json.Marshal(p)
 	if err != nil {
