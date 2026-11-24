@@ -304,6 +304,10 @@ func (s *computeService) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("compute: %w", err)
 	}
+	// A Shielded VM's HTTPS metadata server (#2179): its guest's relay
+	// carries port 443 to this port, TLS and all, after a line naming the
+	// instance, which the API's own HTTP server would answer 400.
+	ln = api.MDSListener(ln)
 	s.ln = ln
 	// The xDS API over TLS (#2160), as proxyless gRPC reaches Google's:
 	// a TLS handshake on this port gets a certificate from the load
