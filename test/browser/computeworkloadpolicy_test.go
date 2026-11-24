@@ -53,7 +53,7 @@ func TestComputeGroupWorkloadPolicyThroughTheBrowser(t *testing.T) {
 		t.Fatalf("the group made on the page has workload policy %v", m["resourcePolicies"])
 	}
 	code, body := consoleDo(t, http.MethodGet, "/api/detail/compute-instance-groups"+q+"&name=us-central1-a&name="+group, "")
-	if code != http.StatusOK || !strings.Contains(body, `"Label":"Workload policy","Value":"`+pol+`"`) {
+	if code != http.StatusOK || !strings.Contains(body, `"label":"Workload policy","value":"`+pol+`"`) {
 		t.Errorf("the group's Details don't name its workload policy: %d %.800s", code, body)
 	}
 	p.follow(group)

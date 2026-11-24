@@ -311,10 +311,13 @@ func (b *computeVMs) podManifest(vm compute.VMSpec, ref string) string {
 			"volumes": volumes}}
 	// A Shielded VM's vTPM (#2179, computevtpm.go).
 	spec := pod["spec"].(map[string]any)
-	// An encrypted disk is open on one node: the VM runs there.
+	// An encrypted disk is open on one node: the VM runs there. A node
+	// selector, not nodeName, so the scheduler still binds the VM's other,
+	// new claims (kind's local-path class binds a claim at its first
+	// consumer's scheduling, which nodeName skips).
 	for _, d := range vm.Encrypted() {
 		if n := b.cryptNode(d.Key); n != "" {
-			spec["nodeName"] = n
+			spec["nodeSelector"] = map[string]string{"kubernetes.io/hostname": n}
 		}
 	}
 	vmc := spec["containers"].([]any)[0].(map[string]any)

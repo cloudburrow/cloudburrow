@@ -67,3 +67,20 @@ func TestManagedGroupWorkloadPolicies(t *testing.T) {
 	wantStatus(t, s, 400, "ANY or ANY_SINGLE_ZONE", "POST", r+"instanceGroupManagers", rg("rg", "EVEN"))
 	mustCall(t, s, "POST", r+"instanceGroupManagers", rg("rg", "ANY_SINGLE_ZONE"))
 }
+
+// TestInstanceTemplateByID (#2206): a template is read and deleted by its
+// numeric ID too, as Terraform's provider reads it.
+func TestInstanceTemplateByID(t *testing.T) {
+	s, err := New(Options{VMs: fakeVMs{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustCall(t, s, "POST", "global/instanceTemplates", obj{"name": "web", "properties": obj{"machineType": "e2-small", "disks": []any{map[string]any{"boot": true, "initializeParams": map[string]any{"sourceImage": "projects/debian-cloud/global/images/family/debian-12"}}}}})
+	id := str(mustCall(t, s, "GET", "global/instanceTemplates/web", nil), "id")
+	if got := mustCall(t, s, "GET", "global/instanceTemplates/"+id, nil); str(got, "name") != "web" {
+		t.Fatalf("by ID: %v", got)
+	}
+	wantStatus(t, s, 404, "", "GET", "global/instanceTemplates/12345", nil)
+	mustCall(t, s, "DELETE", "global/instanceTemplates/"+id, nil)
+	wantStatus(t, s, 404, "", "GET", "global/instanceTemplates/web", nil)
+}

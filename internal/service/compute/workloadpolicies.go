@@ -18,9 +18,9 @@ package compute
 //     placement policies".
 //   - Its VMs are of the series the overview lists (A4X Max, A4X, A4, A3
 //     Ultra, A3 Mega, A3 High, H4D, TPU7x, TPU v6e, TPU v5p). None of them
-//     is served here: their GPUs and TPUs aren't on this machine, so such
-//     a group is kept at zero VMs, and a size above zero is refused with
-//     that reason.
+//     is served here: their GPUs, TPUs and (H4D) 192 vCPUs aren't on this
+//     machine, so such a group is kept at zero VMs, and a size above zero
+//     is refused with that reason.
 //   - A policy a group uses can't be deleted (resourceInUseByAnotherResource).
 
 import (
@@ -117,7 +117,7 @@ func (s *Server) checkWorkloadTemplatesLocked(project, region string, templates 
 		if !workloadSeries[series] {
 			return invalid("Invalid value for field 'resource.instanceTemplate': '%s'. Workload policies support the A4X Max, A4X, A4, A3 Ultra, A3 Mega, A3 High and H4D machine series and TPU7x, TPU v6e and TPU v5p, not the machine type %s.", t, mt)
 		}
-		return unimplemented("a managed instance group with a workload policy is kept at 0 VMs here: the machine series workload policies support (%s's %s) need GPUs or TPUs this machine doesn't have", t, mt)
+		return unimplemented("a managed instance group with a workload policy is kept at 0 VMs here: the machine series workload policies support (%s's %s) need GPUs, TPUs or (H4D) 192 vCPUs this machine doesn't have", t, mt)
 	}
 	return nil
 }

@@ -27,7 +27,7 @@ import (
 // workload policies support need GPUs or TPUs); a group with a VM refused
 // a policy; a regional group taking one only with the ANY_SINGLE_ZONE or
 // ANY shape; and a policy in use refused deletion.
-// covers: compute.resourcePolicies.insert, compute.resourcePolicies.get, compute.resourcePolicies.delete, compute.instanceGroupManagers.insert, compute.instanceGroupManagers.get, compute.instanceGroupManagers.patch, compute.instanceGroupManagers.resize, compute.instanceGroupManagers.delete, compute.regionInstanceGroupManagers.insert, compute.regionInstanceGroupManagers.get, compute.regionInstanceGroupManagers.delete
+// covers: compute.resourcePolicies.insert, compute.resourcePolicies.get, compute.resourcePolicies.delete, compute.instanceGroupManagers.insert, compute.instanceGroupManagers.get, compute.instanceGroupManagers.patch, compute.instanceGroupManagers.delete, compute.regionInstanceGroupManagers.insert, compute.regionInstanceGroupManagers.get, compute.regionInstanceGroupManagers.delete
 func TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h)

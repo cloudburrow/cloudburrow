@@ -15638,9 +15638,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 268,
+      "Implemented": 266,
       "Unimplemented": 68,
-      "Verified": 250
+      "Verified": 252
     },
     "rows": [
       {
@@ -15952,7 +15952,8 @@
         "method": "compute.disks.addResourcePolicies",
         "status": "Verified",
         "tests": [
-          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient"
+          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
+          "test/compat/computediskzonalgroup_test.go:24 TestComputeZonalDiskGroupReplicationThroughTheGoClient"
         ]
       },
       {
@@ -15962,8 +15963,10 @@
       },
       {
         "method": "compute.disks.bulkInsert",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskzonalgroup_test.go:24 TestComputeZonalDiskGroupReplicationThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.disks.createSnapshot",
@@ -15985,6 +15988,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance"
         ]
@@ -15998,6 +16002,7 @@
         "method": "compute.disks.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
           "test/compat/computediskcmek_test.go:74 TestComputeDiskCMEKThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
@@ -16013,7 +16018,8 @@
         "method": "compute.disks.removeResourcePolicies",
         "status": "Verified",
         "tests": [
-          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient"
+          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
+          "test/compat/computediskzonalgroup_test.go:24 TestComputeZonalDiskGroupReplicationThroughTheGoClient"
         ]
       },
       {
@@ -16049,8 +16055,10 @@
       },
       {
         "method": "compute.disks.stopGroupAsyncReplication",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskzonalgroup_test.go:24 TestComputeZonalDiskGroupReplicationThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.disks.testIamPermissions",
@@ -16580,7 +16588,8 @@
         "method": "compute.instanceGroupManagers.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
@@ -16597,14 +16606,16 @@
         "method": "compute.instanceGroupManagers.get",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
         "method": "compute.instanceGroupManagers.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
@@ -16633,7 +16644,8 @@
         "method": "compute.instanceGroupManagers.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139"
+          "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
@@ -16812,6 +16824,7 @@
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/backupdrregiondisk_test.go:32 TestBackupDRRegionalDiskRoundTrip",
           "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
+          "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
           "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance"
@@ -16904,6 +16917,7 @@
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
           "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
           "test/compat/computeimagevdisk_test.go:40 TestComputeImageImportFromAVirtualDiskThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
@@ -17022,6 +17036,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
+          "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
           "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
@@ -17030,6 +17045,7 @@
         "method": "compute.instances.startWithEncryptionKey",
         "status": "Verified",
         "tests": [
+          "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
           "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient"
         ]
       },
@@ -17038,6 +17054,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
+          "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
           "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
@@ -17717,7 +17734,8 @@
         "method": "compute.regionInstanceGroupManagers.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
@@ -17736,14 +17754,16 @@
         "method": "compute.regionInstanceGroupManagers.get",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
@@ -18218,7 +18238,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
-          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
@@ -18226,7 +18247,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
-          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
@@ -18240,7 +18262,8 @@
         "tests": [
           "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
           "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
-          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {

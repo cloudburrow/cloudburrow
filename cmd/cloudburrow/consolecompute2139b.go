@@ -511,7 +511,7 @@ func (p computeGroupsProvider) groupFields(templates, networks []string) []conso
 			ShowWhen: "autoscaling=" + autoscaleOff, Section: "Autoscaling"},
 		namedPortsField(nil, "Port mapping"),
 		// A workload policy (#2206): the group's VMs' placement intent.
-		console.Field{Name: "workloadPolicy", Label: "Workload policy", Type: "text", Pattern: `^([a-z]([-a-z0-9]*[a-z0-9])?)?$`, VisibleWhen: managed, Section: "Workload policy",
+		console.Field{Name: "workloadPolicy", Label: "Workload policy", Type: "text", Pattern: computeNamePattern, VisibleWhen: managed, Section: "Workload policy",
 			Help: "Optional: the name of a workload policy in the group's region (gcloud compute resource-policies create workload-policy). A group takes one only while it has no VMs; a regional group only with the Any or Any single zone shape."},
 		nw,
 		console.Field{Name: "instances", Label: "VM instances", Type: "text", VisibleWhen: unmanaged, Help: "Optional, comma-separated names of VMs in the zone."},
