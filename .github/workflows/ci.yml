@@ -1185,7 +1185,7 @@ jobs:
       # Every test selected for the shard must pass: go test
       # exits 0 on a skip, and each skips without its variables or its screen.
       - name: Console in a headless browser
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai'
         run: |
           set -o pipefail
           # ubuntu-latest ships Google Chrome: it is in the runner image's
@@ -1273,32 +1273,11 @@ jobs:
           . scripts/compat-shards.sh
           # What the restarted instance needs before its tests (#1985).
           compat_browser_prepare "$SHARD"
-          RUN_SHARD_TESTS=$COMPAT_BROWSER_RUN_SHARD_TESTS
-          CROSSSERVICE_SHARD_TESTS=$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS
-          EMULATORS_SHARD_TESTS=$COMPAT_BROWSER_EMULATORS_SHARD_TESTS
-          MEMORYSTORE_SHARD_TESTS=$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS
-          SQL_SHARD_TESTS=$COMPAT_BROWSER_SQL_SHARD_TESTS
-          SERVED_SHARD_TESTS=$COMPAT_BROWSER_SERVED_SHARD_TESTS
-          SERVED_ONLY_TESTS=$COMPAT_BROWSER_SERVED_ONLY_TESTS
-          LOCALAI_SHARD_TESTS=$COMPAT_BROWSER_LOCALAI_SHARD_TESTS
-          NEVER_TESTS=$COMPAT_BROWSER_NEVER_TESTS
-          case "$SHARD" in
-            # The localai shard's tests are kept out of run, whose pattern
-            # (TestSpeech*) names one of them: its transcription needs the
-            # local models only that shard starts.
-            # And the run instance's tests crossservice runs are kept out of run.
-            run) SELECT=(-run "$RUN_SHARD_TESTS" -skip "$CROSSSERVICE_SHARD_TESTS|$LOCALAI_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS") ;;
-            crossservice) SELECT=(-run "$CROSSSERVICE_SHARD_TESTS" -skip "$LOCALAI_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -E "$CROSSSERVICE_SHARD_TESTS") ;;
-            emulators) SELECT=(-run "$EMULATORS_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$EMULATORS_SHARD_TESTS") ;;
-            memorystore) SELECT=(-run "$MEMORYSTORE_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$MEMORYSTORE_SHARD_TESTS") ;;
-            sql) SELECT=(-run "$SQL_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$SQL_SHARD_TESTS") ;;
-            served) SELECT=(-run "$SERVED_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$SERVED_SHARD_TESTS") ;;
-            localai) SELECT=(-run "$LOCALAI_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$LOCALAI_SHARD_TESTS") ;;
-            *) SELECT=(-skip "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$MEMORYSTORE_SHARD_TESTS|$SQL_SHARD_TESTS|$SERVED_ONLY_TESTS|$LOCALAI_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$MEMORYSTORE_SHARD_TESTS|$SQL_SHARD_TESTS|$SERVED_ONLY_TESTS|$LOCALAI_SHARD_TESTS") ;;
-          esac
+          # Each shard's -run and -skip patterns (#2229's vpcvms among them),
+          # from compat_browser_select, which verify-local.sh calls too.
+          compat_browser_select "$SHARD"
+          SELECT=(-skip "$BROWSER_SKIP"); [ -z "$BROWSER_RUN" ] || SELECT+=(-run "$BROWSER_RUN")
           rc=0
-          NOT=$NEVER_TESTS; [ "$SHARD" = localai ] || NOT="$LOCALAI_SHARD_TESTS|$NEVER_TESTS"
-          if [ "$SHARD" = run ]; then NOT="$CROSSSERVICE_SHARD_TESTS|$NOT"; fi
           # 10m, and 20m in served, whose test makes a Kubernetes Engine
           # cluster and node pool, real kind nodes, through the pages (#1913,
           # #1925): about a minute on a laptop, several on a runner. And 20m
@@ -1326,9 +1305,12 @@ jobs:
           # suite took 1,930 s and 2,145 s) about a quarter of an hour from it.
           # And 30m in sql since AlloyDB's pages joined it (#2191): their two
           # tests start four PostgreSQL servers, a minute or so each.
-          BROWSER_TIMEOUT=10m; case "$SHARD" in served) BROWSER_TIMEOUT=20m ;; run|crossservice|storage|sql) BROWSER_TIMEOUT=30m ;; esac
+          # And 30m in vpcvms, whose 43 Compute Engine and VPC console tests
+          # (Landing 168) make VMs, subnets, routers and load balancers
+          # through the pages beside its compat suite's 766 s.
+          BROWSER_TIMEOUT=10m; case "$SHARD" in served) BROWSER_TIMEOUT=20m ;; run|crossservice|storage|sql|vpcvms) BROWSER_TIMEOUT=30m ;; esac
           go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
-          for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}" | grep -vE "$NOT"); do
+          for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | grep -E "${BROWSER_RUN:-^Test}" | grep -vE "$BROWSER_SKIP"); do
             grep -q -- "^--- PASS: $t (" browser.log ||
               { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" browser.log || echo 'no result')"; rc=1; }
           done
@@ -1337,7 +1319,7 @@ jobs:
           echo "== browser ($SHARD): $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai')
+        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai')
         with:
           name: browser-screenshots-${{ matrix.shard }}
           path: |

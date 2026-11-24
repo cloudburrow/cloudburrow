@@ -457,27 +457,11 @@ node_suite() {  # <shard> <dir> <flags>
 
 browser_suite() {  # <shard> <dir> <flags...>
   local shard=$1 dir=$2; shift 2
-  local chrome="" select pattern
-  # As in CI: the KMS and Cloud Run screens' tests in the run shard, the
-  # BigQuery, Firestore and Datastore screens' in the emulators shard, the
-  # Memorystore screens' in the memorystore shard, the Cloud SQL screens' in
-  # the sql shard, the rest in storage.
-  # The never-run tests are skipped in every shard, as in CI.
-  local skip=(-skip "$COMPAT_BROWSER_NEVER_TESTS") pick
-  case "$shard" in
-    # The localai shard's tests are kept out of run, as in CI: TestSpeech*
-    # names one, whose transcription needs that shard's local models.
-    # And the run instance's tests the crossservice shard runs, as in CI.
-    run) select=-run pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS" skip=(-skip "$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS|$COMPAT_BROWSER_LOCALAI_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS") ;;
-    crossservice) select=-run pattern="$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS" skip=(-skip "$COMPAT_BROWSER_LOCALAI_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS") ;;
-    emulators) select=-run pattern="$COMPAT_BROWSER_EMULATORS_SHARD_TESTS" ;;
-    memorystore) select=-run pattern="$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS" ;;
-    sql) select=-run pattern="$COMPAT_BROWSER_SQL_SHARD_TESTS" ;;
-    served) select=-run pattern="$COMPAT_BROWSER_SERVED_SHARD_TESTS" ;;
-    localai) select=-run pattern="$COMPAT_BROWSER_LOCALAI_SHARD_TESTS" ;;
-    *) select=-skip pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS|$COMPAT_BROWSER_SQL_SHARD_TESTS|$COMPAT_BROWSER_SERVED_ONLY_TESTS|$COMPAT_BROWSER_LOCALAI_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS"
-      skip=() ;;
-  esac
+  local chrome="" select=() pick
+  # As in CI: each shard's -run and -skip patterns, from
+  # compat_browser_select (scripts/compat-shards.sh).
+  compat_browser_select "$shard"
+  select=(-skip "$BROWSER_SKIP"); [ -z "$BROWSER_RUN" ] || select+=(-run "$BROWSER_RUN")
   for c in "${CLOUDBURROW_TEST_CHROME:-}" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
     "$(command -v google-chrome || true)" "$(command -v google-chrome-stable || true)" "$(command -v chromium || true)"; do
     if [ -n "$c" ] && [ -x "$c" ]; then chrome=$c; break; fi
@@ -520,23 +504,20 @@ browser_suite() {  # <shard> <dir> <flags...>
   BROWSER_ENV=$(scripts/compat-env.sh --only "$BROWSER_VARS" --cli "$CLI" -- "$@" 2>/dev/null)
   (
     eval "$BROWSER_ENV"
-    # As in CI: 30m in run, crossservice, storage (#2080) and sql (AlloyDB's clusters,
-    # #2191), 20m in served, 10m elsewhere.
+    # As in CI: 30m in run, crossservice, storage (#2080), sql (AlloyDB's clusters,
+    # #2191) and vpcvms (Landing 168's Compute Engine and VPC pages), 20m in
+    # served, 10m elsewhere.
     local timeout=10m
-    case "$shard" in served) timeout=20m ;; run|crossservice|storage|sql) timeout=30m ;; esac
+    case "$shard" in served) timeout=20m ;; run|crossservice|storage|sql|vpcvms) timeout=30m ;; esac
     # As in CI: what the restarted instance needs before its tests (#1985).
     compat_browser_prepare "$shard" 2>> "$dir/browser-prepare.err" || true
     export CLOUDBURROW_TEST_CHROME="$chrome" CLOUDBURROW_TEST_SCREENSHOTS="$dir/browser-screenshots"
-    go test -tags=browser -count=1 -timeout "$timeout" -v "$select" "$pattern" ${skip[@]+"${skip[@]}"} ./test/browser/ > "$dir/browser.log" 2>&1 || true
+    go test -tags=browser -count=1 -timeout "$timeout" -v "${select[@]}" ./test/browser/ > "$dir/browser.log" 2>&1 || true
   )
   go_suite browser "$dir/browser.log" "$("$chrome" --version 2>/dev/null || echo chrome)" strict
   # As in CI: every test of this shard's selection must have passed, so one
   # that never ran (a panic, a timeout) is a failure too.
-  local not=$COMPAT_BROWSER_NEVER_TESTS
-  [ "$shard" = localai ] || not="$COMPAT_BROWSER_LOCALAI_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS"
-  if [ "$shard" = run ]; then not="$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS|$not"; fi
-  for pick in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | grep -vE "$not" |
-    if [ "$select" = -run ]; then grep -E "$pattern"; else grep -vE "$pattern"; fi); do
+  for pick in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | grep -E "${BROWSER_RUN:-^Test}" | grep -vE "$BROWSER_SKIP"); do
     grep -q -- "^--- [A-Z]*: $pick (" "$dir/browser.log" || check "browser test $pick ran" fail "no result"
   done
   "$CLI" stop "$@" >> "$dir/stop.log" 2>&1 || true

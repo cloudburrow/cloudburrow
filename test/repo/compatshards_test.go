@@ -147,15 +147,16 @@ func TestCompatShardListsLiveInOneFile(t *testing.T) {
 			t.Errorf("%s sets %q itself; it belongs in scripts/compat-shards.sh", name, strings.TrimSpace(m))
 		}
 	}
-	if !strings.Contains(ci["compat"], "RUN_SHARD_TESTS=$COMPAT_BROWSER_RUN_SHARD_TESTS") {
-		t.Error("ci.yml's browser step does not take the run shard's browser tests from scripts/compat-shards.sh")
-	}
-	if !strings.Contains(string(raw), `"$COMPAT_BROWSER_RUN_SHARD_TESTS"`) {
-		t.Error("scripts/verify-local.sh does not split the browser suite as CI does")
-	}
-	if !strings.Contains(ci["compat"], "CROSSSERVICE_SHARD_TESTS=$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS") ||
-		!strings.Contains(string(raw), `"$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS"`) {
-		t.Error("ci.yml's browser step or scripts/verify-local.sh does not take the crossservice shard's browser tests from scripts/compat-shards.sh")
+	// The browser suite's split too: each shard's -run and -skip patterns
+	// come from compat_browser_select, and neither file names a shard's
+	// browser list itself.
+	for name, text := range map[string]string{"ci.yml's browser step": ci["compat"], "scripts/verify-local.sh": string(raw)} {
+		if !strings.Contains(text, `compat_browser_select "$`) || !strings.Contains(text, `"$BROWSER_SKIP"`) || !strings.Contains(text, `"$BROWSER_RUN"`) {
+			t.Errorf("%s does not split the browser suite with compat_browser_select", name)
+		}
+		if m := regexp.MustCompile(`\$COMPAT_BROWSER_[A-Z_]+_TESTS`).FindString(text); m != "" {
+			t.Errorf("%s reads %s itself; compat_browser_select picks each shard's browser tests", name, m)
+		}
 	}
 	if !strings.Contains(ci["check"], "shellcheck -x -s bash scripts/compat-shards.sh scripts/verify-local.sh") {
 		t.Error("ci.yml's check job does not shellcheck scripts/compat-shards.sh and scripts/verify-local.sh as bash")

@@ -368,13 +368,50 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # and 83 of its 90 minutes; crossservice's, with no browser step, 44 to 56):
 # the Cloud Run screens' 38 took 657 s and 765 s of them, the other 66 690 s
 # and 925 s.
-COMPAT_BROWSER_SHARDS="storage served run crossservice emulators memorystore sql localai"
+# Landing 168's Compute Engine and VPC consoles (#2139, #2140, #2160,
+# #2180, #2181): VM instances with A1 and Shielded VM settings, IPv6-only
+# subnets, Shared VPC, Cloud Router and NAT, Private Service Connect,
+# Serverless VPC Access, firewall rule logs, load balancer Edit, Cloud
+# Armor, Cloud CDN, IAP, Certificate Manager, network security and Secure
+# Web Proxy. Every screen is drawn only where Compute Engine is served,
+# which the storage shard's instance is not, so main run 45422957668 skipped
+# all 43 there, which failed the step. The served shard's browser step
+# already takes 18 of its 20 minutes with the Kubernetes Engine pages, and
+# computevms's compat suite most of its job, so they run in vpcvms, the
+# served shard's instance again (COMPAT_BROWSER_VPCVMS_TEST_NAMES).
+COMPAT_BROWSER_SHARDS="storage served vpcvms run crossservice emulators memorystore sql localai"
+COMPAT_BROWSER_VPCVMS_TEST_NAMES="ComputeA1Screens ComputeA1ScreensMeetWCAG
+  ShieldedVMConsole2181 ShieldedVMConsole2181MeetsWCAG
+  IPv6OnlyFormsMeetWCAG2140 IPv6OnlySubnetAndInstanceThroughTheBrowser2140
+  IPv6LoadBalancerFrontendMeetsWCAG2140 IPv6LoadBalancerFrontendThroughTheBrowser2140
+  CreateInstanceInServiceProjectMeetsWCAG2140 CreateInstanceOnSharedSubnetThroughTheBrowser2140
+  SharedVPCIndividualSubnetsThroughTheBrowser2140 SharedVPCShareSubnetsMeetsWCAG2140
+  PrivateServiceConnectAndSharedVPCMeetWCAG2140 PrivateServiceConnectAndSharedVPCThroughTheBrowser2140
+  PSCEndpointGlobalAccessThroughTheBrowser2140d
+  CloudRouterAndNATMeetWCAG2140 CloudRouterAndNATThroughTheBrowser
+  RouterNamedSetsThroughTheBrowser2140d RouterRoutePoliciesAndNamedSetsMeetWCAG2140d
+  PrivateNATMeetsWCAG2140 PrivateNATThroughTheBrowser2140
+  ServerlessVPCAccessMeetsWCAG2140 ServerlessVPCAccessThroughTheBrowser2140
+  FirewallRuleLogsThroughTheBrowser
+  LoadBalancerEditThroughTheBrowser2160 CloudArmorThroughTheBrowser2160 CloudArmorRound3ThroughTheBrowser2160
+  CloudCDNThroughTheBrowser2160 IAPThroughTheBrowser2160 IAPTCPThroughTheBrowser2160 IAPBrowserSignIn2160
+  CertificateManagerThroughTheBrowser2160 CertificateManagerEditsThroughTheBrowser2160
+  TrustConfigsAndClientAuthenticationThroughTheBrowser2160 MutualTLSPagesMeetWCAG2160
+  AddressGroupsThroughTheBrowser2160 OrganizationAddressGroupsThroughTheBrowser2160
+  BackendAuthenticationThroughTheBrowser2160 CustomAuthorizationPolicyThroughTheBrowser2160
+  NetworkSecurityRound4MeetsWCAG2160 RoutingRuleMapsThroughTheBrowser2160
+  SecureWebProxyThroughTheBrowser2160 SecureWebProxyMeetsWCAG2160"
+COMPAT_BROWSER_VPCVMS_SHARD_TESTS="^Test($(echo "$COMPAT_BROWSER_VPCVMS_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore)'
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipelines|Workbench|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS='^Test(KMS|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipelines|Workbench|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
-COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
+# Create an image from a Cloud Storage file (#2139) browses a bucket of
+# this instance's Cloud Storage from Compute Engine's Create an image: the
+# memorystore shard's instance serves both (main run 45422957668 skipped
+# both its tests in storage, which serves no Compute Engine).
+COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^Test(Memorystore|CreateImageFromCloudStorageFile)'
 # Private Service Connect's Connection Policies with Cloud SQL's create
 # page (TestConnectionPoliciesThroughTheBrowser, #2141) need Cloud SQL and
 # Compute Engine on one instance: the sql shard's (main run 45102950103
@@ -407,8 +444,42 @@ COMPAT_BROWSER_LOCALAI_SHARD_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbedd
 # pinned 1.8 GB apache/spark image (CLOUDBURROW_TEST_SPARK) on Serverless
 # for Apache Spark, which only the nightly spark shard serves, beside
 # Dataform, which it does not (main run 45422957668 skipped all three in
-# emulators).
-COMPAT_BROWSER_NEVER_TESTS='^Test(CloudRunFunctionsEditDownloadAndPermissionsThroughThePage|BigQueryStudioNotebookRuntimeThroughThePage|BigQueryStudioConnectToARuntimeThroughThePage|BigQuerySparkNotebookManageSessionsThroughThePage|BigQuerySparkNotebookThroughThePage)$'
+# emulators). So do Dataproc's pages (TestDataproc*ThroughThePage: #2156,
+# #2162, #2186, #2188, #2189), whose batches, sessions and clusters run in
+# the pinned apache/spark images (CLOUDBURROW_TEST_SPARK) on the Dataproc
+# API, which only the nightly spark shard serves (main run 45422957668
+# skipped all nine in storage).
+COMPAT_BROWSER_NEVER_TESTS='^Test(CloudRunFunctionsEditDownloadAndPermissionsThroughThePage|BigQueryStudioNotebookRuntimeThroughThePage|BigQueryStudioConnectToARuntimeThroughThePage|BigQuerySparkNotebookManageSessionsThroughThePage|BigQuerySparkNotebookThroughThePage|Dataproc[A-Za-z0-9]*ThroughThePage)$'
+
+# compat_browser_select <shard>: sets, for that shard's browser step,
+#   BROWSER_RUN   its go test -run pattern (every test when empty)
+#   BROWSER_SKIP  its go test -skip pattern
+# and returns 1 for a shard that runs no browser test. Every test the two
+# select must pass: ci.yml and verify-local.sh read both, and
+# cmd/cloudburrow's TestBrowserTestsRunWhereTheirScreensAreServed holds
+# each test to one shard whose instance draws every screen it needs.
+compat_browser_select() {
+  BROWSER_RUN=""
+  BROWSER_SKIP=$COMPAT_BROWSER_NEVER_TESTS
+  # The localai shard's tests are kept out of every other shard: the run
+  # shard's pattern (TestSpeech*) names one, whose transcription needs that
+  # shard's local models.
+  [ "$1" = localai ] || BROWSER_SKIP="$COMPAT_BROWSER_LOCALAI_SHARD_TESTS|$BROWSER_SKIP"
+  case "$1" in
+    # And the run instance's tests the crossservice shard runs.
+    run) BROWSER_RUN=$COMPAT_BROWSER_RUN_SHARD_TESTS BROWSER_SKIP="$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS|$BROWSER_SKIP" ;;
+    crossservice) BROWSER_RUN=$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS ;;
+    emulators) BROWSER_RUN=$COMPAT_BROWSER_EMULATORS_SHARD_TESTS ;;
+    memorystore) BROWSER_RUN=$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS ;;
+    sql) BROWSER_RUN=$COMPAT_BROWSER_SQL_SHARD_TESTS ;;
+    served) BROWSER_RUN=$COMPAT_BROWSER_SERVED_SHARD_TESTS ;;
+    vpcvms) BROWSER_RUN=$COMPAT_BROWSER_VPCVMS_SHARD_TESTS ;;
+    localai) BROWSER_RUN=$COMPAT_BROWSER_LOCALAI_SHARD_TESTS ;;
+    # The rest of the suite.
+    storage) BROWSER_SKIP="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS|$COMPAT_BROWSER_SQL_SHARD_TESTS|$COMPAT_BROWSER_SERVED_ONLY_TESTS|$COMPAT_BROWSER_VPCVMS_SHARD_TESTS|$BROWSER_SKIP" ;;
+    *) return 1 ;;
+  esac
+}
 
 # compat_shard <shard>: sets, for that shard,
 #   SERVICES     the instance's --services
