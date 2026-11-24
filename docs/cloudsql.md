@@ -1468,7 +1468,8 @@ the console. PostgreSQL answers `FATAL 28P01 password authentication failed for 
   `mysql_native_password` for 5.6, 5.7 and 8.0 ("Cloud SQL for MySQL 8.0 uses
   mysql_native_password as the default authentication plugin for new users",
   [features](https://docs.cloud.google.com/sql/docs/mysql/features)), `caching_sha2_password` for
-  8.4. The `default_authentication_plugin` flag changes it on 8.0.
+  8.4. The `default_authentication_plugin` flag changes it on 8.0. As on Cloud SQL, an 8.4 server
+  still loads `mysql_native_password`, so the accounts an upgrade from 8.0 copies keep signing in.
 - **IAM database authentication** keeps signing in by token (#1944): the connector listener
   checks the token and signs the role in with a password of its own.
 - **CloudBurrow's own connections** (the Admin API's users, databases, imports, replicas and the

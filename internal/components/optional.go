@@ -1121,6 +1121,15 @@ func CloudSQLInstanceBackend(name, version string, persistent bool, rootPassword
 			// as the image's is, and 5.7's and 5.6's mysql_native_password.
 			b.Args = append(b.Args, "--default-authentication-plugin=mysql_native_password")
 		}
+		if version == "MYSQL_8_4" {
+			// "Cloud SQL for MySQL 8.4 continues to support existing
+			// accounts that use mysql_native_password ... they can
+			// continue to connect after an instance is upgraded" (same
+			// page): the plugin MySQL 8.4 leaves unloaded is loaded, so an
+			// 8.0 instance's users, copied by a major version upgrade,
+			// keep signing in. New users still get caching_sha2_password.
+			b.Args = append(b.Args, "--mysql-native-password=ON")
+		}
 		for _, f := range flags {
 			b.Args = append(b.Args, "--"+f.Name+"="+f.Value)
 		}
