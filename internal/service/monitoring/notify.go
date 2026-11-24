@@ -359,8 +359,10 @@ func (s *Server) SendEmail(ctx context.Context, project, kind, from string, to [
 
 // incidentMail is an incident's email; the caller holds mu.
 //
-// UNVERIFIED (Google documents the email's content, not its layout; read
-// 2026-11-24): the subject and the text's order.
+// UNVERIFIED (re-read 2026-11-24,
+// https://docs.cloud.google.com/monitoring/support/notification-options:
+// Google documents the email's content, not its layout): the subject and
+// the text's order.
 func (s *Server) incidentMail(in *Incident, p *monitoringpb.AlertPolicy) mail {
 	state := "opened"
 	if in.State == IncidentClosed {
