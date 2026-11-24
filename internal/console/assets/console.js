@@ -12663,7 +12663,10 @@ function computeMachineCard(m, data, running, redraw) {
           showError(`Change VM failed: ${err.message}`);
           return;
         }
-        followMove(data.instance, progress, `${idp}-replace-steps`, showError).then(redraw);
+        // The old VM's card goes with it: the instance's section follows,
+        // and, drawn again, follows the finished change too.
+        const node = document.getElementById("capacity-instance-progress") || progress;
+        followMove(data.instance, node, "capacity-instance-move-steps", showError).then(redraw);
       },
     });
   });
@@ -12754,6 +12757,18 @@ function computeInstanceSection(data, redraw) {
   const where = data.local_compute ? "This machine's Docker"
     : data.compute_machine ? `VM ${data.compute_machine}` : (data.engine && data.engine.message) || "A remote host";
   const actions = el("div", { class: "card-actions", id: `${id}-actions` });
+  const whereNode = el("dd", { id: `${id}-where`, text: where });
+  // After a move the section says where the instance runs now; the outcome
+  // stays in view (a full redraw would drop it).
+  const refresh = async () => {
+    try {
+      const now = await computeJSON("/api/compute");
+      whereNode.textContent = now.local_compute ? "This machine's Docker" : now.compute_machine ? `VM ${now.compute_machine}` : where;
+      back.hidden = !!now.local_compute;
+      for (const b of actions.querySelectorAll(`#${id}-move-resume, #${id}-move-rollback, #${id}-move-interrupted`)) b.remove();
+      back.disabled = false;
+    } catch { /* the console is restarting; the next load reads it */ }
+  };
   const post = async (label, path) => {
     showError("");
     try {
@@ -12762,7 +12777,7 @@ function computeInstanceSection(data, redraw) {
       showError(`${label} failed: ${err.message}`);
       return;
     }
-    followMove(instance, progress, `${id}-move-steps`, showError).then(redraw);
+    followMove(instance, progress, `${id}-move-steps`, showError).then(refresh);
   };
   const back = el("button", { type: "button", class: "secondary", id: `${id}-move-back`, text: "Move back to this machine",
     onclick: () => confirmDestructive({
@@ -12772,10 +12787,11 @@ function computeInstanceSection(data, redraw) {
       confirmLabel: "Move", consequence: "Nothing is removed from the VM until the instance runs here.", style: "confirm",
       onConfirm: async () => post("Move", `/api/compute/moves/${encodeURIComponent(instance)}/back`),
     }) });
-  if (!data.local_compute) actions.append(back);
+  back.hidden = !!data.local_compute;
+  actions.append(back);
   const section = el("section", { class: "card", id, "aria-labelledby": `${id}-title` },
     el("h2", { id: `${id}-title`, text: `Instance ${instance}` }),
-    el("dl", {}, el("dt", { text: "Runs on" }), el("dd", { id: `${id}-where`, text: where })),
+    el("dl", {}, el("dt", { text: "Runs on" }), whereNode),
     actions, error, progress);
   (async () => {
     let st;
@@ -12798,7 +12814,11 @@ function computeInstanceSection(data, redraw) {
       back.disabled = true;
       return;
     }
-    if (st.to === "local" && (!st.done || Date.now() - Date.parse(st.started) < 10 * 60 * 1000)) {
+    // A move back here or a change of VM under way, or just finished (this
+    // page reloaded with the console's restart), is followed here; a move
+    // onto a VM, on that VM's card.
+    const onCard = st.kind !== "replace" && (data.machines || []).some((m) => m.instance === st.to);
+    if (!onCard && (!st.done || Date.now() - Date.parse(st.started) < 10 * 60 * 1000)) {
       followMove(instance, progress, `${id}-move-steps`, showError);
     }
   })();
@@ -12838,11 +12858,12 @@ function computeMoveButton(m, data, idp, busy, progress, showError, redraw) {
         followMove(instance, progress, `${idp}-move-steps`, showError).then(redraw);
       },
     }) });
-  // A move under way (this page reloaded during it) is followed again.
+  // A move onto this VM under way (this page reloaded during it) is
+  // followed again.
   (async () => {
     try {
       const st = await computeJSON(`/api/compute/moves/${encodeURIComponent(instance)}`);
-      if (st.to === m.instance && (!st.done || Date.now() - Date.parse(st.started) < 10 * 60 * 1000)) {
+      if (st.to === m.instance && st.kind !== "replace" && !st.interrupted && (!st.done || Date.now() - Date.parse(st.started) < 10 * 60 * 1000)) {
         followMove(instance, progress, `${idp}-move-steps`, showError);
       }
     } catch { /* no move */ }

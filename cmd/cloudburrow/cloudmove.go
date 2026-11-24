@@ -221,11 +221,28 @@ func checkVM(cfg config.Config, m *byoc.Manager, name string) error {
 		return fmt.Errorf("VM %s is instance %s's compute already", name, mc.UsedBy)
 	}
 	if mc.Instance != cfg.Name && mc.UsedBy == "" {
-		if _, had, _ := remotecompute.LoadRecord(filepath.Join(cfg.StateDir, mc.Instance)); had {
+		if _, had, _ := remotecompute.LoadRecord(filepath.Join(cfg.StateDir, mc.Instance)); had && !neverStarted(cfg, mc.Instance) {
 			return fmt.Errorf("VM %s is instance %s's compute already", name, mc.Instance)
 		}
 	}
 	return nil
+}
+
+// neverStarted reports whether instance has never run: Create gave its VM
+// to an instance of the VM's own name, which no up has started (no up.json,
+// up.log or kubeconfig), so the VM is free for a move.
+func neverStarted(cfg config.Config, instance string) bool {
+	c := cfg
+	c.Name = instance
+	if _, up := running(c); up {
+		return false
+	}
+	for _, f := range []string{"up.json", "up.log", "kubeconfig"} {
+		if _, err := os.Stat(filepath.Join(c.InstanceDir(), f)); err == nil {
+			return false
+		}
+	}
+	return true
 }
 
 // open connects to a remote end; a local one has nothing to open.
@@ -540,6 +557,13 @@ func runMove(ctx context.Context, cfg config.Config, m *byoc.Manager, j moveJour
 		if dst.machine != "" && dst.machine != cfg.Name {
 			if err := m.SetUsedBy(dst.machine, cfg.Name); err != nil {
 				return fail(err)
+			}
+			// The VM is this instance's now, not that of the instance of
+			// its own name that never ran.
+			if neverStarted(cfg, dst.machine) {
+				c := cfg
+				c.Name = dst.machine
+				_ = remotecompute.RemoveRecord(c.InstanceDir())
 			}
 		}
 		j.Phase = phaseRecorded

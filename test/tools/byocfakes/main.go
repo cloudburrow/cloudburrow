@@ -17,7 +17,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"flag"
@@ -29,7 +28,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -59,11 +57,27 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Each VM boots as its cloud's stand-in while the create call runs, as
+	// a VM boots before its cloud reports it running.
 	aws := awsfake.New()
 	defer aws.Close()
 	aws.SetSSMTarget(awsAddr)
+	aws.Boot = func(userData string) {
+		if err := byoctest.BootStandIn(context.Background(), awsName, "ubuntu", userData); err != nil {
+			log.Printf("AWS VM: %v", err)
+			return
+		}
+		log.Printf("an AWS VM booted as %s", awsName)
+	}
 	az := azurefake.New()
 	defer az.Close()
+	az.Boot = func(user, customData string) {
+		if err := byoctest.BootStandIn(context.Background(), azName, user, customData); err != nil {
+			log.Printf("Azure VM: %v", err)
+			return
+		}
+		log.Printf("an Azure VM booted as %s", azName)
+	}
 
 	caPath := filepath.Join(*dir, "azurefake.pem")
 	if err := os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: az.Certificate().Raw}), 0o600); err != nil {
@@ -96,6 +110,12 @@ func main() {
 		}
 		w.WriteHeader(http.StatusOK)
 	})
+	// /approve is the user confirming IAM Identity Center's code on AWS's
+	// page.
+	mux.HandleFunc("POST /approve", func(w http.ResponseWriter, r *http.Request) {
+		aws.Approve()
+		w.WriteHeader(http.StatusOK)
+	})
 	// /live lists what is left in each fake cloud, for the walk-through's
 	// last check after Delete.
 	mux.HandleFunc("GET /live", func(w http.ResponseWriter, r *http.Request) {
@@ -125,7 +145,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	boot(ctx, aws, az, awsName, azName)
+	<-ctx.Done()
 }
 
 func splitStandIn(v string) (name, addr string, err error) {
@@ -134,57 +154,4 @@ func splitStandIn(v string) (name, addr string, err error) {
 		return "", "", fmt.Errorf("a stand-in is container=host:port, not %q", v)
 	}
 	return name, addr, nil
-}
-
-// boot stands the stand-ins in for each VM the fakes create, once, as its
-// cloud-init would boot it.
-func boot(ctx context.Context, aws *awsfake.Server, az *azurefake.Server, awsName, azName string) {
-	booted := map[string]bool{}
-	var mu sync.Mutex
-	t := time.NewTicker(300 * time.Millisecond)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-		for _, r := range aws.Live() {
-			if r.Kind != "instance" || r.UserData == "" {
-				continue
-			}
-			mu.Lock()
-			done := booted[r.ID]
-			booted[r.ID] = true
-			mu.Unlock()
-			if done {
-				continue
-			}
-			if err := byoctest.BootStandIn(ctx, awsName, "ubuntu", r.UserData); err != nil {
-				log.Printf("AWS VM %s: %v", r.ID, err)
-				continue
-			}
-			log.Printf("AWS VM %s booted as %s", r.ID, awsName)
-		}
-		for _, id := range az.IDs() {
-			if !strings.Contains(strings.ToLower(id), "/microsoft.compute/virtualmachines/") || booted[id] {
-				continue
-			}
-			body := az.Resource(id)
-			props, _ := body["properties"].(map[string]any)
-			osp, _ := props["osProfile"].(map[string]any)
-			raw, _ := osp["customData"].(string)
-			ud, err := base64.StdEncoding.DecodeString(raw)
-			if err != nil || len(ud) == 0 {
-				continue
-			}
-			user, _ := osp["adminUsername"].(string)
-			booted[id] = true
-			if err := byoctest.BootStandIn(ctx, azName, user, string(ud)); err != nil {
-				log.Printf("Azure VM %s: %v", id, err)
-				continue
-			}
-			log.Printf("Azure VM %s booted as %s", id, azName)
-		}
-	}
 }

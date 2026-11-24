@@ -11,7 +11,8 @@ install a cloud CLI, write a policy, open a port or manage an SSH key.
 
 > **Not yet tested against real AWS or Azure.** Every flow below is tested against local fakes
 > that speak each cloud's API (see [Testing](#how-it-is-tested)); the first run against the real
-> clouds is the user's. Report anything that differs.
+> clouds is the user's: [Test it on your account](#test-it-on-your-account) lists the clicks and
+> what each should show. Report anything that differs.
 >
 > **The VM becomes the instance's compute through phase 1's engine**
 > ([remote-compute.md](remote-compute.md#a-vm-cloudburrow-provisioned)). When a create, start or
@@ -108,11 +109,18 @@ cloudburrow cloud create --connect ssh --yes              # AWS over SSH from yo
 its state, region, machine type, price per hour, external IP, connection (Session Manager, or
 the one address SSH is open to and when it was set) and auto-stop. There:
 
-- **Size slider**: move it (by mouse or the arrow keys) through Small, Medium and Large and
-  **Resize**; the price follows the slider. AWS resizes a stopped instance, so a running one is
-  stopped, resized and started again. Azure resizes in place where the hardware allows, else
-  deallocates, resizes and starts. The disk, and the cluster's state on it, are kept. A GPU VM
-  resizes only among GPU sizes: the driver is installed at create.
+- **Size slider**: move it (by mouse or the arrow keys) through Small, Medium, Large and GPU;
+  the price, and its difference from now, follow the slider. Within a family it is **Resize**:
+  AWS resizes a stopped instance, so a running one is stopped, resized and started again; Azure
+  resizes in place where the hardware allows, else deallocates, resizes and starts. The disk, and
+  the cluster's state on it, are kept.
+- **Change VM** (to or from GPU): no cloud resizes across these families in place, as a GPU VM's
+  NVIDIA driver and container toolkit are installed by cloud-init when it is made. The button
+  reads Change VM, and its dialog shows the plan and the price before anything happens: a new VM
+  of the size (`<name>-gpu` or `<name>-cpu`) in the same connection and region, with the same
+  auto-stop and connection mode; the instance moved onto it with its state (as in [Move](#4-move-an-instance));
+  then the old VM deleted. If the move fails, the new VM is deleted and the instance stays where
+  it was. CLI: `cloudburrow cloud scale <vm> --size gpu` shows the same plan and asks.
 - **Start** and **Stop**. A stopped VM keeps its disk. On Azure, Stop *deallocates*, so the
   compute is no longer billed.
 - **Auto-stop**: choose another idle time and **Save**. On a running VM CloudBurrow rewrites the
@@ -124,11 +132,15 @@ the one address SSH is open to and when it was set) and auto-stop. There:
 - **Delete** (type the instance's name to confirm).
 - **View resources**: everything tagged `cloudburrow-instance=<name>`.
 
-CLI: `cloudburrow cloud status|scale --size large|start|stop|delete|resources`,
+CLI: `cloudburrow cloud status|scale [<vm>] --size large|start|stop|delete|resources`,
 `cloudburrow cloud set [<instance>] --auto-stop 30m` (`0` is never) and
 `cloudburrow cloud allow-my-ip [<instance>]`. Each takes `--name` for the instance.
 
-## 4. Move a running instance onto the VM
+## 4. Move an instance
+
+An instance moves, with its state, in every direction: from this machine onto a VM, from one VM
+to another (in the same cloud or another: AWS to Azure), and from a VM back to this machine.
+Compute capacity says where the instance runs (**Instance <name>: Runs on**).
 
 A VM created for an instance that already runs on this machine does not take it over silently:
 the instance's cluster and its state (the kind node's etcd, the volumes its pods write, Cloud SQL
@@ -139,8 +151,17 @@ Compute capacity, or the CLI, moves it:
 ```sh
 cloudburrow cloud move lab --to lab          # onto the VM `cloud create --name lab` made
 cloudburrow cloud move lab --to gpu-box      # onto another VM; gpu-box is then lab's compute
+cloudburrow cloud move lab --to lab-az       # from its AWS VM to an Azure VM
+cloudburrow cloud move lab --to local        # from its VM back to this machine
 cloudburrow cloud move lab --to ssh://dev@build-box.example   # onto a host of your own
+cloudburrow cloud move lab --resume          # an interrupted move, from where it stopped
+cloudburrow cloud move lab --rollback        # or undo it
 ```
+
+In the console: **Move instance here** on a VM's card (from this machine or another VM), and
+**Move back to this machine** in the instance's section. A move between two VMs streams through
+this machine, which holds both connections (the clouds need no route to each other); it costs
+the clouds' egress for the bytes carried.
 
 The move, step by step (each step is a line in the console and the terminal):
 
@@ -160,9 +181,20 @@ The move, step by step (each step is a line in the console and the terminal):
 6. **cleanup**: only then are the instance's containers, volumes and the committed images
    removed from this machine.
 
-A failure at any of steps 2 to 5 **rolls back**: what was made on the VM is removed, the record
-goes, and the instance starts on this machine again as it was, with its data. Nothing is removed
-here before the instance runs on the VM. The console restarts during a move, as `up` serves it;
+A failure at any of steps 2 to 5 **rolls back**: what was made at the destination is removed, the
+source's record comes back, and the instance starts where it ran, as it was, with its data.
+Nothing is removed from the source before the instance runs at the destination.
+
+A move is **resumable**. Each step, and within the carry each unit (an image loaded, a volume
+copied, a container made), is written to the instance's move journal (`move-journal.json`, with
+the carry's own in `move-carry.json`) before the next starts. A move that was interrupted (^C, the
+process killed, the laptop asleep or restarted, a dropped link) is not rolled back: the console
+shows **The move … was interrupted** with **Resume move** and **Roll back move**, and the CLI has
+`--resume` and `--rollback`. Resume goes on from the first unfinished unit (one cut off half way
+is done again from its start); Roll back removes what was made and starts the instance where it
+ran. Until then `up` refuses to start the instance, as its cluster is half carried.
+
+The console restarts during a move, as `up` serves it;
 the page follows the move's progress (`<state>/<instance>/move.json`) across the restart, and
 the move runs in a process of its own (`cloudburrow cloud move`), so closing the page does not
 stop it.
@@ -313,9 +345,52 @@ never reach a real endpoint:
 - Browser tests drive the whole console flow against the fakes, with WCAG and keyboard subtests
   (`go test -tags browser ./test/browser -run Byoc`). `TestByocMoveAnInstanceOntoTheVM` checks
   Move: the dialog, the progress, a rolled-back failure in an alert, a stopped VM's reason.
+- `TestByocChangeVMAndResumeAnInterruptedMove` checks Change VM (the GPU stop of the slider, the
+  plan with the price difference, the progress) and an interrupted move's Resume and Roll back.
+- **The first-run walk-through**, `TestByocFirstRunWalkThrough`, is the whole no-DevOps flow in
+  the browser on a real instance whose clouds are the fakes (`test/tools/byocfakes` serves them
+  in a process of its own and writes the file `CLOUDBURROW_BYOC_FAKES` names, every endpoint on
+  127.0.0.1) and whose VMs boot as two stand-ins: connect AWS (IAM Identity Center's device
+  sign-in) and Azure (Microsoft's sign-in), create a VM in each, move the instance onto the AWS
+  VM, deploy a Cloud Run service from the console there, move the instance from AWS to Azure
+  (the revision comes back on the Azure VM's node), scale, stop and start the Azure VM, move it
+  back to this machine, and delete both VMs, nothing left in either cloud, with WCAG and keyboard
+  subtests. `CLOUDBURROW_BYOC_FAKES` is refused unless every endpoint is a loopback address, and
+  keeps the fakes' credentials in a directory, never the keychain.
+- Moves are tested for real against the stand-ins: `TestStandInInterruptedMoveResumes` cuts a
+  carry off half way, resumes it with the data whole, and rolls a second one back from its
+  journal alone; `TestStandInMoveBetweenTwoHosts` carries from this machine to one host, to a
+  second, and back.
 - A move is tested for real against the Docker-in-Docker sshd stand-in
   ([remote-compute.md](remote-compute.md#tests)): `TestStandInMoveRoundTripKeepsData` carries a
   container with a labelled volume, an anonymous volume, a bind mount, a fixed address and a
   published port to the stand-in and back, and a refused carry that rolls back; and an instance
   (Storage, BigQuery, Dataform) with a ConfigMap and a Cloud Storage object was moved with
   `cloudburrow cloud move <instance> --to ssh://` and both were read back from it on the host.
+
+## Test it on your account
+
+The flows above have run against the local fakes only; this checklist is the first run on your
+own AWS account and Azure subscription. It costs a few dollars (Small VMs for about an hour;
+skip the GPU step to stay under a dollar). Start an instance first (`cloudburrow up --name lab`),
+open its console, and keep a terminal on `cloudburrow cloud status --name lab`.
+
+| # | Click | What it should show |
+|---|---|---|
+| 1 | **Settings > Compute**, enter the admin token (`cat <state>/lab/admin-token`) | Two cards, *Connect AWS* and *Connect Azure*; Create VM disabled. |
+| 2 | *Connect AWS*: your IAM Identity Center start URL and its region, **Sign in** | A code on the page and AWS's sign-in page in your browser showing the same code; after you approve, a list of your accounts and roles. Pick one: the connection appears as `aws-<account>`. Without Identity Center, use **Use an access key instead**. |
+| 3 | *Connect Azure*: **Sign in** | Microsoft's sign-in page in your browser; after it, your subscriptions. Pick one: `azure-<subscription>` appears. |
+| 4 | **Create VM**, connection `aws-…`, keep the closest region, **Small**, auto-stop 1 hour | The permission check says *Every permission CloudBurrow needs is granted.* (or names what is missing, and why, in plain words); the hourly and monthly price from AWS's Price List, before Create. |
+| 5 | **Create** | Progress: permissions, address, key, network, firewall, VM, disk, boot (cloud-init installs Docker and kind; 3 to 6 minutes), then *The VM is ready … Move it to the VM*. In AWS's console: one VPC, subnet, security group with **no inbound rule** (Session Manager), one instance and volume, all tagged `cloudburrow-instance=lab`. |
+| 6 | **Compute capacity**: on the VM's card, **Move instance here**, **Move** | Steps stop, connect, stop, image, volume (bytes copied), carried, start, verify, cleanup, done; the console restarts once (enter the new admin token). *Runs on: VM lab*. `cloudburrow status --name lab` names the VM. |
+| 7 | **Cloud Run > Deploy container**: image `ghcr.io/knative/helloworld-go:latest`, Allow public access, **Create** | The service turns ready; its URL answers through this machine as before the move. |
+| 8 | **Create VM** on `azure-…`, name `lab-az`, Small; then **Move instance here** on its card | A second VM in Azure (resource group, VNet, NSG with SSH from **your** address only, public IP, NIC, VM, disk); the move goes from AWS to Azure; *Runs on: VM lab-az*; the service still answers. |
+| 9 | On `lab-az`: the size slider to Medium, **Resize** | The slider shows Medium's price and *+$…/hour*; the machine type becomes `Standard_D16s_v5`; the instance reconnects. |
+| 10 | On `lab-az`: **Stop**, then **Start** | *Stopped* (Azure deallocates: compute billing stops), then *Running*; the instance reconnects; the service answers. |
+| 11 | Change networks (a phone hotspot), wait 3 minutes | The NSG's SSH rule moves to the new address (*Connection: SSH from …* changes); the instance reconnects. |
+| 12 | (Optional, GPU quota needed) the slider to **GPU**, **Change VM** | A dialog with the plan (`lab-az-gpu`, move, delete `lab-az`) and the price difference; then a new GPU VM, the move, and `lab-az` deleted. |
+| 13 | Interrupt a move: start **Move back to this machine**, and during *volume* stop the move's process (`kill <pid>` of `cloudburrow cloud move`) | *The move … was interrupted* with **Resume move** and **Roll back move**; **Resume move** finishes it: *Runs on: This machine's Docker*. |
+| 14 | **Delete** each VM (type its name) | Progress ends *Nothing tagged cloudburrow-instance=… is left*; in each cloud's console nothing tagged is left; Settings > Compute: **Disconnect** removes the keychain items. |
+
+Report each row that differs (a message, a step that took much longer, something left in a
+cloud) on #2209.

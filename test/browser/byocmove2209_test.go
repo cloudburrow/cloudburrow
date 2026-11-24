@@ -31,9 +31,10 @@ import (
 
 // scriptedMover plays a move's steps, or a rolled-back failure.
 type scriptedMover struct {
-	mu    sync.Mutex
-	moves map[string]console.MoveStatus
-	fail  bool
+	mu       sync.Mutex
+	moves    map[string]console.MoveStatus
+	fail     bool
+	replaced []string
 }
 
 func (m *scriptedMover) StartMove(instance, vm string) error {
@@ -73,6 +74,50 @@ func (m *scriptedMover) StartMove(instance, vm string) error {
 		m.moves[instance] = st
 		m.mu.Unlock()
 	}()
+	return nil
+}
+
+// ResumeMove plays the rest of an interrupted move.
+func (m *scriptedMover) ResumeMove(instance string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st, ok := m.moves[instance]
+	if !ok || !st.Interrupted {
+		return errors.New(instance + " has no unfinished move to resume")
+	}
+	st.Done, st.Interrupted, st.Error = true, false, ""
+	st.Steps = append(st.Steps, console.MoveStep{Time: time.Now(), Step: "resume", Message: "Resuming the move of " + instance},
+		console.MoveStep{Time: time.Now(), Step: "done", Message: instance + " runs on " + st.To})
+	m.moves[instance] = st
+	return nil
+}
+
+// RollbackMove undoes an interrupted move.
+func (m *scriptedMover) RollbackMove(instance string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st, ok := m.moves[instance]
+	if !ok || !st.Interrupted {
+		return errors.New(instance + " has no unfinished move to roll back")
+	}
+	st.Done, st.Interrupted, st.RolledBack = true, false, true
+	st.Error = "rolled back at the user's request"
+	st.Steps = append(st.Steps, console.MoveStep{Time: time.Now(), Step: "rollback", Message: "Rolled back"})
+	m.moves[instance] = st
+	return nil
+}
+
+// StartReplace plays a change of VM: a new VM, the move, the old deleted.
+func (m *scriptedMover) StartReplace(instance, vm, size string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	to := vm + "-" + size
+	m.moves[instance] = console.MoveStatus{Instance: instance, Kind: "replace", To: to, Started: time.Now(), Done: true, Steps: []console.MoveStep{
+		{Time: time.Now(), Step: "create", Message: "Making " + to},
+		{Time: time.Now(), Step: "move", Message: "Moving " + instance + " from " + vm + " to " + to},
+		{Time: time.Now(), Step: "delete", Message: "Deleting " + vm},
+		{Time: time.Now(), Step: "done", Message: to + " is the GPU size now"}}}
+	m.replaced = append(m.replaced, vm+":"+size)
 	return nil
 }
 
@@ -229,6 +274,136 @@ func TestByocMoveAnInstanceOntoTheVM(t *testing.T) {
 		p.run(chromedp.KeyEvent(kb.Enter))
 		p.waitFor(`document.querySelector(".modal form[data-confirm=confirm]") !== null && document.activeElement.textContent === "Cancel"`)
 		p.run(chromedp.KeyEvent(kb.Enter))
+		p.waitFor(`document.querySelector(".modal form[data-confirm=confirm]") === null`)
+	})
+}
+
+// Compute capacity's Change VM (#2209): the slider reaches the GPU size,
+// which no cloud resizes a CPU VM to in place, so the page shows the plan
+// (a new VM, the move, the old VM deleted) and the price difference before
+// it asks; and a move that was interrupted offers Resume and Roll back.
+func TestByocChangeVMAndResumeAnInterruptedMove(t *testing.T) {
+	mover := &scriptedMover{moves: map[string]console.MoveStatus{}}
+	b, m := openByocMove(t, mover)
+	p := b.p
+	p.navigate("/settings/compute")
+	p.waitFor(`document.getElementById("compute-token") !== null`)
+	p.setField("#compute-token", byocToken)
+	p.eval(`document.getElementById("compute-token-form").requestSubmit(), true`, nil)
+	p.waitFor(`document.getElementById("compute-aws-card") !== null`)
+	b.connectAWS()
+	if _, err := m.Create(context.Background(), byoc.CreateRequest{Instance: "demo-vm", Connection: "aws-" + awsfake.DefaultAccount,
+		Region: "us-west-2", Preset: byoc.Small, AutoStopMinutes: 60}, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	p.navigate("/compute-capacity")
+	p.waitFor(`document.getElementById("capacity-instance-where") !== null && !document.getElementById("capacity-demo-vm-size").disabled`)
+	var where string
+	p.eval(`document.getElementById("capacity-instance-where").textContent`, &where)
+	if where != "This machine's Docker" {
+		t.Errorf("the instance runs on %q", where)
+	}
+
+	// The slider's last stop is the GPU size: a new VM, with the price
+	// difference.
+	p.run(chromedp.Focus(chromedp.CSS(`#capacity-demo-vm-size`)), chromedp.KeyEvent(kb.End))
+	p.waitFor(`document.getElementById("capacity-demo-vm-size-value").textContent.includes("g6.xlarge")`)
+	var slider struct{ Value, Button string }
+	p.eval(`({ Value: document.getElementById("capacity-demo-vm-size-value").textContent, Button: document.getElementById("capacity-demo-vm-resize").textContent })`, &slider)
+	if !strings.Contains(slider.Value, "a new VM") || !strings.Contains(slider.Value, "+$") || slider.Button != "Change VM" {
+		t.Fatalf("the slider at GPU reads %+v", slider)
+	}
+	p.run(chromedp.Click(chromedp.CSS(`#capacity-demo-vm-resize`)))
+	p.waitFor(`document.querySelector(".modal form[data-confirm=confirm]") !== null`)
+	var detail string
+	p.eval(`document.querySelector(".modal").textContent`, &detail)
+	for _, want := range []string{"Change demo-vm to g6.xlarge", "cannot resize m7i.xlarge to g6.xlarge in place", "demo-vm-gpu", "/hour more", "deleted only once"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("the Change VM dialog lacks %q: %s", want, detail)
+		}
+	}
+	if len(mover.replaced) != 0 {
+		t.Fatal("the change started before it was confirmed")
+	}
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type=submit]`)))
+	p.waitForWithin(`document.getElementById("capacity-instance-move-steps-outcome") !== null`, 30*time.Second)
+	var outcome, steps string
+	p.eval(`document.getElementById("capacity-instance-move-steps-outcome").textContent`, &outcome)
+	p.eval(`[...document.querySelectorAll("#capacity-instance-move-steps li")].map((li) => li.dataset.step).join(",")`, &steps)
+	if steps != "create,move,delete,done" || !strings.Contains(outcome, "runs on demo-vm-gpu") || strings.Join(mover.replaced, ",") != "demo-vm:gpu" {
+		t.Fatalf("the change reads %q %q (%v)", steps, outcome, mover.replaced)
+	}
+
+	// An interrupted move: Resume finishes it.
+	interrupted := func() {
+		mover.mu.Lock()
+		mover.moves["byoc-demo"] = console.MoveStatus{Instance: "byoc-demo", To: "demo-vm", Started: time.Now(), Done: true, Interrupted: true,
+			Error: "the move was interrupted", Steps: []console.MoveStep{{Time: time.Now(), Step: "copy", Message: "Copying volume 3f2a: 0.4 GiB so far"}}}
+		mover.mu.Unlock()
+	}
+	interrupted()
+	p.navigate("/compute-capacity")
+	p.waitFor(`document.getElementById("capacity-instance-move-resume") !== null`)
+	var note string
+	p.eval(`document.getElementById("capacity-instance-move-interrupted").textContent`, &note)
+	if !strings.Contains(note, "was interrupted") {
+		t.Errorf("the interrupted move reads %q", note)
+	}
+	p.run(chromedp.Click(chromedp.CSS(`#capacity-instance-move-resume`)))
+	p.waitForWithin(`document.getElementById("capacity-instance-move-steps-outcome") !== null`, 30*time.Second)
+	p.eval(`document.getElementById("capacity-instance-move-steps-outcome").textContent`, &outcome)
+	if !strings.Contains(outcome, "byoc-demo runs on demo-vm") {
+		t.Fatalf("after Resume the move reads %q", outcome)
+	}
+
+	// Roll back undoes another, after a confirmation.
+	interrupted()
+	p.navigate("/compute-capacity")
+	p.waitFor(`document.getElementById("capacity-instance-move-rollback") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`#capacity-instance-move-rollback`)))
+	p.waitFor(`document.querySelector(".modal form[data-confirm=confirm]") !== null`)
+	p.run(chromedp.Click(chromedp.CSS(`.modal button[type=submit]`)))
+	p.waitForWithin(`document.getElementById("capacity-instance-move-steps-outcome") !== null`, 30*time.Second)
+	var rolled struct{ Role, Text string }
+	p.eval(`({ Role: document.getElementById("capacity-instance-move-steps-outcome").getAttribute("role"),
+		Text: document.getElementById("capacity-instance-move-steps-outcome").textContent })`, &rolled)
+	if rolled.Role != "alert" || !strings.Contains(rolled.Text, "rolled back") {
+		t.Fatalf("after Roll back the move reads %+v", rolled)
+	}
+
+	t.Run("WCAG", func(t *testing.T) {
+		interrupted()
+		p.navigate("/compute-capacity")
+		p.waitFor(`document.getElementById("capacity-instance-move-resume") !== null && !document.getElementById("capacity-demo-vm-size").disabled`)
+		for _, u := range p.unnamedControls() {
+			t.Errorf("an unnamed %s", u)
+		}
+		for _, c := range p.contrastFailures() {
+			t.Errorf("%s", c)
+		}
+		p.run(chromedp.Focus(chromedp.CSS(`#capacity-demo-vm-size`)), chromedp.KeyEvent(kb.End))
+		p.run(chromedp.Click(chromedp.CSS(`#capacity-demo-vm-resize`)))
+		p.waitFor(`document.querySelector(".modal form[data-confirm=confirm]") !== null`)
+		for _, u := range p.unnamedControls() {
+			t.Errorf("the Change VM dialog: an unnamed %s", u)
+		}
+		p.run(chromedp.KeyEvent(kb.Escape))
+		p.waitFor(`document.querySelector(".modal form[data-confirm=confirm]") === null`)
+	})
+
+	t.Run("keyboard", func(t *testing.T) {
+		p.run(reducedMotion())
+		interrupted()
+		p.navigate("/compute-capacity")
+		p.waitFor(`document.getElementById("capacity-instance-move-resume") !== null && !document.getElementById("capacity-demo-vm-size").disabled`)
+		for _, f := range p.keyboardFailures() {
+			t.Errorf("Compute capacity: %s", f)
+		}
+		// Roll back opens by keyboard with focus on Cancel.
+		p.tabTo(`a.id === "capacity-instance-move-rollback"`)
+		p.run(chromedp.KeyEvent(kb.Enter))
+		p.waitFor(`document.querySelector(".modal form[data-confirm=confirm]") !== null && document.activeElement.textContent === "Cancel"`)
+		p.run(chromedp.KeyEvent(kb.Escape))
 		p.waitFor(`document.querySelector(".modal form[data-confirm=confirm]") === null`)
 	})
 }

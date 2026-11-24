@@ -99,6 +99,12 @@ type Server struct {
 	srv *httptest.Server
 	now func() time.Time
 
+	// Boot, when set, is called as RunInstances makes an instance, with its
+	// decoded user data, before the call answers: a test boots a stand-in
+	// host as the VM (test/tools/byocfakes boots the Docker-in-Docker sshd
+	// stand-in). It is called with the fake's lock held.
+	Boot func(userData string)
+
 	mu       sync.Mutex
 	seq      int
 	calls    []string
@@ -1029,6 +1035,9 @@ func (s *Server) runInstances(w http.ResponseWriter, region string, form url.Val
 		itype: form.Get("InstanceType"), image: form.Get("ImageId"), userData: ud, groups: groups, volume: vol.id,
 		shutdown: form.Get("InstanceInitiatedShutdownBehavior"), profile: profile, privateIP: fmt.Sprintf("10.209.1.%d", 10+n%200),
 		tags: tagSpecs(form, "instance")})
+	if s.Boot != nil {
+		s.Boot(ud)
+	}
 	ec2Reply(w, "RunInstances", fmt.Sprintf("<reservationId>r-%s</reservationId><ownerId>%s</ownerId><groupSet/><instancesSet>%s</instancesSet>",
 		strings.TrimPrefix(inst.id, "i-"), DefaultAccount, s.instanceXML(inst)))
 }

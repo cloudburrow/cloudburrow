@@ -248,19 +248,30 @@ console can show as it is.
 
 ## Moving an instance
 
-`cloudburrow cloud move <instance> --to <vm>|ssh://user@host` and the console's **Move instance
-here** move an instance whose Docker is this machine's onto a VM or host ([byoc.md](byoc.md#4-move-a-running-instance-onto-the-vm)).
-`remotecompute.StartCarry` does the Docker side between any two Dockers (each a `DOCKER_HOST`):
-it stops the instance's containers (its kind nodes, and every container labelled
-`io.cloudburrow.instance` or `cloudburrow.instance` for it), commits each, takes its image across
-with `docker save | docker load`, makes each network with the same subnets, streams each volume
-(mounted, or labelled for the instance) between two helper containers, and creates each container
-again from its `docker inspect`, with its address. A system bind mount (`/lib/modules`, `/dev`, the
-Docker socket) stays the target's own; any other bind mount becomes a volume holding the path. A
-container or volume the target already has by that name stops the carry before anything is made.
-`Rollback` removes what was made on the target and starts the source's containers again;
-`RemoveSource` removes the source's once the instance is checked on the target. The state
-directory never moves: it is this machine's, with the APIs.
+`cloudburrow cloud move <instance> --to <vm>|ssh://user@host|local` and the console's **Move
+instance here** and **Move back to this machine** move an instance, with its state, from the
+Docker it runs on (this machine's, a VM's or a host's) to another: a VM in the same or another
+cloud, a host, or this machine ([byoc.md](byoc.md#4-move-an-instance)). `remotecompute.StartCarry`
+does the Docker side between any two Dockers (each a `DOCKER_HOST`; between two VMs the streams
+pass through this machine, which holds both connections): it stops the instance's containers (its
+kind nodes, and every container labelled `io.cloudburrow.instance` or `cloudburrow.instance` for
+it), commits each, takes its image across with `docker save | docker load`, makes each network
+with the same subnets, streams each volume (mounted, or labelled for the instance) between two
+helper containers, and creates each container again from its `docker inspect`, with its address.
+A system bind mount (`/lib/modules`, `/dev`, the Docker socket) stays the target's own; any other
+bind mount becomes a volume holding the path (read on the source host, through a helper there,
+when the source is remote). A container or volume the target already has by that name stops the
+carry before anything is made. `Rollback` removes what was made on the target and starts the
+source's containers again; `RemoveSource` removes the source's (and the images an earlier move
+left there) once the instance is checked on the target. The state directory never moves: it is
+this machine's, with the APIs.
+
+With `CarryOptions.Journal`, the carry records each finished unit (an image loaded, a volume
+copied, a container made); an interruption (the context ends) keeps the journal instead of
+rolling back, `ResumeCarry` continues from the first unfinished unit, and `OpenCarry` gives a
+`Carry` to roll back from the journal alone. `cloud move` keeps its own journal of the move's
+phases beside it, so `--resume` and `--rollback` (Resume and Roll back in the console) work after
+the process that started the move is gone.
 
 ## Egress on the host
 
@@ -313,6 +324,12 @@ the network.
   `cmd/cloudburrow`'s `TestProvisionedComputeRunsDockerOnTheVM` connects an instance whose
   record is a provisioned VM. It uses the provisioner's key and current address, and checks that
   the process's `docker` then reaches the stand-in.
+- `TestStandInInterruptedMoveResumes` cuts a carry off half way (its context ends during a
+  volume's copy): the journal stays and the source is not restarted; `ResumeCarry` finishes it
+  and the 4 MiB of data checks out on the host. A second carry, back, is cut off and undone from
+  its journal alone. `TestStandInMoveBetweenTwoHosts` carries from this machine to one stand-in,
+  from it to a second (`CLOUDBURROW_TEST_REMOTE_HOST_2`), and back, the data and the address kept
+  at each leg.
 - `TestStandInModelContainerMountsAPathOfThisMachine` runs a model container through Model
   Garden's own `DockerCLI` on the stand-in: its model directory exists only here, the container
   mounts it as a read-only volume on the host, and its published port serves the model here

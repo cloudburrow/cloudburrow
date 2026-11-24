@@ -54,6 +54,12 @@ const (
 type Server struct {
 	srv *httptest.Server
 
+	// Boot, when set, is called as a virtual machine is made, with its
+	// admin user and decoded custom data, before the call answers: a test
+	// boots a stand-in host as the VM. It is called with the fake's lock
+	// held.
+	Boot func(user, customData string)
+
 	mu sync.Mutex
 	// TokenLifetime is the expires_in the token endpoint issues; under five
 	// minutes, MSAL refreshes on every silent call.
@@ -738,6 +744,13 @@ func (s *Server) serveResource(w http.ResponseWriter, r *http.Request, path stri
 				body["__power"] = "running"
 				if ident, ok := body["identity"].(map[string]any); ok && ident["type"] == "SystemAssigned" {
 					ident["principalId"], ident["tenantId"] = guid(), TenantID
+				}
+				if osp, ok := props["osProfile"].(map[string]any); ok && s.Boot != nil {
+					raw, _ := osp["customData"].(string)
+					user, _ := osp["adminUsername"].(string)
+					if ud, err := base64.StdEncoding.DecodeString(raw); err == nil && len(ud) > 0 {
+						s.Boot(user, string(ud))
+					}
 				}
 			}
 			if sp, ok := props["storageProfile"].(map[string]any); ok {

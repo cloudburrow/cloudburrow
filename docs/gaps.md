@@ -38,9 +38,9 @@ tracks it; a closed issue is named only where it says what was built.
 | App Hub | 5 | 1 | 1 | 3 | 0 |
 | Dataform | 7 | 0 | 2 | 4 | 1 |
 | Console | 9 | 7 | 2 | 0 | 0 |
-| Remote compute | 1 | 1 | 0 | 0 | 0 |
-| Bring your own cloud | 3 | 2 | 0 | 0 | 1 |
-| **Total** | **93** | **17** | **24** | **44** | **8** |
+| Remote compute | 0 | 0 | 0 | 0 | 0 |
+| Bring your own cloud | 1 | 0 | 0 | 0 | 1 |
+| **Total** | **90** | **14** | **24** | **44** | **8** |
 
 ## Cloud Storage
 
@@ -382,11 +382,10 @@ console, the APIs and the metadata server staying on this machine.
 Closed: containers that mount a path of this machine (Model Garden, the LiteRT-LM runner, the
 TensorFlow converter and predictor, the video decoder, Spark procedures, Dataform) get it as a
 volume on the host (`internal/hostmount`), and a running instance moves onto a VM with its state
-(`cloudburrow cloud move`, the console's Move) (#2209).
-
-| Gap | Why open | Size |
-|---|---|---|
-| Moving an instance from one VM to another, or from a VM back to this machine, from the CLI or the console: `cloud move` carries an instance from this machine's Docker only (`remotecompute.StartCarry` itself carries between any two Dockers and is tested both ways) (#2209) | not built yet | S |
+(`cloudburrow cloud move`, the console's Move) (#2209); and it moves in every direction, from one
+VM to another (across clouds too) and back to this machine, each move resumable from its journal
+after an interruption, or rolled back (`--resume`, `--rollback`, the console's Resume and Roll
+back) (#2209).
 
 ## Bring your own cloud
 
@@ -402,16 +401,24 @@ the user's public address, before each connection and every few minutes, with
 (`cloudburrow cloud set --auto-stop`, Compute capacity), on a running VM at once and on a stopped
 one at its next start (#2209).
 
+A change to or from a GPU size, which no cloud resizes in place (cloud-init installs NVIDIA's
+driver and container toolkit at create), is one guided action: a new VM of the size, the instance
+moved onto it, the old VM deleted, with the plan and the price difference shown first (`cloud
+scale <vm> --size gpu`, Compute capacity's Change VM) (#2209). The first-run walk-through,
+`TestByocFirstRunWalkThrough`, runs the whole no-DevOps flow in the browser against the fakes and
+two stand-in hosts (#2209).
+
 | Gap | Why open | Size |
 |---|---|---|
-| **Not yet tested against real AWS or Azure** (#2209): every flow runs against `awsfake` and `azurefake`, recorded from the clouds' API references; the user runs the first real-cloud check | needs live AWS/Azure (nothing here signs in to them) | M |
-| A GPU/CPU change needs a new VM: the size slider moves within the VM's kind, since only a GPU VM's cloud-init installs NVIDIA's driver and container toolkit (#2209) | not built yet | S |
-| More VMs as extra nodes of one instance (multi-node over the tunnel), phase 3's "later, if needed" (#2209) | not built yet | L |
+| **Not yet tested against real AWS or Azure** (#2209): every flow runs against `awsfake` and `azurefake`, recorded from the clouds' API references, and the stand-in hosts; the user runs the first real-cloud check, [byoc.md's Test it on your account](byoc.md#test-it-on-your-account) | needs live AWS/Azure (nothing here signs in to them) | M |
 
 ## Excluded on purpose
 
 Not gaps to close; each stays until its decision is amended.
 
+- **Several VMs as nodes of one instance** (multi-node over the tunnel): not part of #2209. The
+  coordinator's decision of 2026-11-24 left it for later, if needed; one instance runs on one VM
+  (or this machine), and several instances each run on their own.
 - **Cloud Storage object IAM** (`objects.getIamPolicy`, `setIamPolicy`, `testIamPermissions`):
   501 by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #504. The ACL methods
   (`bucketAccessControls.*`, `objectAccessControls.*`, `defaultObjectAccessControls.*`) are

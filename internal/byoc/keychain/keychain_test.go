@@ -2,6 +2,7 @@ package keychain
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -59,5 +60,33 @@ func TestMemory(t *testing.T) {
 	_ = m.Delete("a")
 	if _, err := m.Get("a"); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
+	}
+}
+
+func TestDirStoreIsOwnerOnlyAndSharedBetweenStores(t *testing.T) {
+	dir := t.TempDir()
+	a, b := Dir{Path: dir}, Dir{Path: dir}
+	if _, err := a.Get("aws/key"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("an empty store's Get = %v", err)
+	}
+	if err := a.Set("aws/key", []byte("fake-secret")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := b.Get("aws/key")
+	if err != nil || string(got) != "fake-secret" {
+		t.Fatalf("another store over the directory reads %q %v", got, err)
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		info, _ := e.Info()
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s is %v, not owner-only", e.Name(), info.Mode().Perm())
+		}
+	}
+	if err := b.Delete("aws/key"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Get("aws/key"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("after Delete, Get = %v", err)
 	}
 }
