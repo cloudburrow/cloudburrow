@@ -99,7 +99,7 @@ func TestConnectExecuteDisconnect(t *testing.T) {
 	log := string(b)
 	for _, want := range []string{
 		"build --label cloudburrow.notebook-runtime=1 -t " + Tag() + " -",
-		"network create --internal --label cloudburrow.instance=w1 cb-nb-net-",
+		"network create --internal --label io.cloudburrow.instance=w1 cb-nb-net-",
 		"--entrypoint python3 " + Tag() + " -I /opt/cloudburrow/relay.py host.docker.internal:9050",
 		"network connect --alias host.docker.internal cb-nb-net-",
 		"-e GOOGLE_CLOUD_PROJECT=p -e CB_BIGQUERY_ENDPOINT=http://host.docker.internal:8080",

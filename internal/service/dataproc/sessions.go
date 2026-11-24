@@ -155,7 +155,14 @@ func (s *Server) CreateSession(ctx context.Context, req *dataprocpb.CreateSessio
 	switch x.GetSessionConfig().(type) {
 	case *dataprocpb.Session_SparkConnectSession:
 	case *dataprocpb.Session_JupyterSession:
-		return nil, status.Error(codes.Unimplemented, "Jupyter sessions are not served by CloudBurrow: create a Spark Connect session (spark_connect_session)")
+		// A Jupyter session (#2162) runs the same Spark Connect server
+		// and, beside it, a Jupyter Server of its kernels (PySpark and
+		// Almond's Scala, each `spark` a Spark Connect session of it),
+		// which the kernel gateway (gateway.go) starts kernels on; a
+		// BigQuery Studio notebook's IPython kernel binds to it too.
+		if x.GetJupyterSession().GetKernel() == dataprocpb.JupyterConfig_KERNEL_UNSPECIFIED {
+			x.GetJupyterSession().Kernel = dataprocpb.JupyterConfig_PYTHON
+		}
 	default:
 		return nil, apierror.InvalidArgument("session needs spark_connect_session or jupyter_session")
 	}
@@ -221,6 +228,9 @@ func (s *Server) startSession(ctx context.Context, name, opName, endpoint string
 	}
 	m := sessionRE.FindStringSubmatch(name)
 	job := baseJob(x.GetUuid(), m[1], m[2], name, x.GetRuntimeConfig(), x.GetEnvironmentConfig())
+	if js := x.GetJupyterSession(); js != nil {
+		job.Kernel = js.GetKernel().String()
+	}
 	job.Log = &sparkproc.LogTarget{Type: "cloud_dataproc_session",
 		Labels: map[string]string{"project_id": m[1], "location": m[2], "session_id": m[3]},
 		Output: "dataproc.googleapis.com%2Foutput", Spark: "dataproc.googleapis.com%2Fspark"}
@@ -590,4 +600,20 @@ func (s *Server) DeleteSessionTemplate(_ context.Context, req *dataprocpb.Delete
 	delete(s.templates, t.Name)
 	s.save()
 	return &emptypb.Empty{}, nil
+}
+
+// KernelConnectURI is the Spark Connect URI a Jupyter session's kernel
+// reaches its ACTIVE session's server by, through this API's gRPC port at
+// addr (the Spark Connect proxy finds the session by its UUID).
+func (s *Server) KernelConnectURI(name, addr string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	x := s.sessions[name]
+	if x == nil {
+		return "", apierror.NotFound("Session %s not found", name)
+	}
+	if x.State != dataprocpb.Session_ACTIVE {
+		return "", status.Errorf(codes.FailedPrecondition, "Session %s is %s, not ACTIVE", name, x.State)
+	}
+	return "sc://" + addr + "/;session_id=" + x.Uuid, nil
 }

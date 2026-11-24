@@ -300,6 +300,24 @@ jobs:
             grep -q -- "^--- PASS: $t (" compat.log ||
               { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" compat.log || echo 'no result')"; exit 1; }
           done
+          # A Dataproc cluster's HDFS across the instance's stop and up
+          # (#2188): the setup leaves a cluster with a file in HDFS, and
+          # the probe reads it once the restarted instance has started the
+          # cluster again.
+          CLOUDBURROW_TEST_DATAPROC_HDFS_SETUP=1 go test -tags=compat -count=1 -timeout 30m -v \
+            -run '^TestDataprocHDFSRestartSetup$' ./test/compat/ | tee hdfs-restart.log
+          ./bin/cloudburrow stop "${CB[@]}"
+          ./bin/cloudburrow up --detach --detach-timeout 10m "${CB[@]}"
+          ./bin/cloudburrow wait --timeout 1m "${CB[@]}"
+          ./bin/cloudburrow env "${CB[@]}" --format json > env.json
+          COMPAT_ENV=$(scripts/compat-env.sh --strict --only "$TEST_VARS" --env-json env.json \
+            --cli "$PWD/bin/cloudburrow" --gcloud "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" -- "${CB[@]}")
+          eval "$COMPAT_ENV"
+          CLOUDBURROW_TEST_DATAPROC_HDFS_EXPECT=present go test -tags=compat -count=1 -timeout 30m -v \
+            -run '^TestDataprocHDFSAcrossRestart$' ./test/compat/ | tee -a hdfs-restart.log
+          for t in TestDataprocHDFSRestartSetup TestDataprocHDFSAcrossRestart; do
+            grep -q -- "^--- PASS: $t (" hdfs-restart.log || { echo "$t did not pass"; exit 1; }
+          done
           ./bin/cloudburrow stop "${CB[@]}"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -308,6 +326,7 @@ jobs:
           name: compat-log-spark
           path: |
             compat.log
+            hdfs-restart.log
             ${{ runner.temp }}/cb/ci/up.log
           retention-days: 7
           if-no-files-found: ignore

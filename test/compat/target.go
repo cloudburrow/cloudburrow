@@ -265,6 +265,8 @@ var gcloudOverrides = []struct {
 	{"workflowexecutions", []string{"WORKFLOWS"}},
 	{"parametermanager", []string{"PARAMETERMANAGER"}},
 	{"apphub", []string{"APPHUB"}},
+	// Dataproc (#2162): gcloud dataproc's REST, on the Dataproc port.
+	{"dataproc", []string{"DATAPROC"}},
 	// Bigtable's admin REST API, on the Bigtable front's port (#1440).
 	{"bigtableadmin", []string{"BIGTABLE"}},
 	// Spanner's admin REST API and the Firestore Admin API (#1461).

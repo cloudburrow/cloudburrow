@@ -126,6 +126,2167 @@
         "verification": "sha256",
         "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
       },
+      "sparkRImage": {
+        "$comment": "SparkR workloads and Dataproc clusters of Spark 3.5 (#2162): runtime versions 1.2, 2.2 and 2.3's SparkR batches and image versions 2.2 and 2.3's clusters (cmd/cloudburrow/sparkrunner.go, rImage).",
+        "image": "apache/spark:3.5.9-scala2.12-java17-python3-r-ubuntu",
+        "digest": "sha256:2442368ef4a5ca60e81604cf48d22d847344d009237cd21a1943b060278898bb",
+        "license": "Apache-2.0 (Apache Spark) and the Ubuntu and Eclipse Temurin packages it is built on; R (GPL-2.0-or-later) is an Ubuntu package in the image",
+        "redistribution": "not published: pulled by digest by the local CLI on the first SparkR workload or Dataproc cluster of its Spark; R runs in the container at runtime only, and no R code is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. The Apache Software Foundation's official image with Python and R.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/spark:3.5.9-scala2.12-java17-python3-r-ubuntu`."
+      },
+      "sparkRImage30": {
+        "$comment": "Runtime version 3.0's SparkR workloads (#2162), Spark 4.0.1.",
+        "image": "apache/spark:4.0.1-scala2.13-java21-python3-r-ubuntu",
+        "digest": "sha256:b374a4f28ed5852cbe036c14fd41e29a02fdb7e4fd7cf0e233bcc22f0272b967",
+        "license": "Apache-2.0 (Apache Spark) and the Ubuntu and Eclipse Temurin packages it is built on; R (GPL-2.0-or-later) is an Ubuntu package in the image",
+        "redistribution": "not published: pulled by digest by the local CLI on the first SparkR workload or Dataproc cluster of its Spark; R runs in the container at runtime only, and no R code is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. The Apache Software Foundation's official image with Python and R.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/spark:4.0.1-scala2.13-java21-python3-r-ubuntu`."
+      },
+      "sparkRImage40": {
+        "$comment": "Runtime version 4.0's SparkR workloads (#2162), Spark 4.2.0.",
+        "image": "apache/spark:4.2.0-scala2.13-java25-python3-r-ubuntu",
+        "digest": "sha256:0686eefef011f8c2bd272f255e30adf911731c574582116c8d8dc9182c7c9565",
+        "license": "Apache-2.0 (Apache Spark) and the Ubuntu and Eclipse Temurin packages it is built on; R (GPL-2.0-or-later) is an Ubuntu package in the image",
+        "redistribution": "not published: pulled by digest by the local CLI on the first SparkR workload or Dataproc cluster of its Spark; R runs in the container at runtime only, and no R code is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. The Apache Software Foundation's official image with Python and R.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/spark:4.2.0-scala2.13-java25-python3-r-ubuntu`."
+      },
+      "sparkClusterImage21": {
+        "$comment": "Dataproc image version 2.1's clusters (#2162): Spark 3.3 (the image version list names Spark 3.3.2; 3.3.3 is the official image of that line, on Java 11).",
+        "image": "apache/spark:3.3.3-scala2.12-java11-python3-r-ubuntu",
+        "digest": "sha256:563f9fdb447a9238c50bdb79301368f26df186cbae197f57eb1da0e6efcb7287",
+        "license": "Apache-2.0 (Apache Spark) and the Ubuntu and Eclipse Temurin packages it is built on; R (GPL-2.0-or-later) is an Ubuntu package in the image",
+        "redistribution": "not published: pulled by digest by the local CLI on the first SparkR workload or Dataproc cluster of its Spark; R runs in the container at runtime only, and no R code is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. The Apache Software Foundation's official image with Python and R.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/spark:3.3.3-scala2.12-java11-python3-r-ubuntu`."
+      },
+      "sparkClusterImage30": {
+        "$comment": "Dataproc image version 3.0's clusters (#2162): Spark 4.1.2 on Java 21, as the image version list has it.",
+        "image": "apache/spark:4.1.2-scala2.13-java21-python3-r-ubuntu",
+        "digest": "sha256:4db9a9d28c9fb0a386e224d4201a79e07df825761574b5fd8873c78a2d5b60ea",
+        "license": "Apache-2.0 (Apache Spark) and the Ubuntu and Eclipse Temurin packages it is built on; R (GPL-2.0-or-later) is an Ubuntu package in the image",
+        "redistribution": "not published: pulled by digest by the local CLI on the first SparkR workload or Dataproc cluster of its Spark; R runs in the container at runtime only, and no R code is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. The Apache Software Foundation's official image with Python and R.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/spark:4.1.2-scala2.13-java21-python3-r-ubuntu`."
+      },
+      "sparkBigQueryConnector33": {
+        "$comment": "Google's BigQuery connector for Apache Spark 3.3 (#2162), for image version 2.1's clusters; fetched and checked as sparkBigQueryConnector is.",
+        "version": "0.46.2",
+        "source": "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-3.3-bigquery/0.46.2/spark-3.3-bigquery-0.46.2.jar",
+        "sha256": "fb700b2d4899ea4823b6f3650273301913323ca0752fc53e8e83e02cee7d1e0a",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "sparkBigQueryConnector41": {
+        "$comment": "Google's BigQuery connector for Apache Spark 4.1 (#2162), for image version 3.0's clusters; fetched and checked as sparkBigQueryConnector is.",
+        "version": "0.46.2",
+        "source": "https://repo1.maven.org/maven2/com/google/cloud/spark/spark-4.1-bigquery/0.46.2/spark-4.1-bigquery-0.46.2.jar",
+        "sha256": "4bcfadd6898f98141a44d696824f807bb3d0565e7ec590854ef9d7a7b294b6da",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocHiveImage": {
+        "$comment": "Dataproc clusters' Hadoop MapReduce, Hive and Pig jobs and their Hive metastore, HiveServer2 and WebHCat (#2162, cmd/cloudburrow/dataprocecosystem.go): Hadoop 3.3.6, Hive 4.0.1 and Tez on Java 8.",
+        "image": "apache/hive:4.0.1",
+        "digest": "sha256:5194161ef50b80875f937dff04936df047cbe894e9727ab8f0606349345b1bd3",
+        "license": "Apache-2.0 (Apache Hive, Hadoop and Tez) and the packages of the image's base",
+        "redistribution": "not published: pulled by digest by the local CLI on the first Dataproc cluster that needs it; nothing of it is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. The Apache Software Foundation's official image; the 3.1.3 image (the Hive of image versions 2.2 and 2.3) is amd64 only.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/hive:4.0.1`."
+      },
+      "dataprocMetastore42Image": {
+        "$comment": "Image version 3.0's default_iceberg catalog (#2162, internal/sparkproc/lake.go startIcebergREST): the Iceberg REST catalog of the Hive 4.2.0 standalone metastore (port 9001, path /iceberg), Hive 4.2.0 being 3.0's Hive.",
+        "image": "apache/hive:standalone-metastore-4.2.0",
+        "digest": "sha256:6ec027489678f06404c8e201010c10e6c67e507b77e41b7e69233d7652453fdf",
+        "license": "Apache-2.0 (Apache Hive and Hadoop) and the packages of the image's base",
+        "redistribution": "not published: pulled by digest by the local CLI on the first image 3.0 cluster with the ICEBERG component; nothing of it is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocDocker24Image": {
+        "$comment": "The DOCKER optional component (#2162, internal/sparkproc/dockercomp.go): a rootless Docker daemon beside every node (image 2.2 and earlier; Docker 24.0), unprivileged: /dev/net/tun and seccomp, AppArmor and systempaths unconfined, no --privileged; its static docker CLI is image-mounted into the nodes and drivers.",
+        "image": "docker:24.0-dind-rootless",
+        "digest": "sha256:e162081c6623cdd809c09d549b742fa08d9d3e1da47e55b8d42fe87a676ff80e",
+        "license": "Apache-2.0 (Moby, the Docker CLI, RootlessKit) and the packages of the image's Alpine base",
+        "redistribution": "not published: pulled by digest by the local CLI on the first cluster with the DOCKER component; nothing of it is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocDocker28Image": {
+        "$comment": "The DOCKER optional component (#2162, internal/sparkproc/dockercomp.go): a rootless Docker daemon beside every node (image 2.3 and 3.0; Docker 28.1), unprivileged: /dev/net/tun and seccomp, AppArmor and systempaths unconfined, no --privileged; its static docker CLI is image-mounted into the nodes and drivers.",
+        "image": "docker:28.1-dind-rootless",
+        "digest": "sha256:921cf550ca1fda0b9e6999ffd4a97cc0e248207479c73febbf5bf105108c2fe5",
+        "license": "Apache-2.0 (Moby, the Docker CLI, RootlessKit) and the packages of the image's Alpine base",
+        "redistribution": "not published: pulled by digest by the local CLI on the first cluster with the DOCKER component; nothing of it is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocTrinoImage": {
+        "$comment": "The TRINO optional component and Trino jobs (#2162): Trino 432, the Trino of image versions 2.2 and 2.3.",
+        "image": "trinodb/trino:432",
+        "digest": "sha256:3a958446c5e0133683f6b625028602f0b5d9182e54db76d9bde4cbb98f42f193",
+        "license": "Apache-2.0",
+        "redistribution": "not published: pulled by digest by the local CLI on the first Dataproc cluster that needs it; nothing of it is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. The Trino Software Foundation's official image.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect trinodb/trino:432`."
+      },
+      "dataprocFlinkImage": {
+        "$comment": "The FLINK optional component and Flink jobs (#2162): Flink 1.17.2, the Flink 1.17 line of image versions 2.2 and 2.3.",
+        "image": "flink:1.17.2-scala_2.12-java11",
+        "digest": "sha256:657ca6218ee6f0e73065bfbfc6124fda8d72f75ee371776f5b0914fb7c65951f",
+        "license": "Apache-2.0",
+        "redistribution": "not published: pulled by digest by the local CLI on the first Dataproc cluster that needs it; nothing of it is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. Docker's official Apache Flink image.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect flink:1.17.2-scala_2.12-java11`."
+      },
+      "dataprocZookeeperImage": {
+        "$comment": "The ZOOKEEPER optional component (#2162): ZooKeeper 3.9.5.",
+        "image": "zookeeper:3.9.5",
+        "digest": "sha256:e6b279d0135070507e867a3220c941fe90b791937b6d469b6929b79a5dfb01ba",
+        "license": "Apache-2.0",
+        "redistribution": "not published: pulled by digest by the local CLI on the first Dataproc cluster that needs it; nothing of it is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. Docker's official Apache ZooKeeper image.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect zookeeper:3.9.5`."
+      },
+      "dataprocSolrImage": {
+        "$comment": "The SOLR optional component (#2162): Solr 9.4.1.",
+        "image": "solr:9.4.1",
+        "digest": "sha256:96e915755c6e0f40200e6a0306e959ed5c2b24b871fef2c34f436a1ca4796f4e",
+        "license": "Apache-2.0",
+        "redistribution": "not published: pulled by digest by the local CLI on the first Dataproc cluster that needs it; nothing of it is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-22 with docker buildx imagetools inspect. Docker's official Apache Solr image.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect solr:9.4.1`."
+      },
+      "dataprocZeppelinImage": {
+        "$comment": "The ZEPPELIN optional component of Dataproc clusters on image versions 2.1 to 2.3 (#2162, internal/sparkproc/zeppelin.go): Zeppelin 0.10.1, its Spark interpreter on the cluster's Spark. linux/amd64 only, so it runs under emulation on arm64; 3.7 GB compressed, 12.3 GB unpacked.",
+        "image": "apache/zeppelin:0.10.1",
+        "digest": "sha256:9c1b5ddd6225ad45cedc327a853f6f13e45797ff419260d20bb9c14f5cbe3a87",
+        "license": "Apache-2.0 (Apache Zeppelin) and the packages of the image's base",
+        "redistribution": "not published: pulled by digest by the local CLI on the first Dataproc cluster with the ZEPPELIN component; nothing of it is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "notes": "Resolved 2026-11-23 with docker buildx imagetools inspect: a single linux/amd64 manifest.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/zeppelin:0.10.1`."
+      },
+      "dataprocZeppelinImage30": {
+        "$comment": "The ZEPPELIN optional component on image version 3.0 (#2162, internal/sparkproc/zeppelin.go): Zeppelin 0.12.1, the patch release of 3.0's Zeppelin 0.12.0 (whose image is linux/amd64 only); its Spark interpreter runs the cluster's Spark 4.1 from the cluster's Spark image, mounted read-only, on that image's Java 17, and its PySpark driver on the image's conda Python 3.9. 2.7 GB compressed, 10.3 GB unpacked.",
+        "image": "apache/zeppelin:0.12.1",
+        "digest": "sha256:ebb76b9b98f1b5457cd10c118fc6624269918a3602711a08d9f237673c0c0abb",
+        "license": "Apache-2.0 (Apache Zeppelin) and the packages of the image's base",
+        "redistribution": "not published: pulled by digest by the local CLI on the first image 3.0 cluster with the ZEPPELIN component; nothing of it is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-23 with docker pull by digest on linux/arm64.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/zeppelin:0.12.1`."
+      },
+      "dataprocRangerSource": {
+        "$comment": "The RANGER optional component (#2162, internal/sparkproc/ranger.go): internal/sparkproc/ranger/Dockerfile builds the Ranger Admin server and its HDFS, Hive and YARN plugins on this machine from this source release, the first time a cluster with RANGER starts: Ranger's own reactor does not build as published (its Kylin plugin needs RoaringBitmap 0.7.36-os-kylin-r1, only on repo.spring.io, which answers 401), so build.pom.xml and distro.pom.xml run Ranger's own assembly descriptors with -pl cloudburrow-distro -am (Maven -C strict checksums; no Kylin plugin, which Dataproc does not install), and one source patch, hive4.patch, lets the Hive plugin run in Hive 4.0.1's HiveServer2. Measured 2026-11-23 on darwin/arm64: 651 s on an empty Maven cache (Maven 635.5 s), about 85 s with the BuildKit cache mount cloudburrow-ranger-2.8.0-m2 (812 MB); the image is 1.67 GB. Apache publishes the SHA-512 c00acf627bd7f1cddebfd15b628faa54bf6ea4933457c8ad21ea0280986b8860627a58109be753e07a01d45f576bce72289627a5bb5ff0e3698296aad88e9cf4; the Dockerfile's ADD --checksum pins the SHA-256 of the same verified file.",
+        "version": "2.8.0",
+        "source": "https://archive.apache.org/dist/ranger/2.8.0/apache-ranger-2.8.0.tar.gz",
+        "sha256": "069ed1550160ac0da87980411c346d1e607466cb823720c73458a7b3b95b34aa",
+        "license": "Apache-2.0",
+        "redistribution": "not published: built into a local image (tag cloudburrow/dataproc-ranger:<context hash>); nothing of it is in the CLI or the repository",
+        "updateFeed": "apache-dist",
+        "verification": "sha256",
+        "skipDiscovery": "Apache distribution site; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocRangerMavenLock": {
+        "$comment": "The RANGER component's Maven dependencies (internal/sparkproc/ranger/m2.sha256): the SHA-256 of every jar, pom, war, zip and tarball the Ranger 2.8.0 build resolves from Maven Central (the build's plugins, Ranger's dependencies, and the Node release frontend-maven-plugin fetches), 3418 files. The Dockerfile fails the build when its Maven repository holds a file not in the lock with that SHA-256; no Ranger artifact is in it, so every Ranger module is built from the source release. The sha256 field is the lock file's own. Regenerate by running the build with an empty cache and hashing its repository (org/apache/ranger left out).",
+        "version": "2.8.0",
+        "source": "https://repo1.maven.org/maven2/",
+        "sha256": "43766356874004d0121e49f6bb2caa27e3450e30cd354b77ec658c73784fe830",
+        "license": "Apache-2.0 and the licences of Ranger's declared Maven dependencies (Ranger's LICENSE.txt)",
+        "redistribution": "not published: resolved into the local build's Maven cache only; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; pinned with the Ranger source release, updated with it."
+      },
+      "dataprocRangerHive4Patch": {
+        "$comment": "The RANGER component's one source patch (internal/sparkproc/ranger/hive4.patch, CloudBurrow's own, Apache-2.0 as the file it changes): Ranger 2.8.0's Hive plugin reads HiveConf.ConfVars.PREEXECHOOKS, which Hive 4.0.1 (the cluster's HiveServer2) no longer has; the patch reads and sets hive.exec.pre.hooks by name. The sha256 is the patch file's.",
+        "version": "2.8.0",
+        "source": "internal/sparkproc/ranger/hive4.patch",
+        "sha256": "047317742ea55cefd6046fc239c7c21c560f07e4af1765bee27f6b44407348e0",
+        "license": "Apache-2.0",
+        "redistribution": "in the repository (a patch to Apache-2.0 source); applied in the local build only",
+        "updateFeed": "none",
+        "verification": "sha256",
+        "skipDiscovery": "CloudBurrow's own patch; drop it when Ranger supports Hive 4."
+      },
+      "dataprocRangerBuildImage": {
+        "$comment": "The RANGER component's build and runtime base (internal/sparkproc/ranger/Dockerfile): the Docker official maven image 3.9.11-eclipse-temurin-8 (Ranger 2.8 builds with Java 8).",
+        "image": "maven:3.9.11-eclipse-temurin-8",
+        "digest": "sha256:e3c149f44c95b0e9dd131862b3df67b3f061f7f6f3898a87b170564b3a943611",
+        "license": "Apache-2.0 (Maven), GPL-2.0 with the Classpath Exception (the Eclipse Temurin JDK) and the packages of the image's Ubuntu base",
+        "redistribution": "not published: the local build's base; nothing of it is in the CLI or the repository",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocRangerMySQLConnector": {
+        "$comment": "The RANGER component's JDBC driver (internal/sparkproc/ranger/Dockerfile), Ranger's own pin, ADDed by SHA-256 into the locally built image only, never into the repository or the CLI.",
+        "version": "8.0.28",
+        "source": "https://repo1.maven.org/maven2/mysql/mysql-connector-java/8.0.28/mysql-connector-java-8.0.28.jar",
+        "sha256": "a00ccdf537ff50e50067b989108c2235197ffb65e197149bbb669db843cd1c3e",
+        "license": "GPL-2.0-only WITH Universal-FOSS-exception-1.0",
+        "redistribution": "not published: downloaded into the locally built Ranger image only; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocGcsConnector": {
+        "$comment": "Google's Cloud Storage connector for Hadoop (#2162), on Hadoop, Hive and Pig jobs' class path: gs:// reads and writes go to the instance's Cloud Storage through the cluster's relay. Fetched by the CLI on the first such job, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc.",
+        "version": "hadoop3-2.2.30",
+        "source": "https://repo1.maven.org/maven2/com/google/cloud/bigdataoss/gcs-connector/hadoop3-2.2.30/gcs-connector-hadoop3-2.2.30-shaded.jar",
+        "sha256": "dd7959e4d59a74023781c9e0666e8c2207528a0e7871eaf5f9b42eea0430a079",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocPig": {
+        "$comment": "Apache Pig (#2162) for Dataproc Pig jobs: the release tarball, checked against this SHA-256, of which bin/, conf/, lib/ and the core jar are kept in <state-dir>/models/spark/dataproc.",
+        "version": "0.18.0",
+        "source": "https://downloads.apache.org/pig/pig-0.18.0/pig-0.18.0.tar.gz",
+        "sha256": "6845adb936a3c3bcc71451765953cae4103e410ba2f6c5a47cc9becade0a434a",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "apache-dist",
+        "verification": "sha256",
+        "skipDiscovery": "downloads.apache.org; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocJupyterPackages": {
+        "$comment": "The JUPYTER optional component (#2162): an image built locally FROM the cluster's Spark image (internal/sparkproc/jupyter/Dockerfile) with JupyterLab 3.6.8 and ipykernel 6.29.5 and every package they need, installed by pip --require-hashes --no-deps --only-binary :all: from internal/sparkproc/jupyter/requirements.txt (uv pip compile --universal --generate-hashes of requirements.in, for Python 3.8 and later), labelled with the instance and removed with it.",
+        "packages": {
+          "jupyterlab": "3.6.8",
+          "ipykernel": "6.29.5"
+        },
+        "license": "BSD-3-Clause",
+        "source": "https://pypi.org/",
+        "redistribution": "not published: installed by pip in a local image build; nothing of it is in the CLI or the repository",
+        "updateFeed": "pypi",
+        "verification": "lock-file-hashes",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components.",
+        "lockFile": "internal/sparkproc/jupyter/requirements.txt"
+      },
+      "dataprocConnectServer35": {
+        "$comment": "Spark's Spark Connect server for Spark 3.5 (#2162, cmd/cloudburrow/sparkrunner.go spark35Runtime.connectServer): Spark 3.5's distribution (the apache/spark image) does not bundle it, so a Serverless session on runtime 1.2, 2.2 or 2.3 mounts it on the server's --jars. Fetched by the CLI on the first such session, checked against this SHA-256 and kept in <state-dir>/models/spark.",
+        "version": "3.5.9",
+        "source": "https://repo1.maven.org/maven2/org/apache/spark/spark-connect_2.12/3.5.9/spark-connect_2.12-3.5.9.jar",
+        "sha256": "cd2342517d42bc02c14ac92e4676e51e948ea4fc1995ed9df6c016dc02b02b98",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocKernels": {
+        "$comment": "A Jupyter session's kernel image (#2162, internal/sparkproc/kernel/Dockerfile), built by the CLI on the runtime's apache/spark image. PyPI: Jupyter Server 2.14.2 and ipykernel 6.29.5 (BSD-3-Clause) with the Spark Connect client's pandas, pyarrow, grpcio and googleapis-common-protos (Apache-2.0/BSD-3-Clause) and every package they need, installed by pip --require-hashes --no-deps --only-binary :all: from requirements-3.5.txt (Spark 3.5) or requirements-4.txt (Spark 4). Maven: Almond 0.14.5 (BSD-3-Clause, the Scala kernel for Jupyter) and its class path for Scala 2.12.18, 2.13.16 and 2.13.18, and Spark's Scala Connect client (spark-connect-client-jvm, with spark-connect-shims on Spark 4; Apache-2.0) for Spark 3.5.9, 4.0.1 and 4.2.0, each jar fetched by kernel/fetch.sh and checked against its SHA-256 in the kernel/*.lock files (listed in mavenArtifacts). Nothing of it is in the CLI.",
+        "version": "0.14.5",
+        "source": "https://repo1.maven.org/maven2/sh/almond/scala-kernel_2.13.16/0.14.5/",
+        "license": "BSD-3-Clause (Almond, Jupyter Server, ipykernel); Apache-2.0 (Spark, Apache Arrow, gRPC) and the licences of the locks' other packages",
+        "redistribution": "not published: the image is built locally by the CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "lock-file-hashes",
+        "skipDiscovery": "Built locally from pinned sources; depcheck only discovers GitHub-sourced components.",
+        "lockFiles": [
+          "internal/sparkproc/kernel/requirements-3.5.txt",
+          "internal/sparkproc/kernel/requirements-4.txt",
+          "internal/sparkproc/kernel/almond-2.12.18.lock",
+          "internal/sparkproc/kernel/almond-2.13.16.lock",
+          "internal/sparkproc/kernel/almond-2.13.18.lock",
+          "internal/sparkproc/kernel/connect-3.5.9.lock",
+          "internal/sparkproc/kernel/connect-4.0.1.lock",
+          "internal/sparkproc/kernel/connect-4.2.0.lock"
+        ],
+        "mavenArtifacts": {
+          "almond-2.12.18.lock": [
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/scala-kernel_2.12.18/0.14.5/scala-kernel_2.12.18-0.14.5.jar",
+              "sha256": "cf3ba9f46f488e1b23f394bec812718503e8c7de799a8249101fc5de561269c0"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/alexarchambault/case-app_2.12/2.1.0/case-app_2.12-2.1.0.jar",
+              "sha256": "659f78fba55beba721a8c4980389fe476682f3193d46aa3d13449127d6620401"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/class-path-util_2.12/0.1.4/class-path-util_2.12-0.1.4.jar",
+              "sha256": "d54c15d04f600ca728557e766532bb6b8b580235aa89c7c2fd53d8b3b29806c1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/scalafmt-dynamic_2.12/3.9.6/scalafmt-dynamic_2.12-3.9.6.jar",
+              "sha256": "21f3a619725268ff61c4a3ea310ae61a448769da67dcefdb58c402c1888164a6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/scala-library/2.12.21/scala-library-2.12.21.jar",
+              "sha256": "e2f4040c95cc4dd1cfeaae38bdde596e4b36933632451efa7d8564c6a359510c"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/kernel_2.12/0.14.5/kernel_2.12-0.14.5.jar",
+              "sha256": "c01c35c1074ba13c6ce7392f12245941e5b41f2d6f72538f9b9c3d76858974bb"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/scala-interpreter_2.12.18/0.14.5/scala-interpreter_2.12.18-0.14.5.jar",
+              "sha256": "764e0eef2661e0b72cbd6f75286d97555d401969c131953f648fa02f07d65046"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/sourcecode_2.12/0.4.4/sourcecode_2.12-0.4.4.jar",
+              "sha256": "b3be5e4f73dca4dfc8d2036198d5792163927318831258bdfbe9a786994a2ad1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/data-class_2.12/0.2.7/data-class_2.12-0.2.7.jar",
+              "sha256": "a28c679c03b1bbe5e61a5b1bde1d9c5875afebf0b3c7b1226fe86b87f610499f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/alexarchambault/case-app-annotations_2.12/2.1.0/case-app-annotations_2.12-2.1.0.jar",
+              "sha256": "86f4788b19689e79393293499e1979d8f4bcee73d88926b416b083168f2e1651"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/alexarchambault/case-app-util_2.12/2.1.0/case-app-util_2.12-2.1.0.jar",
+              "sha256": "50fb05e57d8cace621374dd2ec7934cf5eb2ff51485d23d92391cc2a81ded86c"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/scalafmt-interfaces/3.9.6/scalafmt-interfaces-3.9.6.jar",
+              "sha256": "3d67252a6511aad53ea54b9207d8bff86bcc9f63b33b79b00285404c2df60b9a"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/scalafmt-sysops_2.12/3.9.6/scalafmt-sysops_2.12-3.9.6.jar",
+              "sha256": "a871c62fc786900f7c23afa8546bfc22d8aaeda97aa52ce2aab25f058767a09f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/interface/1.0.29-M2/interface-1.0.29-M2.jar",
+              "sha256": "29729f15fe82b33ba2fd35b295eba9f52d551d4de4bef679df0d8796f91bbc17"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/typesafe/config/1.4.3/config-1.4.3.jar",
+              "sha256": "8ada4c185ce72416712d63e0b5afdc5f009c0cdf405e5f26efecdf156aa5dfb6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-collection-compat_2.12/2.14.0/scala-collection-compat_2.12-2.14.0.jar",
+              "sha256": "40d7c1719db7940a7101509dff407f1ff67baf01abd1f40547b04077d94a92e5"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/co/fs2/fs2-core_2.12/3.12.2/fs2-core_2.12-3.12.2.jar",
+              "sha256": "2718dc010a511594001158533c9a164bbb459c1255ad5992be2b4024d72cbbb1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/interpreter_2.12/0.14.5/interpreter_2.12-0.14.5.jar",
+              "sha256": "9b35669becc578892b05ad255db02659ccbfeba7ad06273af1513194e34ca95f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/mtags_2.12.18/1.6.3/mtags_2.12.18-1.6.3.jar",
+              "sha256": "edad781a9b9d6c62c2b5b3fb0e285393edd6bb42c51720b570f43ae186f6908f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier_2.12/2.1.25-M19/coursier_2.12-2.1.25-M19.jar",
+              "sha256": "7890403ba23e90faaf4c3c02f0f2629d069bf9259bc36cb7c6abb817adb046ab"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/dependency-interface_2.12/0.3.2/dependency-interface_2.12-0.3.2.jar",
+              "sha256": "16f232f41830435d20290ebdd4541a97dd09a27ba998cacd019ce9ba38b477d2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/scala-cli/directive-handler_2.12/0.1.4/directive-handler_2.12-0.1.4.jar",
+              "sha256": "bc1c0f463015361e152f291d046a701b3cd4c196ad8191a4fad287d427730b3f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/fusesource/jansi/jansi/2.4.2/jansi-2.4.2.jar",
+              "sha256": "0b7b8b003a90ea491579b62f5118828e45112914c65589b00faa49d6ec785839"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-compiler_2.12.18/3.0.8/ammonite-compiler_2.12.18-3.0.8.jar",
+              "sha256": "33b6903ee716c959bea9b4467edfb7743b4bd995da823bd02f4b744aa3b70eb3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-repl_2.12.18/3.0.8/ammonite-repl_2.12.18-3.0.8.jar",
+              "sha256": "8b86c6d640f065ab1137b6542d1a15710dc49f0fd84e2e50001636049cfa8138"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/coursier-logger_2.12/0.14.5/coursier-logger_2.12-0.14.5.jar",
+              "sha256": "d89d8ee01a8b59e2b9fcae4dd5e862bec81e4ce05f2baaf48448114727751c72"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/scala-kernel-api_2.12.18/0.14.5/scala-kernel-api_2.12.18-0.14.5.jar",
+              "sha256": "7b7031ba63eae90e63a3744467f239d219f696855dbcd8c531b81f5d2a245c6d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/shared-directives_2.12/0.14.5/shared-directives_2.12-0.14.5.jar",
+              "sha256": "a931e524fdc0990b5301808ec4cbde48197d3501384dc57bd8fcd4cf07ee7c86"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/toree-hooks_2.12/0.14.5/toree-hooks_2.12-0.14.5.jar",
+              "sha256": "15942e020f340c00c09d1195b4396bebc503dd1669be04e8c9f71a9341c823d2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/scala-reflect/2.12.21/scala-reflect-2.12.21.jar",
+              "sha256": "8b91a08ba69a0564689793e732f06768d0914ec9e90fa8c3d1b55c5bf4600c14"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/chuusai/shapeless_2.12/2.3.13/shapeless_2.12-2.3.13.jar",
+              "sha256": "b5e71ed111548ebff93272d710402a6c40fbcc6b50c2d2d6f164b0e3c315c001"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/bigwheel/util-backports_2.12/2.1/util-backports_2.12-2.1.jar",
+              "sha256": "0d2ae5753bc8ff9f221a52ef39e771d285eccc52b88cdce622212569d3bd0e1b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar",
+              "sha256": "d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scodec/scodec-bits_2.12/1.1.38/scodec-bits_2.12-1.1.38.jar",
+              "sha256": "a1f81813a8a5b22f61282470531ffca2a6a61d64720b3560c0a485c77b8c6e21"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-core_2.12/2.11.0/cats-core_2.12-2.11.0.jar",
+              "sha256": "9d89b2f2d70a5144255d6e122ed7deeea05737d871d9ba8ec5c9bfc08ce0ea6f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-effect_2.12/3.6.0/cats-effect_2.12-3.6.0.jar",
+              "sha256": "a23dc9286b9529838fdaf5ac0716b568733baa7215ad145dacee05918c75a7ee"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/fansi_2.12/0.5.1/fansi_2.12-0.5.1.jar",
+              "sha256": "57bd285ff4c4aa706fbe26e08e344881b0fc05a1a7ef8928385fab9b5208de81"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/scalatags_2.12/0.13.1/scalatags_2.12-0.13.1.jar",
+              "sha256": "fb74bc47d84a1d3d27e9aa22f6651cc6ab46bec38a3e685d0c79311a6b3ce8ed"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/slf4j/slf4j-nop/1.7.36/slf4j-nop-1.7.36.jar",
+              "sha256": "c214958b07816cb4412b30c7bdbd4308ffdc6ba2a83767b8f3a9229cbd9274d6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/interpreter-api_2.12/0.14.5/interpreter-api_2.12-0.14.5.jar",
+              "sha256": "4d5f7af9d777d0e6d5bbc03bdbcd83d91438c4e34cc886195ea6cd4f32939fd4"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/protocol_2.12/0.14.5/protocol_2.12-0.14.5.jar",
+              "sha256": "bd5a3e0e7e5743d1dd7fece80e4c39f640700b53c75d9bd728a2a725e912fbe8"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/mtags-shared_2.12.18/1.6.3/mtags-shared_2.12.18-1.6.3.jar",
+              "sha256": "a0e4498dc7764964f404199ab950e35808c724205434f0cafacb61033281150b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/geny_2.12/1.1.1/geny_2.12-1.1.1.jar",
+              "sha256": "2cb8c592106778bd4db849e90baeb5eaf2a78605444fa3187fd6f595bad381d2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/thoughtworks/qdox/qdox/2.2.0/qdox-2.2.0.jar",
+              "sha256": "c260c3230b2340af97d54bf01f7f67ebc57c901922736c881bb11cb981302be2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-java8-compat_2.12/1.0.2/scala-java8-compat_2.12-1.0.2.jar",
+              "sha256": "2f509b96ec69c130e6d062d6a6a25e293d23b1b411129480295999cc15d3febf"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jsoup/jsoup/1.21.2/jsoup-1.21.2.jar",
+              "sha256": "f05496e255734759f0d4b5632da7b24f81313147c78c69e90ad045d096191344"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/lz4/lz4-java/1.8.0/lz4-java-1.8.0.jar",
+              "sha256": "d74a3334fb35195009b338a951f918203d6bbca3d1d359033dc33edd1cadc9ef"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/googlecode/java-diff-utils/diffutils/1.3.0/diffutils-1.3.0.jar",
+              "sha256": "61ba4dc49adca95243beaa0569adc2a23aedb5292ae78aa01186fa782ebdc5c2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/semanticdb-scalac-core_2.12.18/4.13.10/semanticdb-scalac-core_2.12.18-4.13.10.jar",
+              "sha256": "2800006eec2eed8667baa9d900c13d7aff6f37c565c8fff61d09f62748e3f290"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/dependency_2.12/0.3.2/dependency_2.12-0.3.2.jar",
+              "sha256": "5192587c13dee48917304611902d45b2abdd8f7811ccaf4d74b45c18746d266e"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/plokhotnyuk/jsoniter-scala/jsoniter-scala-core_2.12/2.13.5.2/jsoniter-scala-core_2.12-2.13.5.2.jar",
+              "sha256": "8e2737c4b3d3b80fa4f2024f16351cc1018997249b8345ac8a98826ba158eeb3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-core_2.12/2.1.25-M19/coursier-core_2.12-2.1.25-M19.jar",
+              "sha256": "542e3d87a8b6abcd8ea89df5c3bd91a9dc7324d52e28f11b19e5bf72b334a31b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-cache_2.12/2.1.25-M19/coursier-cache_2.12-2.1.25-M19.jar",
+              "sha256": "4faae16a5f6d36ceccb6232768b057b5eb4f20d874a7e9df65a946ee7c0c8881"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-proxy-setup/2.1.25-M19/coursier-proxy-setup-2.1.25-M19.jar",
+              "sha256": "c95636a4d80ce6a1c6d52780d8cf90debd56a7330ea74b2f78c93e25b4d88a78"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/os-lib_2.12/0.11.5/os-lib_2.12-0.11.5.jar",
+              "sha256": "8e8a37fdd0b4c60388985f1b7ffb762adeaf0b508f9bf9cd7e4b2652c00c3c54"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/virtuslab/using_directives/1.1.0/using_directives-1.1.0.jar",
+              "sha256": "9a086b644e0e45d7eb034d0b5d348367900dc39ce6aabe6878eda6f8e9795354"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/scala-compiler/2.12.18/scala-compiler-2.12.18.jar",
+              "sha256": "5680cee34200e8d8ed7965c71d8b1428d3eeb889eb14fec38d40ffbc3761a0d0"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/scalaparse_2.12/3.1.1/scalaparse_2.12-3.1.1.jar",
+              "sha256": "90cbe7621887fc6b4543a98a640d6c5062d7d68b9d0c8262d7780e6ae22632c7"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-xml_2.12/2.4.0/scala-xml_2.12-2.4.0.jar",
+              "sha256": "b4ba143225af5111c613229cd05c1706e607120b280fc0307da04bc801b02c4e"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/javassist/javassist/3.21.0-GA/javassist-3.21.0-GA.jar",
+              "sha256": "7aa59e031f941984af07dacc6ca85e6dc9bd3a485e9aa2494cbc034efa1225d0"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.2.12/javaparser-core-3.2.12.jar",
+              "sha256": "3ccfdf5e7987ea42aa329265a5958f820bcdc967f80922c393eced1248aed43c"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-compiler-interface_2.12.18/3.0.8/ammonite-compiler-interface_2.12.18-3.0.8.jar",
+              "sha256": "803f979dbe855ad1c5e6c467ec026e325b9bd7bd0c85ea9e3508fa3d0c20dae9"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-util_2.12/3.0.8/ammonite-util_2.12-3.0.8.jar",
+              "sha256": "e6cb775e542f5b68e1d98535285be42bf3300e0aabd91c79876d973cf6db6dfa"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-repl-api_2.12.18/3.0.8/ammonite-repl-api_2.12.18-3.0.8.jar",
+              "sha256": "e04c641472ececd39f0d45a7f99aecc682ff98d1bde6f2958925b95f6a87fb8e"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jline/jline-terminal/3.14.1/jline-terminal-3.14.1.jar",
+              "sha256": "a986d06dde0cff9f49cccb002fed8e8f7ae849c554863441991eb693fc2244e9"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jline/jline-terminal-jna/3.14.1/jline-terminal-jna-3.14.1.jar",
+              "sha256": "590547585b74975dd17049495b577e530e461951f9e6a37be33e8fb4eb5ad482"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jline/jline-reader/3.14.1/jline-reader-3.14.1.jar",
+              "sha256": "ba86fac0a56589a6f0153cc9dddc887dd43fa687ddd70ce2c70565ff9011a7d1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-runtime_2.12.18/3.0.8/ammonite-runtime_2.12.18-3.0.8.jar",
+              "sha256": "46d245e2e534420fbe261e3323e54f0e2e6c0c7be6ca9cd999a3383d72c8af6f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-interp_2.12.18/3.0.8/ammonite-interp_2.12.18-3.0.8.jar",
+              "sha256": "f6dd120961c62fbc52351d6b86846244a5c905d222bbe9df7062f6396eb1ac2b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-terminal_2.12/3.0.8/ammonite-terminal_2.12-3.0.8.jar",
+              "sha256": "4d4dd4efe188ae1df3e651ee32f161b492c9a7da77e3704dbeb01c0db86a5b3f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/logger_2.12/0.14.5/logger_2.12-0.14.5.jar",
+              "sha256": "2f6bffcf7ab4f283ed0ec3f4f7e5a4b140a34bdede10e06b9f0e52d24377c631"
+            },
+            {
+              "url": "https://jitpack.io/com/github/jupyter/jvm-repr/0.4.0/jvm-repr-0.4.0.jar",
+              "sha256": "daf8a94c8dfe3e2f1bca8f10a8928adade7b35427c9fad533e5cb21bb3286540"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/jupyter-api_2.12/0.14.5/jupyter-api_2.12-0.14.5.jar",
+              "sha256": "8fe8147c625e96a25dc81c08fc5cfd04cff659d321fa00c0950c790aa31f2935"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-kernel_2.12/2.11.0/cats-kernel_2.12-2.11.0.jar",
+              "sha256": "379c17b074481cebe6a40615fd3cb231e041f57d410dc4c00fdecdb8dc4226a3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-effect-kernel_2.12/3.6.0/cats-effect-kernel_2.12-3.6.0.jar",
+              "sha256": "3cc33d81244ae987a47daf00f0f7599f822e875ca5aff1bcd52f109a82e788ae"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-effect-std_2.12/3.6.0/cats-effect-std_2.12-3.6.0.jar",
+              "sha256": "d65bcb31ce5a8f9422f9d1443a1b5a6a1e28af39ab1a94e07decbed169216ace"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-mtl_2.12/1.3.1/cats-mtl_2.12-1.3.1.jar",
+              "sha256": "7a6ab29633e07f2c7e75a2d469d30d3f1fdfe7364378f203a5e1ef63be3ed912"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/channels_2.12/0.14.5/channels_2.12-0.14.5.jar",
+              "sha256": "11964ee6800a401223073311dbe9257eb6861f61fc46723cab9298a782c1173a"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/mtags-interfaces/1.6.3/mtags-interfaces-1.6.3.jar",
+              "sha256": "741ca1d1bab16a368867bb4f5d56315eb07cb22f336f784bbd9dfaf541e845e1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/protobuf/protobuf-java/4.32.1/protobuf-java-4.32.1.jar",
+              "sha256": "8c99e4d971338bafb0b0b1d1cea9b1bbb3dc9630eb9c25109e4c7c27bca832cb"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/guava/guava/33.5.0-jre/guava-33.5.0-jre.jar",
+              "sha256": "1e301f0c52ac248b0b14fdc3d12283c77252d4d6f48521d572e7d8c4c2cc4ac7"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/semanticdb-shared_2.12/4.13.10/semanticdb-shared_2.12-4.13.10.jar",
+              "sha256": "98403674976ffd78dfdac2bee4595699348ce11f81b15d10727016a516cb764a"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/io_2.12/4.13.10/io_2.12-4.13.10.jar",
+              "sha256": "32c2878660f4f05f0e40dc6b2add1adb8a145cfe1af99fdca57d620a1d632b59"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/versions_2.12/0.5.1/versions_2.12-0.5.1.jar",
+              "sha256": "3fd5ac2cf83d8789c987d5f8b32b1399937e61a3bbc67eda9a35bb0873b477d9"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/concurrent-reference-hash-map/1.1.0/concurrent-reference-hash-map-1.1.0.jar",
+              "sha256": "552707982209afb9feffdccb2e73cc4681a1353e34a47df1bf643d1d2e0a2f61"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-util_2.12/2.1.25-M19/coursier-util_2.12-2.1.25-M19.jar",
+              "sha256": "7a47d076cce32f190992f155ec43884fb116923908d577ae36fb9b34e96cb8d0"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/virtuslab/scala-cli/config_2.12/1.1.3/config_2.12-1.1.3.jar",
+              "sha256": "d7b41d6aac1052ff9d7e7f90e756afb7dd3a562c78c78faf4ba9d75232dd9454"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/windows-ansi/windows-ansi/0.0.6/windows-ansi-0.0.6.jar",
+              "sha256": "077dbdbb977c94fc8b1fb82113cfb0aa5304d4e307c4e0688f69a9895f0da482"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/cache-util/2.1.25-M19/cache-util-2.1.25-M19.jar",
+              "sha256": "fcc458e6868f54fbbc3ec42804fe6eb426a8aeb6afd46cf63017926b5f698725"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-paths/2.1.25-M19/coursier-paths-2.1.25-M19.jar",
+              "sha256": "541887bc6557a25d95b28ddd491ac19531a762c7c68d39f3acc7dcfa8504ecb2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/os-zip/0.11.5/os-zip-0.11.5.jar",
+              "sha256": "2959f416872907502d668829f7d490c299cef36c520d7304f4cab4c02e2e95be"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/fastparse_2.12/3.1.1/fastparse_2.12-3.1.1.jar",
+              "sha256": "ac898711cfefba3dffc2b32d2c5dfa9fa5bf42f19a8ad3930cae1898e4a43de1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/tpolecat/typename_2.12/1.1.0/typename_2.12-1.1.0.jar",
+              "sha256": "f2e78063d2f8a301ad8eab1d7a4e3b91baa4c70bfd09b60e2239ba55cbb615a1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/pprint_2.12/0.9.0/pprint_2.12-0.9.0.jar",
+              "sha256": "aa5c426ec33ba8af1193ffca121d8b189013911b03779582e869bf4c622a6749"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/mainargs_2.12/0.7.6/mainargs_2.12-0.7.6.jar",
+              "sha256": "7ffa17498aeb857874b60d5f473e78d81f839f9a98c519781cc221847d6c671d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-interp-api_2.12.18/3.0.8/ammonite-interp-api_2.12.18-3.0.8.jar",
+              "sha256": "c1bf94bd4c4880c5ee497c0e1971e5f89f596b4c948ec08210a667665165660e"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/upickle_2.12/4.3.2/upickle_2.12-4.3.2.jar",
+              "sha256": "843a7db9c2c66aa78b2af62a000809a5594c3fa2d9faf28b5b0f2b0700270539"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/requests_2.12/0.9.0/requests_2.12-0.9.0.jar",
+              "sha256": "08954397ce4afabc0d9ec2eeb5412510bc533abc82fd950db5a4da94ffd42aa1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/ch/epfl/scala/bsp4j/2.1.1/bsp4j-2.1.1.jar",
+              "sha256": "2eab3085bed125221314901bfd22f9b258164556683615a996b192b16a094b18"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/logger-scala2-macros_2.12/0.14.5/logger-scala2-macros_2.12-0.14.5.jar",
+              "sha256": "646adee2358ff213209aaf2be262881462d1aa006ba97b8c148a415d5681a510"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/zeromq/jeromq/0.5.4/jeromq-0.5.4.jar",
+              "sha256": "59eea0fc6c1bbce8a3c01902570f3d33327f71b44555b6c1bd447cd4115ad900"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/lsp4j/org.eclipse.lsp4j/0.24.0/org.eclipse.lsp4j-0.24.0.jar",
+              "sha256": "2caea31ffa2abd13c6f5d13489be071ad08f108eae83a34473ac72d96cf72922"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/guava/failureaccess/1.0.3/failureaccess-1.0.3.jar",
+              "sha256": "cbfc3906b19b8f55dd7cfd6dfe0aa4532e834250d7f080bd8d211a3e246b59cb"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/guava/listenablefuture/9999.0-empty-to-avoid-conflict-with-guava/listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar",
+              "sha256": "b372a037d4230aa57fbeffdef30fd6123f9c0c2db85d0aced00c91b974f33f99"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jspecify/jspecify/1.0.0/jspecify-1.0.0.jar",
+              "sha256": "1fad6e6be7557781e4d33729d49ae1cdc8fdda6fe477bb0cc68ce351eafdfbab"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/errorprone/error_prone_annotations/2.41.0/error_prone_annotations-2.41.0.jar",
+              "sha256": "a56e782b5b50811ac204073a355a21d915a2107fce13ec711331ad036f660fcc"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/j2objc/j2objc-annotations/3.1/j2objc-annotations-3.1.jar",
+              "sha256": "84d3a150518485f8140ea99b8a985656749629f6433c92b80c75b36aba3b099b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/scalameta_2.12/4.13.10/scalameta_2.12-4.13.10.jar",
+              "sha256": "5b423efdc333a689f7b4b3b3f3b146461cf5ddf69f8973cc76b12cd4e64a0c9c"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/scalap/2.12.17/scalap-2.12.17.jar",
+              "sha256": "4c5dcb2c8e166134d7b96ada0d1d4ba95910133dcdf8be898cad242d45bc7ea8"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/thesamet/scalapb/scalapb-runtime_2.12/0.11.20/scalapb-runtime_2.12-0.11.20.jar",
+              "sha256": "96b41115d8c0dd6e6dc87d8da66023727b565830c3bbaa90b75adf68d8f40909"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/virtuslab/scala-cli/specification-level_2.12/1.1.3/specification-level_2.12-1.1.3.jar",
+              "sha256": "a4748fe8a15594aacfbdb30f1941a78c56d814b482bbe7abc49ef4f206e780ad"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/is-terminal/0.1.2/is-terminal-0.1.2.jar",
+              "sha256": "721cb31b9ae87136b810758edbdf9dc1f363e2d8bf6d9ba2a3642d11abb09526"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/jniutils/windows-jni-utils/0.3.3/windows-jni-utils-0.3.3.jar",
+              "sha256": "ab68efcf162355e20007b238d8108b7ffec0c06b467ee44cbb44ec3f8ac3a7e6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ujson_2.12/4.3.2/ujson_2.12-4.3.2.jar",
+              "sha256": "90464ccdc6c7de7a8a7c59ae2801c46d7adf001773b6f683a9ec6ac8121d5288"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/upack_2.12/4.3.2/upack_2.12-4.3.2.jar",
+              "sha256": "7f56f7f565498f16c44b3b58c32d31201eea84a910c666e865295ccaf33aad43"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/upickle-implicits_2.12/4.3.2/upickle-implicits_2.12-4.3.2.jar",
+              "sha256": "838b85b78d5a93d108f323a585299d446d0de6dfaf0c69ae179780a8b6878d77"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/lsp4j/org.eclipse.lsp4j.generator/0.20.1/org.eclipse.lsp4j.generator-0.20.1.jar",
+              "sha256": "def6366c47d380dcf878f70e84c0d860b9c4112ae2066119db83026af4afaca3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/lsp4j/org.eclipse.lsp4j.jsonrpc/0.24.0/org.eclipse.lsp4j.jsonrpc-0.24.0.jar",
+              "sha256": "7721572e849d4f359b46ede55d5604b982ff498d0d92ebc70e18029f59823c08"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/eu/neilalexander/jnacl/1.0.0/jnacl-1.0.0.jar",
+              "sha256": "4accc9d2a56a6dd5198ec5e1c5c05a091da563bccd346fd6578edc083152beaa"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/parsers_2.12/4.13.10/parsers_2.12-4.13.10.jar",
+              "sha256": "4f79138910b0947671bf2f33cbc8e7755b115214701ca1ecd3f65d96a8da3a3b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/thesamet/scalapb/lenses_2.12/0.11.20/lenses_2.12-0.11.20.jar",
+              "sha256": "e68e373c9ce77e232babe9a629141ffee2dd9c4ec022e73374f9efa45342f6b6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/upickle-core_2.12/4.3.2/upickle-core_2.12-4.3.2.jar",
+              "sha256": "2a2025977a15cffdbd124d03c71be8c35390f600925e59f6a6378a914d82c2f4"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/xtend/org.eclipse.xtend.lib/2.28.0/org.eclipse.xtend.lib-2.28.0.jar",
+              "sha256": "e18b609a3f99ece787443efd231504232f4b6179e9cc1c7b0905361dd31c8fdf"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/code/gson/gson/2.10.1/gson-2.10.1.jar",
+              "sha256": "4241c14a7727c34feea6507ec801318a3d4a90f070e4525681079fb94ee4c593"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/trees_2.12/4.13.10/trees_2.12-4.13.10.jar",
+              "sha256": "81ee396b18ec9a6695b51b57132a8a02e86ba8c097ee8ba363184dd99f79f1d6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/xtext/org.eclipse.xtext.xbase.lib/2.28.0/org.eclipse.xtext.xbase.lib-2.28.0.jar",
+              "sha256": "2e81c2ad0b4e48b0b1ba2e5873a06bb877dfbbcb0651c1ed0988ee15c6ebbdfe"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/xtend/org.eclipse.xtend.lib.macro/2.28.0/org.eclipse.xtend.lib.macro-2.28.0.jar",
+              "sha256": "623a312c0bd6341fecbb72eba6c011f326561d451426fb957a4b18ba076c17c6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/common_2.12/4.13.10/common_2.12-4.13.10.jar",
+              "sha256": "c05fa8ece9358ce3a0beebdda8a36b49998869acfbe1838c8be3637fa0fdd72c"
+            }
+          ],
+          "almond-2.13.16.lock": [
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/scala-kernel_2.13.16/0.14.5/scala-kernel_2.13.16-0.14.5.jar",
+              "sha256": "199d169d054e4cd46d660024e33b6cda99b13b9a1dd24cb3f5aea5a397456d84"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/alexarchambault/case-app_2.13/2.1.0/case-app_2.13-2.1.0.jar",
+              "sha256": "7aefb244065c83550b53a6e62611cd446271af710485162837a41ea2b26e24b2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/class-path-util_2.13/0.1.4/class-path-util_2.13-0.1.4.jar",
+              "sha256": "56683e225197f6be8e4da8f82d182090c7fd00c33ee3458e3a291161f4c0ce7b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/scalafmt-dynamic_2.13/3.9.6/scalafmt-dynamic_2.13-3.9.6.jar",
+              "sha256": "f953acd468bf2f897f70964f1bc7a5dffdeb45db581799dc959fa32f7fb3b405"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/scala-library/2.13.16/scala-library-2.13.16.jar",
+              "sha256": "1ebb2b6f9e4eb4022497c19b1e1e825019c08514f962aaac197145f88ed730f1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/kernel_2.13/0.14.5/kernel_2.13-0.14.5.jar",
+              "sha256": "3858d163dd11327de220f4333610fb72a15f4eea8c34ad13f076d21d387aefb2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/scala-interpreter_2.13.16/0.14.5/scala-interpreter_2.13.16-0.14.5.jar",
+              "sha256": "9a259e0fa69886f74a6374a794da49b9483eee98cfdb896009f0535ecc98a51c"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/sourcecode_2.13/0.4.4/sourcecode_2.13-0.4.4.jar",
+              "sha256": "bd4e99aef8267a410b6ed716c487cf5256f801425f158a8c9cbd056eb032d80d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/data-class_2.13/0.2.7/data-class_2.13-0.2.7.jar",
+              "sha256": "9912c12379c8172ce60892a6720d4f728a0c9304606de5a83ae561b7c627d338"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/alexarchambault/case-app-annotations_2.13/2.1.0/case-app-annotations_2.13-2.1.0.jar",
+              "sha256": "d704c8a899fd664faf90d36eb3c9afbcfabf0a989275d3d22cf4722f2141d5dc"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/alexarchambault/case-app-util_2.13/2.1.0/case-app-util_2.13-2.1.0.jar",
+              "sha256": "86f30e87fe09cad8c9860f359e0c69f64fb6ccd163c5218dd01450b7898bd783"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/scalafmt-interfaces/3.9.6/scalafmt-interfaces-3.9.6.jar",
+              "sha256": "3d67252a6511aad53ea54b9207d8bff86bcc9f63b33b79b00285404c2df60b9a"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/scalafmt-sysops_2.13/3.9.6/scalafmt-sysops_2.13-3.9.6.jar",
+              "sha256": "a3d36a31a694b81fd8e284fe93f2a0a55d2c31cef5386edac1e59a2daa3d586a"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/interface/1.0.29-M2/interface-1.0.29-M2.jar",
+              "sha256": "29729f15fe82b33ba2fd35b295eba9f52d551d4de4bef679df0d8796f91bbc17"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/typesafe/config/1.4.3/config-1.4.3.jar",
+              "sha256": "8ada4c185ce72416712d63e0b5afdc5f009c0cdf405e5f26efecdf156aa5dfb6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-collection-compat_2.13/2.14.0/scala-collection-compat_2.13-2.14.0.jar",
+              "sha256": "95986ac32df70c9ebdd96edfb276cdc038deedbe600177a45f6584022f34a13f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/co/fs2/fs2-core_2.13/3.12.2/fs2-core_2.13-3.12.2.jar",
+              "sha256": "bb41482ef55d4862a0990c6941fc5e7d3b2126dc6a91e3bb162d6e085b342777"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/interpreter_2.13/0.14.5/interpreter_2.13-0.14.5.jar",
+              "sha256": "b90b605ff8766c3c44bca20df3ee86628ee3ae502a020b4c9a15bf7bf9ddea02"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/mtags_2.13.16/1.6.3/mtags_2.13.16-1.6.3.jar",
+              "sha256": "17a8d4a6b48d209187e6d3d49f6e16826d5c49b98020096e5a9d1d2d1f71e9e8"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier_2.13/2.1.25-M19/coursier_2.13-2.1.25-M19.jar",
+              "sha256": "a7fff5002436f62589bb1d81cf168831612f229db7c28b90acab198982109dd3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/dependency-interface_2.13/0.3.2/dependency-interface_2.13-0.3.2.jar",
+              "sha256": "71eec30c5bd34fb6dfca0c08f8ada4b444cf294460bc2fb42a2919f290bb359e"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/scala-cli/directive-handler_2.13/0.1.4/directive-handler_2.13-0.1.4.jar",
+              "sha256": "e4752817a66e10000c2737f2c29c513659099e9535e2342e9a064d228dd06eab"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/fusesource/jansi/jansi/2.4.2/jansi-2.4.2.jar",
+              "sha256": "0b7b8b003a90ea491579b62f5118828e45112914c65589b00faa49d6ec785839"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-compiler_2.13.16/3.0.8/ammonite-compiler_2.13.16-3.0.8.jar",
+              "sha256": "a3182060b7a8cd61117217edcf7faeac22dd4617dd1df796f8fffd873c86ead4"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-repl_2.13.16/3.0.8/ammonite-repl_2.13.16-3.0.8.jar",
+              "sha256": "1010669391d40bbdd5dfd832de604a701d07a5ef7f35dd95816b18c0cddbd02d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/coursier-logger_2.13/0.14.5/coursier-logger_2.13-0.14.5.jar",
+              "sha256": "2512c3ba818a67a9a7f9adf2b061132900edfe6414c32344f6c0d7ed1f95ba30"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/scala-kernel-api_2.13.16/0.14.5/scala-kernel-api_2.13.16-0.14.5.jar",
+              "sha256": "198c0212523ba5c31250d58ced2b93a5c5afbef9ee6a5336fe2f64b5730a9871"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/shared-directives_2.13/0.14.5/shared-directives_2.13-0.14.5.jar",
+              "sha256": "8c44a4bd4a0abb7470616491db25f3a8adee6a4a2584e5d575a09a744c8dcf20"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/toree-hooks_2.13/0.14.5/toree-hooks_2.13-0.14.5.jar",
+              "sha256": "1470af390241c2d5fc5b7d0b938e220bb55363f1c078b2f85b9fa01888ba71af"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/scala-reflect/2.13.16/scala-reflect-2.13.16.jar",
+              "sha256": "fb49ccd9cac7464486ab993cda20a3c1569d8ef26f052e897577ad2a4970fb1d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/chuusai/shapeless_2.13/2.3.13/shapeless_2.13-2.3.13.jar",
+              "sha256": "b822a853c81e2447a76ac2aa560d920f2056efd0c64175ecae9f03e17f805d74"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar",
+              "sha256": "d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scodec/scodec-bits_2.13/1.1.38/scodec-bits_2.13-1.1.38.jar",
+              "sha256": "c711e4a08b56f1269253f26a416863e986fcfee6953e461c8e99e5586322f70a"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-core_2.13/2.11.0/cats-core_2.13-2.11.0.jar",
+              "sha256": "bae46f78975dfee985ee7260feab7a473c92f3bb6dce91eeb00bac8907948d21"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-effect_2.13/3.6.0/cats-effect_2.13-3.6.0.jar",
+              "sha256": "a9cc4d46dea8251fbf84ce6b531a56237f850686460d75be1a585514403fa710"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/fansi_2.13/0.5.1/fansi_2.13-0.5.1.jar",
+              "sha256": "e50796c69261fac857469122ab75f5aab4aeef855ca414f184cb132b318c2d9d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/scalatags_2.13/0.13.1/scalatags_2.13-0.13.1.jar",
+              "sha256": "3204011dba37ce9ae46417fbbc26a68f8f12f6f69cde0d286f83299d227fe1f4"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/slf4j/slf4j-nop/1.7.36/slf4j-nop-1.7.36.jar",
+              "sha256": "c214958b07816cb4412b30c7bdbd4308ffdc6ba2a83767b8f3a9229cbd9274d6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/interpreter-api_2.13/0.14.5/interpreter-api_2.13-0.14.5.jar",
+              "sha256": "70dfc887b85d73770fccbbecef8ae255296a50f8d683da1a446fdc052a496066"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/protocol_2.13/0.14.5/protocol_2.13-0.14.5.jar",
+              "sha256": "93eae74949d408f6b3572211771980dff3b57febe31926984408565547ae2cfc"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/mtags-shared_2.13.16/1.6.3/mtags-shared_2.13.16-1.6.3.jar",
+              "sha256": "717f7f0bf3d3a20ad650b59e7ef989a5301d6a64e994f227073ec63ff68b3f26"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/geny_2.13/1.1.1/geny_2.13-1.1.1.jar",
+              "sha256": "20af231c222fc71c29e06b3cd8d9190a16b412da83cc49fb0b778cf2dc6f94d2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/thoughtworks/qdox/qdox/2.2.0/qdox-2.2.0.jar",
+              "sha256": "c260c3230b2340af97d54bf01f7f67ebc57c901922736c881bb11cb981302be2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-java8-compat_2.13/1.0.2/scala-java8-compat_2.13-1.0.2.jar",
+              "sha256": "90d5b13656be93fb779b8d7c723efa2498a34af06273bb5204afb65f85a20c1b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jsoup/jsoup/1.21.2/jsoup-1.21.2.jar",
+              "sha256": "f05496e255734759f0d4b5632da7b24f81313147c78c69e90ad045d096191344"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/lz4/lz4-java/1.8.0/lz4-java-1.8.0.jar",
+              "sha256": "d74a3334fb35195009b338a951f918203d6bbca3d1d359033dc33edd1cadc9ef"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/googlecode/java-diff-utils/diffutils/1.3.0/diffutils-1.3.0.jar",
+              "sha256": "61ba4dc49adca95243beaa0569adc2a23aedb5292ae78aa01186fa782ebdc5c2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/semanticdb-scalac-core_2.13.16/4.13.10/semanticdb-scalac-core_2.13.16-4.13.10.jar",
+              "sha256": "cd1322380e2928fb3cf5f6f62a5ed7d2cbdad69b3c60fbd8c7f75930a2b3d4c5"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/dependency_2.13/0.3.2/dependency_2.13-0.3.2.jar",
+              "sha256": "cd54da81c7f4e75112b0a29ab566a31628cfe7336ee129f7b9f3f8adf68a141a"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/plokhotnyuk/jsoniter-scala/jsoniter-scala-core_2.13/2.13.5/jsoniter-scala-core_2.13-2.13.5.jar",
+              "sha256": "e258e292706ced7ba036882a439a1ecc841750a7fc4fa4a5f42f074e7491406d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-core_2.13/2.1.25-M19/coursier-core_2.13-2.1.25-M19.jar",
+              "sha256": "9351d7509ee8ed173596c489b9d92238334a4fdc3af7f65028dfd9f5db5a75bd"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-cache_2.13/2.1.25-M19/coursier-cache_2.13-2.1.25-M19.jar",
+              "sha256": "2dca6d2f6d129bc86fcaf781e220c0414521852af713ab6fe7d5677d5f8e0507"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-proxy-setup/2.1.25-M19/coursier-proxy-setup-2.1.25-M19.jar",
+              "sha256": "c95636a4d80ce6a1c6d52780d8cf90debd56a7330ea74b2f78c93e25b4d88a78"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/os-lib_2.13/0.11.5/os-lib_2.13-0.11.5.jar",
+              "sha256": "b8a3d2b10e953bce8dde208a3a5c7b33af5a57000788cd82e3c9e21e5048dc18"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/virtuslab/using_directives/1.1.0/using_directives-1.1.0.jar",
+              "sha256": "9a086b644e0e45d7eb034d0b5d348367900dc39ce6aabe6878eda6f8e9795354"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/scala-compiler/2.13.16/scala-compiler-2.13.16.jar",
+              "sha256": "f59982714591e321ba9c087af2c8666e2f5fb92b11a0cef72c2c5e9b342152d3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/scalaparse_2.13/3.1.1/scalaparse_2.13-3.1.1.jar",
+              "sha256": "a2e4f4fff339d890e6bcfe138af1e83b2cf428604f95e55de682385282d8d525"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-xml_2.13/2.4.0/scala-xml_2.13-2.4.0.jar",
+              "sha256": "b549a1bf335bc4528cf26f005894c7c37220ac4e8450847973d8f4001b8f59ea"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/javassist/javassist/3.21.0-GA/javassist-3.21.0-GA.jar",
+              "sha256": "7aa59e031f941984af07dacc6ca85e6dc9bd3a485e9aa2494cbc034efa1225d0"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.2.12/javaparser-core-3.2.12.jar",
+              "sha256": "3ccfdf5e7987ea42aa329265a5958f820bcdc967f80922c393eced1248aed43c"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-compiler-interface_2.13.16/3.0.8/ammonite-compiler-interface_2.13.16-3.0.8.jar",
+              "sha256": "6d10d23591b1caf28c7fc0a3d8c8ca05178d825a3f331fcc162a9a18671d7355"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-util_2.13/3.0.8/ammonite-util_2.13-3.0.8.jar",
+              "sha256": "b22ace97c437071eafba280e67f503c5e0b43c91d1537877c41873d9ac155dcb"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-repl-api_2.13.16/3.0.8/ammonite-repl-api_2.13.16-3.0.8.jar",
+              "sha256": "3e76844605c00b35b40e54744525c82534b065de56dc24a5595831ad30d343f8"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jline/jline-terminal/3.14.1/jline-terminal-3.14.1.jar",
+              "sha256": "a986d06dde0cff9f49cccb002fed8e8f7ae849c554863441991eb693fc2244e9"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jline/jline-terminal-jna/3.14.1/jline-terminal-jna-3.14.1.jar",
+              "sha256": "590547585b74975dd17049495b577e530e461951f9e6a37be33e8fb4eb5ad482"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jline/jline-reader/3.14.1/jline-reader-3.14.1.jar",
+              "sha256": "ba86fac0a56589a6f0153cc9dddc887dd43fa687ddd70ce2c70565ff9011a7d1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-runtime_2.13.16/3.0.8/ammonite-runtime_2.13.16-3.0.8.jar",
+              "sha256": "e9eeeeb72ce09d7260b4cf7d66f4fc1c2d0c65f9d956b3a88fd26871cb5c3a98"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-interp_2.13.16/3.0.8/ammonite-interp_2.13.16-3.0.8.jar",
+              "sha256": "eea913459ff173023552331b345a4ebfa7c342f299fc6d457463270ee330fe80"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-terminal_2.13/3.0.8/ammonite-terminal_2.13-3.0.8.jar",
+              "sha256": "f376cfa8c5eab98f72d0aa44187e118258c02a804b8c0d1d0cd7de9476084372"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/logger_2.13/0.14.5/logger_2.13-0.14.5.jar",
+              "sha256": "664e996f6eec786f1a6d41b48650bc6d0f44f21e2400f45d4ff011332fbb46a1"
+            },
+            {
+              "url": "https://jitpack.io/com/github/jupyter/jvm-repr/0.4.0/jvm-repr-0.4.0.jar",
+              "sha256": "daf8a94c8dfe3e2f1bca8f10a8928adade7b35427c9fad533e5cb21bb3286540"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/jupyter-api_2.13/0.14.5/jupyter-api_2.13-0.14.5.jar",
+              "sha256": "4e5cd5acc7313f8a91d37ce573769a5a7f435605aff8552cfa15eac7e96cc887"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-kernel_2.13/2.11.0/cats-kernel_2.13-2.11.0.jar",
+              "sha256": "8c237affd1b65796b080d5fab2a9619e12a7662fa05d50dd15d232c586483644"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-effect-kernel_2.13/3.6.0/cats-effect-kernel_2.13-3.6.0.jar",
+              "sha256": "601c23fd2bdf5140a57616c827071f0950854a68154c97463c87940834715a4f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-effect-std_2.13/3.6.0/cats-effect-std_2.13-3.6.0.jar",
+              "sha256": "36e74732d881cd74604f4d2e052b5ee68f4cefa55660c43518ffdaf76a36688d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-mtl_2.13/1.3.1/cats-mtl_2.13-1.3.1.jar",
+              "sha256": "cc3a6020d14334825f94ad0d526052a3d5654b40dbba2875495bf48b4cb1e3f6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/channels_2.13/0.14.5/channels_2.13-0.14.5.jar",
+              "sha256": "fb44aa20bdde92712bf6dbab136bc59f056748f26c81d5ef42b1ba7bbfeec6a5"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/mtags-interfaces/1.6.3/mtags-interfaces-1.6.3.jar",
+              "sha256": "741ca1d1bab16a368867bb4f5d56315eb07cb22f336f784bbd9dfaf541e845e1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/protobuf/protobuf-java/4.32.1/protobuf-java-4.32.1.jar",
+              "sha256": "8c99e4d971338bafb0b0b1d1cea9b1bbb3dc9630eb9c25109e4c7c27bca832cb"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/guava/guava/33.5.0-jre/guava-33.5.0-jre.jar",
+              "sha256": "1e301f0c52ac248b0b14fdc3d12283c77252d4d6f48521d572e7d8c4c2cc4ac7"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/semanticdb-shared_2.13/4.13.10/semanticdb-shared_2.13-4.13.10.jar",
+              "sha256": "79efb4ec9e276950479cc7d73920e4a6347307ec343667bdbd40054effd8eeb2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/io_2.13/4.13.10/io_2.13-4.13.10.jar",
+              "sha256": "e8e72be6e4d71ad162f4faeaa08aac1d99dd3e31983865a97c91762cec42714f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/versions_2.13/0.5.1/versions_2.13-0.5.1.jar",
+              "sha256": "c4b80e41ea6db6403b53f4df25a9b10eb3ef89edd8085a8d6306b7acc7e4f15e"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/concurrent-reference-hash-map/1.1.0/concurrent-reference-hash-map-1.1.0.jar",
+              "sha256": "552707982209afb9feffdccb2e73cc4681a1353e34a47df1bf643d1d2e0a2f61"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-util_2.13/2.1.25-M19/coursier-util_2.13-2.1.25-M19.jar",
+              "sha256": "cd981fedbea453120550148a3cc9ce72eed734d854688fe62b5085ddbca5390d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/virtuslab/scala-cli/config_3/1.9.0/config_3-1.9.0.jar",
+              "sha256": "b177c9285c0598ab6e6f3ca515a60f6910284b2b6df07bcaaf42cdd80e265eac"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/windows-ansi/windows-ansi/0.0.6/windows-ansi-0.0.6.jar",
+              "sha256": "077dbdbb977c94fc8b1fb82113cfb0aa5304d4e307c4e0688f69a9895f0da482"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/cache-util/2.1.25-M19/cache-util-2.1.25-M19.jar",
+              "sha256": "fcc458e6868f54fbbc3ec42804fe6eb426a8aeb6afd46cf63017926b5f698725"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-paths/2.1.25-M19/coursier-paths-2.1.25-M19.jar",
+              "sha256": "541887bc6557a25d95b28ddd491ac19531a762c7c68d39f3acc7dcfa8504ecb2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/os-zip/0.11.5/os-zip-0.11.5.jar",
+              "sha256": "2959f416872907502d668829f7d490c299cef36c520d7304f4cab4c02e2e95be"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/java-diff-utils/java-diff-utils/4.15/java-diff-utils-4.15.jar",
+              "sha256": "964c69e3a23a892db2778ae6806aa1d42f81230032bd8e4982dc8620582ee6b7"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jline/jline/3.27.1/jline-3.27.1-jdk8.jar",
+              "sha256": "9d165aff3d714a455de2e711dc90df09fdb0a0969a1cd4d52aa72a44cb545db0"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/fastparse_2.13/3.1.1/fastparse_2.13-3.1.1.jar",
+              "sha256": "ff3f37dad0f89c9cff494cb984edc122a3c282f063790949e825ae039dcad9d5"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/tpolecat/typename_2.13/1.1.0/typename_2.13-1.1.0.jar",
+              "sha256": "2f6a685273b610d1beb9bb466526ea0e5163f2445a67694cd9da4e1d2a217e17"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/pprint_2.13/0.9.0/pprint_2.13-0.9.0.jar",
+              "sha256": "5dd36b65addcd47bccc68d36dd00bee93e2def439f1a36d02a450308e8d9a3d3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/mainargs_2.13/0.7.6/mainargs_2.13-0.7.6.jar",
+              "sha256": "ba36eddcb5b201b620623bff7baec527053716862d3d2b73a1c788331c9efddd"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-interp-api_2.13.16/3.0.8/ammonite-interp-api_2.13.16-3.0.8.jar",
+              "sha256": "45dedbbe9cfa4e7554869bafeed7df027e6df7518e889b514e70aa06dea61326"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/upickle_2.13/4.3.2/upickle_2.13-4.3.2.jar",
+              "sha256": "deded0e0cdba34a4510af8604b8827ae2ecc2609b7ffa3dc96d6eef87d1694c9"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/requests_2.13/0.9.0/requests_2.13-0.9.0.jar",
+              "sha256": "f5480febb514713d15dde99f46e1f2e130dddebed0c71672655eeba97530ceec"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/ch/epfl/scala/bsp4j/2.1.1/bsp4j-2.1.1.jar",
+              "sha256": "2eab3085bed125221314901bfd22f9b258164556683615a996b192b16a094b18"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/logger-scala2-macros_2.13/0.14.5/logger-scala2-macros_2.13-0.14.5.jar",
+              "sha256": "525b8fb4dac2e34091632e43845906b79cf14a25e74ec14a7f80f284351e6c0d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/zeromq/jeromq/0.5.4/jeromq-0.5.4.jar",
+              "sha256": "59eea0fc6c1bbce8a3c01902570f3d33327f71b44555b6c1bd447cd4115ad900"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/lsp4j/org.eclipse.lsp4j/0.24.0/org.eclipse.lsp4j-0.24.0.jar",
+              "sha256": "2caea31ffa2abd13c6f5d13489be071ad08f108eae83a34473ac72d96cf72922"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/guava/failureaccess/1.0.3/failureaccess-1.0.3.jar",
+              "sha256": "cbfc3906b19b8f55dd7cfd6dfe0aa4532e834250d7f080bd8d211a3e246b59cb"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/guava/listenablefuture/9999.0-empty-to-avoid-conflict-with-guava/listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar",
+              "sha256": "b372a037d4230aa57fbeffdef30fd6123f9c0c2db85d0aced00c91b974f33f99"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jspecify/jspecify/1.0.0/jspecify-1.0.0.jar",
+              "sha256": "1fad6e6be7557781e4d33729d49ae1cdc8fdda6fe477bb0cc68ce351eafdfbab"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/errorprone/error_prone_annotations/2.41.0/error_prone_annotations-2.41.0.jar",
+              "sha256": "a56e782b5b50811ac204073a355a21d915a2107fce13ec711331ad036f660fcc"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/j2objc/j2objc-annotations/3.1/j2objc-annotations-3.1.jar",
+              "sha256": "84d3a150518485f8140ea99b8a985656749629f6433c92b80c75b36aba3b099b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/scalameta_2.13/4.13.10/scalameta_2.13-4.13.10.jar",
+              "sha256": "d666a5baeb0e536e331ee6fcf5c078f23dc547ff54339e362590e1ce41cf6af1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/scalap/2.13.13/scalap-2.13.13.jar",
+              "sha256": "b8ea34fd1f8d261d43002ae92f9d323f0441c1c9385f6606848c59eb9505a15d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/thesamet/scalapb/scalapb-runtime_2.13/0.11.15/scalapb-runtime_2.13-0.11.15.jar",
+              "sha256": "7a5e7b4c6945d76bb05eb05905fe99b1fc6b58db3cc632d81ea7fb3879efbb77"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/scala3-library_3/3.3.6/scala3-library_3-3.3.6.jar",
+              "sha256": "cf4ddaf76c0ce71cf68ca5d2dc7bad46c5a921aaf18909317ddc9ba6e67fb12b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/virtuslab/scala-cli/specification-level_3/1.9.0/specification-level_3-1.9.0.jar",
+              "sha256": "728d06c682627ab7953fc8a97221e0cb81291005be649cbb1721b7dc5e04b585"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/is-terminal/0.1.2/is-terminal-0.1.2.jar",
+              "sha256": "721cb31b9ae87136b810758edbdf9dc1f363e2d8bf6d9ba2a3642d11abb09526"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/jniutils/windows-jni-utils/0.3.3/windows-jni-utils-0.3.3.jar",
+              "sha256": "ab68efcf162355e20007b238d8108b7ffec0c06b467ee44cbb44ec3f8ac3a7e6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ujson_2.13/4.3.2/ujson_2.13-4.3.2.jar",
+              "sha256": "067d90d503203ba060eae194ba7685d838fcd2b47fc72d8e2416b65d01e705e3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/upack_2.13/4.3.2/upack_2.13-4.3.2.jar",
+              "sha256": "73c5a2af67f05b4a0b3db8e549a8b700d44ac279f8723718da91b7c861dbd962"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/upickle-implicits_2.13/4.3.2/upickle-implicits_2.13-4.3.2.jar",
+              "sha256": "6bc4e551b617af24c9ba7ca740758d4a16eb42ca733bfc44d438db84fef7d138"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/lsp4j/org.eclipse.lsp4j.generator/0.20.1/org.eclipse.lsp4j.generator-0.20.1.jar",
+              "sha256": "def6366c47d380dcf878f70e84c0d860b9c4112ae2066119db83026af4afaca3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/lsp4j/org.eclipse.lsp4j.jsonrpc/0.24.0/org.eclipse.lsp4j.jsonrpc-0.24.0.jar",
+              "sha256": "7721572e849d4f359b46ede55d5604b982ff498d0d92ebc70e18029f59823c08"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/eu/neilalexander/jnacl/1.0.0/jnacl-1.0.0.jar",
+              "sha256": "4accc9d2a56a6dd5198ec5e1c5c05a091da563bccd346fd6578edc083152beaa"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/parsers_2.13/4.13.10/parsers_2.13-4.13.10.jar",
+              "sha256": "9f73fff30085eb66041af1b3dd9c01027bf002d0bb7190a41586da003318053e"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/thesamet/scalapb/lenses_2.13/0.11.15/lenses_2.13-0.11.15.jar",
+              "sha256": "cf85c64803b72d2663b352301d292220ecdb86755897eb57054cd734bc3a35e3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/upickle-core_2.13/4.3.2/upickle-core_2.13-4.3.2.jar",
+              "sha256": "de30fc7868518c04aa67460a76ac005719b265804cd956886bbc46f0f0c99161"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/xtend/org.eclipse.xtend.lib/2.28.0/org.eclipse.xtend.lib-2.28.0.jar",
+              "sha256": "e18b609a3f99ece787443efd231504232f4b6179e9cc1c7b0905361dd31c8fdf"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/code/gson/gson/2.10.1/gson-2.10.1.jar",
+              "sha256": "4241c14a7727c34feea6507ec801318a3d4a90f070e4525681079fb94ee4c593"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/trees_2.13/4.13.10/trees_2.13-4.13.10.jar",
+              "sha256": "e507778e19c11785e609b579c39298841ec04beb30d802909ba2eb3fd934769b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/xtext/org.eclipse.xtext.xbase.lib/2.28.0/org.eclipse.xtext.xbase.lib-2.28.0.jar",
+              "sha256": "2e81c2ad0b4e48b0b1ba2e5873a06bb877dfbbcb0651c1ed0988ee15c6ebbdfe"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/xtend/org.eclipse.xtend.lib.macro/2.28.0/org.eclipse.xtend.lib.macro-2.28.0.jar",
+              "sha256": "623a312c0bd6341fecbb72eba6c011f326561d451426fb957a4b18ba076c17c6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/common_2.13/4.13.10/common_2.13-4.13.10.jar",
+              "sha256": "20c76e117e41a5bfd4d6c565c08062f944a7b7510bff27e43c0048a833737640"
+            }
+          ],
+          "almond-2.13.18.lock": [
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/scala-kernel_2.13.18/0.14.5/scala-kernel_2.13.18-0.14.5.jar",
+              "sha256": "5e14d882efb4b6e3507eab711f605a897de27058c692d633040b4d62087b35e6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/alexarchambault/case-app_2.13/2.1.0/case-app_2.13-2.1.0.jar",
+              "sha256": "7aefb244065c83550b53a6e62611cd446271af710485162837a41ea2b26e24b2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/class-path-util_2.13/0.1.4/class-path-util_2.13-0.1.4.jar",
+              "sha256": "56683e225197f6be8e4da8f82d182090c7fd00c33ee3458e3a291161f4c0ce7b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/scalafmt-dynamic_2.13/3.9.6/scalafmt-dynamic_2.13-3.9.6.jar",
+              "sha256": "f953acd468bf2f897f70964f1bc7a5dffdeb45db581799dc959fa32f7fb3b405"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/scala-library/2.13.18/scala-library-2.13.18.jar",
+              "sha256": "4e85d96ff7bc7dc627985523c3541b9917aaa08e956391380c42db21a2c4e5a0"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/kernel_2.13/0.14.5/kernel_2.13-0.14.5.jar",
+              "sha256": "3858d163dd11327de220f4333610fb72a15f4eea8c34ad13f076d21d387aefb2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/scala-interpreter_2.13.18/0.14.5/scala-interpreter_2.13.18-0.14.5.jar",
+              "sha256": "13066db52f58e0f5929fa86005e6b0c3e28401657d23ada686adf2691b17328e"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/sourcecode_2.13/0.4.4/sourcecode_2.13-0.4.4.jar",
+              "sha256": "bd4e99aef8267a410b6ed716c487cf5256f801425f158a8c9cbd056eb032d80d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/data-class_2.13/0.2.7/data-class_2.13-0.2.7.jar",
+              "sha256": "9912c12379c8172ce60892a6720d4f728a0c9304606de5a83ae561b7c627d338"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/alexarchambault/case-app-annotations_2.13/2.1.0/case-app-annotations_2.13-2.1.0.jar",
+              "sha256": "d704c8a899fd664faf90d36eb3c9afbcfabf0a989275d3d22cf4722f2141d5dc"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/alexarchambault/case-app-util_2.13/2.1.0/case-app-util_2.13-2.1.0.jar",
+              "sha256": "86f30e87fe09cad8c9860f359e0c69f64fb6ccd163c5218dd01450b7898bd783"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/scalafmt-interfaces/3.9.6/scalafmt-interfaces-3.9.6.jar",
+              "sha256": "3d67252a6511aad53ea54b9207d8bff86bcc9f63b33b79b00285404c2df60b9a"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/scalafmt-sysops_2.13/3.9.6/scalafmt-sysops_2.13-3.9.6.jar",
+              "sha256": "a3d36a31a694b81fd8e284fe93f2a0a55d2c31cef5386edac1e59a2daa3d586a"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/interface/1.0.29-M2/interface-1.0.29-M2.jar",
+              "sha256": "29729f15fe82b33ba2fd35b295eba9f52d551d4de4bef679df0d8796f91bbc17"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/typesafe/config/1.4.3/config-1.4.3.jar",
+              "sha256": "8ada4c185ce72416712d63e0b5afdc5f009c0cdf405e5f26efecdf156aa5dfb6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-collection-compat_2.13/2.14.0/scala-collection-compat_2.13-2.14.0.jar",
+              "sha256": "95986ac32df70c9ebdd96edfb276cdc038deedbe600177a45f6584022f34a13f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/co/fs2/fs2-core_2.13/3.12.2/fs2-core_2.13-3.12.2.jar",
+              "sha256": "bb41482ef55d4862a0990c6941fc5e7d3b2126dc6a91e3bb162d6e085b342777"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/interpreter_2.13/0.14.5/interpreter_2.13-0.14.5.jar",
+              "sha256": "b90b605ff8766c3c44bca20df3ee86628ee3ae502a020b4c9a15bf7bf9ddea02"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/mtags_2.13.18/1.6.3/mtags_2.13.18-1.6.3.jar",
+              "sha256": "45f58ad3a648c14c178d6a15e30b1a0ed1152720e2d4a4170cceb6fd765fe5b9"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier_2.13/2.1.25-M19/coursier_2.13-2.1.25-M19.jar",
+              "sha256": "a7fff5002436f62589bb1d81cf168831612f229db7c28b90acab198982109dd3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/dependency-interface_2.13/0.3.2/dependency-interface_2.13-0.3.2.jar",
+              "sha256": "71eec30c5bd34fb6dfca0c08f8ada4b444cf294460bc2fb42a2919f290bb359e"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/scala-cli/directive-handler_2.13/0.1.4/directive-handler_2.13-0.1.4.jar",
+              "sha256": "e4752817a66e10000c2737f2c29c513659099e9535e2342e9a064d228dd06eab"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/fusesource/jansi/jansi/2.4.2/jansi-2.4.2.jar",
+              "sha256": "0b7b8b003a90ea491579b62f5118828e45112914c65589b00faa49d6ec785839"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-compiler_2.13.18/3.0.8/ammonite-compiler_2.13.18-3.0.8.jar",
+              "sha256": "d6da6c057583070eb7a230a3c7172fd17986cacfb250e7342ca6a4bf882b0ca7"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-repl_2.13.18/3.0.8/ammonite-repl_2.13.18-3.0.8.jar",
+              "sha256": "e0da6af73e709939a0267660d950184097a71dbe3e1970f7bfe1f24fee5c0f7d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/coursier-logger_2.13/0.14.5/coursier-logger_2.13-0.14.5.jar",
+              "sha256": "2512c3ba818a67a9a7f9adf2b061132900edfe6414c32344f6c0d7ed1f95ba30"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/scala-kernel-api_2.13.18/0.14.5/scala-kernel-api_2.13.18-0.14.5.jar",
+              "sha256": "95ca20e921472c5b020adb5c3886cbe94a305b2136fe479a85a7854e76018ae7"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/shared-directives_2.13/0.14.5/shared-directives_2.13-0.14.5.jar",
+              "sha256": "8c44a4bd4a0abb7470616491db25f3a8adee6a4a2584e5d575a09a744c8dcf20"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/toree-hooks_2.13/0.14.5/toree-hooks_2.13-0.14.5.jar",
+              "sha256": "1470af390241c2d5fc5b7d0b938e220bb55363f1c078b2f85b9fa01888ba71af"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/scala-reflect/2.13.18/scala-reflect-2.13.18.jar",
+              "sha256": "6935ff1982b2ac93d695f15aa66921be2f602921277afe002f018fd8c7d6e29b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/chuusai/shapeless_2.13/2.3.13/shapeless_2.13-2.3.13.jar",
+              "sha256": "b822a853c81e2447a76ac2aa560d920f2056efd0c64175ecae9f03e17f805d74"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar",
+              "sha256": "d3ef575e3e4979678dc01bf1dcce51021493b4d11fb7f1be8ad982877c16a1c0"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scodec/scodec-bits_2.13/1.1.38/scodec-bits_2.13-1.1.38.jar",
+              "sha256": "c711e4a08b56f1269253f26a416863e986fcfee6953e461c8e99e5586322f70a"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-core_2.13/2.11.0/cats-core_2.13-2.11.0.jar",
+              "sha256": "bae46f78975dfee985ee7260feab7a473c92f3bb6dce91eeb00bac8907948d21"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-effect_2.13/3.6.0/cats-effect_2.13-3.6.0.jar",
+              "sha256": "a9cc4d46dea8251fbf84ce6b531a56237f850686460d75be1a585514403fa710"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/fansi_2.13/0.5.1/fansi_2.13-0.5.1.jar",
+              "sha256": "e50796c69261fac857469122ab75f5aab4aeef855ca414f184cb132b318c2d9d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/scalatags_2.13/0.13.1/scalatags_2.13-0.13.1.jar",
+              "sha256": "3204011dba37ce9ae46417fbbc26a68f8f12f6f69cde0d286f83299d227fe1f4"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/slf4j/slf4j-nop/1.7.36/slf4j-nop-1.7.36.jar",
+              "sha256": "c214958b07816cb4412b30c7bdbd4308ffdc6ba2a83767b8f3a9229cbd9274d6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/interpreter-api_2.13/0.14.5/interpreter-api_2.13-0.14.5.jar",
+              "sha256": "70dfc887b85d73770fccbbecef8ae255296a50f8d683da1a446fdc052a496066"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/protocol_2.13/0.14.5/protocol_2.13-0.14.5.jar",
+              "sha256": "93eae74949d408f6b3572211771980dff3b57febe31926984408565547ae2cfc"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/mtags-shared_2.13.18/1.6.3/mtags-shared_2.13.18-1.6.3.jar",
+              "sha256": "67baea9b54177ab6733531fa1fe3cf9ee60abb8867a78ea151a02a1b69d85f3c"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/geny_2.13/1.1.1/geny_2.13-1.1.1.jar",
+              "sha256": "20af231c222fc71c29e06b3cd8d9190a16b412da83cc49fb0b778cf2dc6f94d2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/thoughtworks/qdox/qdox/2.2.0/qdox-2.2.0.jar",
+              "sha256": "c260c3230b2340af97d54bf01f7f67ebc57c901922736c881bb11cb981302be2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-java8-compat_2.13/1.0.2/scala-java8-compat_2.13-1.0.2.jar",
+              "sha256": "90d5b13656be93fb779b8d7c723efa2498a34af06273bb5204afb65f85a20c1b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jsoup/jsoup/1.21.2/jsoup-1.21.2.jar",
+              "sha256": "f05496e255734759f0d4b5632da7b24f81313147c78c69e90ad045d096191344"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/lz4/lz4-java/1.8.0/lz4-java-1.8.0.jar",
+              "sha256": "d74a3334fb35195009b338a951f918203d6bbca3d1d359033dc33edd1cadc9ef"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/googlecode/java-diff-utils/diffutils/1.3.0/diffutils-1.3.0.jar",
+              "sha256": "61ba4dc49adca95243beaa0569adc2a23aedb5292ae78aa01186fa782ebdc5c2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/semanticdb-scalac-core_2.13.18/4.13.10/semanticdb-scalac-core_2.13.18-4.13.10.jar",
+              "sha256": "743511914c9ebeafef8b99d64938de53cddd463069a313feab3ca40322f77596"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/dependency_2.13/0.3.2/dependency_2.13-0.3.2.jar",
+              "sha256": "cd54da81c7f4e75112b0a29ab566a31628cfe7336ee129f7b9f3f8adf68a141a"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/plokhotnyuk/jsoniter-scala/jsoniter-scala-core_2.13/2.13.5/jsoniter-scala-core_2.13-2.13.5.jar",
+              "sha256": "e258e292706ced7ba036882a439a1ecc841750a7fc4fa4a5f42f074e7491406d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-core_2.13/2.1.25-M19/coursier-core_2.13-2.1.25-M19.jar",
+              "sha256": "9351d7509ee8ed173596c489b9d92238334a4fdc3af7f65028dfd9f5db5a75bd"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-cache_2.13/2.1.25-M19/coursier-cache_2.13-2.1.25-M19.jar",
+              "sha256": "2dca6d2f6d129bc86fcaf781e220c0414521852af713ab6fe7d5677d5f8e0507"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-proxy-setup/2.1.25-M19/coursier-proxy-setup-2.1.25-M19.jar",
+              "sha256": "c95636a4d80ce6a1c6d52780d8cf90debd56a7330ea74b2f78c93e25b4d88a78"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/os-lib_2.13/0.11.5/os-lib_2.13-0.11.5.jar",
+              "sha256": "b8a3d2b10e953bce8dde208a3a5c7b33af5a57000788cd82e3c9e21e5048dc18"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/virtuslab/using_directives/1.1.0/using_directives-1.1.0.jar",
+              "sha256": "9a086b644e0e45d7eb034d0b5d348367900dc39ce6aabe6878eda6f8e9795354"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/scala-compiler/2.13.18/scala-compiler-2.13.18.jar",
+              "sha256": "2f15891fcae7aad30a3892194fb2abb6224cf7ce5d2bd90fba7f1c48682fca21"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/scalaparse_2.13/3.1.1/scalaparse_2.13-3.1.1.jar",
+              "sha256": "a2e4f4fff339d890e6bcfe138af1e83b2cf428604f95e55de682385282d8d525"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-xml_2.13/2.4.0/scala-xml_2.13-2.4.0.jar",
+              "sha256": "b549a1bf335bc4528cf26f005894c7c37220ac4e8450847973d8f4001b8f59ea"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/javassist/javassist/3.21.0-GA/javassist-3.21.0-GA.jar",
+              "sha256": "7aa59e031f941984af07dacc6ca85e6dc9bd3a485e9aa2494cbc034efa1225d0"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/github/javaparser/javaparser-core/3.2.12/javaparser-core-3.2.12.jar",
+              "sha256": "3ccfdf5e7987ea42aa329265a5958f820bcdc967f80922c393eced1248aed43c"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-compiler-interface_2.13.18/3.0.8/ammonite-compiler-interface_2.13.18-3.0.8.jar",
+              "sha256": "d9d292a53d45fd8ba55bb652cbd4c19a63fdfa884f69365d9650a2528fbc38a8"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-util_2.13/3.0.8/ammonite-util_2.13-3.0.8.jar",
+              "sha256": "b22ace97c437071eafba280e67f503c5e0b43c91d1537877c41873d9ac155dcb"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-repl-api_2.13.18/3.0.8/ammonite-repl-api_2.13.18-3.0.8.jar",
+              "sha256": "d1e218194368a09c806c80a285c0540e2f79892a32c2d047bfb1ecbcc113b4de"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jline/jline-terminal/3.14.1/jline-terminal-3.14.1.jar",
+              "sha256": "a986d06dde0cff9f49cccb002fed8e8f7ae849c554863441991eb693fc2244e9"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jline/jline-terminal-jna/3.14.1/jline-terminal-jna-3.14.1.jar",
+              "sha256": "590547585b74975dd17049495b577e530e461951f9e6a37be33e8fb4eb5ad482"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jline/jline-reader/3.14.1/jline-reader-3.14.1.jar",
+              "sha256": "ba86fac0a56589a6f0153cc9dddc887dd43fa687ddd70ce2c70565ff9011a7d1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-runtime_2.13.18/3.0.8/ammonite-runtime_2.13.18-3.0.8.jar",
+              "sha256": "1997943b60e3bcebf13d7f19b5da6e0e7583a8a86117801b1bd5ece87fcaa833"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-interp_2.13.18/3.0.8/ammonite-interp_2.13.18-3.0.8.jar",
+              "sha256": "df6838f226ffe15814bc6ad4ac47ca555e95b00b56b26de127495f9f34b18dac"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-terminal_2.13/3.0.8/ammonite-terminal_2.13-3.0.8.jar",
+              "sha256": "f376cfa8c5eab98f72d0aa44187e118258c02a804b8c0d1d0cd7de9476084372"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/logger_2.13/0.14.5/logger_2.13-0.14.5.jar",
+              "sha256": "664e996f6eec786f1a6d41b48650bc6d0f44f21e2400f45d4ff011332fbb46a1"
+            },
+            {
+              "url": "https://jitpack.io/com/github/jupyter/jvm-repr/0.4.0/jvm-repr-0.4.0.jar",
+              "sha256": "daf8a94c8dfe3e2f1bca8f10a8928adade7b35427c9fad533e5cb21bb3286540"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/jupyter-api_2.13/0.14.5/jupyter-api_2.13-0.14.5.jar",
+              "sha256": "4e5cd5acc7313f8a91d37ce573769a5a7f435605aff8552cfa15eac7e96cc887"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-kernel_2.13/2.11.0/cats-kernel_2.13-2.11.0.jar",
+              "sha256": "8c237affd1b65796b080d5fab2a9619e12a7662fa05d50dd15d232c586483644"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-effect-kernel_2.13/3.6.0/cats-effect-kernel_2.13-3.6.0.jar",
+              "sha256": "601c23fd2bdf5140a57616c827071f0950854a68154c97463c87940834715a4f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-effect-std_2.13/3.6.0/cats-effect-std_2.13-3.6.0.jar",
+              "sha256": "36e74732d881cd74604f4d2e052b5ee68f4cefa55660c43518ffdaf76a36688d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/typelevel/cats-mtl_2.13/1.3.1/cats-mtl_2.13-1.3.1.jar",
+              "sha256": "cc3a6020d14334825f94ad0d526052a3d5654b40dbba2875495bf48b4cb1e3f6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/channels_2.13/0.14.5/channels_2.13-0.14.5.jar",
+              "sha256": "fb44aa20bdde92712bf6dbab136bc59f056748f26c81d5ef42b1ba7bbfeec6a5"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/mtags-interfaces/1.6.3/mtags-interfaces-1.6.3.jar",
+              "sha256": "741ca1d1bab16a368867bb4f5d56315eb07cb22f336f784bbd9dfaf541e845e1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/protobuf/protobuf-java/4.32.1/protobuf-java-4.32.1.jar",
+              "sha256": "8c99e4d971338bafb0b0b1d1cea9b1bbb3dc9630eb9c25109e4c7c27bca832cb"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/guava/guava/33.5.0-jre/guava-33.5.0-jre.jar",
+              "sha256": "1e301f0c52ac248b0b14fdc3d12283c77252d4d6f48521d572e7d8c4c2cc4ac7"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/semanticdb-shared_2.13/4.13.10/semanticdb-shared_2.13-4.13.10.jar",
+              "sha256": "79efb4ec9e276950479cc7d73920e4a6347307ec343667bdbd40054effd8eeb2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/io_2.13/4.13.10/io_2.13-4.13.10.jar",
+              "sha256": "e8e72be6e4d71ad162f4faeaa08aac1d99dd3e31983865a97c91762cec42714f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/versions_2.13/0.5.1/versions_2.13-0.5.1.jar",
+              "sha256": "c4b80e41ea6db6403b53f4df25a9b10eb3ef89edd8085a8d6306b7acc7e4f15e"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/concurrent-reference-hash-map/1.1.0/concurrent-reference-hash-map-1.1.0.jar",
+              "sha256": "552707982209afb9feffdccb2e73cc4681a1353e34a47df1bf643d1d2e0a2f61"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-util_2.13/2.1.25-M19/coursier-util_2.13-2.1.25-M19.jar",
+              "sha256": "cd981fedbea453120550148a3cc9ce72eed734d854688fe62b5085ddbca5390d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/virtuslab/scala-cli/config_3/1.9.0/config_3-1.9.0.jar",
+              "sha256": "b177c9285c0598ab6e6f3ca515a60f6910284b2b6df07bcaaf42cdd80e265eac"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/windows-ansi/windows-ansi/0.0.6/windows-ansi-0.0.6.jar",
+              "sha256": "077dbdbb977c94fc8b1fb82113cfb0aa5304d4e307c4e0688f69a9895f0da482"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/cache-util/2.1.25-M19/cache-util-2.1.25-M19.jar",
+              "sha256": "fcc458e6868f54fbbc3ec42804fe6eb426a8aeb6afd46cf63017926b5f698725"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/coursier-paths/2.1.25-M19/coursier-paths-2.1.25-M19.jar",
+              "sha256": "541887bc6557a25d95b28ddd491ac19531a762c7c68d39f3acc7dcfa8504ecb2"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/os-zip/0.11.5/os-zip-0.11.5.jar",
+              "sha256": "2959f416872907502d668829f7d490c299cef36c520d7304f4cab4c02e2e95be"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/java-diff-utils/java-diff-utils/4.16/java-diff-utils-4.16.jar",
+              "sha256": "620403030d676a4a27f780a3acec7438dee1b1651a1c804fa6bb11bb07399a6f"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jline/jline/3.29.0/jline-3.29.0-jdk8.jar",
+              "sha256": "ed2680487642df95379f220c09c0f77e25095713387e2bc00c2d6581bb79c804"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/fastparse_2.13/3.1.1/fastparse_2.13-3.1.1.jar",
+              "sha256": "ff3f37dad0f89c9cff494cb984edc122a3c282f063790949e825ae039dcad9d5"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/tpolecat/typename_2.13/1.1.0/typename_2.13-1.1.0.jar",
+              "sha256": "2f6a685273b610d1beb9bb466526ea0e5163f2445a67694cd9da4e1d2a217e17"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/pprint_2.13/0.9.0/pprint_2.13-0.9.0.jar",
+              "sha256": "5dd36b65addcd47bccc68d36dd00bee93e2def439f1a36d02a450308e8d9a3d3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/mainargs_2.13/0.7.6/mainargs_2.13-0.7.6.jar",
+              "sha256": "ba36eddcb5b201b620623bff7baec527053716862d3d2b73a1c788331c9efddd"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ammonite-interp-api_2.13.18/3.0.8/ammonite-interp-api_2.13.18-3.0.8.jar",
+              "sha256": "935d358c02af065e40724e698e01d2beb802df6c92128bd47d91a04dc3c29f6b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/upickle_2.13/4.3.2/upickle_2.13-4.3.2.jar",
+              "sha256": "deded0e0cdba34a4510af8604b8827ae2ecc2609b7ffa3dc96d6eef87d1694c9"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/requests_2.13/0.9.0/requests_2.13-0.9.0.jar",
+              "sha256": "f5480febb514713d15dde99f46e1f2e130dddebed0c71672655eeba97530ceec"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/ch/epfl/scala/bsp4j/2.1.1/bsp4j-2.1.1.jar",
+              "sha256": "2eab3085bed125221314901bfd22f9b258164556683615a996b192b16a094b18"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/sh/almond/logger-scala2-macros_2.13/0.14.5/logger-scala2-macros_2.13-0.14.5.jar",
+              "sha256": "525b8fb4dac2e34091632e43845906b79cf14a25e74ec14a7f80f284351e6c0d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/zeromq/jeromq/0.5.4/jeromq-0.5.4.jar",
+              "sha256": "59eea0fc6c1bbce8a3c01902570f3d33327f71b44555b6c1bd447cd4115ad900"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/lsp4j/org.eclipse.lsp4j/0.24.0/org.eclipse.lsp4j-0.24.0.jar",
+              "sha256": "2caea31ffa2abd13c6f5d13489be071ad08f108eae83a34473ac72d96cf72922"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/guava/failureaccess/1.0.3/failureaccess-1.0.3.jar",
+              "sha256": "cbfc3906b19b8f55dd7cfd6dfe0aa4532e834250d7f080bd8d211a3e246b59cb"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/guava/listenablefuture/9999.0-empty-to-avoid-conflict-with-guava/listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar",
+              "sha256": "b372a037d4230aa57fbeffdef30fd6123f9c0c2db85d0aced00c91b974f33f99"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/jspecify/jspecify/1.0.0/jspecify-1.0.0.jar",
+              "sha256": "1fad6e6be7557781e4d33729d49ae1cdc8fdda6fe477bb0cc68ce351eafdfbab"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/errorprone/error_prone_annotations/2.41.0/error_prone_annotations-2.41.0.jar",
+              "sha256": "a56e782b5b50811ac204073a355a21d915a2107fce13ec711331ad036f660fcc"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/j2objc/j2objc-annotations/3.1/j2objc-annotations-3.1.jar",
+              "sha256": "84d3a150518485f8140ea99b8a985656749629f6433c92b80c75b36aba3b099b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/scalameta_2.13/4.13.10/scalameta_2.13-4.13.10.jar",
+              "sha256": "d666a5baeb0e536e331ee6fcf5c078f23dc547ff54339e362590e1ce41cf6af1"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/scalap/2.13.13/scalap-2.13.13.jar",
+              "sha256": "b8ea34fd1f8d261d43002ae92f9d323f0441c1c9385f6606848c59eb9505a15d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/thesamet/scalapb/scalapb-runtime_2.13/0.11.15/scalapb-runtime_2.13-0.11.15.jar",
+              "sha256": "7a5e7b4c6945d76bb05eb05905fe99b1fc6b58db3cc632d81ea7fb3879efbb77"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scala-lang/scala3-library_3/3.3.6/scala3-library_3-3.3.6.jar",
+              "sha256": "cf4ddaf76c0ce71cf68ca5d2dc7bad46c5a921aaf18909317ddc9ba6e67fb12b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/virtuslab/scala-cli/specification-level_3/1.9.0/specification-level_3-1.9.0.jar",
+              "sha256": "728d06c682627ab7953fc8a97221e0cb81291005be649cbb1721b7dc5e04b585"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/github/alexarchambault/is-terminal/0.1.2/is-terminal-0.1.2.jar",
+              "sha256": "721cb31b9ae87136b810758edbdf9dc1f363e2d8bf6d9ba2a3642d11abb09526"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/io/get-coursier/jniutils/windows-jni-utils/0.3.3/windows-jni-utils-0.3.3.jar",
+              "sha256": "ab68efcf162355e20007b238d8108b7ffec0c06b467ee44cbb44ec3f8ac3a7e6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/ujson_2.13/4.3.2/ujson_2.13-4.3.2.jar",
+              "sha256": "067d90d503203ba060eae194ba7685d838fcd2b47fc72d8e2416b65d01e705e3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/upack_2.13/4.3.2/upack_2.13-4.3.2.jar",
+              "sha256": "73c5a2af67f05b4a0b3db8e549a8b700d44ac279f8723718da91b7c861dbd962"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/upickle-implicits_2.13/4.3.2/upickle-implicits_2.13-4.3.2.jar",
+              "sha256": "6bc4e551b617af24c9ba7ca740758d4a16eb42ca733bfc44d438db84fef7d138"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/lsp4j/org.eclipse.lsp4j.generator/0.20.1/org.eclipse.lsp4j.generator-0.20.1.jar",
+              "sha256": "def6366c47d380dcf878f70e84c0d860b9c4112ae2066119db83026af4afaca3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/lsp4j/org.eclipse.lsp4j.jsonrpc/0.24.0/org.eclipse.lsp4j.jsonrpc-0.24.0.jar",
+              "sha256": "7721572e849d4f359b46ede55d5604b982ff498d0d92ebc70e18029f59823c08"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/eu/neilalexander/jnacl/1.0.0/jnacl-1.0.0.jar",
+              "sha256": "4accc9d2a56a6dd5198ec5e1c5c05a091da563bccd346fd6578edc083152beaa"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/parsers_2.13/4.13.10/parsers_2.13-4.13.10.jar",
+              "sha256": "9f73fff30085eb66041af1b3dd9c01027bf002d0bb7190a41586da003318053e"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/thesamet/scalapb/lenses_2.13/0.11.15/lenses_2.13-0.11.15.jar",
+              "sha256": "cf85c64803b72d2663b352301d292220ecdb86755897eb57054cd734bc3a35e3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/lihaoyi/upickle-core_2.13/4.3.2/upickle-core_2.13-4.3.2.jar",
+              "sha256": "de30fc7868518c04aa67460a76ac005719b265804cd956886bbc46f0f0c99161"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/xtend/org.eclipse.xtend.lib/2.28.0/org.eclipse.xtend.lib-2.28.0.jar",
+              "sha256": "e18b609a3f99ece787443efd231504232f4b6179e9cc1c7b0905361dd31c8fdf"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/com/google/code/gson/gson/2.10.1/gson-2.10.1.jar",
+              "sha256": "4241c14a7727c34feea6507ec801318a3d4a90f070e4525681079fb94ee4c593"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/trees_2.13/4.13.10/trees_2.13-4.13.10.jar",
+              "sha256": "e507778e19c11785e609b579c39298841ec04beb30d802909ba2eb3fd934769b"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/xtext/org.eclipse.xtext.xbase.lib/2.28.0/org.eclipse.xtext.xbase.lib-2.28.0.jar",
+              "sha256": "2e81c2ad0b4e48b0b1ba2e5873a06bb877dfbbcb0651c1ed0988ee15c6ebbdfe"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/eclipse/xtend/org.eclipse.xtend.lib.macro/2.28.0/org.eclipse.xtend.lib.macro-2.28.0.jar",
+              "sha256": "623a312c0bd6341fecbb72eba6c011f326561d451426fb957a4b18ba076c17c6"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/scalameta/common_2.13/4.13.10/common_2.13-4.13.10.jar",
+              "sha256": "20c76e117e41a5bfd4d6c565c08062f944a7b7510bff27e43c0048a833737640"
+            }
+          ],
+          "connect-3.5.9.lock": [
+            {
+              "url": "https://repo1.maven.org/maven2/org/apache/spark/spark-connect-client-jvm_2.12/3.5.9/spark-connect-client-jvm_2.12-3.5.9.jar",
+              "sha256": "ec52b1cdc2243187d6c363fdb37f1e39ddea46c0f98e9a01f01c5be05ce26590"
+            }
+          ],
+          "connect-4.0.1.lock": [
+            {
+              "url": "https://repo1.maven.org/maven2/org/apache/spark/spark-connect-client-jvm_2.13/4.0.1/spark-connect-client-jvm_2.13-4.0.1.jar",
+              "sha256": "ade842ddbc2ea73d5e4c5faa9c0cf92f4fb091eb6f73393c4c092bb15fd9b2a3"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/apache/spark/spark-connect-shims_2.13/4.0.1/spark-connect-shims_2.13-4.0.1.jar",
+              "sha256": "1a6df04217265718a08c240f0e02fa8347250b0a4e05b24790793040faaa7539"
+            }
+          ],
+          "connect-4.2.0.lock": [
+            {
+              "url": "https://repo1.maven.org/maven2/org/apache/spark/spark-connect-client-jvm_2.13/4.2.0/spark-connect-client-jvm_2.13-4.2.0.jar",
+              "sha256": "c31e52a432ee2b7325cd6b4640e99869999c2b4fbbb6b11ea0651102063efb7d"
+            },
+            {
+              "url": "https://repo1.maven.org/maven2/org/apache/spark/spark-connect-shims_2.13/4.2.0/spark-connect-shims_2.13-4.2.0.jar",
+              "sha256": "248a5841410bdd394acd5168bdb6f78160a957a78ff0edfa3bc061a594943a42"
+            }
+          ]
+        }
+      },
+      "dataprocLakeDeltaSpark212321": {
+        "$comment": "Delta Lake 3.2.1 for the DELTA optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "3.2.1",
+        "source": "https://repo1.maven.org/maven2/io/delta/delta-spark_2.12/3.2.1/delta-spark_2.12-3.2.1.jar",
+        "sha256": "088e187da689a347a6a8556dcb22318e3dfcfb995d807f5e2c19b4d0a7ee9499",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeDeltaStorage321": {
+        "$comment": "Delta Lake 3.2.1 for the DELTA optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "3.2.1",
+        "source": "https://repo1.maven.org/maven2/io/delta/delta-storage/3.2.1/delta-storage-3.2.1.jar",
+        "sha256": "4dcc179fc4076bda5060a4038f979c53e1f5916cf04971e28f9441db390763c7",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeIcebergSparkRuntime35212161": {
+        "$comment": "Apache Iceberg 1.6.1 for the ICEBERG optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "1.6.1",
+        "source": "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.6.1/iceberg-spark-runtime-3.5_2.12-1.6.1.jar",
+        "sha256": "87e7184f31ef0caac415bbdfcf1bc4943346a58b98d747dc83434f7139e12acb",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeIcebergSparkRuntime352121100": {
+        "$comment": "Apache Iceberg 1.10.0 for the ICEBERG optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "1.10.0",
+        "source": "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.10.0/iceberg-spark-runtime-3.5_2.12-1.10.0.jar",
+        "sha256": "70f9471870b2d456167d703c829f098a446b86bb1379eee338c0efa03a341026",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeIcebergSparkRuntime41213110": {
+        "$comment": "Apache Iceberg 1.11.0, image version 3.0's, for the ICEBERG optional component (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars ICEBERG/3.0): on every node's and driver's Spark class path, with the default_iceberg REST catalog. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "1.11.0",
+        "source": "https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-4.1_2.13/1.11.0/iceberg-spark-runtime-4.1_2.13-1.11.0.jar",
+        "sha256": "d6ea6c5d099288daeb7d5a92061bd3d7d8f296492632b42378e5f2f0e3066242",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeHudiSpark35Bundle2120150": {
+        "$comment": "Apache Hudi 0.15.0 for the HUDI optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "0.15.0",
+        "source": "https://repo1.maven.org/maven2/org/apache/hudi/hudi-spark3.5-bundle_2.12/0.15.0/hudi-spark3.5-bundle_2.12-0.15.0.jar",
+        "sha256": "aab6ecdb5c65fcd20406b980b31ccec294fae95693de947d5778f0b3fb4e302a",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeDeltaSpark213420": {
+        "$comment": "Delta Lake 4.2.0 for the DELTA optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "4.2.0",
+        "source": "https://repo1.maven.org/maven2/io/delta/delta-spark_2.13/4.2.0/delta-spark_2.13-4.2.0.jar",
+        "sha256": "8480050a55c7e50427f3bec3af9243f98fc7cbfa453a2ef55e6ea8d0b7b121ff",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeDeltaStorage420": {
+        "$comment": "Delta Lake 4.2.0 for the DELTA optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "4.2.0",
+        "source": "https://repo1.maven.org/maven2/io/delta/delta-storage/4.2.0/delta-storage-4.2.0.jar",
+        "sha256": "2d84df76551f2b3cd27b120abec67ccbba324cea6ec45eb659edcc54234f99f3",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeHudiSpark41Bundle213120": {
+        "$comment": "Apache Hudi 1.2.0 for the HUDI optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "1.2.0",
+        "source": "https://repo1.maven.org/maven2/org/apache/hudi/hudi-spark4.1-bundle_2.13/1.2.0/hudi-spark4.1-bundle_2.13-1.2.0.jar",
+        "sha256": "69ba6fa7e29096c15737614a98e85536935365f044dc4d647dfdec6bcc24f6ce",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocLakeHudiSpark33Bundle2120123": {
+        "$comment": "Apache Hudi 0.12.3 for the HUDI optional component of Dataproc clusters (#2162, cmd/cloudburrow/dataprocecosystem.go lakeJars): mounted on every node and driver at the component's /usr/lib path and on the Spark class path, as the image versions' release notes list it. Fetched by the CLI on the first cluster with the component, checked against this SHA-256 and kept in <state-dir>/models/spark/dataproc/lake.",
+        "version": "0.12.3",
+        "source": "https://repo1.maven.org/maven2/org/apache/hudi/hudi-spark3.3-bundle_2.12/0.12.3/hudi-spark3.3-bundle_2.12-0.12.3.jar",
+        "sha256": "99142b2f0f67d8b48bf7114f7e8fee8859772b9e288064abb28b07655bb0277c",
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "maven-central",
+        "verification": "sha256",
+        "skipDiscovery": "Maven Central; depcheck only discovers GitHub-sourced components."
+      },
+      "dataprocIPython": {
+        "$comment": "IPython 8.37.0 and its dependencies (#2162, cmd/cloudburrow/dataprocipython.go): pure-Python wheels from PyPI, unpacked into <state-dir>/models/spark/dataproc/ipython-8.37.0 and mounted on a PySpark notebook batch's driver PYTHONPATH, so its cells run in IPython (magics and shell escapes). Each checked against its SHA-256.",
+        "version": "8.37.0",
+        "files": {
+          "ipython-8.37.0-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/91/d0/274fbf7b0b12643cbbc001ce13e6a5b1607ac4929d1b11c72460152c9fc3/ipython-8.37.0-py3-none-any.whl",
+            "sha256": "ed87326596b878932dbcb171e3e698845434d8c61b8d8cd474bf663041a9dcf2",
+            "license": "BSD-3-Clause"
+          },
+          "decorator-5.2.1-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/4e/8c/f3147f5c4b73e7550fe5f9352eaa956ae838d5c51eb58e7a25b9f3e2643b/decorator-5.2.1-py3-none-any.whl",
+            "sha256": "d316bb415a2d9e2d2b3abcc4084c6502fc09240e292cd76a76afc106a1c8e04a",
+            "license": "BSD-2-Clause"
+          },
+          "exceptiongroup-1.3.0-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/36/f4/c6e662dade71f56cd2f3735141b265c3c79293c109549c1e6933b0651ffc/exceptiongroup-1.3.0-py3-none-any.whl",
+            "sha256": "4d111e6e0c13d0644cad6ddaa7ed0261a0b36971f6d23e7ec9b4b9097da78a10",
+            "license": "MIT"
+          },
+          "jedi-0.19.2-py2.py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/c0/5a/9cac0c82afec3d09ccd97c8b6502d48f165f9124db81b4bcb90b4af974ee/jedi-0.19.2-py2.py3-none-any.whl",
+            "sha256": "a8ef22bde8490f57fe5c7681a3c83cb58874daf72b4784de3cce5b6ef6edb5b9",
+            "license": "MIT"
+          },
+          "parso-0.8.5-py2.py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/16/32/f8e3c85d1d5250232a5d3477a2a28cc291968ff175caeadaf3cc19ce0e4a/parso-0.8.5-py2.py3-none-any.whl",
+            "sha256": "646204b5ee239c396d040b90f9e272e9a8017c630092bf59980beb62fd033887",
+            "license": "MIT"
+          },
+          "matplotlib_inline-0.2.1-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/af/33/ee4519fa02ed11a94aef9559552f3b17bb863f2ecfe1a35dc7f548cde231/matplotlib_inline-0.2.1-py3-none-any.whl",
+            "sha256": "d56ce5156ba6085e00a9d54fead6ed29a9c47e215cd1bba2e976ef39f5710a76",
+            "license": "BSD-3-Clause"
+          },
+          "pexpect-4.9.0-py2.py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/9e/c3/059298687310d527a58bb01f3b1965787ee3b40dce76752eda8b44e9a2c5/pexpect-4.9.0-py2.py3-none-any.whl",
+            "sha256": "7236d1e080e4936be2dc3e326cec0af72acf9212a7e1d060210e70a47e253523",
+            "license": "ISC"
+          },
+          "ptyprocess-0.7.0-py2.py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/22/a6/858897256d0deac81a172289110f31629fc4cee19b6f01283303e18c8db3/ptyprocess-0.7.0-py2.py3-none-any.whl",
+            "sha256": "4b41f3967fce3af57cc7e94b888626c18bf37a083e3651ca8feeb66d492fef35",
+            "license": "ISC"
+          },
+          "prompt_toolkit-3.0.52-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/84/03/0d3ce49e2505ae70cf43bc5bb3033955d2fc9f932163e84dc0779cc47f48/prompt_toolkit-3.0.52-py3-none-any.whl",
+            "sha256": "9aac639a3bbd33284347de5ad8d68ecc044b91a762dc39b7c21095fcd6a19955",
+            "license": "BSD-3-Clause"
+          },
+          "pygments-2.19.2-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/c7/21/705964c7812476f378728bdf590ca4b771ec72385c533964653c68e86bdc/pygments-2.19.2-py3-none-any.whl",
+            "sha256": "86540386c03d588bb81d44bc3928634ff26449851e99741617ecb9037ee5ec0b",
+            "license": "BSD-2-Clause"
+          },
+          "stack_data-0.6.3-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/f1/7b/ce1eafaf1a76852e2ec9b22edecf1daa58175c090266e9f6c64afcd81d91/stack_data-0.6.3-py3-none-any.whl",
+            "sha256": "d5558e0c25a4cb0853cddad3d77da9891a08cb85dd9f9f91b9f8cd66e511e695",
+            "license": "MIT"
+          },
+          "executing-2.2.1-py2.py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/c1/ea/53f2148663b321f21b5a606bd5f191517cf40b7072c0497d3c92c4a13b1e/executing-2.2.1-py2.py3-none-any.whl",
+            "sha256": "760643d3452b4d777d295bb167ccc74c64a81df23fb5e08eff250c425a4b2017",
+            "license": "MIT"
+          },
+          "asttokens-3.0.0-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/25/8a/c46dcc25341b5bce5472c718902eb3d38600a903b14fa6aeecef3f21a46f/asttokens-3.0.0-py3-none-any.whl",
+            "sha256": "e3078351a059199dd5138cb1c706e6430c05eff2ff136af5eb4790f9d28932e2",
+            "license": "Apache-2.0"
+          },
+          "pure_eval-0.2.3-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl",
+            "sha256": "1db8e35b67b3d218d818ae653e27f06c3aa420901fa7b081ca98cbedc874e0d0",
+            "license": "MIT"
+          },
+          "traitlets-5.14.3-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/00/c0/8f5d070730d7836adc9c9b6408dec68c6ced86b304a9b26a14df072a6e8c/traitlets-5.14.3-py3-none-any.whl",
+            "sha256": "b74e89e397b1ed28cc831db7aea759ba6640cb3de13090ca145426688ff1ac4f",
+            "license": "BSD-3-Clause"
+          },
+          "typing_extensions-4.15.0-py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/18/67/36e9267722cc04a6b9f15c7f3441c2363321a3ea07da7ae0c0707beb2a9c/typing_extensions-4.15.0-py3-none-any.whl",
+            "sha256": "f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548",
+            "license": "PSF-2.0"
+          },
+          "wcwidth-0.2.14-py2.py3-none-any.whl": {
+            "source": "https://files.pythonhosted.org/packages/af/b5/123f13c975e9f27ab9c0770f514345bd406d0e8d3b7a0723af9d43f710af/wcwidth-0.2.14-py2.py3-none-any.whl",
+            "sha256": "a7bb560c8aee30f9957e5f9895805edd20602f2d7f720186dfd906e82b4982e1",
+            "license": "MIT"
+          }
+        },
+        "license": "BSD-3-Clause (IPython); its dependencies' licences are per file",
+        "source": "https://pypi.org/",
+        "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
+        "updateFeed": "pypi",
+        "verification": "sha256",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
+      },
       "tfconvertBase": {
         "$comment": "deploy/tfconvert/Dockerfile builds FROM this digest (#1775): the TensorFlow SavedModel converter image the CLI builds locally on the first imported TENSORFLOW model.",
         "image": "python:3.12-slim",
@@ -157,24 +2318,32 @@
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect python:3.12-slim`."
       },
       "notebookRuntimePackages": {
-        "$comment": "pip install in internal/nbruntime/image/Dockerfile (#2094): Google's google-cloud-bigquery 3.47.0 and bigquery-magics 0.15.2 (Apache-2.0: %%bigquery and the client a notebook's Python uses), with IPython 9.9.0 (BSD-3-Clause, the cells' shell), pandas 2.3.3 (BSD-3-Clause), pyarrow 22.0.0 (Apache-2.0), db-dtypes 1.9.0 (Apache-2.0) and matplotlib 3.10.7 (the PSF-based Matplotlib licence), and what pip resolves for them.",
+        "$comment": "pip install --require-hashes --no-deps --only-binary :all: in internal/nbruntime/image/Dockerfile, from the hashed lock internal/nbruntime/image/requirements.txt (uv pip compile --generate-hashes of requirements.in; pyspark-client, published as an sdist only, is built with --no-build-isolation against the hashed setuptools of build-requirements.txt) (#2094): Google's google-cloud-bigquery 3.47.0 and bigquery-magics 0.15.2 (Apache-2.0: %%bigquery and the client a notebook's Python uses), with IPython 9.9.0 (BSD-3-Clause, the cells' shell), pandas 2.3.3 (BSD-3-Clause), pyarrow 22.0.0 (Apache-2.0), db-dtypes 1.9.0 (Apache-2.0) and matplotlib 3.10.7 (the PSF-based Matplotlib licence), and every package they need, each pinned by hash.",
         "version": "google-cloud-bigquery 3.47.0, bigquery-magics 0.15.2",
         "source": "https://pypi.org/project/bigquery-magics/0.15.2/",
         "license": "Apache-2.0 (Google's packages); BSD-3-Clause, Apache-2.0 and the Matplotlib licence (third-party)",
         "redistribution": "not published: installed into the locally built notebook runtime image; nothing of it is in the CLI",
         "updateFeed": "pypi",
-        "verification": "built-and-run",
-        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
+        "verification": "lock-file-hashes",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components.",
+        "lockFiles": [
+          "internal/nbruntime/image/requirements.txt",
+          "internal/nbruntime/image/build-requirements.txt"
+        ]
       },
       "notebookRuntimeSparkPackages": {
-        "$comment": "pip install in internal/nbruntime/image/Dockerfile (#2156), for an Apache Spark notebook's DataprocSparkSession: Google's dataproc-spark-connect 1.1.0 (installed --no-deps) and google-cloud-dataproc 5.32.0 (Apache-2.0), with pyspark-client 4.0.1 (Apache-2.0, the Spark Connect client of the runtime 3.0 sessions' Spark 4.0.1), websockets 17.4 (BSD-3-Clause), tqdm 4.70.1 (MPL-2.0 AND MIT) and packaging 26.3 (Apache-2.0 OR BSD-2-Clause), and what pip resolves for them.",
+        "$comment": "pip install --require-hashes --no-deps --only-binary :all: in internal/nbruntime/image/Dockerfile, from the hashed lock internal/nbruntime/image/requirements.txt (uv pip compile --generate-hashes of requirements.in; pyspark-client, published as an sdist only, is built with --no-build-isolation against the hashed setuptools of build-requirements.txt) (#2156), for an Apache Spark notebook's DataprocSparkSession: Google's dataproc-spark-connect 1.1.0 (installed --no-deps) and google-cloud-dataproc 5.32.0 (Apache-2.0), with pyspark-client 4.0.1 (Apache-2.0, the Spark Connect client of the runtime 3.0 sessions' Spark 4.0.1), websockets 17.4 (BSD-3-Clause), tqdm 4.70.1 (MPL-2.0 AND MIT) and packaging 26.3 (Apache-2.0 OR BSD-2-Clause), and every package they need, each pinned by hash.",
         "version": "dataproc-spark-connect 1.1.0, google-cloud-dataproc 5.32.0, pyspark-client 4.0.1",
         "source": "https://pypi.org/project/dataproc-spark-connect/1.1.0/",
         "license": "Apache-2.0 (Google's packages and pyspark-client); BSD-3-Clause, MPL-2.0 AND MIT, Apache-2.0 OR BSD-2-Clause (third-party)",
         "redistribution": "not published: installed into the locally built notebook runtime image; nothing of it is in the CLI",
         "updateFeed": "pypi",
-        "verification": "built-and-run",
-        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
+        "verification": "lock-file-hashes",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components.",
+        "lockFiles": [
+          "internal/nbruntime/image/requirements.txt",
+          "internal/nbruntime/image/build-requirements.txt"
+        ]
       },
       "notebookRuntimeJupyterLab": {
         "$comment": "pip install --require-hashes in internal/nbruntime/image/Dockerfile (#2198), a Vertex AI Workbench instance's JupyterLab: jupyterlab 4.6.5 and jupyter-server 2.21.1 (BSD-3-Clause), ipykernel 7.4.0 (BSD-3-Clause), terminado 0.18.1 (BSD-2-Clause), Google's google-cloud-storage 3.17.1 (Apache-2.0), and their dependencies. Every package of the image is pinned with its hashes in requirements.txt and spark.txt, uv pip compile --universal --generate-hashes of requirements.in and spark.in with --exclude-newer 2026-11-01; no installed distribution declares a GPL, LGPL or AGPL licence (checked 2026-11-24).",
@@ -187,14 +2356,17 @@
         "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
       },
       "tensorflow": {
-        "$comment": "pip install tensorflow==2.20.0 in deploy/tfconvert/Dockerfile (#1775): Google's tf.lite.TFLiteConverter.from_saved_model converts imported SavedModels to TensorFlow Lite.",
+        "$comment": "pip install --require-hashes --no-deps --only-binary :all: in deploy/tfconvert/Dockerfile, from the hashed lock deploy/tfconvert/requirements.txt (uv pip compile --universal --python-version 3.12 --generate-hashes of requirements.in) (#1775, #2162): Google's tensorflow 2.20.0, whose tf.lite.TFLiteConverter.from_saved_model converts imported SavedModels to TensorFlow Lite, with keras 3.15.1, numpy 2.5.5, protobuf 7.36.2 and every other package it needs, each pinned by hash.",
         "version": "2.20.0",
         "source": "https://pypi.org/project/tensorflow/2.20.0/",
-        "license": "Apache-2.0",
+        "license": "Apache-2.0 (tensorflow, keras, tensorboard); BSD-3-Clause, MIT, Apache-2.0, MPL-2.0 (certifi) and the PSF licence (typing-extensions) (third-party)",
         "redistribution": "not published: installed into the locally built converter image; nothing of it is in the CLI",
         "updateFeed": "pypi",
-        "verification": "built-and-run",
-        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
+        "verification": "lock-file-hashes",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components.",
+        "lockFiles": [
+          "deploy/tfconvert/requirements.txt"
+        ]
       },
       "pythonHolidays": {
         "$comment": "BigQuery ML HOLIDAY_REGION's built-in calendar (#1776): tools/bqholidays/generate.py runs on this wheel to write internal/bigqueryfront/holidaycal.tsv.gz, an UNVERIFIED (docs re-read 2026-11-18) stand-in for Google's calendar, which is published only as a BigQuery public dataset (third_party/python-holidays/PROVENANCE.md).",

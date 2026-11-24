@@ -14,6 +14,7 @@ import (
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/googleapi"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataproc"
+	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/sparkproc"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -48,6 +50,12 @@ type dataprocService struct {
 	live func() map[string]string
 	// caller is a request's principal, a resource's creator.
 	caller func(ctx context.Context) string
+	// gke is the Kubernetes Engine API, Dataproc on GKE's clusters' (nil:
+	// none served).
+	gke func() *gke.Server
+	// kms is the instance's Cloud KMS, which decrypts the RANGER
+	// component's admin password (nil: none served).
+	kms    *kmsService
 	server *grpctransport.Server
 	api    *dataproc.Server
 }
@@ -99,7 +107,16 @@ func (s *dataprocService) Start(ctx context.Context) error {
 	if s.spark != nil {
 		if d := s.spark(); d != nil {
 			opts.Engine = dataproc.Docker{D: d}
+			opts.HistoryDir = d.History
 		}
+	}
+	opts.InstanceID = s.cfg.Name
+	opts.AllowUnconfinedContainers = s.cfg.AllowUnconfinedContainers
+	if s.kms != nil {
+		opts.Decrypt = buildKMSDecrypter{svc: s.kms}.Decrypt
+	}
+	if s.gke != nil {
+		opts.Virtual = dataprocGKE{api: s.gke, dir: filepath.Join(s.cfg.InstanceDir(), "dataproc-gke")}
 	}
 	if s.live != nil && serviceEnabled(s.cfg, config.ServiceStorage) {
 		opts.Storage = &dataprocStorage{live: s.live}
@@ -133,7 +150,8 @@ func (s *dataprocService) Start(ctx context.Context) error {
 	})
 	// The WebSocket bridge outside every wrapper, which would hide the
 	// connection's Hijacker.
-	s.server.ServeHTTP(api.Bridge(jsonAPI))
+	// The History Servers (the Spark UI, #2162) beside the JSON API.
+	s.server.ServeHTTP(api.Bridge(api.WebUI(jsonAPI)))
 	if err := s.server.Register(func(g *grpc.Server) { api.Register(g) }); err != nil {
 		return err
 	}
@@ -225,6 +243,27 @@ func (d *dataprocStorage) Write(ctx context.Context, uri string, data []byte) er
 		return err
 	}
 	return w.Close()
+}
+
+// List lists the bucket's objects under prefix, by name with their sizes.
+func (d *dataprocStorage) List(ctx context.Context, bucket, prefix string) (map[string]int64, error) {
+	c, err := d.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	out := map[string]int64{}
+	it := c.Bucket(bucket).Objects(ctx, &storage.Query{Prefix: prefix})
+	for {
+		a, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		out[a.Name] = a.Size
+	}
 }
 
 func (d *dataprocStorage) EnsureBucket(ctx context.Context, project, bucket, location string) error {

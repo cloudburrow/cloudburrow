@@ -63,6 +63,20 @@ type Conn interface {
 // Docker is the Engine of a sparkproc.Docker.
 type Docker struct{ D *sparkproc.Docker }
 
+// DeleteDisks removes a deleted cluster's nodes' disks.
+func (d Docker) DeleteDisks(uuid string) { d.D.RemoveDisks(uuid) }
+
+// diskDeleter is an Engine whose clusters' disks outlive their nodes'
+// containers (the instance's restart), until the cluster is deleted.
+type diskDeleter interface{ DeleteDisks(uuid string) }
+
+// deleteDisks removes cluster uuid's disks, where the engine keeps them.
+func (s *Server) deleteDisks(uuid string) {
+	if d, ok := s.opts.Engine.(diskDeleter); ok && uuid != "" {
+		d.DeleteDisks(uuid)
+	}
+}
+
 func (d Docker) Run(ctx context.Context, job sparkproc.Job) (sparkproc.Result, error) {
 	return d.D.Run(ctx, job)
 }
@@ -94,6 +108,9 @@ type Options struct {
 	// Engine runs the workloads; nil fails each batch and session with
 	// Spark's unavailability.
 	Engine Engine
+	// Virtual starts Dataproc on GKE clusters, or is nil when the
+	// instance serves no Kubernetes Engine.
+	Virtual VirtualEngine
 	// Storage is the instance's Cloud Storage, or nil when it serves none.
 	Storage Storage
 	// ProjectNumber is a project's number, for the staging bucket's name.
@@ -103,6 +120,20 @@ type Options struct {
 	// Workers bounds the batches run at once (0: 2); the rest wait
 	// PENDING.
 	Workers int
+	// HistoryDir is the host directory the batches' and sessions' Spark
+	// event logs are written to (sparkproc.Docker.History), which the
+	// instance's History Server reads; "" serves no Spark UI for them.
+	HistoryDir string
+	// Decrypt decrypts with the instance's Cloud KMS (the RANGER
+	// component's admin password), or is nil when it serves none.
+	Decrypt func(ctx context.Context, key string, ciphertext []byte) ([]byte, error)
+	// AllowUnconfinedContainers is `up --allow-unconfined-containers`
+	// (#2162): only with it does a cluster run the DOCKER optional
+	// component, whose daemons run with seccomp, AppArmor and the /proc and
+	// /sys masks unconfined.
+	AllowUnconfinedContainers bool
+	// InstanceID names the instance's History Server's containers.
+	InstanceID string
 	// Logf receives the server's notes, or is nil.
 	Logf func(format string, args ...any)
 }
@@ -112,6 +143,11 @@ type Server struct {
 	dataprocpb.UnimplementedBatchControllerServer
 	dataprocpb.UnimplementedSessionControllerServer
 	dataprocpb.UnimplementedSessionTemplateControllerServer
+	dataprocpb.UnimplementedClusterControllerServer
+	dataprocpb.UnimplementedJobControllerServer
+	dataprocpb.UnimplementedAutoscalingPolicyServiceServer
+	dataprocpb.UnimplementedWorkflowTemplateServiceServer
+	dataprocpb.UnimplementedNodeGroupControllerServer
 
 	opts Options
 	now  func() time.Time
@@ -124,10 +160,23 @@ type Server struct {
 	ops       map[string]*longrunningpb.Operation
 	requests  map[string]string // request_id key -> operation name
 	cancels   map[string]context.CancelFunc
-	connects  map[string]Conn      // session name -> its server
-	activity  map[string]time.Time // session name -> last Spark Connect call
-	closed    bool
-	wg        sync.WaitGroup
+	connects  map[string]Conn          // session name -> its server
+	kernels   map[string]gatewayKernel // kernel gateway kernel ID -> its session
+	activity  map[string]time.Time     // session name -> last Spark Connect call
+	clusters  map[string]*dataprocpb.Cluster
+	nodes     map[string]Nodes // cluster name -> its containers
+	jobs      map[string]*dataprocpb.Job
+	jobOps    map[string]string // job name -> its SubmitJobAsOperation operation
+	policies  map[string]*dataprocpb.AutoscalingPolicy
+	workflows map[string][]*dataprocpb.WorkflowTemplate // every version, the current last
+	history   *historyServer
+	apps      map[string]string // workload ID to Spark application ID (resolveApp)
+	wfCancel  map[string]bool   // workflow operations cancelled
+	// driverNext is each cluster's next driver node (placeDriverLocked).
+	driverNext map[string]int
+	stop       chan struct{} // closed by Close
+	closed     bool
+	wg         sync.WaitGroup
 
 	bridgeOnce sync.Once
 	bridgeLn   *bridgeListener
@@ -156,10 +205,13 @@ func NewServer(opts Options) (*Server, error) {
 		batches: map[string]*dataprocpb.Batch{}, sessions: map[string]*dataprocpb.Session{},
 		templates: map[string]*dataprocpb.SessionTemplate{}, ops: map[string]*longrunningpb.Operation{},
 		requests: map[string]string{}, cancels: map[string]context.CancelFunc{},
-		connects: map[string]Conn{}, activity: map[string]time.Time{}}
+		connects: map[string]Conn{}, activity: map[string]time.Time{}, kernels: map[string]gatewayKernel{},
+		clusters: map[string]*dataprocpb.Cluster{}, nodes: map[string]Nodes{}, jobs: map[string]*dataprocpb.Job{},
+		jobOps: map[string]string{}, policies: map[string]*dataprocpb.AutoscalingPolicy{}, workflows: map[string][]*dataprocpb.WorkflowTemplate{}, wfCancel: map[string]bool{}, stop: make(chan struct{})}
 	if err := s.load(); err != nil {
 		return nil, err
 	}
+	s.restartClusters()
 	return s, nil
 }
 
@@ -172,6 +224,9 @@ func (s *Server) logf(format string, args ...any) {
 // Close stops every running batch and session.
 func (s *Server) Close() {
 	s.mu.Lock()
+	if !s.closed {
+		close(s.stop)
+	}
 	s.closed = true
 	cancels := make([]context.CancelFunc, 0, len(s.cancels))
 	for _, c := range s.cancels {
@@ -187,6 +242,20 @@ func (s *Server) Close() {
 	}
 	for _, c := range connects {
 		c.Stop()
+	}
+	s.mu.Lock()
+	nodes := make([]Nodes, 0, len(s.nodes))
+	for _, n := range s.nodes {
+		nodes = append(nodes, n)
+	}
+	s.nodes = map[string]Nodes{}
+	hist := s.history
+	s.mu.Unlock()
+	for _, n := range nodes {
+		n.Delete()
+	}
+	if hist != nil {
+		hist.close()
 	}
 	s.wg.Wait()
 	if s.bridgeSrv != nil {
@@ -210,6 +279,45 @@ func (s *Server) Reset(project string) error {
 		if match(name) {
 			stop = append(stop, c)
 			delete(s.connects, name)
+		}
+	}
+	var drop []Nodes
+	for name, n := range s.nodes {
+		if match(name) {
+			drop = append(drop, n)
+			delete(s.nodes, name)
+		}
+	}
+	var disks []string
+	defer func() {
+		for _, n := range drop {
+			n.Delete()
+		}
+		// The forgotten clusters' disks go with them.
+		for _, uuid := range disks {
+			s.deleteDisks(uuid)
+		}
+	}()
+	for k, c := range s.clusters {
+		if match(k) {
+			delete(s.clusters, k)
+			disks = append(disks, c.ClusterUuid)
+		}
+	}
+	for k := range s.jobs {
+		if match(k) {
+			delete(s.jobs, k)
+			delete(s.jobOps, k)
+		}
+	}
+	for k := range s.policies {
+		if match(k) {
+			delete(s.policies, k)
+		}
+	}
+	for k := range s.workflows {
+		if match(k) {
+			delete(s.workflows, k)
 		}
 	}
 	for _, m := range []any{s.batches, s.sessions, s.templates, s.ops} {
@@ -335,11 +443,17 @@ func runtimeVersion(v string) (string, error) {
 // ---- persistence ----
 
 type persisted struct {
-	Batches   []json.RawMessage `json:"batches"`
-	Sessions  []json.RawMessage `json:"sessions"`
-	Templates []json.RawMessage `json:"templates"`
-	Ops       []json.RawMessage `json:"operations"`
-	Requests  map[string]string `json:"requests"`
+	Batches   []json.RawMessage   `json:"batches"`
+	Sessions  []json.RawMessage   `json:"sessions"`
+	Templates []json.RawMessage   `json:"templates"`
+	Ops       []json.RawMessage   `json:"operations"`
+	Requests  map[string]string   `json:"requests"`
+	Clusters  []json.RawMessage   `json:"clusters,omitempty"`
+	Jobs      []json.RawMessage   `json:"jobs,omitempty"`
+	JobNames  []string            `json:"jobNames,omitempty"`
+	JobOps    map[string]string   `json:"jobOperations,omitempty"`
+	Policies  []json.RawMessage   `json:"autoscalingPolicies,omitempty"`
+	Workflows [][]json.RawMessage `json:"workflowTemplates,omitempty"`
 }
 
 func (s *Server) load() error {
@@ -398,6 +512,47 @@ func (s *Server) load() error {
 	for k, v := range p.Requests {
 		s.requests[k] = v
 	}
+	for _, raw := range p.Clusters {
+		var x dataprocpb.Cluster
+		if err := protojson.Unmarshal(raw, &x); err == nil {
+			s.clusters[clusterKey(x.ProjectId, regionOfCluster(&x), x.ClusterName)] = &x
+		}
+	}
+	for i, raw := range p.Jobs {
+		var x dataprocpb.Job
+		if i < len(p.JobNames) && protojson.Unmarshal(raw, &x) == nil {
+			if !jobDone(&x) {
+				// Its driver ran in a container that run removed.
+				if x.Status != nil {
+					x.StatusHistory = append(x.StatusHistory, x.Status)
+				}
+				x.Status = &dataprocpb.JobStatus{State: dataprocpb.JobStatus_ERROR, Details: "The job was stopped when the instance stopped.", StateStartTime: now}
+				x.Done = true
+			}
+			s.jobs[p.JobNames[i]] = &x
+		}
+	}
+	for k, v := range p.JobOps {
+		s.jobOps[k] = v
+	}
+	for _, raw := range p.Policies {
+		var x dataprocpb.AutoscalingPolicy
+		if err := protojson.Unmarshal(raw, &x); err == nil {
+			s.policies[policyKeyOf(x.Name)] = &x
+		}
+	}
+	for _, versions := range p.Workflows {
+		var vs []*dataprocpb.WorkflowTemplate
+		for _, raw := range versions {
+			var x dataprocpb.WorkflowTemplate
+			if err := protojson.Unmarshal(raw, &x); err == nil {
+				vs = append(vs, &x)
+			}
+		}
+		if len(vs) > 0 {
+			s.workflows[workflowKeyOf(vs[0].Name)] = vs
+		}
+	}
 	// Operations left running end with their resource.
 	for name, op := range s.ops {
 		if !op.Done {
@@ -429,6 +584,27 @@ func (s *Server) saveLocked() error {
 	for _, k := range sortedKeys(s.ops) {
 		b, _ := m.Marshal(s.ops[k])
 		p.Ops = append(p.Ops, b)
+	}
+	for _, k := range sortedKeys(s.clusters) {
+		b, _ := m.Marshal(s.clusters[k])
+		p.Clusters = append(p.Clusters, b)
+	}
+	for _, k := range sortedKeys(s.jobs) {
+		b, _ := m.Marshal(s.jobs[k])
+		p.Jobs, p.JobNames = append(p.Jobs, b), append(p.JobNames, k)
+	}
+	p.JobOps = s.jobOps
+	for _, k := range sortedKeys(s.policies) {
+		b, _ := m.Marshal(s.policies[k])
+		p.Policies = append(p.Policies, b)
+	}
+	for _, k := range sortedKeys(s.workflows) {
+		var vs []json.RawMessage
+		for _, v := range s.workflows[k] {
+			b, _ := m.Marshal(v)
+			vs = append(vs, b)
+		}
+		p.Workflows = append(p.Workflows, vs)
 	}
 	b, err := json.Marshal(p)
 	if err != nil {
@@ -468,4 +644,25 @@ func (s *Server) caller(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+// restartClusters starts again the clusters the CLI's last run left
+// running: their containers were removed when it stopped.
+func (s *Server) restartClusters() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for name, c := range s.clusters {
+		switch c.GetStatus().GetState() {
+		case dataprocpb.ClusterStatus_DELETING:
+			delete(s.clusters, name)
+			go s.deleteDisks(c.ClusterUuid)
+		case dataprocpb.ClusterStatus_STOPPING:
+			s.setClusterStateLocked(c, dataprocpb.ClusterStatus_STOPPED, "")
+		case dataprocpb.ClusterStatus_STOPPED, dataprocpb.ClusterStatus_ERROR:
+		default:
+			s.wg.Add(1)
+			go s.startCluster(name, "", true)
+		}
+	}
+	s.save()
 }

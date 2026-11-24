@@ -449,11 +449,15 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	dataprocSvc := newDataprocService(cfg)
 	if dataprocSvc != nil {
 		dataprocSvc.live = boundAddrs
+		dataprocSvc.kms = kmsSvc
 	}
 	dataprocSvc.register(coord)
 	// The Kubernetes Engine API (#1913), in process; its clusters are
 	// kind clusters of their own.
 	gkeSvc := newGKEService(cfg)
+	if dataprocSvc != nil && gkeSvc != nil {
+		dataprocSvc.gke = gkeSvc.API
+	}
 	// The Compute Engine API's VPC networking (#1936), in process, before
 	// the services that check their networks against it.
 	computeSvc := newComputeService(cfg)
@@ -1989,6 +1993,7 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 	fmt.Fprintf(w, "  kubeconfig: %s\n", cfg.KubeconfigPath())
 	fmt.Fprintf(w, "  mode:       %s\n", cfg.Mode)
 	fmt.Fprintf(w, "  iam:        enforcement %s\n", iamEnforcementMode(cfg))
+	fmt.Fprintf(w, "  containers: %s\n", unconfinedLine(cfg.AllowUnconfinedContainers))
 
 	if !cfg.IsLoopback() {
 		fmt.Fprintf(w, "\n  WARNING: bound to %s, which is not loopback.\n", cfg.BindAddress)
@@ -1996,6 +2001,9 @@ func printStartup(w io.Writer, cfg config.Config, control *lifecycle.ControlServ
 		fmt.Fprintf(w, "  address controls it and the cluster it manages.\n")
 	}
 	printKMSWarning(w, kmsSvc)
+	if cfg.AllowUnconfinedContainers {
+		fmt.Fprint(w, unconfinedWarning)
+	}
 
 	fmt.Fprintf(w, "\n  services: ")
 	for i, s := range cfg.EnabledServices() {
@@ -2095,6 +2103,11 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 		iam = info.IAMEnforcement
 	}
 	fmt.Fprintf(stdout, "iam:        enforcement %s\n", iam)
+	unconfined := cfg.AllowUnconfinedContainers
+	if info, err := readRuntime(cfg); err == nil {
+		unconfined = info.AllowUnconfinedContainers
+	}
+	fmt.Fprintf(stdout, "containers: %s\n", unconfinedLine(unconfined))
 	// Microsoft's SQL Server licence (#1916): who accepted it, when, how.
 	for _, l := range mssqlEULALines(readMSSQLEULAStatus(cfg)) {
 		fmt.Fprintln(stdout, l)
@@ -2268,3 +2281,19 @@ func projectLine(cfg config.Config) string {
 		return project
 	}
 }
+
+// unconfinedLine is `status`'s and the banner's containers line: whether
+// the instance may run containers unconfined (#2162).
+func unconfinedLine(allowed bool) string {
+	if allowed {
+		return "unconfined allowed (--allow-unconfined-containers): the Dataproc DOCKER component runs"
+	}
+	return "confined (the Dataproc DOCKER component is refused; --allow-unconfined-containers allows it)"
+}
+
+// unconfinedWarning is the banner's warning with
+// --allow-unconfined-containers (#2162).
+const unconfinedWarning = "\n  WARNING: --allow-unconfined-containers is on. Dataproc clusters with the\n" +
+	"  DOCKER component run each node's Docker daemon with seccomp, AppArmor and\n" +
+	"  the /proc and /sys masks unconfined, which weakens the isolation between\n" +
+	"  those containers and this machine. Start without the flag to refuse them.\n"

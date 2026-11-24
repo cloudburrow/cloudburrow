@@ -187,7 +187,7 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 	}
 	suffix = strings.Trim(suffix, "-") + fmt.Sprintf("-%d", time.Now().UnixNano()%1e6)
 	network, relay, kernel := "cb-nb-net-"+suffix, "cb-nb-relay-"+suffix, "cb-nb-"+suffix
-	label := "cloudburrow.instance=" + m.Instance
+	label := "io.cloudburrow.instance=" + m.Instance // sparkproc.InstanceLabel: swept by stop
 	image := Tag()
 
 	if out, err := m.docker(ctx, "network", "create", "--internal", "--label", label, network); err != nil {

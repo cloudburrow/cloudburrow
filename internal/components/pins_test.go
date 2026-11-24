@@ -157,6 +157,10 @@ var (
 func dockerfileProblems(content string, images, sums map[string]bool) []string {
 	var problems []string
 	stages := map[string]bool{"scratch": true}
+	// An ARG's default: FROM ${BASE} is checked as its default, the
+	// image a build without --build-arg takes (the CLI passes another
+	// pinned, recorded image of the same kind).
+	argDefaults := map[string]string{}
 	joined := strings.ReplaceAll(content, "\\\n", " ")
 	for _, line := range strings.Split(joined, "\n") {
 		f := strings.Fields(line)
@@ -164,6 +168,12 @@ func dockerfileProblems(content string, images, sums map[string]bool) []string {
 			continue
 		}
 		switch strings.ToUpper(f[0]) {
+		case "ARG":
+			if len(f) > 1 {
+				if k, v, ok := strings.Cut(f[1], "="); ok {
+					argDefaults[k] = v
+				}
+			}
 		case "FROM":
 			args := f[1:]
 			for len(args) > 0 && strings.HasPrefix(args[0], "--") {
@@ -174,6 +184,15 @@ func dockerfileProblems(content string, images, sums map[string]bool) []string {
 				continue
 			}
 			img := args[0]
+			if name, ok := strings.CutPrefix(img, "$"); ok {
+				name = strings.TrimSuffix(strings.TrimPrefix(name, "{"), "}")
+				if def, ok := argDefaults[name]; ok {
+					img = def
+				} else {
+					problems = append(problems, "FROM "+img+": ARG "+name+" has no pinned default")
+					continue
+				}
+			}
 			switch {
 			case stages[strings.ToLower(img)]:
 			case !strings.Contains(img, "@sha256:"):

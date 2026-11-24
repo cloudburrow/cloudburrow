@@ -255,8 +255,24 @@ func TestSessionsAndTemplates(t *testing.T) {
 		t.Errorf("deleted: %v", err)
 	}
 	if _, err := s.CreateSession(ctx, &dataprocpb.CreateSessionRequest{Parent: parent, SessionId: "sess-2", Session: &dataprocpb.Session{
-		SessionConfig: &dataprocpb.Session_JupyterSession{JupyterSession: &dataprocpb.JupyterConfig{}}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("jupyter: %v", err)
+		SessionConfig: &dataprocpb.Session_JupyterSession{JupyterSession: &dataprocpb.JupyterConfig{Kernel: dataprocpb.JupyterConfig_SCALA}}}}); err != nil {
+		t.Errorf("scala: %v", err) // served (#2162): Almond, on the session's kernel server
+	}
+	jop, err := s.CreateSession(ctx, &dataprocpb.CreateSessionRequest{Parent: parent, SessionId: "sess-3", Session: &dataprocpb.Session{
+		SessionConfig: &dataprocpb.Session_JupyterSession{JupyterSession: &dataprocpb.JupyterConfig{DisplayName: "nb"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait(t, func() bool {
+		o, _ := ops.GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: jop.Name})
+		return o.GetDone()
+	})
+	j, _ := s.GetSession(ctx, &dataprocpb.GetSessionRequest{Name: parent + "/sessions/sess-3"})
+	if j.GetState() != dataprocpb.Session_ACTIVE || j.GetJupyterSession().GetKernel() != dataprocpb.JupyterConfig_PYTHON {
+		t.Errorf("jupyter: %v", j)
+	}
+	if u, err := s.KernelConnectURI(j.Name, "host.docker.internal:8081"); err != nil || u != "sc://host.docker.internal:8081/;session_id="+j.Uuid {
+		t.Errorf("kernel URI %q %v", u, err)
 	}
 }
 

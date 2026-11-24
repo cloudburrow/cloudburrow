@@ -61,7 +61,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceDataform:         {Providers: []string{"dataform", "dataform-folders", "dataform-settings"}},
 	config.ServiceAppHub:           {Providers: []string{"apphub", "apphub-discovered", "apphub-settings"}},
 	config.ServiceTrace:            {Providers: []string{"trace-explorer"}},
-	config.ServiceDataproc:         {Providers: []string{"dataproc-batches", "dataproc-sessions", "dataproc-templates"}},
+	config.ServiceDataproc:         {Providers: []string{"dataproc-batches", "dataproc-sessions", "dataproc-templates", "dataproc-clusters", "dataproc-jobs", "dataproc-workflows", "dataproc-autoscaling"}},
 	// The Kubernetes Engine API (#1913): its clusters are on Kubernetes
 	// clusters, beside the instance's own.
 	config.ServiceGKE: {Providers: []string{"gkeclusters"}},

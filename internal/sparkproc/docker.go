@@ -28,7 +28,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed assets/relay.py assets/procedure.py assets/run.sh
+//go:embed assets/relay.py assets/procedure.py assets/run.sh assets/node.sh assets/eco.sh assets/hivenode.sh assets/nodemanager.sh assets/hdfs.sh
 var assets embed.FS
 
 // The connector's endpoints, the relay's aliases on the job's network.
@@ -61,6 +61,16 @@ type LogEntry struct {
 // for that Spark.
 type Runtime struct {
 	Image string
+	// RImage is the same Spark's image with R beside Python (the
+	// official image's -python3-r- variant), which SparkR workloads and
+	// Dataproc clusters run in; "" when none is pinned.
+	RImage string
+	// Kernel is how a Jupyter session's kernel image is built on Image
+	// (KernelImage), nil when none is pinned for this runtime's Spark.
+	Kernel *KernelRuntime
+	// ConnectServer returns the Spark Connect server's jar when the
+	// image's Spark does not bundle it (Spark 3.5), nil when it does.
+	ConnectServer func(ctx context.Context) (string, error)
 	// Connector returns the connector jar's path on the host, fetching
 	// it on the first use.
 	Connector func(ctx context.Context) (string, error)
@@ -72,11 +82,30 @@ type Docker struct {
 	// the one a procedure with no runtime_version runs on.
 	Runtimes map[string]Runtime
 	Default  string
+	// Clusters are the Dataproc cluster image versions (MAJOR.MINOR) a
+	// cluster runs (#2162): each one's Spark, its RImage the nodes'.
+	Clusters map[string]Runtime
+	// IPython returns the host directory of IPython and its
+	// dependencies' packages (pure Python), mounted on a notebook batch's
+	// PYTHONPATH (Job.IPython), fetching them on the first use; nil
+	// serves none.
+	IPython func(ctx context.Context) (string, error)
+	// History is the host directory batches and sessions write their
+	// Spark event logs to, which the instance's History Server reads
+	// (their Spark UI); "" writes none.
+	History string
 	// BigQuery and Storage are the instance's BigQuery REST and Storage
 	// API addresses on the host (host:port), live at each run; Registry
 	// its Artifact Registry's (the Docker registry a container_image is
 	// read from), or nil.
 	BigQuery, Storage, Registry func() string
+	// GCS is the instance's Cloud Storage (JSON API) address on the
+	// host, which a cluster's Hadoop, Hive and Pig reach gs:// through;
+	// nil or "" for none.
+	GCS func() string
+	// Ecosystem is what a cluster's Hadoop, Hive, Pig, Trino and Flink
+	// jobs and its optional components run on; nil serves none.
+	Ecosystem *Ecosystem
 	// Mint mints a token of the instance for a service account that
 	// exists, for a job's RunAs; nil refuses RunAs.
 	Mint func(email string) (string, error)
@@ -89,6 +118,10 @@ type Docker struct {
 	// Tmp holds each job's directory ("": the system's); Cache the Spark
 	// and Java trees a custom container is given ("": under Tmp).
 	Tmp, Cache string
+	// Disks holds the Dataproc clusters' nodes' disks, by cluster UUID
+	// and host name, which outlive the instance's restart ("": each
+	// cluster's own directory, removed with it).
+	Disks string
 	// Log receives each line of output; Logf the runner's own notes.
 	Log  func(LogEntry)
 	Logf func(format string, args ...any)
@@ -133,7 +166,7 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	if job.KeyOnly {
 		return Result{}, nil
 	}
-	p, failed, err := d.prepare(ctx, job, "")
+	p, failed, err := d.prepare(ctx, job)
 	if err != nil || failed != nil {
 		if failed != nil {
 			return *failed, nil
@@ -193,7 +226,7 @@ func (p *prepared) close() {
 // cannot be minted, a custom container that cannot be read). inbound,
 // when set, is a port of the Spark container the relay publishes on the
 // host's loopback (a Spark Connect server's).
-func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepared, failed *Result, _ error) {
+func (d *Docker) prepare(ctx context.Context, job Job, inbound ...string) (_ *prepared, failed *Result, _ error) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return nil, nil, &Unavailable{Msg: "docker is not on PATH: Apache Spark workloads run in a local Spark container"}
 	}
@@ -278,7 +311,7 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepa
 	suffix = strings.Trim(suffix, "-") + fmt.Sprintf("-%d", time.Now().UnixNano()%1e6)
 	network, relay, spark := "cb-spark-net-"+suffix, "cb-spark-relay-"+suffix, "cb-spark-"+suffix
 	p.network, p.relay, p.spark = network, relay, spark
-	label := "cloudburrow.instance=" + d.Instance
+	label := d.instanceLabel()
 
 	restTarget, storageTarget, stop, err := d.targets(ctx, rest, storage)
 	if err != nil {
@@ -295,14 +328,14 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepa
 	if !d.desktop {
 		relayArgs = append(relayArgs, "--add-host", "host.docker.internal:host-gateway")
 	}
-	if inbound != "" {
+	for _, port := range inbound {
 		// Published from the default bridge, the relay's first network:
 		// a container on an --internal network publishes nothing.
-		relayArgs = append(relayArgs, "-p", "127.0.0.1::"+inbound)
+		relayArgs = append(relayArgs, "-p", "127.0.0.1::"+port)
 	}
 	relayArgs = append(relayArgs, rt.Image, "/cb/relay.py", restTarget, storageTarget)
-	if inbound != "" {
-		relayArgs = append(relayArgs, spark+":"+inbound)
+	for _, port := range inbound {
+		relayArgs = append(relayArgs, spark+":"+port)
 	}
 	if out, err := d.docker(ctx, relayArgs...); err != nil {
 		return nil, nil, &Unavailable{Msg: "start the Spark job's relay: " + out}
@@ -319,7 +352,36 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepa
 		"-v", dir + ":/cb", "-v", jar + ":/cb-connector/spark-bigquery.jar:ro",
 		"-e", "CB_SPARK_OUT=/cb/out/params.json", "-e", "CB_SPARK_TYPES=/cb/types.json"}
 	image, conf := rt.Image, map[string]string{}
+	if job.Kind == KindSparkR {
+		if rt.RImage == "" {
+			return nil, &Result{Failed: true, Message: "SparkR is not available on runtime " + version + ": no Spark image with R is pinned for it"}, nil
+		}
+		image = rt.RImage
+	}
+	if d.History != "" && job.Kind != "" {
+		// The event log the Spark UI is read from (#2162).
+		run = append(run, "-v", d.History+":/cb-history")
+		conf["spark.eventLog.enabled"], conf["spark.eventLog.dir"] = "true", "file:/cb-history"
+		if job.AppID != "" {
+			// Spark's local scheduler names its application local-MILLIS
+			// whatever spark.app.id says, so the workload's ID is a
+			// property of its own, which the event log's environment
+			// records and the Spark UI's path is resolved by.
+			conf[WorkloadProperty] = job.AppID
+		}
+	}
 	pythonPath := "/cb/lib"
+	if job.IPython {
+		if d.IPython == nil {
+			return nil, nil, &Unavailable{Msg: "the Spark runner serves no IPython for notebook batches"}
+		}
+		ip, err := d.IPython(ctx)
+		if err != nil {
+			return nil, nil, &Unavailable{Msg: "IPython is not available: " + err.Error()}
+		}
+		run = append(run, "-v", ip+":/cb-ipython:ro")
+		pythonPath += ":/cb-ipython"
+	}
 	if custom != nil && custom.env["PYTHONPATH"] != "" {
 		pythonPath += ":" + custom.env["PYTHONPATH"] // the image's packages too
 	}
@@ -350,6 +412,18 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepa
 	for _, name := range names {
 		run = append(run, "-e", "BIGQUERY_PROC_PARAM."+name+"="+job.Params[name])
 	}
+	if job.Kind == KindConnect && rt.ConnectServer != nil {
+		// Spark 3.5's distribution has no Spark Connect server jar
+		// (spark-connect_2.12, which start-connect-server.sh fetches
+		// with --packages): it is pinned instead.
+		server, err := rt.ConnectServer(ctx)
+		if err != nil {
+			p.close()
+			return nil, nil, &Unavailable{Msg: "the Spark Connect server jar is not available: " + err.Error()}
+		}
+		run = append(run, "-v", server+":/cb-connector/spark-connect.jar:ro")
+		args.jars = append(args.jars, "/cb-connector/spark-connect.jar")
+	}
 	run = append(run, "--entrypoint", "/bin/bash", image, "/cb/run.sh")
 	run = append(run, submitArgs(job, args, token, conf)...)
 	p.image, p.run = image, run
@@ -364,17 +438,31 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound string) (_ *prepa
 // so the runner relays the two ports from the default bridge's gateway
 // address for the run (internal/hostrelay, as #575 does for the cluster).
 func (d *Docker) targets(ctx context.Context, rest, storage string) (string, string, func(), error) {
-	if err := d.probeDesktop(); err != nil {
+	t, stop, err := d.hostTargets(ctx, rest, storage)
+	if err != nil {
 		return "", "", nil, err
 	}
-	_, restPortHost, _ := net.SplitHostPort(rest)
-	_, storagePortHost, _ := net.SplitHostPort(storage)
+	return t[0], t[1], stop, nil
+}
+
+// hostTargets are host addresses (host:port on the host's loopback) as
+// a relay container reaches them, in order, and the function that stops
+// the host relays made for them.
+func (d *Docker) hostTargets(ctx context.Context, addrs ...string) ([]string, func(), error) {
+	if err := d.probeDesktop(); err != nil {
+		return nil, nil, err
+	}
+	out := make([]string, len(addrs))
 	if d.desktop {
-		return "host.docker.internal:" + restPortHost, "host.docker.internal:" + storagePortHost, func() {}, nil
+		for i, a := range addrs {
+			_, port, _ := net.SplitHostPort(a)
+			out[i] = "host.docker.internal:" + port
+		}
+		return out, func() {}, nil
 	}
 	gw, err := d.docker(ctx, "network", "inspect", "bridge", "--format", "{{range .IPAM.Config}}{{.Gateway}} {{end}}")
 	if err != nil {
-		return "", "", nil, errors.New("find the default bridge's gateway: " + gw)
+		return nil, nil, errors.New("find the default bridge's gateway: " + gw)
 	}
 	var ip string
 	for _, f := range strings.Fields(gw) {
@@ -384,18 +472,24 @@ func (d *Docker) targets(ctx context.Context, rest, storage string) (string, str
 		}
 	}
 	if ip == "" {
-		return "", "", nil, fmt.Errorf("the default bridge has no IPv4 gateway (%q)", gw)
+		return nil, nil, fmt.Errorf("the default bridge has no IPv4 gateway (%q)", gw)
 	}
-	r1 := &hostrelay.Relay{Listen: net.JoinHostPort(ip, "0"), Target: rest}
-	r2 := &hostrelay.Relay{Listen: net.JoinHostPort(ip, "0"), Target: storage}
-	if err := r1.Start(ctx); err != nil {
-		return "", "", nil, err
+	var relays []*hostrelay.Relay
+	stop := func() {
+		for _, r := range relays {
+			_ = r.Close()
+		}
 	}
-	if err := r2.Start(ctx); err != nil {
-		_ = r1.Close()
-		return "", "", nil, err
+	for i, a := range addrs {
+		r := &hostrelay.Relay{Listen: net.JoinHostPort(ip, "0"), Target: a}
+		if err := r.Start(ctx); err != nil {
+			stop()
+			return nil, nil, err
+		}
+		relays = append(relays, r)
+		out[i] = r.Addr()
 	}
-	return r1.Addr(), r2.Addr(), func() { _ = r1.Close(); _ = r2.Close() }, nil
+	return out, stop, nil
 }
 
 // probeDesktop asks the daemon whether it is Docker Desktop. The probe

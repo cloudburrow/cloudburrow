@@ -20,14 +20,20 @@
 # bigquery.notebookRuntimeBase).
 FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 
-COPY requirements.txt spark.txt /opt/cloudburrow/
-RUN pip install --no-cache-dir --require-hashes -r /opt/cloudburrow/requirements.txt
+# pip checks each wheel's SHA-256 and installs nothing the lock does not
+# list (--no-deps); it builds only pyspark-client, an sdist alone, with the
+# lock's own setuptools (build-requirements.txt, installed first, and
+# --no-build-isolation, so no build requirement is fetched beside the lock).
+COPY requirements.txt spark.txt build-requirements.txt /opt/cloudburrow/
+RUN pip install --no-cache-dir --require-hashes --no-deps --only-binary :all: -r /opt/cloudburrow/build-requirements.txt && \
+    pip install --no-cache-dir --require-hashes --no-deps --no-build-isolation --only-binary :all: --no-binary pyspark-client \
+      -r /opt/cloudburrow/requirements.txt
 # An Apache Spark notebook's DataprocSparkSession (#2156): Google's
 # dataproc-spark-connect, without its pyspark[connect] requirement, whose
 # full pyspark (Spark's jars) a Spark Connect client does not use:
 # pyspark-client 4.0.1 is the same client alone, the version of the
 # runtime 3.0 sessions' Spark.
-RUN pip install --no-cache-dir --no-deps --require-hashes -r /opt/cloudburrow/spark.txt
+RUN pip install --no-cache-dir --no-deps --require-hashes --only-binary :all: -r /opt/cloudburrow/spark.txt
 
 COPY kernel.py relay.py /opt/cloudburrow/
 # A Workbench instance's Python points Google's clients at the instance's

@@ -84,11 +84,11 @@ func TestJupyterInstance(t *testing.T) {
 	b, _ := os.ReadFile(calls)
 	log := string(b)
 	for _, want := range []string{
-		"network create --internal --label cloudburrow.instance=w1 cb-nb-net-",
+		"network create --internal --label io.cloudburrow.instance=w1 cb-nb-net-",
 		"-p 127.0.0.1::8888 --entrypoint python3 " + Tag() + " -I /opt/cloudburrow/relay.py 8080=host.docker.internal:9050 8082=host.docker.internal:",
 		" 8083=host.docker.internal:9023",
 		"network connect --alias host.docker.internal cb-nb-net-",
-		"volume create --label cloudburrow.instance=w1 --label cloudburrow.workbench-disk=1 cb-workbench-1",
+		"volume create --label io.cloudburrow.instance=w1 --label cloudburrow.workbench-disk=1 cb-workbench-1",
 		"--hostname one --user 1001:1001 -w /home/jupyter -v cb-workbench-1:/home/jupyter",
 		"-e JUPYTER_TOKEN -e GOOGLE_CLOUD_PROJECT=p -e CB_WORKBENCH=1 -e CB_BIGQUERY_ENDPOINT=http://host.docker.internal:8080",
 		"-e GCE_METADATA_HOST=host.docker.internal:8082",
