@@ -3094,6 +3094,15 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	project := r.URL.Query().Get("project")
 	opID := s.logs.StartOperation(req.Action, req.Name, project)
 
+	// A row's action that starts a long-running operation answers once it
+	// has started, as the same action on the resource's own page does: a
+	// Colab Enterprise runtime's Start from its row outlasted the page's 70
+	// seconds on a loaded runner (main CI 45422957668).
+	if sa, ok := p.(StartingActor); ok && sa.Starts(req.Action) {
+		s.startAtPath(ctx, w, p, sa, project, []string{req.Name}, req.Name, req.Action, nil, opID)
+		return
+	}
+
 	if err := actor.Act(ctx, project, req.Name, req.Action); err != nil {
 		s.logs.FinishOperation(opID, OperationFailed, userMessage(err))
 		s.logs.Log(Entry{
