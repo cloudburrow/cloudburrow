@@ -770,6 +770,17 @@ func short(v string) string {
 }
 
 // create makes the container again on To from its own configuration.
+// dockerDesktopLabel reports a label Docker Desktop adds to a container it
+// makes (desktop.docker.io/ports/6443/tcp: the address it publishes a port
+// on, in its own VM's terms). It describes that Docker alone and is not
+// carried: kind reads the ports label before the bindings, so a node
+// carried from a Mac to a Linux VM would name a wrong API server address
+// (Docker Desktop lists a binding twice there: "127.0.0.1:52220,127.0.0.1:52220").
+// A Docker Desktop target adds its own.
+func dockerDesktopLabel(k string) bool {
+	return strings.HasPrefix(k, "desktop.docker.io/")
+}
+
 // publishSpecs is a container's port bindings as --publish values, each
 // once: Docker Desktop records a binding given once twice in
 // HostConfig.PortBindings, and a Linux dockerd refuses the second (its own
@@ -810,6 +821,9 @@ func (c *Carry) create(ctx context.Context, ct containerInfo, image string) erro
 		args = append(args, "--hostname", ct.Config.Hostname)
 	}
 	for _, k := range sortedKeys(ct.Config.Labels) {
+		if dockerDesktopLabel(k) {
+			continue
+		}
 		args = append(args, "--label", k+"="+ct.Config.Labels[k])
 	}
 	if ct.Config.User != "" {

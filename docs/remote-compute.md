@@ -257,7 +257,9 @@ pass through this machine, which holds both connections): it stops the instance'
 kind nodes, and every container labelled `io.cloudburrow.instance` or `cloudburrow.instance` for
 it), commits each, takes its image across with `docker save | docker load`, makes each network
 with the same subnets, streams each volume (mounted, or labelled for the instance) between two
-helper containers, and creates each container again from its `docker inspect`, with its address.
+helper containers, and creates each container again from its `docker inspect`, with its address
+(each published port once, and without Docker Desktop's own `desktop.docker.io/` labels, which
+describe that Docker alone: kind would read a Mac's port label on a Linux VM).
 A system bind mount (`/lib/modules`, `/dev`, the Docker socket) stays the target's own; any other
 bind mount becomes a volume holding the path (read on the source host, through a helper there,
 when the source is remote). A container or volume the target already has by that name stops the

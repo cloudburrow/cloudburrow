@@ -19,3 +19,18 @@ func TestPublishSpecsOncePerBinding(t *testing.T) {
 		t.Fatalf("publishSpecs = %q, want %q", got, want)
 	}
 }
+
+// Docker Desktop's own labels describe its VM's ports and are not carried;
+// the instance's and kind's are.
+func TestDockerDesktopLabelsStay(t *testing.T) {
+	for k, want := range map[string]bool{
+		"desktop.docker.io/ports/6443/tcp": true,
+		"desktop.docker.io/binds/0/Source": true,
+		"io.x-k8s.kind.cluster":            false,
+		"io.cloudburrow.instance":          false,
+	} {
+		if got := dockerDesktopLabel(k); got != want {
+			t.Errorf("dockerDesktopLabel(%q) = %v", k, got)
+		}
+	}
+}
