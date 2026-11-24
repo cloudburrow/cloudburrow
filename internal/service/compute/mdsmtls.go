@@ -429,6 +429,12 @@ type peekedConn struct {
 
 func (c *peekedConn) Read(p []byte) (int, error) { return c.r.Read(p) }
 
+// MDSListener wraps ln, a listener of the Compute port that a caller
+// serves itself (cloudburrow up's), as Start wraps its own: the guests'
+// port 443 connections are served there as their instances' HTTPS
+// metadata server, and every other connection is returned by Accept.
+func (s *Server) MDSListener(ln net.Listener) net.Listener { return newMDSListener(s, ln) }
+
 func newMDSListener(s *Server, ln net.Listener) *mdsListener {
 	m := &mdsListener{Listener: ln, s: s, conns: make(chan net.Conn), errc: make(chan error, 1), tlsc: make(chan net.Conn), done: make(chan struct{})}
 	m.https = &http.Server{ReadHeaderTimeout: 10 * time.Second,

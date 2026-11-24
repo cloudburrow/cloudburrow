@@ -167,6 +167,10 @@ func (s *computeService) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("compute: %w", err)
 	}
+	// A Shielded VM's HTTPS metadata server (#2179): its guest's relay
+	// carries port 443 to this port, TLS and all, after a line naming the
+	// instance, which the API's own HTTP server would answer 400.
+	ln = api.MDSListener(ln)
 	s.ln = ln
 	vrest := vpcaccess.NewRESTHandler(va)
 	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
