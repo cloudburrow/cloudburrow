@@ -26,7 +26,11 @@ name: Cloud SQL ephemeral nightly
 # scripts/compat-shards.sh, with CLOUDBURROW_TEST_SPARK=1, on a persistent
 # instance. It pulls the pinned apache/spark images by digest first, and
 # keeps Google's BigQuery connector jars from Maven Central, which the CLI
-# fetches on the first CALL, in actions/cache, keyed by their pins.
+# fetches on the first CALL, in actions/cache, keyed by their pins. Then
+# its browser step (#2234) brings the instance up again and runs the console
+# tests only this shard's instance serves (compat_browser_select spark in
+# scripts/compat-shards.sh): Dataproc's pages and BigQuery Studio's notebook
+# runtime and Spark notebooks, in headless Chrome as ci.yml's browser step.
 on:
   schedule:
     # 06:47 UTC, off the hour and clear of the other nightlies.
@@ -208,8 +212,9 @@ jobs:
   spark:
     name: official SDK compatibility (spark)
     runs-on: ubuntu-latest
-    # The shard's 150m go test deadline, plus the build and the pulls.
-    timeout-minutes: 175
+    # The shard's 150m go test deadline, plus the build and the pulls, and
+    # the browser step's 90m (#2234).
+    timeout-minutes: 270
     env:
       SHARD: spark
     steps:
@@ -279,6 +284,8 @@ jobs:
           CB=(--name ci --state-dir "$RUNNER_TEMP/cb" "${FIXTURES[@]}" ${UP_FLAGS[@]+"${UP_FLAGS[@]}"}
             --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0 --port-cloudsql 0
             --services "$SERVICES")
+          # The browser step brings the same instance up again.
+          printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args"
           ./bin/cloudburrow up --detach --detach-timeout 10m "${CB[@]}"
           ./bin/cloudburrow wait --timeout 1m "${CB[@]}"
           ./bin/cloudburrow env "${CB[@]}" --format json > env.json
@@ -320,6 +327,63 @@ jobs:
           done
           ./bin/cloudburrow stop "${CB[@]}"
 
+      # The console tests only this instance serves (#2234), as ci.yml's
+      # browser step runs each shard's: from compat_browser_select, and every
+      # test it selects must pass (go test exits 0 on a skip, and each skips
+      # without its variables, its screen or its switch).
+      - name: Console in a headless browser
+        run: |
+          set -o pipefail
+          # ubuntu-latest ships Google Chrome, as in ci.yml; only if an image
+          # ever drops it, the same pinned Chrome for Testing from Google's
+          # own distribution.
+          CHROME=$(command -v google-chrome || command -v google-chrome-stable || true)
+          if [ -z "$CHROME" ]; then
+            CFT=154.0.8037.57
+            echo "no google-chrome on this runner; installing Chrome for Testing $CFT"
+            curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/chrome.zip" "https://storage.googleapis.com/chrome-for-testing-public/$CFT/linux64/chrome-linux64.zip"
+            unzip -q "$RUNNER_TEMP/chrome.zip" -d "$RUNNER_TEMP"
+            CHROME="$RUNNER_TEMP/chrome-linux64/chrome"
+          fi
+          "$CHROME" --version
+          export CLOUDBURROW_TEST_CHROME="$CHROME"
+          # The page is this instance's console on loopback and nothing else,
+          # as in ci.yml, so Chrome's sandbox is off.
+          export CLOUDBURROW_TEST_CHROME_NO_SANDBOX=1
+          export CLOUDBURROW_TEST_SCREENSHOTS="$RUNNER_TEMP/browser-screenshots"
+
+          mapfile -t CB < "$RUNNER_TEMP/cb-args"
+          ./bin/cloudburrow up --detach --detach-timeout 10m "${CB[@]}"
+          # The console, the control address and the admin token, and the
+          # APIs the tests make and read back their fixtures through: the
+          # Dataproc API, Kubernetes Engine's for Dataproc on GKE's cluster,
+          # Cloud KMS and Cloud Storage for Ranger's key and bucket, and
+          # BigQuery for the notebooks' queries.
+          BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER,DATAPROC,GKE,KMS,STORAGE,BIGQUERY,BIGQUERY_PROJECT,KUBECONFIG
+          BROWSER_ENV=$(scripts/compat-env.sh --strict --only "$BROWSER_VARS" --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
+          eval "$BROWSER_ENV"
+
+          # shellcheck source=scripts/compat-shards.sh
+          . scripts/compat-shards.sh
+          # CLOUDBURROW_TEST_SPARK, which the compat step's compat_shard set.
+          compat_shard "$SHARD"
+          # CLOUDBURROW_TEST_NOTEBOOK_RUNTIME, for the notebook runtime's tests.
+          compat_browser_prepare "$SHARD"
+          compat_browser_select "$SHARD"
+          SELECT=(-skip "$BROWSER_SKIP"); [ -z "$BROWSER_RUN" ] || SELECT+=(-run "$BROWSER_RUN")
+          rc=0
+          # 90m: nine Dataproc clusters, batches and sessions in the
+          # apache/spark images, a Kubernetes Engine cluster, and the notebook
+          # runtime's image, built with pip on the first Connect.
+          go test -tags=browser -count=1 -timeout 90m -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
+          for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | grep -E "${BROWSER_RUN:-^Test}" | grep -vE "$BROWSER_SKIP"); do
+            grep -q -- "^--- PASS: $t (" browser.log ||
+              { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" browser.log || echo 'no result')"; rc=1; }
+          done
+          ./bin/cloudburrow stop "${CB[@]}"
+          [ "$rc" = 0 ] || { echo "the console browser suite did not pass"; exit 1; }
+          echo "== browser ($SHARD): $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -327,6 +391,8 @@ jobs:
           path: |
             compat.log
             hdfs-restart.log
+            browser.log
+            ${{ runner.temp }}/browser-screenshots
             ${{ runner.temp }}/cb/ci/up.log
           retention-days: 7
           if-no-files-found: ignore

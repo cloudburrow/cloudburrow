@@ -3,7 +3,10 @@
 package browser
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -24,6 +27,47 @@ func dpWait(t *testing.T, provider, project, name, want string, limit time.Durat
 			t.Fatalf("%s did not come to hold %q: %s", name, want, got)
 		}
 		time.Sleep(2 * time.Second)
+	}
+}
+
+// dpDeleteCluster is a cluster test's cleanup: Delete through the console
+// API's action route, as the cluster's page sends it, then a wait until the
+// cluster has gone, so the next test's cluster has the machine. A test that
+// deleted it through the page finds it gone or going. The route was once
+// /api/act/..., which the console answered with its page, so no cluster
+// was ever deleted and the nightly's later clusters failed to start beside
+// them (#2234).
+func dpDeleteCluster(t *testing.T, project, cluster string) {
+	t.Helper()
+	listed := func() bool {
+		code, body := consoleDo(t, http.MethodGet, "/api/detail/dataproc-clusters?"+url.Values{"project": {project}, "name": {cluster}}.Encode(), "")
+		if code != http.StatusOK {
+			t.Errorf("read %s through the console API = %d: %s", cluster, code, body)
+			return false
+		}
+		// A cluster that is not there is a detail the console cannot read.
+		var d struct{ Unavailable string }
+		if err := json.Unmarshal([]byte(body), &d); err != nil {
+			t.Errorf("read %s through the console API: %v: %s", cluster, err, body)
+			return false
+		}
+		return !strings.Contains(d.Unavailable, "Not found")
+	}
+	if !listed() {
+		return
+	}
+	body, _ := json.Marshal(map[string]any{"Path": []string{cluster}, "Action": "delete"})
+	// One the test deleted through the page is still going: wait for it.
+	if code, resp := consoleDo(t, http.MethodPost, "/api/actions/dataproc-clusters?project="+url.QueryEscape(project), string(body)); code != http.StatusOK && code != http.StatusAccepted &&
+		!strings.Contains(resp, "is already being deleted") {
+		t.Errorf("delete %s = %d: %s", cluster, code, resp)
+		return
+	}
+	for deadline := time.Now().Add(10 * time.Minute); listed(); time.Sleep(3 * time.Second) {
+		if time.Now().After(deadline) {
+			t.Errorf("%s was still there 10 minutes after Delete", cluster)
+			return
+		}
 	}
 }
 
@@ -73,7 +117,7 @@ func TestDataprocClustersThroughThePage(t *testing.T) {
 	cluster := "projects/" + project + "/regions/us-central1/clusters/browser-c"
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr, #view h1")].some((r) => r.textContent.includes(%q))`, "browser-c"))
 	t.Cleanup(func() {
-		consoleDo(t, "POST", "/api/act/dataproc-clusters?project="+project+"&name="+cluster+"&action=delete", "{}")
+		dpDeleteCluster(t, project, cluster)
 	})
 	dpWait(t, "dataproc-clusters", project, cluster, `"Running"`, 10*time.Minute)
 	p.navigate("/dataproc/clusters?project=" + project)
@@ -206,7 +250,7 @@ func TestDataprocHiveOnDriverNodesThroughThePage(t *testing.T) {
 	cluster := "projects/" + project + "/regions/us-central1/clusters/browser-ng"
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr, #view h1")].some((r) => r.textContent.includes(%q))`, "browser-ng"))
 	t.Cleanup(func() {
-		consoleDo(t, "POST", "/api/act/dataproc-clusters?project="+project+"&name="+cluster+"&action=delete", "{}")
+		dpDeleteCluster(t, project, cluster)
 	})
 	dpWait(t, "dataproc-clusters", project, cluster, `"Running"`, 10*time.Minute)
 	p.navigate("/dataproc/clusters?project=" + project)
