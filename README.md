@@ -1,9 +1,19 @@
 # CloudBurrow
 
+<img src="docs/assets/cloudburrow-hero.svg" width="1200" alt="CloudBurrow — Dig into your code. Keep the cloud local. A Google Cloud emulator on Kubernetes, open source under MIT." />
+
+<p align="center">
+  <a href="#quick-start"><strong>Quick start</strong></a> ·
+  <a href="docs/compatibility.md">Compatibility</a> ·
+  <a href="#the-console">Console</a> ·
+  <a href="#documentation">Documentation</a> ·
+  <a href="https://github.com/orgs/cloudburrow/discussions">Community</a>
+</p>
+
 [![CI](https://github.com/cloudburrow/cloudburrow/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cloudburrow/cloudburrow/actions/workflows/ci.yml?query=branch%3Amain)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A local Google Cloud emulator for development and testing.
+**Your Google Cloud development loop, on your own machine.**
 
 CloudBurrow runs a local Kubernetes cluster that speaks Google Cloud APIs, so you can build
 and test applications on your own machine with the official Google Cloud SDKs, without
@@ -13,12 +23,63 @@ Manager and Firestore), all run against a live instance in CI. No other language
 Java is not planned (#718). Because it is a real Kubernetes cluster, `kubectl`, Helm
 charts and operators work against it directly.
 
-## Status
+## Build locally. Test the whole workflow.
 
-**Released: [the latest release](https://github.com/cloudburrow/cloudburrow/releases/latest)**, with a new one every one to two days
-([docs/ci.md](docs/ci.md#releasing)). Install it with `brew install cloudburrow/tap/cloudburrow`, the install script, or from source
-([docs/install.md](docs/install.md)). Every archive, and the one `checksums.txt`, carries a GitHub
-build attestation, and the installer refuses an archive it cannot verify. The
+| Develop with familiar tools | Exercise connected services | See what your tests prove |
+| :--- | :--- | :--- |
+| Point official Google client libraries at local endpoints. Use Kubernetes tooling against the underlying cluster. | Upload an object, publish an event, run a container and read its result—the acceptance workflow spans the services. | Follow each `Verified` operation to its SDK-driven test. Partial behavior and inherited limits are documented. |
+
+CloudBurrow is for development and integration testing. It does not promise full Google Cloud
+parity or production security. Start with the [compatibility matrix](docs/compatibility.md)
+for the operations your application calls.
+
+## Quick start
+
+Install **Docker, kind and kubectl** first. Give Docker at least **4 CPU and 6 GB RAM**.
+Use a packaged release to get the bundled service binaries; Go is only needed when building
+from source. See the [installation guide](docs/install.md) for platform requirements.
+
+**1. Install CloudBurrow** with Homebrew on macOS or Linux:
+
+```sh
+brew install cloudburrow/tap/cloudburrow
+cloudburrow doctor
+```
+
+Prefer another installation method? Use the [installer or release archives](docs/install.md),
+or [build from source](#building-from-source).
+
+**2. Start your local environment:**
+
+```sh
+cloudburrow up
+```
+
+This creates the local cluster and runs in the foreground. The default services are
+Cloud Storage, Pub/Sub, Cloud Tasks, Cloud Run and Secret Manager.
+
+**3. In another terminal, configure your client environment:**
+
+```sh
+eval "$(cloudburrow env)"
+```
+
+This exports local endpoint overrides, the project, a local metadata server and a generated
+ADC file. These are development credentials, not Google Cloud credentials; see
+[credentials and endpoint configuration](docs/credentials.md).
+
+**4. Open the console at <http://127.0.0.1:9090>**, or start with the
+[Python](docs/examples/python.md) and [Node.js](docs/examples/node.md) client examples.
+
+`stop`, `reset` and `delete` are distinct operations. Read their
+[command semantics](docs/configuration.md) before resetting data or removing a cluster.
+
+## Releases and compatibility
+
+Install the [latest release](https://github.com/cloudburrow/cloudburrow/releases/latest).
+See [the release process](docs/ci.md#releasing) for build and acceptance gates. Release archives
+and `checksums.txt` carry GitHub build attestations; the [installation guide](docs/install.md)
+explains checksum and attestation verification. The
 acceptance workflow passes end to end: upload an object, publish an event, a Cloud Run worker
 receives it and reads the object, writes a result, and the result is read back. Every step goes
 through an official Google SDK, including inside the worker.
@@ -80,32 +141,6 @@ history per node and per pod; a Logs Explorer; and search across all of it.
 A control appears only where the backend can perform the operation. What the console can and
 cannot show, and why, is in [docs/console-parity.md](docs/console-parity.md).
 
-## Quick start
-
-Needs **Docker**, **kind** and **kubectl**, plus **Go** to build. Give Docker at least 4 CPU and
-6 GB — the full stack measures about 1.5 GiB and 2.1 CPU.
-
-```sh
-git clone https://github.com/cloudburrow/cloudburrow.git
-cd cloudburrow
-make build
-
-./bin/cloudburrow doctor      # checks prerequisites, changes nothing
-./bin/cloudburrow up          # creates the cluster and runs in the foreground
-```
-
-In another shell, point Google tooling at it:
-
-```sh
-eval "$(./bin/cloudburrow env)"
-```
-
-That exports endpoint overrides, the project, a local metadata server and a generated ADC file.
-The credentials authorise nothing; they exist so tooling that insists on them runs offline. See
-[docs/install.md](docs/install.md) and [docs/credentials.md](docs/credentials.md).
-
-`stop`, `reset` and `delete` are distinct commands, and none implies another.
-
 ## What will not work
 
 Worth reading before you rely on it — the full list is in [docs/status.md](docs/status.md):
@@ -143,26 +178,41 @@ Worth reading before you rely on it — the full list is in [docs/status.md](doc
 
 ## How it fits together
 
-```
- your machine                          │  local Kubernetes cluster (kind)
- ──────────────────────────────────────┼─────────────────────────────────────────
-  official Google SDKs ────────────────┼──▶ Cloud Storage   (CloudBurrow)
-                                       │    Pub/Sub         (Google's emulator)
-  cloudburrow CLI                      │    Cloud Run       (Knative Serving)
-   ├─ cluster lifecycle                │    Firestore, Datastore, Bigtable,
-   ├─ Cloud Tasks          (ours)      │      Spanner       (Google's emulators, opt-in)
-   ├─ Secret Manager       (ours)      │    Cloud SQL       (PostgreSQL, opt-in)
-   ├─ Cloud Run v2 adapter (ours)      │    local AI runtimes
-   ├─ metadata server + ADC fixture    │
-   └─ web console                      │
-  kubectl / helm / operators ──────────┼──▶ Kubernetes API  (direct)
+```mermaid
+flowchart LR
+    app[Your application] --> sdk[Official Google client libraries]
+    sdk --> api[Local endpoints and adapters]
+    subgraph local[Local development environment]
+        api --> owned[CloudBurrow service implementations]
+        api --> upstream[Google and community emulators]
+        api --> knative[Knative Serving]
+        knative --> worker[Your containers]
+        console[Local web console] --> api
+    end
+    tools[kubectl / Helm / operators] --> k8s[Local Kubernetes API]
 ```
 
-**Reuse over rewrite.** Google's own emulators and a maintained Cloud Storage implementation
-are integrated rather than reimplemented; CloudBurrow builds only where no upstream exists, with
+This is a conceptual view; see the [architecture](docs/architecture.md) for process placement
+and service boundaries. Cloud Run uses Knative through an adapter, and only the mapped,
+verified behavior is claimed.
+
+**Reuse over rewrite.** Google's own emulators and other upstream components are integrated where they fit.
+CloudBurrow owns its Cloud Storage implementation and builds where a demonstrated gap remains, with
 the evidence recorded in [docs/upstream-evaluation.md](docs/upstream-evaluation.md).
 
 ## Documentation
+
+| I want to… | Start here |
+| :--- | :--- |
+| Install and configure a local environment | [Installation](docs/install.md) · [Configuration](docs/configuration.md) |
+| Check a specific API operation | [Compatibility matrix](docs/compatibility.md) · [RPC coverage](docs/coverage/README.md) |
+| Connect an application | [Credentials](docs/credentials.md) · [Python examples](docs/examples/python.md) · [Node.js examples](docs/examples/node.md) |
+| Run integration tests in CI | [CI guide and GitHub Action](docs/ci.md) |
+| Understand the runtime | [Architecture](docs/architecture.md) · [Networking](docs/networking.md) |
+| Ask a question or propose a workflow | [Discussions](https://github.com/orgs/cloudburrow/discussions) |
+
+<details>
+<summary><strong>Browse the full documentation index</strong></summary>
 
 - [docs/status.md](docs/status.md) — what works and what does not, on one page
 - [docs/compatibility.md](docs/compatibility.md) — per-operation status for every service, with the test behind each claim
@@ -192,6 +242,8 @@ the evidence recorded in [docs/upstream-evaluation.md](docs/upstream-evaluation.
 - [SECURITY.md](SECURITY.md) — supported versions and how to report a vulnerability privately
 - [AGENTS.md](AGENTS.md) — instructions for contributors and AI coding agents
 
+</details>
+
 ## Building from source
 
 Requires Go (minimum version pinned in [go.mod](go.mod)).
@@ -209,7 +261,17 @@ which include it, or pass `--services` without `storage`. The same goes for BigQ
 emulator CloudBurrow builds from source with patches and embeds (#1061): `make bigquery-binaries`,
 which `make build` runs.
 
-or from a clone:
+For a complete local build with the bundled service binaries:
+
+```sh
+git clone https://github.com/cloudburrow/cloudburrow.git
+cd cloudburrow
+make build
+./bin/cloudburrow doctor
+./bin/cloudburrow up
+```
+
+Development commands:
 
 | Command | Purpose |
 |---|---|
@@ -241,6 +303,11 @@ diagnostics.
 No CI job receives publishing credentials, and none can reach Google Cloud.
 
 ## Contributing
+
+Questions, ideas and examples are welcome in [Discussions](https://github.com/orgs/cloudburrow/discussions).
+Report reproducible bugs in [Issues](https://github.com/cloudburrow/cloudburrow/issues), with
+steps to reproduce and the affected API operation.
+
 
 Work is tracked by issue on the [project board](https://github.com/orgs/cloudburrow/projects/1),
 one issue per pull request. Read [AGENTS.md](AGENTS.md) before starting — it covers scope,
