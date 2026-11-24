@@ -2192,7 +2192,11 @@ type Server struct {
 	// instanceSrc performs the Instance page's state save and load, reset
 	// and seed through the admin API, with the page's own token (#801); nil
 	// offers no page. instanceTokenFile is where the token is, not the token.
-	instanceSrc       InstanceSource
+	instanceSrc InstanceSource
+	// mail is the local mail sink (mail.go), or nil; clocks the Instance
+	// page's service clocks.
+	mail              MailSource
+	clocks            []Clock
 	instanceTokenFile string
 
 	mu   sync.Mutex
@@ -2276,6 +2280,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/instance/load", s.handleStateLoad)
 	mux.HandleFunc("POST /api/instance/reset", s.handleInstanceReset)
 	mux.HandleFunc("POST /api/instance/seed", s.handleInstanceSeed)
+	mux.HandleFunc("GET /api/mail", s.handleMail)
+	mux.HandleFunc("GET /api/mail/{id}", s.handleMailMessage)
+	mux.HandleFunc("DELETE /api/mail", s.handleMailDelete)
+	mux.HandleFunc("GET /api/clocks", s.handleClocks)
+	mux.HandleFunc("POST /api/clocks/{id}", s.handleClockAdvance)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/metrics/series", s.handleSeries)
 	mux.HandleFunc("GET /api/metrics/requests", s.handleRequestMetrics)

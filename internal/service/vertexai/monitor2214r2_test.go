@@ -168,7 +168,7 @@ type fakeNotifier struct {
 	emails   []string
 }
 
-func (f *fakeNotifier) NotifyChannels(_ context.Context, _ string, names []string, payload []byte) []AlertDelivery {
+func (f *fakeNotifier) NotifyChannels(_ context.Context, _ string, names []string, payload []byte, _, _ string) []AlertDelivery {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.channels = append(f.channels, names)
@@ -176,7 +176,7 @@ func (f *fakeNotifier) NotifyChannels(_ context.Context, _ string, names []strin
 	return nil
 }
 
-func (f *fakeNotifier) RecordEmail(project, _ string, to []string, subject, body string) {
+func (f *fakeNotifier) SendEmail(_ context.Context, project, _, _ string, to []string, subject, body string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.emails = append(f.emails, project+"|"+strings.Join(to, ",")+"|"+subject+"|"+body)

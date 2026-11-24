@@ -22,6 +22,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/mailsink"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
@@ -53,6 +54,8 @@ type monitoringService struct {
 	// counters.
 	logging  *loggingService
 	counters *metrics.Registry
+	// mail is the local mail sink email channels send to (#2214), or nil.
+	mail *mailsink.Sink
 	// reqs are the serviceruntime request metrics; set before Start, they
 	// are sampled by whoever set them.
 	reqs *monitoring.RequestBuiltin
@@ -185,6 +188,9 @@ func (s *monitoringService) Start(ctx context.Context) error {
 		api.SetPublisher(func(ctx context.Context, topic string, data []byte, attrs map[string]string) error {
 			return sinkPublisher{tunnel: tunnel}.Publish(ctx, topic, []logging.Message{{Data: data, Attributes: attrs}})
 		})
+	}
+	if s.mail != nil && s.mail.Addr() != "" {
+		api.SetMailer(s.mail.Send)
 	}
 	if s.cfg.Endpoints.Console > 0 {
 		api.SetConsoleURL("http://" + net.JoinHostPort("localhost", strconv.Itoa(s.cfg.Endpoints.Console)))

@@ -7,12 +7,14 @@ import (
 	"fmt"
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/authplatform"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/egress"
 	"github.com/cloudburrow/cloudburrow/internal/faultgate"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
+	"github.com/cloudburrow/cloudburrow/internal/mailsink"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
@@ -29,6 +31,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/siteverification"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/storagejobs"
+	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -556,9 +559,20 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	traceSvc.register(coord)
 	// Cloud Monitoring (#1939), in process: log-based metrics' values come
 	// from this instance's Cloud Logging, request metrics from its counters.
+	// The local mail sink (#2214): an SMTP server on the loopback interface
+	// that keeps every message for the console's Mail page and relays
+	// none. Cloud Monitoring's email channels and Model Monitoring's
+	// email alerts are sent to it.
+	mailSink := mailsink.New()
+	if err := mailSink.Listen("127.0.0.1:0"); err != nil {
+		fmt.Fprintf(stderr, "cloudburrow up: warning: the local mail sink did not start (%v); email notifications are recorded, not sent\n", err)
+	} else {
+		defer mailSink.Close()
+	}
 	monitoringSvc := newMonitoringService(cfg)
 	if monitoringSvc != nil {
 		monitoringSvc.logging = loggingSvc
+		monitoringSvc.mail = mailSink
 		// Cloud Tasks' queue metrics come from its dispatch (#2064).
 		monitoringSvc.tasks = tasksSvc
 		// Pub/Sub notification channels publish to this instance's Pub/Sub
@@ -1515,6 +1529,15 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if monitoringSvc != nil {
 			localAISrv.SetAlertNotifier(monitoringAlertNotifier{srv: monitoringServerOf(monitoringSvc)})
 		}
+		// Their anomalies go to Cloud Logging too, when enable_logging asks
+		// (#2214), through its own WriteLogEntries.
+		if loggingSvc != nil && loggingSvc.api != nil {
+			api := loggingSvc.api
+			localAISrv.SetAnomalyLogger(func(ctx context.Context, e *loggingpb.LogEntry) error {
+				_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
+				return err
+			})
+		}
 		// Executions, schedules and pipeline jobs run as the identity they
 		// name (#2173), with actAs checked on it.
 		localAISrv.SetIdentity(runIdentity(iamEnforcer, iameval.VertexAI, creds, func() *resourcemanager.Registry { return projectRegistry }))
@@ -1915,6 +1938,18 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// through the admin API in process with the token the page sends,
 		// never one the console holds (#553).
 		consoleSrv.SetInstance(newConsoleInstance(cfg, adminAPI), adminTokenPath(cfg))
+		// The Mail page (#2214): the local mail sink's messages.
+		if mailSink.Addr() != "" {
+			consoleSrv.SetMail(mailSink)
+		}
+		// The Instance page's clocks (#2214): CloudBurrow's clock:advance
+		// calls, by the UI parity rule.
+		if localAISrv != nil {
+			consoleSrv.SetClocks([]console.Clock{{ID: "agent-platform", Title: "Agent Platform clock",
+				Help: "Moves the Agent Platform (Vertex AI) clock forward: model deployment monitoring jobs' runs, every hour at least, " +
+					"and Agent Platform schedules' runs that it passes start at once. POST " + vertexai.ClockAdvancePath + " on the Agent Platform port.",
+				Advance: localAISrv.AdvanceClock}})
+		}
 	}
 	// Last: ready hooks run once everything above has started, and shutdown
 	// hooks run first, before anything they use is stopped.

@@ -35,6 +35,7 @@ type channelType struct {
 	// SMS channels are.
 	verify bool
 	// local is how its notifications are delivered: "webhook", "pubsub",
+	// "email" (to the local mail sink, #2214),
 	// or "" for recorded only.
 	local string
 }
@@ -43,7 +44,7 @@ type channelType struct {
 // (docs.cloud.google.com/monitoring/support/notification-options and
 // /alerts/using-channels-api, read 2026-11-19) with their labels.
 var channelTypes = []channelType{
-	{t: "email", display: "Email", desc: "A channel that sends notifications via email.", labels: []string{"email_address"}, verify: true},
+	{t: "email", display: "Email", desc: "A channel that sends notifications via email.", labels: []string{"email_address"}, verify: true, local: "email"},
 	{t: "google_chat", display: "Google Chat", desc: "A channel that sends notifications to a Google Chat space.", labels: []string{"space"}},
 	{t: "pagerduty", display: "PagerDuty Services", desc: "A channel that sends notifications to PagerDuty.", labels: []string{"service_key"}, sensitive: []string{"service_key"}},
 	{t: "pubsub", display: "Pub/Sub", desc: "A channel that sends notifications to a Pub/Sub topic.", labels: []string{"topic"}, local: "pubsub"},
@@ -323,23 +324,46 @@ func newCode() string {
 	return fmt.Sprintf("G-%06d", n.Int64())
 }
 
-func (s *Server) SendNotificationChannelVerificationCode(_ context.Context, req *monitoringpb.SendNotificationChannelVerificationCodeRequest) (*emptypb.Empty, error) {
+func (s *Server) SendNotificationChannelVerificationCode(ctx context.Context, req *monitoringpb.SendNotificationChannelVerificationCodeRequest) (*emptypb.Empty, error) {
 	if _, err := childName("name", req.GetName(), "notificationChannels"); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	c, _ := s.get(kindChannels, req.GetName()).(*monitoringpb.NotificationChannel)
 	if c == nil {
+		s.mu.Unlock()
 		return nil, apierror.NotFound("Requested entity was not found.")
 	}
 	if !channelTypeOf(c.GetType()).verify {
+		s.mu.Unlock()
 		return nil, apierror.InvalidArgument("Notification channel %s of type %s does not need verification", c.GetName(), c.GetType())
 	}
 	code := verificationCode{code: newCode(), expire: s.now().Add(time.Hour)}
 	s.codes[c.GetName()] = code
-	s.recordDelivery(Delivery{Channel: c.GetName(), Type: c.GetType(), Kind: "verification",
-		State: DeliveryRecorded, Detail: "verification code " + code.code + " (not sent: CloudBurrow never sends email or SMS)"})
+	mailer := s.mailer
+	c = clone(c)
+	s.mu.Unlock()
+	// An email channel's code is mailed to the local mail sink, as Google
+	// mails it to the address; an SMS channel's is only recorded.
+	d := Delivery{Channel: c.GetName(), Type: c.GetType(), Kind: "verification",
+		State: DeliveryRecorded, Detail: "verification code " + code.code + " (not sent: CloudBurrow never sends SMS)"}
+	if c.GetType() == "email" {
+		to := c.GetLabels()["email_address"]
+		d.Detail = "verification code " + code.code + " (not sent: this instance has no local mail sink)"
+		if mailer != nil {
+			err := mailer(ctx, "monitoring", AlertsSender, []string{to}, "Verify your notification channel",
+				"Your Cloud Monitoring verification code for the notification channel "+c.GetDisplayName()+" ("+c.GetName()+") is "+
+					code.code+". It expires in an hour.\n")
+			if err != nil {
+				d.State, d.Detail = DeliveryFailed, "the local mail sink refused the verification email: "+err.Error()
+			} else {
+				d.State, d.Detail = DeliverySent, "verification code sent to "+to+" through the local mail sink (the console's Mail page)"
+			}
+		}
+	}
+	s.mu.Lock()
+	s.recordDelivery(d)
+	s.mu.Unlock()
 	return &emptypb.Empty{}, nil
 }
 

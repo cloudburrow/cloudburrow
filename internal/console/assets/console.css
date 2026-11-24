@@ -3059,3 +3059,9 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .pl-pane-back { margin-top: 12px; }
 .pl-pane-group dd.has-copy { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
 .pl-pane-group dd.has-copy > * { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
+
+/* Mail (#2214): a message's text keeps its lines. Settings and utilities'
+   Instance links, one to a line. */
+.mail-text { white-space: pre-wrap; word-break: break-word; max-height: 32rem; overflow: auto; }
+#settings-instance a { display: block; }
+#mail-list tbody tr[aria-selected="true"] { background: var(--row-selected, rgba(26, 115, 232, 0.08)); }

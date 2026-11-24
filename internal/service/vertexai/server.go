@@ -31,6 +31,8 @@ type Server struct {
 	mu sync.RWMutex
 	// alertNotifier delivers Model Monitoring's alerts (monitoralerts.go).
 	alertNotifier AlertNotifier
+	// anomalyLogger writes Model Monitoring's anomaly log entries.
+	anomalyLogger AnomalyLogger
 	aliases       map[string]string
 
 	// embedders serve :predict and :embedContent, by embedding model ID

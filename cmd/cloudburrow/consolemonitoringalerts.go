@@ -2040,20 +2040,20 @@ func (p monitoringSnoozesProvider) Act(ctx context.Context, project, name, actio
 // alerts (#2214) through Cloud Monitoring's notification channels.
 type monitoringAlertNotifier struct{ srv func() *monitoring.Server }
 
-func (n monitoringAlertNotifier) NotifyChannels(ctx context.Context, kind string, names []string, payload []byte) []vertexai.AlertDelivery {
+func (n monitoringAlertNotifier) NotifyChannels(ctx context.Context, kind string, names []string, payload []byte, subject, text string) []vertexai.AlertDelivery {
 	srv := n.srv()
 	if srv == nil {
 		return nil
 	}
 	var out []vertexai.AlertDelivery
-	for _, d := range srv.NotifyChannels(ctx, kind, names, payload) {
+	for _, d := range srv.NotifyChannels(ctx, kind, names, payload, subject, text) {
 		out = append(out, vertexai.AlertDelivery{Channel: d.Channel, State: d.State, Detail: d.Detail})
 	}
 	return out
 }
 
-func (n monitoringAlertNotifier) RecordEmail(project, kind string, to []string, subject, body string) {
+func (n monitoringAlertNotifier) SendEmail(ctx context.Context, project, kind, from string, to []string, subject, body string) {
 	if srv := n.srv(); srv != nil {
-		srv.RecordEmail(project, kind, to, subject, body)
+		srv.SendEmail(ctx, project, kind, from, to, subject, body)
 	}
 }
