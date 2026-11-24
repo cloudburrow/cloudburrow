@@ -510,6 +510,9 @@ func (p computeGroupsProvider) groupFields(templates, networks []string) []conso
 		console.Field{Name: "size", Label: "Number of instances", Type: "text", Default: "1", Pattern: `^[0-9]{1,3}$`, VisibleWhen: managed,
 			ShowWhen: "autoscaling=" + autoscaleOff, Section: "Autoscaling"},
 		namedPortsField(nil, "Port mapping"),
+		// A workload policy (#2206): the group's VMs' placement intent.
+		console.Field{Name: "workloadPolicy", Label: "Workload policy", Type: "text", Pattern: `^([a-z]([-a-z0-9]*[a-z0-9])?)?$`, VisibleWhen: managed, Section: "Workload policy",
+			Help: "Optional: the name of a workload policy in the group's region (gcloud compute resource-policies create workload-policy). A group takes one only while it has no VMs; a regional group only with the Any or Any single zone shape."},
 		nw,
 		console.Field{Name: "instances", Label: "VM instances", Type: "text", VisibleWhen: unmanaged, Help: "Optional, comma-separated names of VMs in the zone."},
 	)
@@ -581,6 +584,13 @@ func (p computeGroupsProvider) Create(ctx context.Context, project string, value
 			dp["zones"] = zl
 		}
 		b["distributionPolicy"] = dp
+	}
+	if wp := strings.TrimSpace(values["workloadPolicy"]); wp != "" {
+		region := where
+		if !compute.IsRegion(where) {
+			region = regionOfZoneName(where)
+		}
+		b["resourcePolicies"] = map[string]any{"workloadPolicy": "regions/" + region + "/resourcePolicies/" + wp}
 	}
 	scope := groupScope(where)
 	if _, err := p.call("POST", project, scope+"/instanceGroupManagers", nil, b); err != nil {
@@ -684,7 +694,8 @@ func (p computeGroupsProvider) Detail(ctx context.Context, project string, path 
 		props = append(props,
 			console.Property{Label: "Instance template", Value: vpcLast(vpcStr(mgr, "instanceTemplate"))},
 			console.Property{Label: "Target size", Value: strconv.Itoa(int(vpcNum(mgr, "targetSize")))},
-			console.Property{Label: "Base instance name", Value: vpcStr(mgr, "baseInstanceName")})
+			console.Property{Label: "Base instance name", Value: vpcStr(mgr, "baseInstanceName")},
+			console.Property{Label: "Workload policy", Value: vpcDash(vpcLast(vpcStr(vmMap(mgr, "resourcePolicies"), "workloadPolicy")))})
 		groups = append(groups, console.PropertyGroup{Heading: "Autoscaling", Properties: p.autoscalingProps(p.autoscalerOf(project, mgr))})
 	}
 	props = append(props, console.Property{Label: "Named ports", Value: vpcDash(strings.Join(ports, ", "))},

@@ -26,16 +26,18 @@ package compute
 //     stopped VM; its VMs report resourceStatus.physicalHostTopology,
 //     sharing a cluster, block or sub-block as maxDistance requires);
 //     vmCount caps the VMs.
-//   - workloadPolicy (type HIGH_AVAILABILITY or HIGH_THROUGHPUT,
-//     maxTopologyDistance and acceleratorTopology with HIGH_THROUGHPUT) is
-//     "the intent of the instance placement in the MIG": it is validated
-//     and kept; an instance can't take it.
+//   - workloadPolicy (type HIGH_AVAILABILITY or HIGH_THROUGHPUT;
+//     maxTopologyDistance, or acceleratorTopology and
+//     acceleratorTopologyMode, with HIGH_THROUGHPUT) is "the intent of the
+//     instance placement in the MIG": managed instance groups take it
+//     (workloadpolicies.go); an instance can't.
 //   - A VM takes one policy of each type
 //     (RESOURCE_POLICY_DUPLICATE_TYPE_UNSUPPORTED), and a policy a VM has
 //     can't be deleted.
 
 import (
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -53,6 +55,9 @@ const (
 // compactSeries are the machine series of this instance's machine types
 // that compact placement policies support (placement-policies-overview).
 var compactSeries = map[string]bool{"n2": true, "n2d": true, "c3": true}
+
+// acceleratorTopologyRE is an accelerator topology: 1x72, 2x2, 4x4x4.
+var acceleratorTopologyRE = regexp.MustCompile(`^[1-9][0-9]*(x[1-9][0-9]*){1,2}$`)
 
 var instanceCron = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
@@ -83,7 +88,8 @@ func checkCron(v, field string) (cron.Schedule, error) {
 			break
 		}
 		if n.Sub(prev) < time.Hour {
-			return nil, invalid("Invalid value for field '%s': '%s'. An instance schedule can run at most one start and one stop operation per hour.", field, v)
+			// Google's text, as its API returns it.
+			return nil, invalid("Invalid value for field '%s': '%s'. Schedule has to be less frequent than hourly.", field, v)
 		}
 		prev = n
 	}
@@ -243,7 +249,24 @@ func newWorkloadPolicy(v any, field string) (obj, error) {
 		if t != "HIGH_THROUGHPUT" {
 			return nil, invalid("Invalid value for field '%s.acceleratorTopology': '%s'. acceleratorTopology is set with type HIGH_THROUGHPUT only.", field, a)
 		}
+		if !acceleratorTopologyRE.MatchString(a) {
+			return nil, invalid("Invalid value for field '%s.acceleratorTopology': '%s'. The topology is dimensions joined by x, such as 1x72.", field, a)
+		}
 		out["acceleratorTopology"] = a
+	}
+	if m := str(in, "acceleratorTopologyMode"); m != "" {
+		if t != "HIGH_THROUGHPUT" {
+			return nil, invalid("Invalid value for field '%s.acceleratorTopologyMode': '%s'. acceleratorTopologyMode is set with type HIGH_THROUGHPUT only.", field, m)
+		}
+		if m != "AUTO_CONNECT" && m != "PROVISION_ONLY" {
+			return nil, invalid("Invalid value for field '%s.acceleratorTopologyMode': '%s'. The mode must be AUTO_CONNECT or PROVISION_ONLY.", field, m)
+		}
+		out["acceleratorTopologyMode"] = m
+	}
+	// maxTopologyDistance "cannot be set if accelerator topology or
+	// accelerator topology mode is set".
+	if out["maxTopologyDistance"] != nil && (out["acceleratorTopology"] != nil || out["acceleratorTopologyMode"] != nil) {
+		return nil, invalid("Invalid value for field '%s.maxTopologyDistance': '%s'. maxTopologyDistance can't be set with acceleratorTopology or acceleratorTopologyMode.", field, str(out, "maxTopologyDistance"))
 	}
 	return out, nil
 }

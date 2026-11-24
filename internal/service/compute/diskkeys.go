@@ -170,7 +170,9 @@ func (s *Server) openCustomerLocked(o obj, ck map[string]any, field string) ([]b
 	}
 	if k == nil {
 		return nil, errf(http.StatusBadRequest, "resourceIsEncryptedWithCustomerEncryptionKey",
-			"The resource '%s' is encrypted with a customer-supplied encryption key, and the key was not provided.", rel)
+			// Google's text, as its API returns it (quoted in public
+			// client issues): the resource's name in quotes.
+			"'%s' is protected with a customer supplied encryption key, but none was provided.", rel)
 	}
 	ek, _ := o["diskEncryptionKey"].(map[string]any)
 	if ek == nil {

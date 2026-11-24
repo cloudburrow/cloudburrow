@@ -43,8 +43,13 @@ func (s *Server) resourcePolicies(c call, region string) (obj, error) {
 		if _, ok := s.res[rel]; !ok {
 			return nil, notFound(rel)
 		}
-		if users := append(s.policyUsersLocked(rel), s.instancePolicyUsersLocked(rel)...); len(users) > 0 {
-			return nil, inUse("resource policy", rel, users[0])
+		users := append(s.policyUsersLocked(rel), s.instancePolicyUsersLocked(rel)...)
+		if len(users) > 0 {
+			return nil, inUse("resource_policy", rel, users[0])
+		}
+		if users := s.managerPolicyUsersLocked(rel); len(users) > 0 {
+			sort.Strings(users)
+			return nil, inUse("resource_policy", rel, users[0])
 		}
 		delete(s.res, rel)
 		return s.done(c.project, scope, "delete", rel, nil)

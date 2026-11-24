@@ -23,9 +23,9 @@ func TestInstanceSchedules(t *testing.T) {
 		return obj{"vmStartSchedule": obj{"schedule": start}, "vmStopSchedule": obj{"schedule": stop}, "timeZone": "Europe/Paris"}
 	}
 	wantStatus(t, s, 400, "vmStartSchedule, vmStopSchedule or both", "POST", r+"resourcePolicies", obj{"name": "x", "instanceSchedulePolicy": obj{}})
-	wantStatus(t, s, 400, "one start and one stop operation per hour", "POST", r+"resourcePolicies",
+	wantStatus(t, s, 400, "Schedule has to be less frequent than hourly.", "POST", r+"resourcePolicies",
 		obj{"name": "x", "instanceSchedulePolicy": sched("* 8 * * *", "0 18 * * *")})
-	wantStatus(t, s, 400, "one start and one stop operation per hour", "POST", r+"resourcePolicies",
+	wantStatus(t, s, 400, "Schedule has to be less frequent than hourly.", "POST", r+"resourcePolicies",
 		obj{"name": "x", "instanceSchedulePolicy": sched("0,30 8 * * *", "0 18 * * *")})
 	wantStatus(t, s, 400, "IANA", "POST", r+"resourcePolicies",
 		obj{"name": "x", "instanceSchedulePolicy": obj{"vmStartSchedule": obj{"schedule": "0 8 * * *"}, "timeZone": "Mars/Base"}})

@@ -501,7 +501,9 @@ var linkKeys = map[string]bool{"selfLink": true, "network": true, "subnetwork": 
 	// Private Service Connect (#2140, psc.go).
 	"target": true, "targetService": true, "natSubnets": true, "endpoint": true, "consumerNetwork": true,
 	// Regional disks and consistency groups (#2206).
-	"disk": true, "consistencyGroupPolicy": true, "sourceConsistencyGroupPolicy": true}
+	"disk": true, "consistencyGroupPolicy": true, "sourceConsistencyGroupPolicy": true,
+	// Workload policies on managed instance groups (#2206).
+	"workloadPolicy": true}
 
 // renderNested makes the link fields of objects inside lists and objects
 // absolute (an instance's disks and network interfaces).

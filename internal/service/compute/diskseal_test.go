@@ -303,7 +303,7 @@ func TestDiskCSEK(t *testing.T) {
 		t.Fatal("a CSEK disk is not sealed")
 	}
 	newVM(t, s, "us-central1-a", "vm", "n2-standard-2")
-	wantStatus(t, s, 400, "the key was not provided", "POST", z+"instances/vm/attachDisk", obj{"source": z + "disks/c", "deviceName": "c"})
+	wantStatus(t, s, 400, "is protected with a customer supplied encryption key, but none was provided.", "POST", z+"instances/vm/attachDisk", obj{"source": z + "disks/c", "deviceName": "c"})
 	wantStatus(t, s, 400, "is incorrect", "POST", z+"instances/vm/attachDisk", obj{"source": z + "disks/c", "deviceName": "c", "diskEncryptionKey": obj{"rawKey": other}})
 	mustCall(t, s, "POST", z+"instances/vm/attachDisk", obj{"source": z + "disks/c", "deviceName": "c", "diskEncryptionKey": ck})
 	vms.put(key, "csek data")
@@ -313,7 +313,7 @@ func TestDiskCSEK(t *testing.T) {
 	if _, sealed := vms.state(key); !sealed {
 		t.Error("not sealed after stop")
 	}
-	wantStatus(t, s, 400, "the key was not provided", "POST", z+"instances/vm/start", nil)
+	wantStatus(t, s, 400, "is protected with a customer supplied encryption key, but none was provided.", "POST", z+"instances/vm/start", nil)
 	src := "projects/p/zones/us-central1-a/disks/c"
 	wantStatus(t, s, 400, "is incorrect", "POST", z+"instances/vm/startWithEncryptionKey",
 		obj{"disks": []any{obj{"source": src, "diskEncryptionKey": obj{"rawKey": other}}}})
@@ -323,10 +323,10 @@ func TestDiskCSEK(t *testing.T) {
 	}
 	// Snapshots: the source key is needed; with snapshotEncryptionKey the
 	// snapshot needs that key too.
-	wantStatus(t, s, 400, "the key was not provided", "POST", z+"disks/c/createSnapshot", obj{"name": "s1"})
+	wantStatus(t, s, 400, "is protected with a customer supplied encryption key, but none was provided.", "POST", z+"disks/c/createSnapshot", obj{"name": "s1"})
 	mustCall(t, s, "POST", z+"disks/c/createSnapshot", obj{"name": "s1", "sourceDiskEncryptionKey": ck, "snapshotEncryptionKey": obj{"rawKey": other}})
 	mustCall(t, s, "POST", z+"disks/c/createSnapshot", obj{"name": "s2", "sourceDiskEncryptionKey": ck})
-	wantStatus(t, s, 400, "the key was not provided", "POST", z+"disks", obj{"name": "r1", "sourceSnapshot": "global/snapshots/s1"})
+	wantStatus(t, s, 400, "is protected with a customer supplied encryption key, but none was provided.", "POST", z+"disks", obj{"name": "r1", "sourceSnapshot": "global/snapshots/s1"})
 	mustCall(t, s, "POST", z+"disks", obj{"name": "r1", "sourceSnapshot": "global/snapshots/s1", "sourceSnapshotEncryptionKey": obj{"rawKey": other}})
 	mustCall(t, s, "POST", z+"disks", obj{"name": "r2", "sourceSnapshot": "global/snapshots/s2"})
 	for _, n := range []string{"r1", "r2"} {

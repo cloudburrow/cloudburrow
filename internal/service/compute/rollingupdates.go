@@ -283,6 +283,19 @@ func (s *Server) patchManagerLocked(c call, l igLoc, rel string, m obj) (obj, er
 	if err != nil {
 		return nil, err
 	}
+	wp, setWP, err := s.checkManagerWorkloadLocked(l, b, m, true, len(s.liveManagedLocked(rel)))
+	if err != nil {
+		return nil, err
+	}
+	if setWP || workloadPolicyOf(m) != "" {
+		var tpls []string
+		for _, v := range vs {
+			tpls = append(tpls, str(v.(obj), "instanceTemplate"))
+		}
+		if err := s.checkWorkloadTemplatesLocked(l.project, l.region, tpls, size); err != nil {
+			return nil, err
+		}
+	}
 	cur, _ := m["updatePolicy"].(map[string]any)
 	up, err := checkUpdatePolicy(obj(cur), b["updatePolicy"], len(managerZones(m)), size, l.regional(), targetShapeOf(m))
 	if err != nil {
@@ -300,6 +313,9 @@ func (s *Server) patchManagerLocked(c call, l igLoc, rel string, m obj) (obj, er
 	}
 	if d, ok := b["description"].(string); ok {
 		m["description"] = d
+	}
+	if setWP {
+		m["resourcePolicies"] = obj{"workloadPolicy": wp}
 	}
 	m["targetSize"] = float64(size)
 	m["versions"] = vs
