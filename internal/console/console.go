@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/cloudburrow/cloudburrow/internal/byoc"
 	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
@@ -2144,6 +2145,13 @@ type Server struct {
 	instanceSrc       InstanceSource
 	instanceTokenFile string
 
+	// compute is bring your own cloud (#2209): Settings > Compute and
+	// Compute capacity; nil offers no page. computeAuth checks the admin
+	// token; nil uses instanceSrc's.
+	compute         *byoc.Manager
+	computeInstance string
+	computeAuth     ComputeAuthorizer
+
 	mu   sync.Mutex
 	ln   net.Listener
 	srv  *http.Server
@@ -2225,6 +2233,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/instance/load", s.handleStateLoad)
 	mux.HandleFunc("POST /api/instance/reset", s.handleInstanceReset)
 	mux.HandleFunc("POST /api/instance/seed", s.handleInstanceSeed)
+	s.computeRoutes(mux)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/metrics/series", s.handleSeries)
 	mux.HandleFunc("GET /api/metrics/requests", s.handleRequestMetrics)
