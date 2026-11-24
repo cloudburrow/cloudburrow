@@ -52,7 +52,7 @@ func (s *Server) SetCompute(api func() Compute) {
 
 // servedType is whether a plan or association of typ is served.
 func servedType(typ string) bool {
-	return typ == CloudSQLResourceType || typ == ComputeInstanceResourceType || typ == ComputeDiskResourceType
+	return typ == CloudSQLResourceType || isCompute(typ) || isWorkload(typ)
 }
 
 func (s *Server) computeAPI() (Compute, error) {
@@ -198,6 +198,9 @@ type computeDisk struct {
 // runLocked is a backup run's state: a Compute Engine backup's, or Cloud
 // SQL's. With s.mu held.
 func (s *Server) runLocked(id string) (Run, bool) {
+	if strings.HasPrefix(id, workloadRunPrefix) {
+		return s.workloadRunLocked(id)
+	}
 	if strings.HasPrefix(id, computeRunPrefix) {
 		r := s.st.ComputeRuns[id]
 		if r == nil {
@@ -214,6 +217,9 @@ func (s *Server) runLocked(id string) (Run, bool) {
 // deleteRun deletes a backup run: a Compute Engine backup's snapshots, or
 // Cloud SQL's run. Without s.mu held.
 func (s *Server) deleteRun(id string) error {
+	if strings.HasPrefix(id, workloadRunPrefix) {
+		return s.deleteWorkloadRun(id)
+	}
 	if !strings.HasPrefix(id, computeRunPrefix) {
 		if s.sql == nil {
 			return nil
@@ -322,6 +328,10 @@ func jobResourceType(kind string) string {
 		return "Compute Engine"
 	case ComputeDiskResourceType:
 		return "Disk"
+	case AlloyDBResourceType:
+		return "AlloyDB"
+	case FilestoreResourceType:
+		return "Filestore"
 	}
 	return "Cloud SQL"
 }

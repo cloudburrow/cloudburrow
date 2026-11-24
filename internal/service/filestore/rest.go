@@ -95,7 +95,7 @@ func Mixins() []*annotations.HttpRule {
 
 // Transcoder is the JSON API's configuration, with nothing registered.
 func Transcoder() *rest.Transcoder {
-	return &rest.Transcoder{Packages: []string{"google.cloud.filestore.v1"}, Mixins: Mixins(), SnakeCaseMasks: true}
+	return &rest.Transcoder{Packages: []string{"google.cloud.filestore.v1"}, Mixins: Mixins(), SnakeCaseMasks: true, Overlay: filestoreOverlay}
 }
 
 // NewRESTHandler is the JSON API over s.

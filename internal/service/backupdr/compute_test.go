@@ -108,13 +108,14 @@ func TestComputeBackupAndRestore(t *testing.T) {
 		t.Fatalf("vault: %d %v", code, out)
 	}
 	for _, typ := range []string{"Instance", "Disk"} {
-		body := strings.Replace(planBody, "sqladmin.googleapis.com/Instance", "compute.googleapis.com/"+typ, 1)
+		// No logRetentionDays: it applies to Cloud SQL and AlloyDB only.
+		body := strings.Replace(strings.Replace(planBody, "sqladmin.googleapis.com/Instance", "compute.googleapis.com/"+typ, 1), `,"logRetentionDays":"7"`, "", 1)
 		if code, out := call(t, s, "POST", loc+"/backupPlans?backupPlanId="+strings.ToLower(typ), body); code != 200 {
 			t.Fatalf("%s plan: %d %v", typ, code, out)
 		}
 	}
-	hourly := strings.Replace(strings.Replace(planBody, "sqladmin.googleapis.com/Instance", "compute.googleapis.com/Disk", 1),
-		`"recurrenceType":"DAILY"`, `"recurrenceType":"HOURLY","hourlyFrequency":1`, 1)
+	hourly := strings.Replace(strings.Replace(strings.Replace(planBody, "sqladmin.googleapis.com/Instance", "compute.googleapis.com/Disk", 1),
+		`"recurrenceType":"DAILY"`, `"recurrenceType":"HOURLY","hourlyFrequency":1`, 1), `,"logRetentionDays":"7"`, "", 1)
 	if code, out := call(t, s, "POST", loc+"/backupPlans?backupPlanId=hourly", hourly); code != 200 {
 		t.Errorf("an hourly frequency of 1 for a disk: %d %v", code, out)
 	}

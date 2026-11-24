@@ -322,17 +322,17 @@ func dailyRule() []*backupdr.BackupRule {
 }
 
 // idleBackupWindow is a daily backup window, in UTC hours, that the test
-// cannot run into: 01:00 to 05:00, or 13:00 to 17:00 when it is before
-// 07:00 UTC. Inside its window a DAILY rule takes its scheduled backup at
+// cannot run into: 01:00 to 07:00, or 13:00 to 19:00 when it is before
+// 09:00 UTC (a window "must be at least six hours long", #1524). Inside its window a DAILY rule takes its scheduled backup at
 // the instance's next once-a-minute check, as Backup and DR does, and a
 // test's on-demand backup does not stand in for it; a test that counts
 // backups then saw one more than it took (#1871: main run 44438624783, at
 // 02:50 UTC).
 func idleBackupWindow() (start, end int64) {
-	if time.Now().UTC().Hour() < 7 {
-		return 13, 17
+	if time.Now().UTC().Hour() < 9 {
+		return 13, 19
 	}
-	return 1, 5
+	return 1, 7
 }
 
 func hasDataSource(ds []*backupdr.DataSource, name string) bool {

@@ -1284,6 +1284,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			}
 			return nil
 		})
+		// AlloyDB clusters and Filestore instances (#1524), through
+		// their services in process.
+		useBackupDRWorkloads(backupDRSrv, alloyDBSvc, filestoreSvc)
 		if kmsSvc != nil {
 			// A vault's encryptionConfig (#1501) wraps its data key with
 			// this instance's Cloud KMS, in process.

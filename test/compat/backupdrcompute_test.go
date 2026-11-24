@@ -174,7 +174,7 @@ func TestBackupDRComputeVMAndDiskRoundTrip(t *testing.T) {
 	waitBDR(err)
 	daily := []*backupdrpb.BackupRule{{RuleId: "daily", BackupRetentionDays: 7, BackupScheduleOneof: &backupdrpb.BackupRule_StandardSchedule{
 		StandardSchedule: &backupdrpb.StandardSchedule{RecurrenceType: backupdrpb.StandardSchedule_DAILY, TimeZone: "UTC",
-			BackupWindow: &backupdrpb.BackupWindow{StartHourOfDay: 1, EndHourOfDay: 5}}}}}
+			BackupWindow: &backupdrpb.BackupWindow{StartHourOfDay: 1, EndHourOfDay: 7}}}}}
 	for id, typ := range map[string]string{iplan: "compute.googleapis.com/Instance", dplan: "compute.googleapis.com/Disk"} {
 		op, err := bdr.CreateBackupPlan(ctx, &backupdrpb.CreateBackupPlanRequest{Parent: loc, BackupPlanId: id, BackupPlan: &backupdrpb.BackupPlan{
 			BackupVault: loc + "/backupVaults/" + vault, ResourceType: typ, BackupRules: daily}})
@@ -460,7 +460,7 @@ resource "google_backup_dr_backup_plan" %[2]q {
       time_zone       = "UTC"
       backup_window {
         start_hour_of_day = 1
-        end_hour_of_day   = 5
+        end_hour_of_day   = 7
       }
     }
   }

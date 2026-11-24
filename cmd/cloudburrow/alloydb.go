@@ -45,6 +45,9 @@ type alloyDBService struct {
 	// storage is the address of the instance's Cloud Storage, for
 	// ExportCluster and ImportCluster; nil serves neither.
 	storage func() string
+	// backupDR resolves the Backup and DR backups and data sources a
+	// cluster is restored from (#1524); nil without backupdr.
+	backupDR alloydb.BackupDR
 
 	server    *grpctransport.Server
 	api       *alloydb.Server
@@ -142,6 +145,10 @@ func (s *alloyDBService) Start(ctx context.Context) error {
 	api, err := alloydb.NewServer(state, filepath.Join(s.cfg.InstanceDir(), "alloydb-ca.json"), opts)
 	if err != nil {
 		return err
+	}
+	if s.backupDR != nil {
+		// Backup and DR backups and data sources restored (#1524).
+		api.SetBackupDR(s.backupDR)
 	}
 	s.api = api
 	s.server = grpctransport.New(net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.AlloyDB)))

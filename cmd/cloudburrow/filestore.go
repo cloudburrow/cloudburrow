@@ -49,9 +49,12 @@ type filestoreService struct {
 	csiStop context.CancelFunc
 	csiDone chan struct{}
 	logf    func(format string, args ...any)
-	server  *grpctransport.Server
-	api     *filestore.Server
-	backend *filestoreserver.Docker
+	// backupDR resolves the Backup and DR backups a new instance is
+	// restored from (#1524); nil without backupdr.
+	backupDR filestore.BackupDR
+	server   *grpctransport.Server
+	api      *filestore.Server
+	backend  *filestoreserver.Docker
 }
 
 func newFilestoreService(cfg config.Config) *filestoreService {
@@ -107,6 +110,10 @@ func (s *filestoreService) Start(ctx context.Context) error {
 		}
 	}
 	api, err := filestore.NewServer(state, opts)
+	if err == nil && s.backupDR != nil {
+		// Backup and DR backups restored into new instances (#1524).
+		api.SetBackupDR(s.backupDR)
+	}
 	if err != nil {
 		return err
 	}

@@ -179,6 +179,10 @@ type Server struct {
 	// bases are the times of each cluster's first continuous backup base
 	// on its current primary: the earliest it can be recovered to.
 	bases map[string]time.Time
+	// bdr is each cluster's Backup and DR protection (#1524), and bdrAPI
+	// the service that resolves its backups and data sources.
+	bdr    map[string]*bdrState
+	bdrAPI BackupDR
 
 	ca *authority
 	// conn is the listeners, once ServeConnector runs.
@@ -218,6 +222,7 @@ func (s *Server) clear() {
 	s.lastAuto = map[string]time.Time{}
 	s.bases = map[string]time.Time{}
 	s.epochs = map[string]int64{}
+	s.bdr = map[string]*bdrState{}
 }
 
 // Wait waits for the background operations started so far.
@@ -466,6 +471,7 @@ type diskState struct {
 	LastAuto  map[string]time.Time `json:"lastAuto,omitempty"`
 	Bases     map[string]time.Time `json:"bases,omitempty"`
 	Epochs    map[string]int64     `json:"epochs,omitempty"`
+	BackupDR  map[string]*bdrState `json:"backupdr,omitempty"`
 }
 
 func marshalAll[T proto.Message](m map[string]T) ([]json.RawMessage, error) {
@@ -515,6 +521,7 @@ func (s *Server) save() error {
 	}
 	st.Requests, st.Restores, st.Passwords, st.Versions, st.LastAuto, st.Bases = s.requests, s.restores, s.passwords, s.versions, s.lastAuto, s.bases
 	st.Epochs = s.epochs
+	st.BackupDR = s.bdr
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
@@ -571,6 +578,9 @@ func (s *Server) load() error {
 	}
 	for k, v := range st.Epochs {
 		s.epochs[k] = v
+	}
+	for k, v := range st.BackupDR {
+		s.bdr[k] = v
 	}
 	// An operation a restart interrupted ends in error, and its resource
 	// is left as it was recorded. UNVERIFIED: Google's operations survive

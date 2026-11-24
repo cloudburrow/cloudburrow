@@ -310,7 +310,7 @@ resource "google_backup_dr_backup_plan" "p" {
       time_zone       = "UTC"
       backup_window {
         start_hour_of_day = 1
-        end_hour_of_day   = 5
+        end_hour_of_day   = 7
       }
     }
   }

@@ -364,7 +364,7 @@ func (s *Server) specOf(in *alloydbpb.Instance) (ServerSpec, error) {
 		spec.ReplicaOf = serverName(p.GetName())
 		floorFlags(spec.Flags, p.GetDatabaseFlags())
 	} else {
-		spec.PITR = c.GetContinuousBackupConfig().GetEnabled()
+		spec.PITR = s.pitrOn(c)
 	}
 	spec.Pooler = poolerOf(in)
 	return spec, nil
