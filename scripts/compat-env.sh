@@ -445,6 +445,9 @@ for n in "${SELECTED[@]}"; do
   v=CLOUDBURROW_TEST_$n
   if [ -n "$strict" ]; then
     # A port of 0 would mean env fell back to configuration.
+    # ALLOYDB_CONNECTOR is set only when another instance holds the AlloyDB
+    # connectors' port 5433 (docs/alloydb.md), so empty is its normal value.
+    if [ -z "$VALUE" ] && [ "$n" = ALLOYDB_CONNECTOR ]; then UNSET+=("$v"); continue; fi
     [ -n "$VALUE" ] || { echo "$v is empty" >&2; dump_sources; exit 1; }
     case "$VALUE" in *:0) echo "env exported an unbound port: $v=$VALUE" >&2; exit 1 ;; esac
   elif [ -z "$VALUE" ]; then
