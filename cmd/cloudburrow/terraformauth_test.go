@@ -111,3 +111,34 @@ func TestTerraformEnforcedAuth(t *testing.T) {
 		t.Error("a module's impersonate_service_account was accepted")
 	}
 }
+
+// A module declaring an IAM Credentials data source signs the provider in
+// as a principal (#1578); one that only names it in a comment, a string or
+// the wrapper's own file does not.
+func TestModuleCallsIAMCredentials(t *testing.T) {
+	for body, want := range map[string]bool{
+		"data \"google_service_account_access_token\" \"t\" {\n}\n":     true,
+		"  data  \"google_service_account_id_token\" \"i\" {}\n":        true,
+		"data \"google_service_account_jwt\" \"j\" {}\n":                true,
+		"# data \"google_service_account_jwt\" \"j\" {}\n":              false,
+		"resource \"google_service_account\" \"sa\" {}\n":               false,
+		"locals { x = \"data \\\"google_service_account_jwt\\\"\" }\n":  false,
+		"data \"google_service_account_key\" \"k\" {}\n":                false,
+		"data \"google_service_account_access_token_extra\" \"x\" {}\n": false,
+	} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := moduleCallsIAMCredentials(dir); got != want {
+			t.Errorf("moduleCallsIAMCredentials(%q) = %v, want %v", body, got, want)
+		}
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "cloudburrow_providers_override.tf"), []byte("data \"google_service_account_jwt\" \"j\" {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if moduleCallsIAMCredentials(dir) {
+		t.Error("the wrapper's own file counted")
+	}
+}

@@ -37,7 +37,7 @@ func TestTheTerraformProviderNeverPointsAtGoogle(t *testing.T) {
 			set, rows := 0, 0
 			for _, e := range terraformEndpoints {
 				if slices.Contains(services, e.service) || (e.service == localAIEndpoint && slices.Contains(services, config.ServiceRun)) ||
-					((e.service == storageTransferService || e.service == storageInsightsService) &&
+					((e.service == storageTransferService || e.service == storageInsightsService || e.service == storageBatchService) &&
 						slices.Contains(services, config.ServiceStorage)) {
 					rows++ // Run has three: Cloud Run v2, Artifact Registry and Cloud Build (#1304); Vertex AI and Document AI are served with it (#1940, #1953)
 				}
@@ -50,8 +50,8 @@ func TestTheTerraformProviderNeverPointsAtGoogle(t *testing.T) {
 				}
 			}
 			// The Resource Manager rows are always set: the project registry
-			// always runs, whichever services are enabled: v1, Cloud Billing, IAM and IAM beta (#1743), v3, v3 (resource_manager3_), tags and tags_location (#1578), and so do Service Usage and the API Keys API (#1915), and Cloud Quotas and Site Verification (#2030), and core_billing, billing and billing_budgets (#2109).
-			if set+len(skipped) != rows+15 {
+			// always runs, whichever services are enabled: v1, Cloud Billing, IAM and IAM beta (#1743), v3, v3 (resource_manager3_), tags and tags_location (#1578), and so do Service Usage and the API Keys API (#1915), and Cloud Quotas and Site Verification (#2030), and core_billing, billing and billing_budgets (#2109); and since #1578 Cloud Identity, Organization Policy, IAM v2, IAM v3 and workforce pools on that port, and IAM Credentials on the metadata server, which every instance runs.
+			if set+len(skipped) != rows+21 {
 				t.Errorf("%v: %d set and %d named as skipped, want every enabled service accounted for", services, set, len(skipped))
 			}
 			if override != strings.Contains(body, "credentials  = null") {

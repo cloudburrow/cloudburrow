@@ -126,6 +126,30 @@ func terraformEnforcedAuth(cfg config.Config, dir string, getenv func(string) st
 	return terraformAuth{credentials: path}, none, nil
 }
 
+// iamCredentialsData finds a data source that calls the IAM Credentials
+// API with the provider's own token (#1578): generateAccessToken,
+// generateIdToken given target_service_account, and signJwt. That API
+// authenticates the caller whatever --iam-enforcement says, as Google's
+// does (internal/metadata/serviceaccounts.go), so "owner" gets 401.
+var iamCredentialsData = regexp.MustCompile(`(?m)^\s*data\s+"google_service_account_(access_token|id_token|jwt)"`)
+
+// moduleCallsIAMCredentials reports whether a .tf file in dir declares one
+// of iamCredentialsData's data sources: the provider then signs in as a
+// principal (terraformEnforcedAuth), the instance's owner by default,
+// though the instance does not enforce IAM.
+func moduleCallsIAMCredentials(dir string) bool {
+	files, _ := filepath.Glob(filepath.Join(dir, "*.tf"))
+	for _, f := range files {
+		if strings.HasPrefix(filepath.Base(f), "cloudburrow_providers") {
+			continue
+		}
+		if b, err := os.ReadFile(f); err == nil && iamCredentialsData.Match(b) {
+			return true
+		}
+	}
+	return false
+}
+
 // moduleImpersonates reports whether a .tf file in dir sets
 // impersonate_service_account.
 func moduleImpersonates(dir string) bool {

@@ -422,7 +422,7 @@ const ssmJSONPrefix = "/securesourcemanager"
 // JSON API (register adds it and the Operations service it polls), and
 // passes every other request to next. builds runs push triggers' builds.
 func SourceManagerHandlerOr(m *SecureSourceManagerServer, builds *CloudBuildServer, register func(grpc.ServiceRegistrar), next http.Handler) http.Handler {
-	t := &rest.Transcoder{Packages: []string{"google.cloud.securesourcemanager.v1"}, Mixins: ssmIAMMixins}
+	t := &rest.Transcoder{Packages: []string{"google.cloud.securesourcemanager.v1"}, Mixins: ssmIAMMixins, Overlay: ssmOverlay}
 	register(t)
 	iampb.RegisterIAMPolicyServer(t, ssmInstanceIAM{})
 	m.builds = builds // pull requests' triggers and merges run builds (#1927)

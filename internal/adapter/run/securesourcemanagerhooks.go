@@ -184,7 +184,7 @@ func hookOut(h *ssmpb.Hook) *ssmpb.Hook {
 	if ssmState.hookSecrets[h.GetName()] != "" {
 		out.SensitiveQueryString = ssmQueryPlaceholder
 	}
-	return out
+	return withHookAuthLocked(out)
 }
 
 // CreateHook adds a webhook to a repository.
@@ -207,6 +207,12 @@ func (m *SecureSourceManagerServer) CreateHook(_ context.Context, req *ssmpb.Cre
 	h.Name = req.GetParent() + "/hooks/" + req.GetHookId()
 	if _, ok := ssmState.hooks[h.Name]; ok {
 		return nil, apierror.AlreadyExists("hook %q already exists", h.Name)
+	}
+	// serviceAccountAuth is kept apart (ssmExtra.HookAuth), never in the
+	// stored hook.
+	h.ProtoReflect().SetUnknown(nil)
+	if err := setHookAuthLocked(h.Name, hookAuthIn(req.GetHook())); err != nil {
+		return nil, err
 	}
 	now := timestamppb.Now()
 	h.Uid, h.CreateTime, h.UpdateTime = uuid.NewString(), now, now
@@ -263,7 +269,7 @@ func (m *SecureSourceManagerServer) ListHooks(_ context.Context, req *ssmpb.List
 	return &ssmpb.ListHooksResponse{Hooks: page, NextPageToken: next}, nil
 }
 
-var ssmHookFields = []string{"target_uri", "disabled", "events", "push_option", "sensitive_query_string"}
+var ssmHookFields = []string{"target_uri", "disabled", "events", "push_option", "sensitive_query_string", string(fieldHookServiceAccountAuth)}
 
 // UpdateHook changes the fields its mask names ("*" replaces them all;
 // with no mask, the fields that are set).
@@ -285,6 +291,8 @@ func (m *SecureSourceManagerServer) UpdateHook(_ context.Context, req *ssmpb.Upd
 			return len(in.GetEvents()) > 0
 		case "push_option":
 			return in.GetPushOption() != nil
+		case string(fieldHookServiceAccountAuth):
+			return hookAuthIn(in)
 		}
 		return in.GetSensitiveQueryString() != ""
 	})
@@ -299,6 +307,7 @@ func (m *SecureSourceManagerServer) UpdateHook(_ context.Context, req *ssmpb.Upd
 	}
 	next := proto.Clone(cur).(*ssmpb.Hook)
 	secret, hasSecret := ssmState.hookSecrets[cur.GetName()], false
+	auth, hasAuth := false, false
 	for _, p := range paths {
 		switch p {
 		case "target_uri":
@@ -309,6 +318,8 @@ func (m *SecureSourceManagerServer) UpdateHook(_ context.Context, req *ssmpb.Upd
 			next.Events = in.GetEvents()
 		case "push_option":
 			next.PushOption = in.GetPushOption()
+		case string(fieldHookServiceAccountAuth):
+			auth, hasAuth = hookAuthIn(in), true
 		case "sensitive_query_string":
 			if q := in.GetSensitiveQueryString(); q != ssmQueryPlaceholder {
 				secret, hasSecret = strings.TrimPrefix(q, "?"), true
@@ -317,6 +328,11 @@ func (m *SecureSourceManagerServer) UpdateHook(_ context.Context, req *ssmpb.Upd
 	}
 	if err := checkHook(next); err != nil {
 		return nil, err
+	}
+	if hasAuth {
+		if err := setHookAuthLocked(cur.GetName(), auth); err != nil {
+			return nil, err
+		}
 	}
 	next.UpdateTime = timestamppb.Now()
 	ssmState.hooks[cur.GetName()] = next
