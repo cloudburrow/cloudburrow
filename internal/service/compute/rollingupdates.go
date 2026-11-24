@@ -449,6 +449,11 @@ func (s *Server) refreshManagedLocked(mgr string, o obj, tpl string) {
 // settledLocked is whether every VM of a manager is RUNNING with no
 // operation of its own running.
 func (s *Server) settledLocked(rel string) bool {
+	for vm := range pendingOf(s.res[rel]) {
+		if _, made := s.res[vm]; !made {
+			return false // a VM the group failed to make, to retry (#2220)
+		}
+	}
 	prefix := rel[:strings.Index(rel, "/instanceGroupManagers/")]
 	prefix = prefix[:strings.LastIndex(prefix, "/")] // projects/P/zones or projects/P/regions
 	prefix = prefix[:strings.LastIndex(prefix, "/")] + "/zones/"
@@ -609,14 +614,16 @@ func (s *Server) rollManagerLocked(project, rel string, m obj) (bool, error) {
 
 // addManagedVMLocked makes one more VM of a manager, beyond its size.
 func (s *Server) addManagedVMLocked(project, rel string, m obj) error {
-	have := s.liveManagedLocked(rel)
+	have := s.membersLocked(rel, m)
 	for {
 		name := str(m, "baseInstanceName") + "-" + randLower(4)
 		zone := s.nextZoneLocked(m, have)
-		if _, taken := s.res[zoneRel(project, zone, "instances", name)]; taken {
+		vm := zoneRel(project, zone, "instances", name)
+		if _, taken := s.res[vm]; taken || pendingEntry(m, vm) != nil {
 			continue
 		}
-		return s.insertManagedVMLocked(project, zone, rel, m, name)
+		s.createManagedLocked(project, rel, m, zone, name, s.newVMTemplateLocked(rel, m), "CREATING")
+		return nil
 	}
 }
 
@@ -684,7 +691,8 @@ func (s *Server) applyUpdatesLocked(c call, l igLoc, rel string, m obj) (obj, er
 func (s *Server) rollOnce() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	changed := false
+	// Retry the VMs groups failed to make (#2220).
+	changed := s.retryManagersLocked()
 	for k, m := range s.res {
 		if !strings.Contains(k, "/instanceGroupManagers/") {
 			continue

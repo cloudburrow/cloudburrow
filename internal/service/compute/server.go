@@ -95,6 +95,10 @@ type Options struct {
 	// UpdateEvery is how often a managed instance group's PROACTIVE update
 	// takes its next step (#2139); 2s when zero.
 	UpdateEvery time.Duration
+	// MIGRetryBase is the backoff before a managed instance group's
+	// second retry of a VM it failed to make (#2220, migretry.go),
+	// doubling to a minute; 5s when zero.
+	MIGRetryBase time.Duration
 	// LB reaches load balancers' backends (#2153, lbplane.go); nil
 	// reaches only those this package can itself.
 	LB LBBackends
