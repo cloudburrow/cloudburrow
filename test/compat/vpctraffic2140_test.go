@@ -238,7 +238,7 @@ func TestInternalLBAndPSCEndpointCarryVMTraffic2140(t *testing.T) {
 	wait(igs.AddInstances(ctx, &computepb.AddInstancesInstanceGroupRequest{Project: p, Zone: zone, InstanceGroup: group,
 		InstanceGroupsAddInstancesRequestResource: &computepb.InstanceGroupsAddInstancesRequest{
 			Instances: []*computepb.InstanceReference{{Instance: proto.String("zones/" + zone + "/instances/" + web)}}}}))
-	ilb := internalLB(ctx, t, opts, p, region, defNet, "ct-ilb-"+sfx, "projects/"+p+"/zones/"+zone+"/instanceGroups/"+group, 80)
+	ilb := internalLB(ctx, t, opts, p, region, defNet, "", "ct-ilb-"+sfx, "projects/"+p+"/zones/"+zone+"/instanceGroups/"+group, 80)
 	rule, err := frs.Get(ctx, &computepb.GetForwardingRuleRequest{Project: p, Region: region, ForwardingRule: "ct-ilb-" + sfx})
 	if err != nil {
 		t.Fatal(err)

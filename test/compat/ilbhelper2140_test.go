@@ -16,9 +16,10 @@ import (
 // load-balancing/docs/internal/setting-up-internal does it with the Go
 // client: a regional TCP health check, an INTERNAL regional backend
 // service (with group as its backend when given) and a forwarding rule on
-// network for port. It returns the forwarding rule's link, which a service
+// network for port, in subnet when given (Google requires it in a custom
+// mode network; an auto mode network's own subnet otherwise). It returns the forwarding rule's link, which a service
 // attachment publishes (#2140), and deletes all three at cleanup.
-func internalLB(ctx context.Context, t *testing.T, opts []option.ClientOption, project, region, network, name, group string, port int) string {
+func internalLB(ctx context.Context, t *testing.T, opts []option.ClientOption, project, region, network, subnet, name, group string, port int) string {
 	t.Helper()
 	hcs, err := computeapi.NewRegionHealthChecksRESTClient(ctx, opts...)
 	if err != nil {
@@ -45,9 +46,13 @@ func internalLB(ctx context.Context, t *testing.T, opts []option.ClientOption, p
 		bs.Backends = []*computepb.Backend{{Group: proto.String(group), BalancingMode: proto.String("CONNECTION")}}
 	}
 	wait(bss.Insert(ctx, &computepb.InsertRegionBackendServiceRequest{Project: project, Region: region, BackendServiceResource: bs}))
-	wait(frs.Insert(ctx, &computepb.InsertForwardingRuleRequest{Project: project, Region: region, ForwardingRuleResource: &computepb.ForwardingRule{
+	rule := &computepb.ForwardingRule{
 		Name: proto.String(name), LoadBalancingScheme: proto.String("INTERNAL"), IPProtocol: proto.String("TCP"),
-		Ports: []string{itoa(port)}, Network: proto.String(network), BackendService: proto.String(scope + "backendServices/" + name)}}))
+		Ports: []string{itoa(port)}, Network: proto.String(network), BackendService: proto.String(scope + "backendServices/" + name)}
+	if subnet != "" {
+		rule.Subnetwork = proto.String(subnet)
+	}
+	wait(frs.Insert(ctx, &computepb.InsertForwardingRuleRequest{Project: project, Region: region, ForwardingRuleResource: rule}))
 	t.Cleanup(func() {
 		c := context.Background()
 		for _, del := range []func() (*computeapi.Operation, error){
