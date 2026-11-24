@@ -29,6 +29,7 @@ package alloydb
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"encoding/binary"
 	"errors"
@@ -43,6 +44,8 @@ import (
 
 	alloydbpb "cloud.google.com/go/alloydb/apiv1/alloydbpb"
 	"cloud.google.com/go/alloydb/connectors/apiv1alpha/connectorspb"
+
+	"github.com/cloudburrow/cloudburrow/internal/pgwire"
 )
 
 // DirectPort is the port an instance serves PostgreSQL on at its address.
@@ -310,8 +313,84 @@ func (c *Connector) serveConnector(raw net.Conn, ip string) {
 	if err != nil {
 		return
 	}
+	email := ""
+	if authType == connectorspb.MetadataExchangeRequest_AUTO_IAM && c.s.opts.IAMToken != nil {
+		email, _ = c.s.opts.IAMToken(token)
+	}
+	c.s.signInAndPipe(conn, r, raw, cluster, email, addr)
+}
+
+// signInAndPipe reads the client's startup message and connects it to the
+// server at addr (#2208). A built-in user's sign-in is the server's, which
+// checks its password. An IAM user's is checked here: by the token of an
+// AUTO_IAM connection (autoEmail, its principal), or by the token the
+// client sends as its password, which must be this instance's, for that
+// user's principal; the proxy then signs in as the user's role with the
+// role's own password, as Google's proxy signs an IAM connection in.
+func (s *Server) signInAndPipe(client net.Conn, r *bufio.Reader, raw net.Conn, cluster, autoEmail, addr string) {
+	startup, err := pgwire.ReadStartup(r)
+	if err != nil {
+		return
+	}
+	if pgwire.Code(startup) == pgwire.CancelRequest {
+		_ = raw.SetDeadline(time.Time{})
+		pipe(client, io.MultiReader(bytes.NewReader(startup), r), addr)
+		return
+	}
+	user := pgwire.StartupParams(startup)["user"]
+	iam := s.isIAMRole(cluster, user)
+	if !iam && autoEmail == "" {
+		_ = raw.SetDeadline(time.Time{})
+		pipe(client, io.MultiReader(bytes.NewReader(startup), r), addr)
+		return
+	}
+	email := autoEmail
+	if email == "" {
+		token, err := pgwire.ReadPassword(client, r)
+		if err != nil {
+			return
+		}
+		ok := false
+		if s.opts.IAMToken != nil {
+			email, ok = s.opts.IAMToken(token)
+		}
+		if !ok {
+			// UNVERIFIED: Google's words for a refused IAM sign-in.
+			_, _ = client.Write(pgwire.Fatal("28P01", "IAM authentication failed for user \""+user+"\""))
+			return
+		}
+	}
+	if !iam || roleName(strings.ToLower(email)) != user {
+		_, _ = client.Write(pgwire.Fatal("28P01", "IAM authentication failed for user \""+user+"\""))
+		return
+	}
+	backend, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	if err != nil {
+		_, _ = client.Write(pgwire.Fatal("08006", err.Error()))
+		return
+	}
+	defer backend.Close()
+	br := bufio.NewReader(backend)
+	_ = backend.SetDeadline(time.Now().Add(30 * time.Second))
+	if err := pgwire.SignIn(backend, br, startup, user, s.iamRolePassword(user), client); err != nil {
+		return
+	}
+	_ = backend.SetDeadline(time.Time{})
 	_ = raw.SetDeadline(time.Time{})
-	pipe(conn, r, addr)
+	splice(client, r, backend, br)
+}
+
+// isIAMRole is whether role is the role of one of cluster's IAM users.
+func (s *Server) isIAMRole(cluster, role string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, k := range sortedKeys(s.users, cluster+"/users/") {
+		if s.users[k].GetUserType() == alloydbpb.User_ALLOYDB_IAM_USER &&
+			roleName(strings.ToLower(k[strings.LastIndex(k, "/")+1:])) == role {
+			return true
+		}
+	}
+	return false
 }
 
 // pipe copies between client (read through r) and the server at addr.
@@ -321,10 +400,16 @@ func pipe(client net.Conn, r io.Reader, addr string) {
 		return
 	}
 	defer backend.Close()
+	splice(client, r, backend, backend)
+}
+
+// splice copies between client (read through r) and backend (read
+// through br) until both directions end.
+func splice(client net.Conn, r io.Reader, backend net.Conn, br io.Reader) {
 	done := make(chan struct{}, 2)
 	go func() { _, _ = io.Copy(backend, r); closeWrite(backend); done <- struct{}{} }()
 	go func() {
-		_, _ = io.Copy(client, backend)
+		_, _ = io.Copy(client, br)
 		if t, ok := client.(*tls.Conn); ok {
 			_ = t.CloseWrite()
 		} else {
@@ -420,8 +505,7 @@ func (c *Connector) serveDirect(raw net.Conn, ip string, pooled bool) {
 		pgRefuse(client, "08006", err.Error())
 		return
 	}
-	_ = raw.SetDeadline(time.Time{})
-	pipe(client, r, addr)
+	c.s.signInAndPipe(client, r, raw, in.GetName()[:strings.Index(in.GetName(), "/instances/")], "", addr)
 }
 
 // peekedConn reads what a bufio.Reader buffered before the connection.

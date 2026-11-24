@@ -277,6 +277,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		comps.SetMySQLCredentials(mysqlCreds)
 	}
+	// PostgreSQL's passwords (#2208): every PostgreSQL server checks them,
+	// so they are made whether or not `up` runs one of its own.
+	pgCreds, err := loadOrCreatePostgresCredentials(cfg)
+	if err != nil {
+		return fmt.Errorf("Cloud SQL for PostgreSQL credentials: %w", err)
+	}
+	comps.SetPostgresCredentials(pgCreds)
 
 	// Order matters: the control server first so health and readiness are
 	// observable while the cluster comes up, then the cluster, then the
@@ -293,7 +300,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// A database's tunnel is up once its user logs in through it (#1262).
 	for _, s := range []config.Service{config.ServiceCloudSQLMySQL, config.ServiceCloudSQL} {
 		if f := forwarderFor(forwarders, string(s)); f != nil {
-			f.SetHandshake(databaseHandshake(s, mysqlCreds))
+			f.SetHandshake(databaseHandshake(s, mysqlCreds, pgCreds))
 		}
 	}
 	for _, f := range forwarders {

@@ -595,7 +595,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			return bigtableInstancesProvider{endpoint: a, savedQueries: filepath.Join(d.cfg.InstanceDir(), bigtableSavedQueriesFile)}
 		}},
 		{config.ServiceSpanner, func(a string) console.Provider { return spannerProvider{endpoint: a} }},
-		{config.ServiceCloudSQL, func(a string) console.Provider { return cloudSQLProvider{endpoint: a} }},
+		{config.ServiceCloudSQL, func(a string) console.Provider {
+			creds, _ := loadOrCreatePostgresCredentials(d.cfg)
+			return cloudSQLProvider{endpoint: a, password: creds.Password}
+		}},
 		{config.ServiceCloudSQLMySQL, func(a string) console.Provider { return newCloudSQLMySQLProvider(a, d.mysql) }},
 		// Memorystore's Instances page, through the admin API (#1302).
 		{config.ServiceMemorystore, func(a string) console.Provider { return newMemorystoreProvider(d.cfg, a, d.memorystore) }},

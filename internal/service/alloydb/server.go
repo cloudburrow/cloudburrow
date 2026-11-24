@@ -134,6 +134,13 @@ type Options struct {
 	// IAMToken resolves an OAuth 2.0 access token minted by this instance
 	// to its principal's email; nil knows none.
 	IAMToken func(token string) (email string, ok bool)
+	// AdminUser and AdminPassword are CloudBurrow's management role on
+	// every server (#2208, components.AlloyDBAdminUser), which the API
+	// signs in as: every TCP sign-in is checked by password. An IAM
+	// user's role has a password derived from AdminPassword, which the
+	// connectors' server-side proxy signs in with once it has checked the
+	// connection's token.
+	AdminUser, AdminPassword string
 	// InstanceAddresses are the addresses instances take for their own,
 	// in order (DefaultInstanceAddresses); those the host does not have
 	// are skipped. With none, every instance has ConnectorHost.

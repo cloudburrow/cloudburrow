@@ -600,11 +600,12 @@ func bigQueryBackend(project string) Backend {
 
 // cloudSQLBackend runs PostgreSQL in the cluster.
 //
-// Authentication is trust, deliberately and consistently with the rest of
-// CloudBurrow: nothing here authenticates a request, and a password would be a
-// shared secret that implied otherwise while being printed in the startup
-// banner anyway. This is why the endpoint is bound to loopback and why the
-// documentation is explicit that it must never be exposed.
+// Every TCP sign-in is checked by password, as Cloud SQL checks it (#2208,
+// pgauth.go): the image initialises the data directory with trust, and
+// pgStartCommand then holds every host line of pg_hba.conf to the
+// password, leaving only the socket in the pod trusted. The application's
+// user and CloudBurrow's management role get their passwords from
+// WithPostgresAuth.
 //
 // Unlike the emulators beside it this is a real database, so it is given a
 // volume when the instance is persistent and keeps its data across a restart.
@@ -613,8 +614,11 @@ func cloudSQLBackend(persistent bool) Backend {
 		Name:  "cloudsql",
 		Image: CloudSQLImage,
 		Port:  CloudSQLPort,
+		// The entrypoint's own pg_hba.conf, which pgStartCommand rewrites.
+		Command: pgStartCommand,
 		Env: map[string]string{
-			// trust, not a password: see above.
+			// Initialised with no password, which WithPostgresAuth then
+			// sets; pg_hba.conf asks for it (pgauth.go).
 			"POSTGRES_HOST_AUTH_METHOD": "trust",
 			"POSTGRES_USER":             CloudSQLUser,
 			"POSTGRES_DB":               CloudSQLDatabase,
@@ -1108,6 +1112,15 @@ func CloudSQLInstanceBackend(name, version string, persistent bool, rootPassword
 		if version == "MYSQL_5_7" || version == "MYSQL_5_6" {
 			b.Args = append(b.Args, legacyMySQLArgs...)
 		}
+		if version == "MYSQL_8_0" {
+			// "Cloud SQL for MySQL 8.0 uses mysql_native_password as the
+			// default authentication plugin for new users instead of
+			// caching_sha2_password" (#2208, docs.cloud.google.com/sql/docs/
+			// mysql/features); the default_authentication_plugin flag,
+			// after it, still wins. 8.4's default is caching_sha2_password,
+			// as the image's is, and 5.7's and 5.6's mysql_native_password.
+			b.Args = append(b.Args, "--default-authentication-plugin=mysql_native_password")
+		}
 		for _, f := range flags {
 			b.Args = append(b.Args, "--"+f.Name+"="+f.Value)
 		}
@@ -1239,7 +1252,7 @@ if ` + rebuild + `; then
   # the new timeline. 'latest', 12's default, follows it (#1524).
   if [ -f "$PGDATA/recovery.conf" ]; then echo "recovery_target_timeline = 'latest'" >> "$PGDATA/recovery.conf"; fi` + mark + `
 fi
-exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
+` + pgAuthPrelude + `exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
 	b.Args = nil
 	return b
 }
@@ -1301,7 +1314,7 @@ if [ "$(cat "$marker" 2>/dev/null)" != "$CLOUDSQL_STANDBY_EPOCH" ]; then
 		` application_name=` + SQLStandbyApplicationName + `'" >> "$conf"
   echo "$CLOUDSQL_STANDBY_EPOCH" > "$marker"
 fi
-exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
+` + pgAuthPrelude + `exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
 	b.Args = nil
 	return b
 }
@@ -1339,7 +1352,7 @@ if [ "$(cat "$marker" 2>/dev/null)" != "$CLOUDSQL_STANDBY_EPOCH" ]; then
   rm -rf /var/lib/mysql/data
   echo "$CLOUDSQL_STANDBY_EPOCH" > "$marker"
 fi
-exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
+` + pgAuthPrelude + `exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
 	b.Args = nil
 	return b
 }

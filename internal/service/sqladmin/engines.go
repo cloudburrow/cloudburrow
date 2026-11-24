@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -56,6 +57,13 @@ type Postgres struct {
 	// PoolerHostAddr, when set, is the host address of the instance's
 	// managed connection pooler, "" while it has none (#2141).
 	PoolerHostAddr func() string
+	// AdminUser and AdminPassword are CloudBurrow's management role
+	// (#2208, components.PGAdminUser), which the Admin API signs in as
+	// and then acts as User; UserPassword is User's own, used when there
+	// is no management role (the console's screen of `up`'s server).
+	// Every TCP sign-in is checked by password.
+	AdminUser, AdminPassword string
+	UserPassword             string
 }
 
 // PoolerAddr is the address of the instance's managed connection pooler,
@@ -76,9 +84,23 @@ func (p *Postgres) conn(ctx context.Context) (*pgx.Conn, error) {
 	if err != nil {
 		return nil, Errorf(http.StatusServiceUnavailable, "the PostgreSQL tunnel is not up")
 	}
-	c, err := pgx.Connect(ctx, fmt.Sprintf("postgres://%s@%s:%s/%s?sslmode=disable", p.User, host, port, p.Database))
+	user, password := p.User, p.UserPassword
+	if p.AdminUser != "" && p.AdminPassword != "" {
+		user, password = p.AdminUser, p.AdminPassword
+	}
+	u := url.URL{Scheme: "postgres", User: url.UserPassword(user, password), Host: net.JoinHostPort(host, port),
+		Path: "/" + p.Database, RawQuery: "sslmode=disable"}
+	c, err := pgx.Connect(ctx, u.String())
 	if err != nil {
 		return nil, Errorf(http.StatusServiceUnavailable, "cannot reach PostgreSQL: %v", err)
+	}
+	if user != p.User {
+		// The management role acts as the server's superuser, so what it
+		// makes is owned as before (#2208).
+		if _, err := c.Exec(ctx, "SET SESSION AUTHORIZATION "+pgx.Identifier{p.User}.Sanitize()); err != nil {
+			_ = c.Close(context.Background())
+			return nil, Errorf(http.StatusServiceUnavailable, "cannot act as %s on PostgreSQL: %v", p.User, err)
+		}
 	}
 	return c, nil
 }
@@ -228,7 +250,7 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]User, error) {
 		FROM pg_catalog.pg_roles r
 		WHERE (r.rolcanlogin OR EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting s, unnest(s.setconfig) x
 			WHERE s.setrole = r.oid AND s.setdatabase = 0 AND x = '`+pgFailedCheckSetting+`=on'))
-		AND r.rolname NOT LIKE 'pg\_%' ORDER BY r.rolname`)
+		AND r.rolname NOT LIKE 'pg\_%' AND r.rolname NOT IN ('`+pgAdminUser+`', '`+pgAlloyDBAdminUser+`') ORDER BY r.rolname`)
 	if err != nil {
 		return nil, pgError(err)
 	}
@@ -250,6 +272,13 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]User, error) {
 	}
 	return out, rows.Err()
 }
+
+// CloudBurrow's management roles (#2208, components.PGAdminUser and
+// AlloyDBAdminUser), which users.list leaves out, as Google's are.
+const (
+	pgAdminUser        = "cloudsqladmin"
+	pgAlloyDBAdminUser = "alloydbadmin"
+)
 
 // The roles Cloud SQL for PostgreSQL makes its IAM users members of.
 const (
@@ -334,8 +363,20 @@ func pgEnsureHBA(ctx context.Context, c *pgx.Conn, lines ...string) error {
 // CreateUser creates a login role able to create databases and roles, as
 // Cloud SQL's built-in users are (members of cloudsqlsuperuser, which this
 // server does not have).
+// pgSystem refuses a write to CloudBurrow's management role (#2208), as
+// Cloud SQL refuses one to cloudsqladmin.
+func pgSystem(u User) error {
+	if u.Name == pgAdminUser || u.Name == pgAlloyDBAdminUser {
+		return Errorf(http.StatusBadRequest, "Invalid request: %s is a system user of the instance, which cannot be created, modified or deleted.", u.Name)
+	}
+	return nil
+}
+
 func (p *Postgres) CreateUser(ctx context.Context, u User, password string) error {
 	if err := checkName("user", u.Name); err != nil {
+		return err
+	}
+	if err := pgSystem(u); err != nil {
 		return err
 	}
 	stmt := "CREATE ROLE " + pgx.Identifier{u.Name}.Sanitize() + " LOGIN CREATEDB CREATEROLE"
@@ -346,6 +387,9 @@ func (p *Postgres) CreateUser(ctx context.Context, u User, password string) erro
 }
 
 func (p *Postgres) UpdateUser(ctx context.Context, u User, password string) error {
+	if err := pgSystem(u); err != nil {
+		return err
+	}
 	if password == "" {
 		return nil
 	}
@@ -353,6 +397,9 @@ func (p *Postgres) UpdateUser(ctx context.Context, u User, password string) erro
 }
 
 func (p *Postgres) DeleteUser(ctx context.Context, u User) error {
+	if err := pgSystem(u); err != nil {
+		return err
+	}
 	if u.Name == p.User {
 		return Errorf(http.StatusBadRequest, "Invalid request: %s is the server's own superuser and cannot be deleted.", u.Name)
 	}

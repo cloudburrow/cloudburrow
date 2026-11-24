@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -23,16 +24,20 @@ import (
 // replicas are the Admin API's, on the Cloud SQL instances screen
 // (consolecloudsqlinstances.go); IAM database authentication is not served.
 // The screen says so rather than leaving a developer to infer either.
-type cloudSQLProvider struct{ endpoint string }
+type cloudSQLProvider struct {
+	endpoint string
+	// password is the application user's generated password (#2208),
+	// which the server checks as it checks every sign-in.
+	password string
+}
 
 func (cloudSQLProvider) ID() string    { return "cloudsql" }
 func (cloudSQLProvider) Title() string { return "Cloud SQL" }
 
 // connect opens a connection to one database on the local server.
 //
-// No password: the server runs with trust authentication, consistently with
-// the rest of CloudBurrow, which authenticates nothing. The endpoint is
-// loopback-bound for that reason.
+// It signs in as the application's user with its generated password, which
+// the server checks as it checks every sign-in (#2208).
 func (p cloudSQLProvider) connect(ctx context.Context, database string) (*pgx.Conn, error) {
 	host, port, err := net.SplitHostPort(p.endpoint)
 	if err != nil {
@@ -41,9 +46,9 @@ func (p cloudSQLProvider) connect(ctx context.Context, database string) (*pgx.Co
 	if database == "" {
 		database = components.CloudSQLDatabase
 	}
-	url := fmt.Sprintf("postgres://%s@%s:%s/%s?sslmode=disable",
-		components.CloudSQLUser, host, port, database)
-	return pgx.Connect(ctx, url)
+	u := url.URL{Scheme: "postgres", User: url.UserPassword(components.CloudSQLUser, p.password),
+		Host: net.JoinHostPort(host, port), Path: "/" + database, RawQuery: "sslmode=disable"}
+	return pgx.Connect(ctx, u.String())
 }
 
 const cloudSQLNote = "A real PostgreSQL: Google publishes no Cloud SQL emulator. " +

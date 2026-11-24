@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -26,12 +25,12 @@ import (
 
 // databaseHandshake is the handshake for a service's tunnel, or nil for a
 // service with no database protocol.
-func databaseHandshake(s config.Service, mysqlCreds components.MySQLCredentials) netfwd.Handshake {
+func databaseHandshake(s config.Service, mysqlCreds components.MySQLCredentials, pgCreds components.PostgresCredentials) netfwd.Handshake {
 	switch s {
 	case config.ServiceCloudSQLMySQL:
 		return func(ctx context.Context, addr string) error { return mysqlHandshake(ctx, addr, mysqlCreds) }
 	case config.ServiceCloudSQL:
-		return postgresHandshake
+		return func(ctx context.Context, addr string) error { return postgresHandshake(ctx, addr, pgCreds.Password) }
 	}
 	return nil
 }
@@ -65,15 +64,9 @@ func mysqlHandshake(ctx context.Context, addr string, creds components.MySQLCred
 }
 
 // postgresHandshake connects as the application's user to its database,
-// with the trust authentication the server runs, and runs SELECT 1.
-func postgresHandshake(ctx context.Context, addr string) error {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return err
-	}
-	url := fmt.Sprintf("postgres://%s@%s:%s/%s?sslmode=disable",
-		components.CloudSQLUser, host, port, components.CloudSQLDatabase)
-	conn, err := pgx.Connect(ctx, url)
+// with its generated password (#2208), and runs SELECT 1.
+func postgresHandshake(ctx context.Context, addr, password string) error {
+	conn, err := pgx.Connect(ctx, cloudSQLURLWithPassword(addr, password))
 	if err != nil {
 		return fmt.Errorf("PostgreSQL login as %s through %s: %w", components.CloudSQLUser, addr, err)
 	}

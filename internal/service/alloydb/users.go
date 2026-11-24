@@ -2,6 +2,9 @@ package alloydb
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -18,9 +21,25 @@ import (
 
 func timeAfter(ms int) <-chan time.Time { return time.After(time.Duration(ms) * time.Millisecond) }
 
-// pgConn connects to server's PostgreSQL as user (the superuser when ""),
-// to database ("postgres" when "").
+// pgConn connects to server's PostgreSQL as CloudBurrow's management
+// role, to database ("postgres" when "").
 func (s *Server) pgConn(ctx context.Context, server, user, database string) (*pgx.Conn, error) {
+	return s.pgConnAs(ctx, server, user, "", database)
+}
+
+// iamRolePassword is the password of an IAM user's role (#2208): derived
+// from the management role's, so the same on every server of every
+// cluster, a replica's copy included, and known to no user.
+func (s *Server) iamRolePassword(role string) string {
+	m := hmac.New(sha256.New, []byte(s.opts.AdminPassword))
+	m.Write([]byte("alloydb-iam-role\x00" + role))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// pgConnAs connects to server's PostgreSQL as user with password (the
+// management role, or the superuser where there is none, when user is
+// ""), to database ("postgres" when "").
+func (s *Server) pgConnAs(ctx context.Context, server, user, password, database string) (*pgx.Conn, error) {
 	if s.opts.Engine == nil {
 		return nil, apierror.FailedPrecondition("no engine runs AlloyDB instances here")
 	}
@@ -30,6 +49,9 @@ func (s *Server) pgConn(ctx context.Context, server, user, database string) (*pg
 	}
 	if user == "" {
 		user = builtinUser
+		if s.opts.AdminUser != "" && s.opts.AdminPassword != "" {
+			user, password = s.opts.AdminUser, s.opts.AdminPassword
+		}
 	}
 	if database == "" {
 		database = "postgres"
@@ -38,7 +60,7 @@ func (s *Server) pgConn(ctx context.Context, server, user, database string) (*pg
 	if err != nil {
 		return nil, apierror.Internal(err, "connection settings")
 	}
-	cfg.User, cfg.Database = user, database
+	cfg.User, cfg.Database, cfg.Password = user, database, password
 	cfg.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
@@ -99,8 +121,11 @@ END$$`}
 	for _, u := range users {
 		id := u.GetName()[strings.LastIndex(u.GetName(), "/")+1:]
 		pw := ""
-		if u.GetUserType() == alloydbpb.User_ALLOYDB_BUILT_IN {
+		switch u.GetUserType() {
+		case alloydbpb.User_ALLOYDB_BUILT_IN:
 			pw = password
+		case alloydbpb.User_ALLOYDB_IAM_USER:
+			pw = s.iamRolePassword(roleName(id))
 		}
 		stmts = append(stmts, ensureRole(roleName(id), pw, u.GetUserType() == alloydbpb.User_ALLOYDB_BUILT_IN && id == builtinUser)...)
 		for _, r := range u.GetDatabaseRoles() {
@@ -186,7 +211,12 @@ func (s *Server) CreateUser(ctx context.Context, req *alloydbpb.CreateUserReques
 	defer conn.Close(ctx)
 	role := roleName(req.GetUserId())
 	stmts := []string{"CREATE ROLE " + quoteIdent(role) + " WITH LOGIN"}
-	if u.GetPassword() != "" {
+	switch {
+	case u.GetUserType() == alloydbpb.User_ALLOYDB_IAM_USER:
+		// Its token is checked by the connectors' proxy, which then signs
+		// in with the role's own password (#2208).
+		stmts[0] += " PASSWORD " + quoteLiteral(s.iamRolePassword(role))
+	case u.GetPassword() != "":
 		stmts[0] += " PASSWORD " + quoteLiteral(u.GetPassword())
 	}
 	for _, r := range u.GetDatabaseRoles() {
@@ -424,7 +454,9 @@ func (s *Server) ExecuteSql(ctx context.Context, req *alloydbpb.ExecuteSqlReques
 	if req.GetValidateOnly() {
 		return &alloydbpb.ExecuteSqlResponse{}, nil
 	}
-	conn, err := s.pgConn(ctx, server, roleName(req.GetUser()), req.GetDatabase())
+	// Signed in as the user with the password given, which the server
+	// checks (#2208).
+	conn, err := s.pgConnAs(ctx, server, roleName(req.GetUser()), req.GetPassword(), req.GetDatabase())
 	if err != nil {
 		return nil, err
 	}
