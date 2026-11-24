@@ -305,6 +305,29 @@ send nothing can move the credential to another universe itself, as the second r
 container: Go and Node must make no attempt, and Python fails on any attempt but this lookup and
 skips, naming #1981, while the lookup remains.
 
+## Unconfined containers: opt-in (#2162)
+
+The Dataproc DOCKER optional component gives each cluster node a Docker daemon. CloudBurrow runs
+it rootless (the official `docker:*-dind-rootless` image, never `--privileged`), but rootless
+Docker-in-Docker still needs `--security-opt seccomp=unconfined`, `apparmor=unconfined` and
+`systempaths=unconfined` (the `/proc` and `/sys` masks lifted) and `/dev/net/tun`. Those options
+take away layers that keep a container from the kernel of the machine it runs on, so a job that
+escapes its nested container has fewer barriers left between it and this machine.
+
+So it is off by default, as the user decided (2026-11-23):
+
+- Only an instance started with `cloudburrow up --allow-unconfined-containers` (or
+  `CLOUDBURROW_ALLOW_UNCONFINED_CONTAINERS=true`, or `"allowUnconfinedContainers": true` in a
+  config file named with `--config`) runs such containers. A `./cloudburrow.json` discovered in the
+  working directory cannot turn it on.
+- The choice is recorded in the instance's runtime file and shown by `cloudburrow status`
+  (`containers:` line; `allow_unconfined_containers` in `--format json`), and `up` prints a
+  warning in its banner when it is on.
+- Without it, `CreateCluster` (and a workflow template's managed cluster) with the DOCKER
+  component, and `StartCluster` of a stopped DOCKER cluster, answer `FAILED_PRECONDITION` (HTTP 400,
+  status `FAILED_PRECONDITION`), whose message says how to opt in. The CLI does not even give the
+  Spark runner the dind image.
+
 ## What remains
 
 - **Any page served from a loopback origin is trusted.** Another local dev server, or anything

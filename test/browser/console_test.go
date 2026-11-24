@@ -633,7 +633,8 @@ func (p *tab) waitForWithin(expr string, limit time.Duration) {
 }
 
 // contextReplaced reports whether err is Chrome refusing an evaluation in an
-// execution context a navigation has just replaced.
+// execution context a navigation has just replaced (or, as a form's own
+// submission does, navigated away from mid-evaluation).
 func contextReplaced(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "Cannot find context with specified id") ||

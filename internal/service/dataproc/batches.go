@@ -114,9 +114,21 @@ func checkBatch(b *dataprocpb.Batch) error {
 		if err := gs("pyspark_notebook_batch.notebook_file_uri", p.GetNotebookFileUri(), true); err != nil {
 			return err
 		}
-		return status.Errorf(codes.Unimplemented, "PySpark notebook batches are not served by CloudBurrow yet: run the notebook's code as a pyspark_batch")
+		for k := range p.GetParams() {
+			if !pyIdentRE.MatchString(k) {
+				return apierror.InvalidArgument("pyspark_notebook_batch.params key %q is not a Python identifier", k)
+			}
+		}
+		for _, f := range []struct {
+			field string
+			uris  []string
+		}{{"python_file_uris", p.GetPythonFileUris()}, {"jar_file_uris", p.GetJarFileUris()}, {"file_uris", p.GetFileUris()}, {"archive_uris", p.GetArchiveUris()}} {
+			if err := all("pyspark_notebook_batch."+f.field, f.uris); err != nil {
+				return err
+			}
+		}
 	default:
-		return apierror.InvalidArgument("batch needs one of pyspark_batch, spark_batch, spark_r_batch and spark_sql_batch")
+		return apierror.InvalidArgument("batch needs one of pyspark_batch, spark_batch, spark_r_batch, spark_sql_batch and pyspark_notebook_batch")
 	}
 	if len(b.GetLabels()) > maxLabels {
 		return apierror.InvalidArgument("No more than %d labels can be associated with a batch", maxLabels)
@@ -392,6 +404,7 @@ func (s *Server) runBatch(ctx context.Context, name string) {
 		cancel()
 	}
 	s.endBatch(name, res, err, ctx.Err() != nil, started)
+	s.copyToPHS(snap.GetEnvironmentConfig().GetPeripheralsConfig().GetSparkHistoryServerConfig().GetDataprocCluster(), snap.GetUuid())
 }
 
 func batchProjectLocation(name string) (string, string) {
@@ -533,6 +546,17 @@ func (s *Server) batchJob(ctx context.Context, b *dataprocpb.Batch, project, loc
 		job.Kind, job.Language, job.Args = sparkproc.KindSparkR, "R", p.GetArgs()
 		job.Main = one(p.GetMainRFileUri())
 		job.Files, job.Archives = many(p.GetFileUris()), many(p.GetArchiveUris())
+	case *dataprocpb.Batch_PysparkNotebookBatch:
+		p := w.PysparkNotebookBatch
+		job.Kind, job.Language, job.IPython = sparkproc.KindPySpark, "PYTHON", true
+		if nb := one(p.GetNotebookFileUri()); nb != nil {
+			script, e := notebookScript(nb.Data, p.GetParams())
+			if e != nil {
+				return job, fmt.Errorf("%s: %w", nb.URI, e)
+			}
+			job.Main = &sparkproc.File{URI: strings.TrimSuffix(nb.URI, ".ipynb") + ".py", Data: []byte(script)}
+		}
+		job.PyFiles, job.Jars, job.Files, job.Archives = many(p.GetPythonFileUris()), many(p.GetJarFileUris()), many(p.GetFileUris()), many(p.GetArchiveUris())
 	case *dataprocpb.Batch_SparkSqlBatch:
 		p := w.SparkSqlBatch
 		job.Kind, job.Language, job.QueryVariables = sparkproc.KindSparkSQL, "SQL", p.GetQueryVariables()
@@ -548,7 +572,7 @@ func baseJob(id, project, location, name string, rc *dataprocpb.RuntimeConfig, e
 	ec := env.GetExecutionConfig()
 	job := sparkproc.Job{SparkJobID: id, Project: project, Location: location, Procedure: name,
 		Properties: rc.GetProperties(), RuntimeVersion: rc.GetVersion(), ContainerImage: rc.GetContainerImage(),
-		ServiceAccount: ec.GetServiceAccount(), KMSKey: ec.GetKmsKey()}
+		ServiceAccount: ec.GetServiceAccount(), KMSKey: ec.GetKmsKey(), AppID: appID(id)}
 	if sa := ec.GetServiceAccount(); sa != "" {
 		// The workload runs as its service account: the BigQuery
 		// connector's token is one minted for it.

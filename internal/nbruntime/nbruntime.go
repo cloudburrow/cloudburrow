@@ -41,10 +41,10 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed image/Dockerfile image/kernel.py image/relay.py
+//go:embed image/Dockerfile image/kernel.py image/relay.py image/requirements.txt image/build-requirements.txt
 var context_ embed.FS
 
-var contextFiles = []string{"Dockerfile", "kernel.py", "relay.py"}
+var contextFiles = []string{"Dockerfile", "kernel.py", "relay.py", "requirements.txt", "build-requirements.txt"}
 
 // Tag is the runtime image's tag: its build context's hash, so a changed
 // Dockerfile or kernel is a new image, never a stale one.
@@ -338,7 +338,7 @@ func (m *Manager) launch(ctx context.Context, s *session) error {
 	}
 	suffix = strings.Trim(suffix, "-") + fmt.Sprintf("-%d", time.Now().UnixNano()%1e6)
 	network, relay, kernel := "cb-nb-net-"+suffix, "cb-nb-relay-"+suffix, "cb-nb-"+suffix
-	label := "cloudburrow.instance=" + m.Instance
+	label := "io.cloudburrow.instance=" + m.Instance // sparkproc.InstanceLabel: swept by stop
 	image := Tag()
 
 	if out, err := m.docker(ctx, "network", "create", "--internal", "--label", label, network); err != nil {

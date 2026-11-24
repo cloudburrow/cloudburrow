@@ -810,6 +810,14 @@ type Config struct {
 	// set it.
 	CloudBuildHostSteps bool `json:"cloudbuildHostSteps,omitempty"`
 
+	// AllowUnconfinedContainers lets the instance run containers with
+	// seccomp, AppArmor and the /proc and /sys masks unconfined (#2162):
+	// the Dataproc DOCKER optional component's rootless Docker daemons. That
+	// weakens the isolation between those containers and this machine, so
+	// it is opt-in; without it a cluster with DOCKER is refused
+	// FAILED_PRECONDITION. A discovered ./cloudburrow.json cannot set it.
+	AllowUnconfinedContainers bool `json:"allowUnconfinedContainers,omitempty"`
+
 	// ArtifactRegistryCleanupInterval is how often Artifact Registry's
 	// cleanup policies run (#1897); zero is Google's, about once a day.
 	ArtifactRegistryCleanupInterval Duration `json:"artifactRegistryCleanupInterval,omitempty"`

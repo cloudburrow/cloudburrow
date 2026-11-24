@@ -24,6 +24,9 @@ const connectReady = "Spark Connect server started"
 type Connect struct {
 	// Addr is the server's address on the host (127.0.0.1:port).
 	Addr string
+	// KernelAddr is a Jupyter session's kernel server's address on the
+	// host (its Jupyter Server REST and websocket API), "" for none.
+	KernelAddr string
 
 	p      *prepared
 	cancel context.CancelFunc
@@ -35,6 +38,9 @@ type Connect struct {
 
 // Address is Addr.
 func (c *Connect) Address() string { return c.Addr }
+
+// KernelHost is KernelAddr.
+func (c *Connect) KernelHost() string { return c.KernelAddr }
 
 // Done is closed when the server has stopped.
 func (c *Connect) Done() <-chan struct{} { return c.done }
@@ -62,7 +68,11 @@ func (d *Docker) StartConnect(ctx context.Context, job Job) (*Connect, error) {
 			return nil, errors.New(res.KeyRefused)
 		}
 	}
-	p, failed, err := d.prepare(ctx, job, ConnectPort)
+	ports := []string{ConnectPort}
+	if job.Kernel != "" {
+		ports = append(ports, KernelPort)
+	}
+	p, failed, err := d.prepare(ctx, job, ports...)
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +121,12 @@ func (d *Docker) StartConnect(ctx context.Context, job Job) (*Connect, error) {
 	}()
 	select {
 	case <-ready:
+		if job.Kernel != "" {
+			if err := d.startKernels(ctx, job, p, c); err != nil {
+				c.Stop()
+				return nil, err
+			}
+		}
 		return c, nil
 	case <-c.done:
 		res := c.Result()

@@ -30,6 +30,11 @@ func (s *Server) Register(g grpc.ServiceRegistrar) {
 	dataprocpb.RegisterBatchControllerServer(g, s)
 	dataprocpb.RegisterSessionControllerServer(g, s)
 	dataprocpb.RegisterSessionTemplateControllerServer(g, s)
+	dataprocpb.RegisterClusterControllerServer(g, s)
+	dataprocpb.RegisterJobControllerServer(g, s)
+	dataprocpb.RegisterAutoscalingPolicyServiceServer(g, s)
+	dataprocpb.RegisterWorkflowTemplateServiceServer(g, s)
+	dataprocpb.RegisterNodeGroupControllerServer(g, s)
 	longrunningpb.RegisterOperationsServer(g, &operations{s: s})
 	locations.Register(g, &locationsServer{})
 }
@@ -51,7 +56,12 @@ func (s *Server) finishOpLocked(name string, response proto.Message, err error) 
 	}
 	op.Done = true
 	if err != nil {
-		st, _ := status.FromError(apierror.Wrap(err))
+		// A workload's failure keeps its code and message (a status of
+		// codes.Unknown is the workload's, not an internal error).
+		st, ok := status.FromError(err)
+		if !ok {
+			st, _ = status.FromError(apierror.Wrap(err))
+		}
 		op.Result = &longrunningpb.Operation_Error{Error: st.Proto()}
 	} else if response != nil {
 		a, _ := anypb.New(response)
@@ -65,6 +75,14 @@ func (s *Server) finishOpLocked(name string, response proto.Message, err error) 
 				md.DoneTime = done
 			case *dataprocpb.SessionOperationMetadata:
 				md.DoneTime = done
+			case *dataprocpb.ClusterOperationMetadata:
+				if md.Status != nil {
+					md.StatusHistory = append(md.StatusHistory, md.Status)
+				}
+				md.Status = &dataprocpb.ClusterOperationStatus{State: dataprocpb.ClusterOperationStatus_DONE, InnerState: "DONE", StateStartTime: done}
+				if err != nil {
+					md.Status.InnerState, md.Status.Details = "FAILED", err.Error()
+				}
 			}
 			op.Metadata, _ = anypb.New(m)
 		}
@@ -180,6 +198,14 @@ func (o *operations) CancelOperation(_ context.Context, req *longrunningpb.Cance
 		}
 	}
 	if batch == nil {
+		var wf dataprocpb.WorkflowMetadata
+		if op.GetMetadata().UnmarshalTo(&wf) == nil && wf.Template != "" {
+			// "Cancels the workflow: its jobs are cancelled and a managed
+			// cluster is deleted" (operations.cancel on a workflow's
+			// operation, as the workflows guide has it).
+			s.wfCancel[op.Name] = true
+			return &emptypb.Empty{}, nil
+		}
 		return nil, status.Errorf(codes.FailedPrecondition, "Operation %s cannot be cancelled", op.Name)
 	}
 	if batch.State == dataprocpb.Batch_PENDING || batch.State == dataprocpb.Batch_RUNNING {

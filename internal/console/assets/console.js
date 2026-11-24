@@ -455,6 +455,17 @@ const ROUTES = [
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
   { path: "/bigquery-dataform-settings", service: "dataform-settings", icon: "bigquery", title: "Dataform settings", kind: "Configuration",
     section: "Databases", product: "bigquery", productTitle: "BigQuery" },
+  // Dataproc on Compute Engine (#2162): clusters, jobs, workflow templates
+  // and autoscaling policies, above Serverless as Google's Dataproc menu
+  // has them.
+  { path: "/dataproc/clusters", service: "dataproc-clusters", icon: "dataproc", title: "Clusters", kind: "Cluster",
+    section: "Databases", product: "dataproc", productTitle: "Dataproc" },
+  { path: "/dataproc/jobs", service: "dataproc-jobs", icon: "dataproc", title: "Jobs", kind: "Job",
+    section: "Databases", product: "dataproc", productTitle: "Dataproc" },
+  { path: "/dataproc/workflows/templates", service: "dataproc-workflows", icon: "dataproc", title: "Workflows", kind: "Workflow template",
+    section: "Databases", product: "dataproc", productTitle: "Dataproc" },
+  { path: "/dataproc/autoscalingPolicies", service: "dataproc-autoscaling", icon: "dataproc", title: "Autoscaling policies", kind: "Autoscaling policy",
+    section: "Databases", product: "dataproc", productTitle: "Dataproc" },
   // Serverless for Apache Spark (#2156), the Dataproc API's batches,
   // interactive Spark Connect sessions and session templates, under
   // Dataproc's Serverless menu as Google's console has them.

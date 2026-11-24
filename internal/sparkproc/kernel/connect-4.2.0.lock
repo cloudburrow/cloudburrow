@@ -1,0 +1,3 @@
+# Spark 4.2.0's Scala Connect client (#2162), from Maven Central by SHA-256.
+c31e52a432ee2b7325cd6b4640e99869999c2b4fbbb6b11ea0651102063efb7d https://repo1.maven.org/maven2/org/apache/spark/spark-connect-client-jvm_2.13/4.2.0/spark-connect-client-jvm_2.13-4.2.0.jar
+248a5841410bdd394acd5168bdb6f78160a957a78ff0edfa3bc061a594943a42 https://repo1.maven.org/maven2/org/apache/spark/spark-connect-shims_2.13/4.2.0/spark-connect-shims_2.13-4.2.0.jar
