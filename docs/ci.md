@@ -239,6 +239,17 @@ Landing 168 gave every VM its own metadata server, vTPM and VPC data plane: its 
 `TestCompatVMShardsSplitTheServedShard` fails unless each of the served instance's tests but the
 Kubernetes Engine ones runs in exactly one of the three shards.
 
+`vpcvms` runs a browser step too: Landing 168's Compute Engine and VPC console tests
+(`COMPAT_BROWSER_VPCVMS_TEST_NAMES`: VM instances, Shared VPC, Cloud Router and NAT, Private Service
+Connect, Serverless VPC Access, load balancer Edit, Cloud Armor, Cloud CDN, IAP, Certificate
+Manager, network security, Secure Web Proxy), whose screens are drawn only where Compute Engine is
+served. They fell to the `storage` shard's browser step, the rest of the suite, which skipped all 43
+in main run 45422957668 and failed. Each shard's browser tests come from `compat_browser_select`,
+which ci.yml and `scripts/verify-local.sh` both call, and `cmd/cloudburrow`'s
+`TestBrowserTestsRunWhereTheirScreensAreServed` fails unless every browser test but the never-run
+ones is selected by exactly one browser shard whose `--services` draw each screen it names with
+`needService`.
+
 ### The localaispeech shard
 
 The compat job's `localaispeech` shard runs on the `localai` shard's instance again (the same
