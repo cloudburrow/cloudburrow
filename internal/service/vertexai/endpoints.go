@@ -251,6 +251,8 @@ func (s *Server) endpointPredict(ctx context.Context, project, location, endpoin
 	if err := prediction.ValidateResponse(req, resp); err != nil {
 		return nil, apierror.Internal(err, "endpoint %s broke the prediction contract: %v", endpoint, err)
 	}
+	// Model Monitoring's request logging (modelmonitor.go, #2214).
+	s.logPrediction(project, location, endpoint, a.deployedModel, a.model, req.Instances, resp.Predictions)
 	if a.deployedModel != "" {
 		return withDeployedModelID(a.body, a.deployedModel, a.model), nil
 	}

@@ -53,6 +53,7 @@ import (
 	"unicode/utf8"
 
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
+	betapb "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"github.com/robfig/cron/v3"
 	"google.golang.org/genproto/googleapis/rpc/status"
@@ -117,6 +118,9 @@ func (st *notebookStore) checkSchedule(parent string, sc *aiplatformpb.Schedule)
 	}
 	switch r := sc.GetRequest().(type) {
 	case nil:
+		if st.mon != nil && st.mon.SchedReqs[sc.GetName()] != nil {
+			return nil // a v1beta1 model monitoring schedule (modelmonitorsched.go)
+		}
 		return apierror.InvalidArgument("schedule.request is required: create_notebook_execution_job_request or create_pipeline_job_request")
 	case *aiplatformpb.Schedule_CreatePipelineJobRequest:
 		req := r.CreatePipelineJobRequest
@@ -293,6 +297,10 @@ func (x *scheduleService) DeleteSchedule(_ context.Context, req *aiplatformpb.De
 		return nil, grpcError(err)
 	}
 	delete(st.schedules, req.GetName())
+	if st.mon != nil && st.mon.SchedReqs[req.GetName()] != nil {
+		delete(st.mon.SchedReqs, req.GetName())
+		st.saveMonitoring()
+	}
 	st.save()
 	st.mu.Unlock()
 	return x.s.finished(req.GetName(), &aiplatformpb.DeleteOperationMetadata{GenericMetadata: generic()}, &emptypb.Empty{}, nil)
@@ -460,6 +468,13 @@ func (st *notebookStore) activeRuns(name string) int64 {
 			n++
 		}
 	}
+	if st.mon != nil {
+		for _, j := range st.mon.Jobs {
+			if j.GetSchedule() == name && (j.GetState() == betapb.JobState_JOB_STATE_PENDING || j.GetState() == betapb.JobState_JOB_STATE_RUNNING) {
+				n++
+			}
+		}
+	}
 	return n
 }
 
@@ -503,6 +518,8 @@ func (s *Server) stopScheduler() {
 
 // runDueSchedules starts the runs that are due.
 func (s *Server) runDueSchedules() {
+	// Model Monitoring v1's runs (mdmjobs.go, #2214).
+	s.runDueMDM()
 	st := s.notebooks()
 	var runs []dueRun
 	st.mu.Lock()
@@ -530,6 +547,10 @@ func (s *Server) runDueSchedules() {
 		}
 		st.complete(sc)
 		st.save()
+		if st.mon != nil && st.mon.SchedReqs[k] != nil {
+			runs = append(runs, dueRun{name: k, monitor: proto.Clone(st.mon.SchedReqs[k]).(*betapb.CreateModelMonitoringJobRequest), at: at})
+			continue
+		}
 		if req := sc.GetCreatePipelineJobRequest(); req != nil {
 			runs = append(runs, dueRun{name: k, parent: req.GetParent(), pipeline: proto.Clone(req.GetPipelineJob()).(*aiplatformpb.PipelineJob), at: at})
 			continue
@@ -539,6 +560,19 @@ func (s *Server) runDueSchedules() {
 	}
 	st.mu.Unlock()
 	for _, r := range runs {
+		if r.monitor != nil {
+			r.monitor.ModelMonitoringJobId = ""
+			if r.monitor.GetModelMonitoringJob().GetDisplayName() == "" && r.monitor.ModelMonitoringJob != nil {
+				st.mu.Lock()
+				if sc := st.schedules[r.name]; sc != nil {
+					r.monitor.ModelMonitoringJob.DisplayName = sc.GetDisplayName()
+				}
+				st.mu.Unlock()
+			}
+			j, err := s.createMonitoringJob(r.monitor, r.name, r.at)
+			s.recordRun(r, j.GetName(), err)
+			continue
+		}
 		if r.pipeline != nil {
 			if r.pipeline.GetDisplayName() == "" {
 				st.mu.Lock()
@@ -587,6 +621,7 @@ type dueRun struct {
 	name, parent string
 	job          *aiplatformpb.NotebookExecutionJob
 	pipeline     *aiplatformpb.PipelineJob
+	monitor      *betapb.CreateModelMonitoringJobRequest
 	at           time.Time
 }
 

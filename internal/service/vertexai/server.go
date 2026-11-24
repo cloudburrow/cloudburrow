@@ -161,6 +161,17 @@ func (s *Server) Handler() http.Handler {
 	// Workbench instances, notebooks.googleapis.com v2 (#2173).
 	mux.HandleFunc("/v2/projects/{project}/locations/{location}/instances", s.serveNotebookREST)
 	mux.HandleFunc("/v2/projects/{project}/locations/{location}/instances/", s.serveNotebookREST)
+	// Model Monitoring and data labeling jobs (#2214): v1's
+	// modelDeploymentMonitoringJobs and dataLabelingJobs, v1beta1's
+	// modelMonitors and schedules (a monitoring run's).
+	for _, c := range []string{"modelDeploymentMonitoringJobs", "dataLabelingJobs"} {
+		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c, s.serveNotebookREST)
+		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
+	}
+	for _, c := range []string{"modelMonitors", "schedules"} {
+		mux.HandleFunc("/v1beta1/projects/{project}/locations/{location}/"+c, s.serveNotebookREST)
+		mux.HandleFunc("/v1beta1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
+	}
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/pipelineJobs:batchDelete", s.serveNotebookREST)
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/pipelineJobs:batchCancel", s.serveNotebookREST)
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/notebookRuntimeTemplates:setDefault", s.setDefaultREST)

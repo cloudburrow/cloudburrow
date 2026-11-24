@@ -39,6 +39,9 @@ const AP_PATHS = {
 };
 const AP_DOCS = "https://docs.cloud.google.com/gemini-enterprise-agent-platform/";
 
+// Agent Platform's Monitoring page's tabs (#2214).
+const MONITOR_TABS = ["/agent-platform/model-monitoring/model-monitors", "/agent-platform/model-monitoring/schedules", "/agent-platform/model-monitoring/deployment-jobs"];
+
 function agentPlatformRoutes() {
   const base = { section: "AI and machine learning", product: "vertexai", productTitle: "Agent Platform", icon: "ai" };
   const page = (path, title, group, more) => ({ ...base, path, title, group, ...more });
@@ -150,8 +153,25 @@ function agentPlatformRoutes() {
     // Deploy and use.
     absent(`${AP}/matching-engine/indexes`, "Vector Search", "Deploy and use", "projects.locations.indexes and indexEndpoints",
       "Vector indexes and the endpoints that serve them", AP_DOCS + "build"),
-    absent(`${AP}/model-monitoring/model-monitors`, "Monitoring", "Deploy and use", "projects.locations.modelMonitors",
-      "Model monitors for drift and skew", AP_DOCS + "machine-learning"),
+    // Model Monitoring (#2214): "In the Google Cloud console, go to the
+    // Monitoring page. Click Configure monitoring"
+    // (https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/set-up-model-monitoring,
+    // read 2026-11-24). The tabs' names are CloudBurrow's (UNVERIFIED).
+    page(`${AP}/model-monitoring/model-monitors`, "Monitoring", "Deploy and use", { service: "vertex-model-monitors", listedWhenOff: true, tabTitle: "Model monitors",
+      pageTabs: MONITOR_TABS, kind: "Model monitor",
+      api: "v1beta1 projects.locations.modelMonitors", about: "Model monitors, their runs, feature statistics and alerts",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/set-up-model-monitoring",
+      instead: "Start CloudBurrow with --services including run and storage: a monitor's model is in the Model Registry, and its datasets in Cloud Storage." }),
+    page(`${AP}/model-monitoring/schedules`, "Monitoring", "Deploy and use", { service: "vertex-model-monitoring-schedules", listedWhenOff: true, tabTitle: "Schedules",
+      navHidden: true, navAs: `${AP}/model-monitoring/model-monitors`, pageTabs: MONITOR_TABS, kind: "Schedule",
+      api: "v1beta1 projects.locations.schedules", about: "Recurring monitoring runs, with Pause, Resume and Delete",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/run-monitoring-job",
+      instead: "Start CloudBurrow with --services including run and storage." }),
+    page(`${AP}/model-monitoring/deployment-jobs`, "Monitoring", "Deploy and use", { service: "vertex-model-deployment-monitoring", listedWhenOff: true, tabTitle: "Deployment monitoring jobs",
+      navHidden: true, navAs: `${AP}/model-monitoring/model-monitors`, pageTabs: MONITOR_TABS, kind: "Monitoring job",
+      api: "projects.locations.modelDeploymentMonitoringJobs", about: "Skew and drift monitoring of an endpoint's deployed models, with Pause, Resume and Delete",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/using-model-monitoring",
+      instead: "Start CloudBurrow with --services including run and storage: a job watches a Model Registry endpoint." }),
   ];
 }
 

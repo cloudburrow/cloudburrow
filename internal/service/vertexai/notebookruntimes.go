@@ -71,6 +71,7 @@ import (
 	"unicode/utf8"
 
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
+	betapb "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	nbpb "cloud.google.com/go/notebooks/apiv2/notebookspb"
@@ -202,6 +203,9 @@ type notebookStore struct {
 	// pipelineRunner.
 	pipelines      map[string]*pipelineEntry
 	pipelineRunner PipelineRunner
+	// mon is Model Monitoring's resources (modelmonitor.go,
+	// mdmjobs.go, #2214), saved beside file.
+	mon *monitorState
 }
 
 // runtimeEntry is a runtime and what its lifecycle needs.
@@ -237,6 +241,7 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.host, st.file = host, file
+	st.loadMonitoringState()
 	b, err := os.ReadFile(file)
 	if err != nil {
 		return
@@ -278,6 +283,14 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 		st.owners[k] = v
 	}
 	st.loadPipelines(saved.Pipelines)
+}
+
+// loadMonitoringState reads Model Monitoring's state, which
+// SetNotebookRuntimes's file has beside it; the caller holds st.mu.
+func (st *notebookStore) loadMonitoringState() {
+	if st.file != "" {
+		st.loadMonitoring()
+	}
 }
 
 // save writes the store; the caller holds st.mu.
@@ -1184,18 +1197,27 @@ func (s *Server) registerNotebooks(srv grpc.ServiceRegistrar) {
 	aiplatformpb.RegisterScheduleServiceServer(srv, &scheduleService{s: s})
 	aiplatformpb.RegisterPipelineServiceServer(srv, &pipelineService{s: s})
 	nbpb.RegisterNotebookServiceServer(srv, &workbenchService{s: s})
+	// Model Monitoring and data labeling jobs (#2214): v1's JobService,
+	// v1beta1's ModelMonitoringService and ScheduleService.
+	aiplatformpb.RegisterJobServiceServer(srv, &jobService{s: s})
+	betapb.RegisterModelMonitoringServiceServer(srv, &modelMonitoringService{s: s})
+	betapb.RegisterScheduleServiceServer(srv, &betaScheduleService{s: s})
 }
 
 // notebookREST is the transcoder for the notebookRuntimeTemplates and
 // notebookRuntimes paths and their operations.
 func (s *Server) notebookREST() *rest.Transcoder {
 	s.nbRESTOnce.Do(func() {
-		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1", "google.cloud.notebooks.v2"}, SnakeCaseMasks: true, Mixins: []*annotations.HttpRule{
+		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1", "google.cloud.aiplatform.v1beta1", "google.cloud.notebooks.v2"}, SnakeCaseMasks: true, Mixins: []*annotations.HttpRule{
 			opRule("/v1/{name=projects/*/locations/*/notebookRuntimeTemplates/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/notebookRuntimes/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/notebookExecutionJobs/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/schedules/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/pipelineJobs/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/modelDeploymentMonitoringJobs/*/operations/*}"),
+			opRule("/v1beta1/{name=projects/*/locations/*/modelMonitors/*/operations/*}"),
+			opRule("/v1beta1/{name=projects/*/locations/*/modelMonitors/*/modelMonitoringJobs/*/operations/*}"),
+			opRule("/v1beta1/{name=projects/*/locations/*/schedules/*/operations/*}"),
 		}}
 		t.Mixins = append(t.Mixins, NotebookIAMMixins()...)
 		s.registerNotebooks(t)

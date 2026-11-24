@@ -244,6 +244,11 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// UNVERIFIED (re-read 2026-11-22): deleting a pipeline run from the
 	// console is not described (run-pipeline, schedule-pipeline-run).
 	"vertex-pipeline-runs": unverified,
+	// Agent Platform Model Monitoring (#2214): Google's docs show no
+	// delete dialog for a monitor, a monitoring schedule or a v1 job.
+	"vertex-model-monitors":              unverified,
+	"vertex-model-monitoring-schedules":  unverified,
+	"vertex-model-deployment-monitoring": unverified,
 	// Vertex AI Workbench instances (#2173): "click Delete ... To confirm,
 	// click Confirm"
 	// (https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart).
