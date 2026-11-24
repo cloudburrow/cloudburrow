@@ -110,6 +110,9 @@ type trialRun struct {
 	// metricsDir is the host folder that is the primary replica's
 	// /tmp/hypertune.
 	metricsDir string
+	// env is more of every replica's environment (a NAS trial's
+	// CLOUD_ML_HP_METRIC_TAG, nasjobs.go).
+	env map[string]string
 }
 
 // trialEnv gives a trial's replica CLOUD_ML_TRIAL_ID and, on the primary,
@@ -120,6 +123,9 @@ func trialEnv(ctx context.Context, c *PipelineContainer, primary bool) {
 		return
 	}
 	c.Env["CLOUD_ML_TRIAL_ID"] = tr.id
+	for k, v := range tr.env {
+		c.Env[k] = v
+	}
 	if primary {
 		c.Mounts["/tmp/hypertune"] = tr.metricsDir
 	}

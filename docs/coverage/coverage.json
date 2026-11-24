@@ -6586,8 +6586,8 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Implemented": 10,
-      "Unimplemented": 14,
+      "Implemented": 17,
+      "Unimplemented": 7,
       "Verified": 196
     },
     "rows": [
@@ -6890,8 +6890,8 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CancelNasJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Neural Architecture Search runs Google's proprietary search controller (#2214); not built yet"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CreateBatchPredictionJob",
@@ -6931,8 +6931,8 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CreateNasJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Neural Architecture Search runs Google's proprietary search controller (#2214); not built yet"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/DeleteBatchPredictionJob",
@@ -6969,8 +6969,8 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/DeleteNasJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Neural Architecture Search runs Google's proprietary search controller (#2214); not built yet"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/GetBatchPredictionJob",
@@ -7010,13 +7010,13 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/GetNasJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Neural Architecture Search runs Google's proprietary search controller (#2214); not built yet"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/GetNasTrialDetail",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Neural Architecture Search runs Google's proprietary search controller (#2214); not built yet"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/ListBatchPredictionJobs",
@@ -7055,13 +7055,13 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/ListNasJobs",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Neural Architecture Search runs Google's proprietary search controller (#2214); not built yet"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/ListNasTrialDetails",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Neural Architecture Search runs Google's proprietary search controller (#2214); not built yet"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/PauseModelDeploymentMonitoringJob",
