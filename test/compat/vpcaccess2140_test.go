@@ -46,9 +46,16 @@ func vpcAccessClient(t *testing.T, h *Harness) *vpcaccess.Client {
 
 // ensureCompatConnector makes the connector runStoredSettings names, when
 // Compute Engine is served: Cloud Run then checks that it exists and is
-// READY (#2140). Without compute, Cloud Run records it unchecked.
-func ensureCompatConnector(h *Harness) {
-	addr := os.Getenv(EnvCompute)
+// READY (#2140). Without compute, Cloud Run records it unchecked. The run
+// and crossservice shards export Compute Engine as their own
+// CLOUDBURROW_TEST_RUN_COMPUTE, not as EnvCompute (main run 45371505851
+// made no connector there); any failure fails the test.
+func ensureCompatConnector(t *testing.T, h *Harness) {
+	t.Helper()
+	addr := strings.TrimSpace(os.Getenv("CLOUDBURROW_TEST_RUN_COMPUTE"))
+	if addr == "" {
+		addr = strings.TrimSpace(os.Getenv(EnvCompute))
+	}
 	if addr == "" {
 		return
 	}
@@ -56,13 +63,16 @@ func ensureCompatConnector(h *Harness) {
 	defer cancel()
 	c, err := vpcaccess.NewRESTClient(ctx, option.WithEndpoint("http://"+addr), option.WithoutAuthentication())
 	if err != nil {
-		return
+		t.Fatalf("vpcaccess client: %v", err)
 	}
 	defer c.Close()
 	op, err := c.CreateConnector(ctx, &vpcaccesspb.CreateConnectorRequest{Parent: "projects/" + h.Project() + "/locations/us-central1",
 		ConnectorId: "compat", Connector: &vpcaccesspb.Connector{Network: "default", IpCidrRange: "10.8.250.0/28"}})
-	if err == nil {
-		_, _ = op.Wait(ctx)
+	if err != nil {
+		t.Fatalf("CreateConnector compat: %v", err)
+	}
+	if _, err := op.Wait(ctx); err != nil {
+		t.Fatalf("waiting for connector compat: %v", err)
 	}
 }
 
