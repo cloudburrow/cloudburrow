@@ -49,6 +49,9 @@ Commands:
   storage-server
               Run the builtin Cloud Storage server alone: the one up runs, with unbuilt methods answering 501 (#485)
   terraform   Run terraform (or --binary tofu) with the google provider pointed here
+  cloud       Run the instance's compute on a VM in your own AWS account or
+              Azure subscription (cloud connect|disconnect|create|status|
+              scale|start|stop|delete|resources)
   status      Report the configured instance and its state
   stop        End a running up, then stop the cluster, preserving state a backend persists
   reset       Destroy CloudBurrow-managed state, keeping the cluster; with an
@@ -293,6 +296,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	case "terraform":
 		// No help flag of our own: `terraform --help` is terraform's.
 		return runTerraform(args[1:], stdout, stderr)
+
+	case "cloud":
+		return runCloud(args[1:], stdout, stderr)
 
 	case "logs":
 		if hasHelpFlag(args[1:]) {
