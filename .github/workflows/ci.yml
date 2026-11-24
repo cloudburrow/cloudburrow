@@ -1254,7 +1254,7 @@ jobs:
           # and the Compute Engine API, whose VMs and disks Backup and DR backs
           # up and restores through the pages (#2084's round, TestBackupDRCompute*),
           # and Cloud Storage, which AlloyDB's Export writes to (#2191).
-          if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE; fi
+          if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE,ALLOYDB; fi
           # The served shard's: the Kubernetes Engine API, whose cluster the
           # pages make is removed through it by name whatever the test
           # reached, and the kubeconfig the Deploy test cleans up with

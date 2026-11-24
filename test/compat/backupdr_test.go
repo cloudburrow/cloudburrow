@@ -82,7 +82,7 @@ func wantBackupDRCode(t *testing.T, what string, err error, code int, contains s
 //
 // Both are read with a database client through the official connector.
 // backups.restore of a Cloud SQL backup is refused (Cloud SQL restores it),
-// and a plan for an AlloyDB cluster with the reason.
+// and a plan for a regional disk with the reason.
 // covers: backupdr.projects.locations.backupVaults.create, backupdr.projects.locations.backupVaults.get, backupdr.projects.locations.backupVaults.list, backupdr.projects.locations.backupVaults.delete, backupdr.projects.locations.backupPlans.create, backupdr.projects.locations.backupPlans.get, backupdr.projects.locations.backupPlans.list, backupdr.projects.locations.backupPlans.delete, backupdr.projects.locations.backupPlanAssociations.create, backupdr.projects.locations.backupPlanAssociations.get, backupdr.projects.locations.backupPlanAssociations.list, backupdr.projects.locations.backupPlanAssociations.delete, backupdr.projects.locations.backupPlanAssociations.triggerBackup, backupdr.projects.locations.backupVaults.dataSources.list, backupdr.projects.locations.backupVaults.dataSources.get, backupdr.projects.locations.backupVaults.dataSources.backups.list, backupdr.projects.locations.backupVaults.dataSources.backups.get, backupdr.projects.locations.backupVaults.dataSources.backups.delete, backupdr.projects.locations.operations.get, backupdr.projects.locations.operations.list, backupdr.projects.locations.list, backupdr.projects.locations.get, sql.instances.restoreBackup, sql.instances.pointInTimeRestore, sql.instances.insert, sql.instances.get, sql.operations.get
 func TestBackupDRCloudSQLRestore(t *testing.T) {
 	h := New(t)
@@ -129,8 +129,8 @@ func TestBackupDRCloudSQLRestore(t *testing.T) {
 	}
 
 	_, err = bdr.Projects.Locations.BackupPlans.Create(loc, &backupdr.BackupPlan{BackupVault: vaultName,
-		ResourceType: "alloydb.googleapis.com/Cluster", BackupRules: dailyRule()}).BackupPlanId("adb-" + suffix).Do()
-	wantBackupDRCode(t, "a plan for an AlloyDB cluster", err, http.StatusNotImplemented, "AlloyDB")
+		ResourceType: "compute.googleapis.com/RegionDisk", BackupRules: dailyRule()}).BackupPlanId("rd-" + suffix).Do()
+	wantBackupDRCode(t, "a plan for a regional disk", err, http.StatusNotImplemented, "regional disks")
 
 	planID := "plan-" + suffix
 	wait(bdr.Projects.Locations.BackupPlans.Create(loc, &backupdr.BackupPlan{BackupVault: vaultName,

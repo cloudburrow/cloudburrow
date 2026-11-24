@@ -53,8 +53,11 @@ type filestoreService struct {
 	// restored from (#1524); nil without backupdr.
 	backupDR filestore.BackupDR
 	server   *grpctransport.Server
-	api      *filestore.Server
-	backend  *filestoreserver.Docker
+	// rest is the JSON API, in process, for Backup and DR's console
+	// pages (#1524); nil until started.
+	rest    http.Handler
+	api     *filestore.Server
+	backend *filestoreserver.Docker
 }
 
 func newFilestoreService(cfg config.Config) *filestoreService {
@@ -83,6 +86,14 @@ func (s *filestoreService) API() *filestore.Server {
 		return nil
 	}
 	return s.api
+}
+
+// REST is the JSON API in process, nil until started.
+func (s *filestoreService) REST() http.Handler {
+	if s == nil {
+		return nil
+	}
+	return s.rest
 }
 
 // Addr is the bound address.
@@ -127,6 +138,7 @@ func (s *filestoreService) Start(ctx context.Context) error {
 		s.server.Interpose(i)
 	}
 	var jsonAPI http.Handler = filestore.NewRESTHandler(api)
+	s.rest = jsonAPI
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}

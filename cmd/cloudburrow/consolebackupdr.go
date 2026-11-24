@@ -35,14 +35,17 @@ type backupDRProvider struct {
 	sql http.Handler
 	// compute is the Compute Engine API (#2075), nil when not served.
 	compute func() *compute.Server
+	// alloydb and filestore are AlloyDB's and Filestore's REST APIs
+	// (#1524); nil, or answering nil, when not served.
+	alloydb, filestore func() http.Handler
 }
 
 func (backupDRProvider) ID() string    { return "backupdr" }
 func (backupDRProvider) Title() string { return "Backup vaults" }
 
-const backupDRNote = "Backup vaults hold the backups of the Cloud SQL instances and Compute Engine VMs and disks their backup plans protect. " +
+const backupDRNote = "Backup vaults hold the backups of the Cloud SQL instances, Compute Engine VMs and disks, AlloyDB clusters and Filestore instances their backup plans protect. " +
 	"A Cloud SQL backup is a real dump of the instance's databases, restored by Cloud SQL; a VM's or disk's holds its disks' contents, " +
-	"restored to a new VM or disk. Other workload types (AlloyDB, Filestore) are not served (docs/backupdr.md)."
+	"restored to a new VM or disk. AlloyDB clusters' and Filestore instances' backups are restored by AlloyDB and Filestore into new clusters and instances (docs/backupdr.md)."
 
 // call sends one request to h and decodes its JSON answer, or returns the
 // API's own error message.

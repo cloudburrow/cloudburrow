@@ -26,24 +26,14 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 )
 
-// bdrResourceTypes are Google's Resource Type choices; Cloud SQL and
-// Compute Engine's VMs and disks (#2075) are served here (docs/backupdr.md).
+// bdrResourceTypes are Google's Resource Type choices: Cloud SQL, Compute
+// Engine's VMs and disks (#2075), AlloyDB clusters and Filestore instances
+// (#1524), each served here while its service is (docs/backupdr.md).
 var bdrResourceTypes = []string{backupdr.CloudSQLResourceType, "compute.googleapis.com/Instance", "compute.googleapis.com/Disk",
 	"alloydb.googleapis.com/Cluster", "file.googleapis.com/Instance"}
 
 var bdrResourceTypeLabels = map[string]string{backupdr.CloudSQLResourceType: "Cloud SQL", "compute.googleapis.com/Instance": "Compute Engine",
 	"compute.googleapis.com/Disk": "Disk", "alloydb.googleapis.com/Cluster": "AlloyDB", "file.googleapis.com/Instance": "Filestore"}
-
-// bdrUnservedTypes are the Resource Type choices drawn disabled, each with
-// why.
-func bdrUnservedTypes() map[string]string {
-	out := map[string]string{}
-	for _, t := range bdrResourceTypes[3:] {
-		out[t] = "Not available locally: CloudBurrow's Backup and DR Service backs up Cloud SQL instances and Compute Engine VMs and disks; " +
-			bdrResourceTypeLabels[t] + " is not served (docs/backupdr.md)."
-	}
-	return out
-}
 
 func bdrTypeLabel(t string) string {
 	if l := bdrResourceTypeLabels[t]; l != "" {
@@ -103,6 +93,10 @@ func (s bdrSource) id() string      { return lastSegment(str(s.ds, "name")) }
 func (s bdrSource) instance() string {
 	g := nested(s.ds, "dataSourceGcpResource")
 	switch str(g, "type") {
+	case backupdr.AlloyDBResourceType:
+		return str(nested(g, "alloyDbClusterDatasourceProperties"), "name")
+	case backupdr.FilestoreResourceType:
+		return str(nested(g, "filestoreInstanceDatasourceProperties"), "name")
 	case backupdr.ComputeInstanceResourceType:
 		return str(nested(g, "computeInstanceDatasourceProperties"), "name")
 	case backupdr.ComputeDiskResourceType:
@@ -444,14 +438,15 @@ func (p bdrVaultedProvider) List(ctx context.Context, project string) (console.L
 	}
 	l := console.Listing{Columns: bdrVaultedColumns, NameColumn: "Resource name", Noun: "protected resources", AlwaysStatus: true,
 		Filters: []*console.Scope{bdrTypeFilter(typ)},
-		Note:    "The resources with a backup plan applied, or with backups in a backup vault of this project: Cloud SQL instances, Compute Engine VMs and disks (docs/backupdr.md)."}
-	if typ != "all" && typ != backupdr.CloudSQLResourceType && !bdrComputeType(typ) {
+		Note: "The resources with a backup plan applied, or with backups in a backup vault of this project: Cloud SQL instances, " +
+			"Compute Engine VMs and disks, AlloyDB clusters and Filestore instances (docs/backupdr.md)."}
+	if typ != "all" && !p.api.bdrServedType(typ) {
 		if _, known := bdrResourceTypeLabels[typ]; !known {
 			l.Unavailable = fmt.Sprintf("%q is not a resource type Backup and DR protects", typ)
 			return l, nil
 		}
 		// A type the service does not back up has no protected resource.
-		l.Note = bdrUnservedTypes()[typ]
+		l.Note = p.api.unservedTypes()[typ]
 		return l, nil
 	}
 	if project == "" {
@@ -495,8 +490,18 @@ func bdrLastState(s string) string {
 }
 
 // CreateForm implements console.Creator: Google's Schedule backup.
-func (bdrVaultedProvider) CreateForm() (string, []console.Field) {
-	return "Schedule backup", bdrScheduleFields(nil, nil, nil, nil, nil, nil, nil, nil)
+func (p bdrVaultedProvider) CreateForm() (string, []console.Field) {
+	return "Schedule backup", p.scheduleFields(bdrScheduleFields(nil, nil, nil, nil, nil, nil, nil, nil), nil, nil, nil, nil)
+}
+
+// scheduleFields are Schedule backup's fields with AlloyDB's clusters and
+// Filestore's instances after the disks, and the types not served drawn
+// disabled.
+func (p bdrVaultedProvider) scheduleFields(f []console.Field, clusters []string, clusterLabels map[string]string, fs []string, fsLabels map[string]string) []console.Field {
+	f[0].UnavailableOptions = p.api.unservedTypes()
+	out := append([]console.Field{}, f[:len(f)-1]...)
+	out = append(out, workloadScheduleFields(clusters, clusterLabels, fs, fsLabels)...)
+	return append(out, f[len(f)-1])
 }
 
 func bdrScheduleFields(instances []string, instLabels map[string]string, plans []string, planLabels map[string]string,
@@ -504,8 +509,7 @@ func bdrScheduleFields(instances []string, instLabels map[string]string, plans [
 	regions := backupdr.Regions
 	return []console.Field{
 		{Name: "resourceType", Label: "Resource Type", Type: "radio", Required: true, Section: "Choose resources",
-			Options: bdrResourceTypes, OptionLabels: bdrResourceTypeLabels, Default: backupdr.CloudSQLResourceType,
-			UnavailableOptions: bdrUnservedTypes()},
+			Options: bdrResourceTypes, OptionLabels: bdrResourceTypeLabels, Default: backupdr.CloudSQLResourceType},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Section: "Choose resources", Options: regions,
 			OptionLabels: bdrRegionLabels(), Default: "us-central1", Help: "The region of the instance."},
 		{Name: "instance", Label: "Resources", Type: "select", Section: "Choose resources", Options: instances,
@@ -531,7 +535,9 @@ func (p bdrVaultedProvider) CreateFormFor(ctx context.Context, project string) [
 	plans, planLabels := p.api.planOptions(ctx, project)
 	vms, vmLabels := bdrResourceOptions(p.api.computeResources(project, "instances"))
 	disks, diskLabels := bdrResourceOptions(p.api.computeResources(project, "disks"))
-	return bdrScheduleFields(sortedKeysOf(inst), labels, plans, planLabels, vms, vmLabels, disks, diskLabels)
+	clusters, clusterLabels := bdrWorkloadOptions(p.api.workloadResources(ctx, project, backupdr.AlloyDBResourceType))
+	fs, fsLabels := bdrWorkloadOptions(p.api.workloadResources(ctx, project, backupdr.FilestoreResourceType))
+	return p.scheduleFields(bdrScheduleFields(sortedKeysOf(inst), labels, plans, planLabels, vms, vmLabels, disks, diskLabels), clusters, clusterLabels, fs, fsLabels)
 }
 
 func (bdrVaultedProvider) CreateOnPage() bool   { return true }
@@ -547,8 +553,14 @@ func (p bdrVaultedProvider) Create(ctx context.Context, project string, v map[st
 	if bdrComputeType(v["resourceType"]) {
 		return p.scheduleCompute(ctx, project, v)
 	}
-	if v["resourceType"] != "" && v["resourceType"] != backupdr.CloudSQLResourceType {
-		return "", fmt.Errorf("%s is not served here: Backup and DR backs up Cloud SQL instances and Compute Engine VMs and disks", bdrTypeLabel(v["resourceType"]))
+	if v["resourceType"] != "" && !p.api.bdrServedType(v["resourceType"]) {
+		if m := p.api.unservedTypes()[v["resourceType"]]; m != "" {
+			return "", errors.New(m)
+		}
+		return "", fmt.Errorf("%q is not a resource type Backup and DR protects", v["resourceType"])
+	}
+	if bdrWorkloadType(v["resourceType"]) {
+		return p.scheduleWorkload(ctx, project, v)
 	}
 	inst := p.api.sqlInstances(ctx, project)
 	i, ok := inst[v["instance"]]
@@ -602,6 +614,10 @@ func (p bdrVaultedProvider) Detail(ctx context.Context, project string, path []s
 	if bdrComputeType(s.typ()) {
 		// A VM's or disk's rows in place of the database version.
 		d.Summary = append(append(d.Summary[:6:6], bdrComputeSummary(s)...), d.Summary[7:]...)
+	}
+	if bdrWorkloadType(s.typ()) {
+		// A cluster's or instance's rows in place of the database version.
+		d.Summary = append(append(d.Summary[:6:6], bdrWorkloadSummary(s)...), d.Summary[7:]...)
 	}
 	if s.association() == "" {
 		d.Summary = append(d.Summary, console.Property{Label: "Backup configuration",
@@ -666,6 +682,9 @@ func bdrBackupDelete(b map[string]any, now time.Time) console.Action {
 func (p bdrVaultedProvider) restoreAction(ctx context.Context, project string, s bdrSource, backups []string) console.Action {
 	if bdrComputeType(s.typ()) {
 		return p.computeRestoreAction(ctx, project, s, backups)
+	}
+	if bdrWorkloadType(s.typ()) {
+		return p.workloadRestoreAction(ctx, project, s, backups)
 	}
 	engine := strings.SplitN(str(nested(s.ds, "dataSourceGcpResource", "cloudSqlInstanceDatasourceProperties"), "databaseInstalledVersion"), "_", 2)[0]
 	var targets []string
@@ -749,9 +768,12 @@ func (p bdrVaultedProvider) DetailActions(ctx context.Context, project string, p
 	if len(active) > 0 {
 		acts = append(acts, p.restoreAction(ctx, project, s, active))
 	}
-	if bdrComputeType(s.typ()) {
-		// Point-in-time restore is Cloud SQL's.
+	if bdrComputeType(s.typ()) || s.typ() == backupdr.FilestoreResourceType {
+		// Point-in-time restore is Cloud SQL's and AlloyDB's.
 		return acts
+	}
+	if s.typ() == backupdr.AlloyDBResourceType {
+		return append(acts, workloadPITRAction(project, s))
 	}
 	acts = append(acts, console.Action{ID: "pitr", Label: "Point-in-time restore", Fields: []console.Field{
 		{Name: "target", Label: "New instance ID", Type: "text", Required: true, Pattern: `[a-z][a-z0-9\-]{0,96}`},
@@ -797,6 +819,9 @@ func (p bdrVaultedProvider) ActAt(ctx context.Context, project string, path []st
 		if bdrComputeType(s.typ()) {
 			return p.restoreCompute(ctx, s, v)
 		}
+		if bdrWorkloadType(s.typ()) {
+			return p.restoreWorkload(ctx, s, v, false)
+		}
 		target := s.instanceName()
 		switch v["destination"] {
 		case "", "source":
@@ -824,6 +849,9 @@ func (p bdrVaultedProvider) ActAt(ctx context.Context, project string, path []st
 		_, err = p.api.call(ctx, p.api.sql, http.MethodPost, "/v1/projects/"+project+"/instances/"+url.PathEscape(target)+"/restoreBackup",
 			map[string]any{"backupdrBackup": str(s.ds, "name") + "/backups/" + v["backup"]})
 	case "pitr":
+		if s.typ() == backupdr.AlloyDBResourceType {
+			return p.restoreWorkload(ctx, s, v, true)
+		}
 		if p.api.sql == nil {
 			return errors.New("the Cloud SQL Admin API is not served by this instance")
 		}
@@ -879,8 +907,10 @@ func (p bdrPlansProvider) List(ctx context.Context, project string) (console.Lis
 }
 
 // CreateForm implements console.Creator: Google's Create Backup plan.
-func (bdrPlansProvider) CreateForm() (string, []console.Field) {
-	return "Create Backup plan", bdrPlanFields(nil, nil)
+func (p bdrPlansProvider) CreateForm() (string, []console.Field) {
+	f := bdrPlanFields(nil, nil)
+	f[0].UnavailableOptions = p.api.unservedTypes()
+	return "Create Backup plan", f
 }
 
 func bdrHours(from, to int) ([]string, map[string]string) {
@@ -900,8 +930,7 @@ func bdrPlanFields(vaults []string, vaultLabels map[string]string) []console.Fie
 	recur := []string{"HOURLY", "DAILY", "WEEKLY", "MONTHLY", "YEARLY"}
 	return []console.Field{
 		{Name: "resourceType", Label: "Resource Type", Type: "radio", Required: true, Section: "Resource Type",
-			Options: bdrResourceTypes, OptionLabels: bdrResourceTypeLabels, Default: backupdr.CloudSQLResourceType,
-			UnavailableOptions: bdrUnservedTypes()},
+			Options: bdrResourceTypes, OptionLabels: bdrResourceTypeLabels, Default: backupdr.CloudSQLResourceType},
 		{Name: "id", Label: "Name", Type: "text", Required: true, Section: "Identity", Pattern: bdrIDPattern, Help: bdrIDHelp + "."},
 		{Name: "description", Label: "Description", Type: "text", Section: "Identity"},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Section: "Location", Options: backupdr.Regions,
@@ -939,7 +968,7 @@ func bdrPlanFields(vaults []string, vaultLabels map[string]string) []console.Fie
 		{Name: "ondemandDays", Label: "Maximum retention (days)", Type: "text", Section: "On-Demand Retention", ShowWhen: "ondemand",
 			Pattern: `[1-9][0-9]{0,4}`, Help: "1 to 36159 days; at least the vault's minimum enforced retention."},
 		{Name: "logs", Label: "Database Logs", Type: "checkbox", Section: "Database Logs",
-			Help: "Keeps the instance's transaction logs, for point-in-time restore."},
+			Help: "Keeps the database's transaction logs, for point-in-time restore: Cloud SQL and AlloyDB plans only."},
 		{Name: "logDays", Label: "Log retention (days)", Type: "text", Section: "Database Logs", ShowWhen: "logs", Default: "7",
 			Pattern: `[1-9][0-9]{0,4}`, Help: "How long the logs are kept; at least the vault's minimum enforced retention."},
 	}
@@ -955,7 +984,9 @@ func (p bdrPlansProvider) CreateFormFor(ctx context.Context, project string) []c
 		opts = append(opts, n)
 		labels[n] = lastSegment(n) + " (" + locationOf(n) + ")"
 	}
-	return bdrPlanFields(opts, labels)
+	f := bdrPlanFields(opts, labels)
+	f[0].UnavailableOptions = p.api.unservedTypes()
+	return f
 }
 
 func (bdrPlansProvider) CreateOnPage() bool   { return true }
@@ -1014,7 +1045,7 @@ func bdrRulesFrom(group, tz string, optional bool, typ string) ([]any, error) {
 			// Compute Engine VMs and disks: 1 to 23 hours; Cloud SQL: 6
 			// to 23 (StandardSchedule.hourlyFrequency).
 			lo := 6
-			if bdrComputeType(typ) {
+			if bdrComputeType(typ) || bdrWorkloadType(typ) {
 				lo = 1
 			}
 			h, err := strconv.Atoi(r["hourly"])
@@ -1037,8 +1068,11 @@ func (p bdrPlansProvider) Create(ctx context.Context, project string, v map[stri
 	if typ == "" {
 		typ = backupdr.CloudSQLResourceType
 	}
-	if typ != backupdr.CloudSQLResourceType && !bdrComputeType(typ) {
-		return "", fmt.Errorf("%s is not served here: Backup and DR backs up Cloud SQL instances and Compute Engine VMs and disks", bdrTypeLabel(typ))
+	if !p.api.bdrServedType(typ) {
+		if m := p.api.unservedTypes()[typ]; m != "" {
+			return "", errors.New(m)
+		}
+		return "", fmt.Errorf("%q is not a resource type Backup and DR protects", typ)
 	}
 	if !bdrIDRe.MatchString(v["id"]) {
 		return "", fmt.Errorf("the name must be %s", bdrIDHelp)
@@ -1064,6 +1098,9 @@ func (p bdrPlansProvider) Create(ctx context.Context, project string, v map[stri
 		body["description"] = d
 	}
 	if v["logs"] == "true" {
+		if typ != backupdr.CloudSQLResourceType && typ != backupdr.AlloyDBResourceType {
+			return "", fmt.Errorf("database logs are kept for Cloud SQL and AlloyDB plans only, not %s", bdrTypeLabel(typ))
+		}
 		n, err := strconv.Atoi(v["logDays"])
 		if err != nil || n < 1 {
 			return "", errors.New("the log retention is a number of days, at least 1")

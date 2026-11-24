@@ -49,8 +49,11 @@ type alloyDBService struct {
 	// cluster is restored from (#1524); nil without backupdr.
 	backupDR alloydb.BackupDR
 
-	server    *grpctransport.Server
-	api       *alloydb.Server
+	server *grpctransport.Server
+	api    *alloydb.Server
+	// rest is the JSON API, in process, for Backup and DR's console
+	// pages (#1524); nil until started.
+	rest      http.Handler
 	engine    *alloyDBEngine
 	connector *alloydb.Connector
 	tlsFront  *alloyDBTLSFront
@@ -83,6 +86,14 @@ func (s *alloyDBService) API() *alloydb.Server {
 		return nil
 	}
 	return s.api
+}
+
+// REST is the JSON API in process, nil until started.
+func (s *alloyDBService) REST() http.Handler {
+	if s == nil {
+		return nil
+	}
+	return s.rest
 }
 
 // Addr is the bound address.
@@ -160,6 +171,7 @@ func (s *alloyDBService) Start(ctx context.Context) error {
 		s.server.Interpose(i)
 	}
 	var jsonAPI http.Handler = alloydb.NewRESTHandler(api)
+	s.rest = jsonAPI
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}
