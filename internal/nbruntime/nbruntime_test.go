@@ -181,7 +181,7 @@ func TestConnectExecuteDisconnect(t *testing.T) {
 		"-p 127.0.0.1::8888 --entrypoint python3 " + Tag() + " -I /opt/cloudburrow/relay.py 8080=host.docker.internal:9050",
 		"network connect --alias host.docker.internal cb-nb-net-",
 		"--hostname colab --user 1000:1000 -w /home/colab",
-		"-e GOOGLE_CLOUD_PROJECT=p -e CB_COLAB=1 -e NO_GCE_CHECK=True -e CB_BIGQUERY_ENDPOINT=http://host.docker.internal:8080",
+		"-e GOOGLE_CLOUD_PROJECT=p -e CB_COLAB=1 -e JUPYTER_CONFIG_PATH=/etc/cloudburrow/colab -e NO_GCE_CHECK=True -e CB_BIGQUERY_ENDPOINT=http://host.docker.internal:8080",
 		"--entrypoint jupyter " + Tag() + " lab --ServerApp.root_dir=/home/colab",
 		"rm -f -v cb-nb-p-nb-",
 		"rm -f -v cb-nb-relay-p-nb-",

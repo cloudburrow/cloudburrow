@@ -15,3 +15,6 @@ jupyterlab
 jupyter-server
 ipykernel
 terminado
+dataproc-jupyter-plugin==0.1.99
+bigquery-jupyter-plugin==0.1.4
+gcs-jupyter-plugin==0.1.3

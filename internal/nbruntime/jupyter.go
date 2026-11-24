@@ -15,6 +15,8 @@ package nbruntime
 //	host.docker.internal:8081  its Dataproc API (gRPC), when served
 //	host.docker.internal:8082  the instance's metadata server (below)
 //	host.docker.internal:8083  its Cloud Storage JSON API, when served
+//	host.docker.internal:8084  its Resource Manager (REST)
+//	host.docker.internal:8085  its Service Usage (REST)
 //
 // and one inbound port, 8888, published on the host's loopback alone and
 // relayed to JupyterLab's 8080 on the internal network: the console's
@@ -92,6 +94,8 @@ const (
 	jupyterRelayPort = "8888"
 	metadataPort     = "8082"
 	storagePort      = "8083"
+	rmPort           = "8084"
+	usagePort        = "8085"
 )
 
 // IdlePoll is how often an instance's kernel activity is read.
@@ -201,6 +205,7 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 	var relays []string
 	for _, r := range []struct{ port, addr string }{
 		{relayPort, rest}, {"8081", call(m.Dataproc)}, {metadataPort, metaAddr}, {storagePort, call(m.Storage)},
+		{rmPort, workbenchOnly(colab, m.ResourceManager)}, {usagePort, workbenchOnly(colab, m.ServiceUsage)},
 	} {
 		a, err := relayTo(r.port, r.addr)
 		if err != nil {
@@ -257,7 +262,7 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 		runArgs = []string{"run", "-d", "--init", "--name", kernel, "--label", label, "--network", network,
 			"--hostname", "colab", "--user", "1000:1000", "-w", "/home/colab",
 			"-e", "HOME=/home/colab", "-e", "USER=colab", "-e", "SHELL=/bin/bash", "-e", "JUPYTER_TOKEN",
-			"-e", "GOOGLE_CLOUD_PROJECT=" + s.project, "-e", "CB_COLAB=1", "-e", "NO_GCE_CHECK=True",
+			"-e", "GOOGLE_CLOUD_PROJECT=" + s.project, "-e", "CB_COLAB=1", "-e", "JUPYTER_CONFIG_PATH=/etc/cloudburrow/colab", "-e", "NO_GCE_CHECK=True",
 			"-e", "CB_BIGQUERY_ENDPOINT=" + endpoint}
 		if s.opts.Token != "" {
 			// Passed by name, so the token is not on docker's command line.
@@ -275,13 +280,18 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 	if call(m.Storage) != "" && !colab {
 		runArgs = append(runArgs, "-e", "CB_STORAGE_ENDPOINT="+ep+storagePort)
 	}
-	if call(m.Dataproc) != "" {
-		region := m.Region
-		if region == "" {
-			region = "us-central1"
+	if !colab {
+		runArgs = append(runArgs, gcloudEnv(s.project, m.region(), ep, call(m.Storage) != "", call(m.Dataproc) != "")...)
+		if call(m.ResourceManager) != "" {
+			runArgs = append(runArgs, "-e", "CB_RESOURCEMANAGER_ENDPOINT="+ep+rmPort)
 		}
+		if call(m.ServiceUsage) != "" {
+			runArgs = append(runArgs, "-e", "CB_SERVICEUSAGE_ENDPOINT="+ep+usagePort)
+		}
+	}
+	if call(m.Dataproc) != "" {
 		runArgs = append(runArgs, "-e", "CB_DATAPROC_ENDPOINT="+dataprocEndpoint,
-			"-e", "GOOGLE_CLOUD_DATAPROC_API_ENDPOINT="+dataprocEndpoint, "-e", "GOOGLE_CLOUD_REGION="+region)
+			"-e", "GOOGLE_CLOUD_DATAPROC_API_ENDPOINT="+dataprocEndpoint, "-e", "GOOGLE_CLOUD_REGION="+m.region())
 	}
 	for _, k := range sortedKeys(s.opts.Env) {
 		runArgs = append(runArgs, "-e", k+"="+s.opts.Env[k])
@@ -358,6 +368,43 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 		m.logf("workbench instance %s: JupyterLab up (%s)", s.key, kernel)
 	}
 	return nil
+}
+
+// workbenchOnly is f's address for a Workbench instance, "" for a Colab
+// runtime.
+func workbenchOnly(colab bool, f func() string) string {
+	if colab {
+		return ""
+	}
+	return call(f)
+}
+
+func (m *Manager) region() string {
+	if m.Region == "" {
+		return "us-central1"
+	}
+	return m.Region
+}
+
+// gcloudEnv configures the instance's Google Cloud CLI (gcloud), which
+// Google's JupyterLab plugins read their project, region, credentials and
+// API endpoints from, as on a Workbench VM: its credentials are the
+// metadata server's (GCE_METADATA_ROOT), its endpoints the relay's
+// (api_endpoint_overrides), and it never checks for updates or reports
+// usage.
+func gcloudEnv(project, region, ep string, storage, dataproc bool) []string {
+	env := []string{"-e", "GCE_METADATA_ROOT=" + relayAlias + ":" + metadataPort,
+		"-e", "CLOUDSDK_CORE_PROJECT=" + project, "-e", "CLOUDSDK_COMPUTE_REGION=" + region, "-e", "CLOUDSDK_DATAPROC_REGION=" + region,
+		"-e", "CLOUDSDK_CORE_DISABLE_USAGE_REPORTING=true", "-e", "CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK=true",
+		"-e", "CLOUDSDK_CORE_DISABLE_PROMPTS=1", "-e", "CLOUDSDK_CONFIG=/home/jupyter/.config/gcloud",
+		"-e", "CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY=" + ep + relayPort + "/bigquery/v2/"}
+	if storage {
+		env = append(env, "-e", "CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE="+ep+storagePort)
+	}
+	if dataproc {
+		env = append(env, "-e", "CLOUDSDK_API_ENDPOINT_OVERRIDES_DATAPROC="+ep+"8081/")
+	}
+	return env
 }
 
 func call(f func() string) string {

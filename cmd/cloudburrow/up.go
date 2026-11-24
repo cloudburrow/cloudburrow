@@ -1387,6 +1387,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		return ""
 	}
+	// Its BigQuery JupyterLab plugin lists projects with Resource Manager
+	// and reads the BigQuery API's state from Service Usage (#2198).
+	notebooks.ResourceManager = func() string { return loopbackPort(cfg.Endpoints.ResourceManager) }
+	notebooks.ServiceUsage = func() string { return loopbackPort(cfg.Endpoints.ServiceUsage) }
 	defer notebooks.Close()
 	// Colab Enterprise's runtime templates and runtimes (#2105), on the
 	// local Vertex AI endpoint, run on them.

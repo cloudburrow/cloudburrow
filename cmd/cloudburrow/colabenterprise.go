@@ -11,8 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"cloud.google.com/go/dataform/apiv1/dataformpb"
@@ -273,3 +275,12 @@ func (t *tailBuffer) Write(p []byte) (int, error) {
 }
 
 func (t *tailBuffer) String() string { return string(t.b) }
+
+// loopbackPort is a bound REST port's address on the host's loopback, ""
+// for none.
+func loopbackPort(port int) string {
+	if port <= 0 {
+		return ""
+	}
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+}

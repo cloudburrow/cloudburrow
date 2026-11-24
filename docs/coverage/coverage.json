@@ -6837,7 +6837,8 @@
         "method": "google.cloud.aiplatform.v1.NotebookService/AssignNotebookRuntime",
         "status": "Verified",
         "tests": [
-          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes",
+          "test/compat/workbench2198b_test.go:210 TestColabEnterpriseRuntimeJupyterServer"
         ]
       },
       {
@@ -6886,7 +6887,8 @@
         "method": "google.cloud.aiplatform.v1.NotebookService/GetNotebookRuntime",
         "status": "Verified",
         "tests": [
-          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes"
+          "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes",
+          "test/compat/workbench2198b_test.go:210 TestColabEnterpriseRuntimeJupyterServer"
         ]
       },
       {
@@ -6929,7 +6931,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/colabenterprise2105_test.go:199 TestColabEnterpriseRuntimes",
-          "test/compat/pipelines2173_test.go:356 TestIAMEnforcementVertexAIRunIdentity"
+          "test/compat/pipelines2173_test.go:356 TestIAMEnforcementVertexAIRunIdentity",
+          "test/compat/workbench2198b_test.go:210 TestColabEnterpriseRuntimeJupyterServer"
         ]
       },
       {
@@ -7566,7 +7569,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/workbench2173_test.go:58 TestWorkbenchInstances",
-          "test/compat/workbench2198_test.go:180 TestWorkbenchJupyterLab"
+          "test/compat/workbench2198_test.go:180 TestWorkbenchJupyterLab",
+          "test/compat/workbench2198b_test.go:89 TestWorkbenchJupyterLabBearerAndIdentity"
         ]
       },
       {
@@ -7574,7 +7578,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/workbench2173_test.go:58 TestWorkbenchInstances",
-          "test/compat/workbench2198_test.go:180 TestWorkbenchJupyterLab"
+          "test/compat/workbench2198_test.go:180 TestWorkbenchJupyterLab",
+          "test/compat/workbench2198b_test.go:89 TestWorkbenchJupyterLabBearerAndIdentity"
         ]
       },
       {

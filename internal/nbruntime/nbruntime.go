@@ -46,10 +46,10 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed image/Dockerfile image/cloudburrow_colab.py image/relay.py image/requirements.txt image/spark.txt image/build-requirements.txt image/cloudburrow_endpoints.py image/jupyter_server_config.py image/ipython_kernel_config.py image/overrides.json
+//go:embed image/Dockerfile image/cloudburrow_colab.py image/relay.py image/requirements.txt image/spark.txt image/build-requirements.txt image/fetch_gcloud.py image/cloudburrow_endpoints.py image/jupyter_server_config.py image/ipython_kernel_config.py image/overrides.json
 var context_ embed.FS
 
-var contextFiles = []string{"Dockerfile", "cloudburrow_colab.py", "relay.py", "requirements.txt", "spark.txt", "build-requirements.txt",
+var contextFiles = []string{"Dockerfile", "cloudburrow_colab.py", "relay.py", "requirements.txt", "spark.txt", "build-requirements.txt", "fetch_gcloud.py",
 	"cloudburrow_endpoints.py", "jupyter_server_config.py", "ipython_kernel_config.py", "overrides.json"}
 
 // Tag is the runtime image's tag: its build context's hash, so a changed
@@ -144,6 +144,11 @@ type Manager struct {
 	// host (host:port), "" when it is not served: a Workbench instance's
 	// google-cloud-storage reaches it (#2198).
 	Storage func() string
+	// ResourceManager and ServiceUsage are the instance's Resource Manager
+	// and Service Usage REST addresses on the host (host:port), "" when
+	// none: a Workbench instance's BigQuery JupyterLab plugin lists
+	// projects and checks the BigQuery API's state there (#2198).
+	ResourceManager, ServiceUsage func() string
 	// Region is the Dataproc region a notebook's sessions are made in;
 	// "" is us-central1.
 	Region string

@@ -11,7 +11,10 @@
 # --generate-hashes` of requirements.in and spark.in. Google's own:
 # google-cloud-bigquery and bigquery-magics (%%bigquery),
 # google-cloud-storage, google-cloud-dataproc and dataproc-spark-connect,
-# google-auth and pydata-google-auth. Third-party, BSD, MIT, Apache or
+# google-auth and pydata-google-auth, and Workbench's JupyterLab plugins
+# (dataproc-jupyter-plugin, bigquery-jupyter-plugin, gcs-jupyter-plugin,
+# google-cloud-jupyter-config, kernels-mixer, scheduler-jupyter-plugin;
+# Apache-2.0). Third-party, BSD, MIT, Apache or
 # MPL licensed, installed here and never part of the CLI: JupyterLab and
 # Jupyter Server (BSD-3-Clause) with ipykernel, terminado and IPython
 # (BSD-3-Clause), pandas, pyarrow, db-dtypes, matplotlib, websockets,
@@ -35,6 +38,14 @@ RUN pip install --no-cache-dir --require-hashes --no-deps --only-binary :all: -r
 # runtime 3.0 sessions' Spark.
 RUN pip install --no-cache-dir --no-deps --require-hashes --only-binary :all: -r /opt/cloudburrow/spark.txt
 
+# A Workbench instance's Google Cloud CLI (fetch_gcloud.py: Google's
+# versioned archive, SHA-256 pinned), which Google's JupyterLab plugins
+# (dataproc-jupyter-plugin, bigquery-jupyter-plugin, gcs-jupyter-plugin,
+# in the lock) read their configuration and credentials from.
+COPY fetch_gcloud.py /opt/cloudburrow/
+RUN python3 -I /opt/cloudburrow/fetch_gcloud.py && rm -f /tmp/google-cloud-cli.tar.gz && \
+    ln -s /opt/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud
+ENV CLOUDSDK_PYTHON=/usr/local/bin/python3
 COPY relay.py /opt/cloudburrow/
 # A Colab runtime's kernels load cloudburrow_colab (ipython_kernel_config.py).
 COPY cloudburrow_colab.py /usr/local/lib/python3.12/site-packages/
@@ -49,6 +60,14 @@ COPY ipython_kernel_config.py /etc/ipython/
 # fetches Jupyter's news nor asks whether to.
 COPY overrides.json /usr/local/share/jupyter/lab/settings/
 RUN echo "import cloudburrow_endpoints" > /usr/local/lib/python3.12/site-packages/cloudburrow_endpoints.pth
+# Workbench's JupyterLab plugins are a Workbench instance's: a Colab or
+# BigQuery Studio runtime's Jupyter Server (JUPYTER_CONFIG_PATH, set for
+# those alone) loads none of them.
+RUN mkdir -p /etc/cloudburrow/colab/labconfig && \
+    echo '{"ServerApp":{"jpserver_extensions":{"dataproc_jupyter_plugin":false,"bigquery_jupyter_plugin":false,"gcs_jupyter_plugin":false,"scheduler_jupyter_plugin":false,"google.cloud.jupyter_config":false}}}' \
+      > /etc/cloudburrow/colab/jupyter_server_config.json && \
+    echo '{"disabledExtensions":{"dataproc_jupyter_plugin":true,"sparkmonitor":true,"bigquery-jupyter-plugin":true,"gcs-jupyter-plugin":true,"scheduler-jupyter-plugin":true}}' \
+      > /etc/cloudburrow/colab/labconfig/page_config.json
 
 # Nothing in a notebook runs as root. A Colab runtime's HOME is colab's; a
 # Workbench instance's is /home/jupyter, its data disk.
