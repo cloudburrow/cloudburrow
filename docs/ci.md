@@ -225,6 +225,20 @@ gcloud. The `gke` shard reached go test's 60-minute deadline in main run 4538253
 `TestCompatGKEShardsSplitTheKubernetesEngineTests` fails unless each Kubernetes Engine test runs in
 exactly one of the two shards.
 
+### The computevms and vpcvms shards
+
+The compat job's `computevms` and `vpcvms` shards run on the `served` shard's instance again too.
+`computevms` runs only `COMPAT_COMPUTE_VM_TESTS` from `scripts/compat-shards.sh` (named in
+`COMPAT_COMPUTE_VM_TEST_NAMES`): Compute Engine's VMs, disks, instance groups, rolling updates and
+metadata servers, through the client, gcloud and Terraform. `vpcvms` runs only
+`COMPAT_VPC_VM_TESTS` (`COMPAT_VPC_VM_TEST_NAMES`): the VPC networking tests that carry VM traffic
+(Cloud Router BGP, Cloud NAT, IPv6, load balancers and Private Service Connect to VMs, IAP tunnels).
+The `served` shard skips both. It reached go test's 60-minute deadline in main run 45422957668 once
+Landing 168 gave every VM its own metadata server, vTPM and VPC data plane: its tests had run
+3,592 s, 2,654 s of them these, and 430 never ran. `test/repo`'s
+`TestCompatVMShardsSplitTheServedShard` fails unless each of the served instance's tests but the
+Kubernetes Engine ones runs in exactly one of the three shards.
+
 ### The localaispeech shard
 
 The compat job's `localaispeech` shard runs on the `localai` shard's instance again (the same

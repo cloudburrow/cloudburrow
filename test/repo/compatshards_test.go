@@ -275,6 +275,74 @@ for s in served gke gkeupgrade; do compat_shard "$s"; echo "$s.RUN=$COMPAT_RUN";
 	}
 }
 
+// The computevms and vpcvms shards run the served shard's tests that boot
+// VMs (COMPAT_COMPUTE_VM_TEST_NAMES, COMPAT_VPC_VM_TEST_NAMES), on its
+// instance, and served skips them: every name either list gives is a
+// compat test, and each test of served's instance but the Kubernetes
+// Engine ones runs in exactly one of the three shards.
+func TestCompatVMShardsSplitTheServedShard(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is not on PATH")
+	}
+	script, err := filepath.Abs(filepath.Join("..", "..", "scripts", "compat-shards.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog := `set -eu; . "$1"; echo "GKE=$COMPAT_GKE_TESTS"
+echo "computevms.NAMES=$(echo $COMPAT_COMPUTE_VM_TEST_NAMES)"; echo "vpcvms.NAMES=$(echo $COMPAT_VPC_VM_TEST_NAMES)"
+for s in served computevms vpcvms; do compat_shard "$s"; echo "$s.RUN=$COMPAT_RUN"; echo "$s.SKIP=$COMPAT_SKIP"; done`
+	out, err := exec.Command(bash, "-c", prog, "bash", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("compat-shards.sh: %v\n%s", err, out)
+	}
+	v := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		k, val, _ := strings.Cut(line, "=")
+		v[k] = val
+	}
+	gke := regexp.MustCompile(v["GKE"])
+	runs := func(shard, name string) bool {
+		if r := v[shard+".RUN"]; r != "" && !regexp.MustCompile(r).MatchString(name) {
+			return false
+		}
+		if s := v[shard+".SKIP"]; s != "" && regexp.MustCompile(s).MatchString(name) {
+			return false
+		}
+		return true
+	}
+	tests := compatTestNames(t)
+	shards := []string{"served", "computevms", "vpcvms"}
+	for _, s := range shards[1:] {
+		names := strings.Fields(v[s+".NAMES"])
+		if len(names) == 0 {
+			t.Errorf("the %s shard names no test", s)
+		}
+		for _, n := range names {
+			if !tests["Test"+n] || gke.MatchString("Test"+n) {
+				t.Errorf("the %s shard names %s, which is not a compat test of the served shard's", s, n)
+			}
+			if !runs(s, "Test"+n) {
+				t.Errorf("the %s shard does not run %s, which it names", s, n)
+			}
+		}
+	}
+	for name := range tests {
+		if gke.MatchString(name) {
+			continue
+		}
+		var in []string
+		for _, s := range shards {
+			if runs(s, name) {
+				in = append(in, s)
+			}
+		}
+		if len(in) != 1 {
+			t.Errorf("%s runs in %v of served, computevms and vpcvms; want exactly one", name, in)
+		}
+	}
+}
+
 // The compat job's log check and scripts/verify-local.sh's coverage list
 // every shard with a compat suite: the matrix but acceptance, whose
 // suites are test/e2e's and test/k8s's.
