@@ -92,7 +92,9 @@ type obj = map[string]any
 type Server struct {
 	opts Options
 
-	mu  sync.Mutex
+	mu sync.Mutex
+	// kms is Cloud KMS, for disks' customer-managed keys (#2206).
+	kms KeyService
 	res map[string]obj // by relative name: projects/P/global/networks/N
 	ops map[string]obj // by relative name: projects/P/global/operations/O
 	// defaultDeleted are the projects whose default network was deleted,

@@ -241,7 +241,8 @@ func TestAsyncReplication(t *testing.T) {
 	zs := []any{"zones/us-central1-a", "zones/us-central1-b"}
 	zs2 := []any{"zones/us-east1-b", "zones/us-east1-c"}
 	mustCall(t, s, "POST", r+"resourcePolicies", obj{"name": "cg", "diskConsistencyGroupPolicy": obj{}})
-	wantStatus(t, s, 501, "snapshotSchedulePolicy", "POST", r+"resourcePolicies", obj{"name": "sched", "snapshotSchedulePolicy": obj{}})
+	wantStatus(t, s, 400, "snapshotSchedulePolicy.schedule", "POST", r+"resourcePolicies", obj{"name": "sched", "snapshotSchedulePolicy": obj{}})
+	wantStatus(t, s, 501, "instanceSchedulePolicy", "POST", r+"resourcePolicies", obj{"name": "is", "instanceSchedulePolicy": obj{}})
 	mustCall(t, s, "POST", r+"disks", obj{"name": "prim", "sizeGb": "10", "replicaZones": zs, "resourcePolicies": []any{r + "resourcePolicies/cg"}})
 	mustCall(t, s, "POST", r+"resourcePolicies", obj{"name": "cg-other", "diskConsistencyGroupPolicy": obj{}})
 	wantStatus(t, s, 400, "only one consistency group", "POST", r+"disks/prim/addResourcePolicies", obj{"resourcePolicies": []any{"cg-other"}})

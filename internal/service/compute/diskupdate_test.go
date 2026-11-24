@@ -158,7 +158,7 @@ func TestDiskUpdate(t *testing.T) {
 	if z := mustCall(t, s, "GET", "zones/us-central1-a/disks/z", nil); z["sizeGb"] != "12" || z["architecture"] != "ARM64" {
 		t.Errorf("zonal update: %v", z)
 	}
-	if _, err := patchCall(t, s, "zones/us-central1-a/disks/z", "licenses", obj{}); ErrorStatus(err) != 501 {
-		t.Errorf("licenses: %v", err)
+	if _, err := patchCall(t, s, "zones/us-central1-a/disks/z", "licenses", obj{"licenses": []any{"projects/nope/global/licenses/x"}}); ErrorStatus(err) != 404 {
+		t.Errorf("an unknown license: %v", err)
 	}
 }

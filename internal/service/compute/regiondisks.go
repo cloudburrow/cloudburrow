@@ -326,6 +326,9 @@ func (s *Server) newRegionDiskLocked(project, region string, b obj, field string
 		}
 		d["resourcePolicies"] = l
 	}
+	if err := s.finishNewDiskLocked(d, b, field); err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 
@@ -402,7 +405,7 @@ func (s *Server) regionDisks(c call, region string) (obj, error) {
 }
 
 var regionDiskVerbs = map[string]bool{"resize": true, "setLabels": true, "createSnapshot": true, "addResourcePolicies": true,
-	"removeResourcePolicies": true, "startAsyncReplication": true, "stopAsyncReplication": true}
+	"removeResourcePolicies": true, "startAsyncReplication": true, "stopAsyncReplication": true, "updateKmsKey": true}
 
 // insertDiskLocked stores a new disk and makes its storage: blank, from a
 // snapshot, or a copy of its sourceDisk.

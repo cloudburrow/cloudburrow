@@ -408,6 +408,9 @@ func (s *Server) newDiskLocked(project, zone string, b obj, field string) (obj, 
 		return nil, invalid("Invalid value for field '%s.sizeGb': '%d'. Disk size must be between %d GB and %d GB for %s.", field, size, minSize, lim.max, typ)
 	}
 	d["sizeGb"] = strconv.FormatInt(size, 10)
+	if err := s.finishNewDiskLocked(d, b, field); err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 
@@ -480,6 +483,8 @@ func (s *Server) diskVerbLocked(c call, scope, rel string, d obj) (obj, error) {
 		return s.startAsyncReplication(c.project, scope, rel, d, c.body)
 	case "stopAsyncReplication":
 		return s.stopAsyncReplication(c.project, scope, rel, d)
+	case "updateKmsKey":
+		return s.updateDiskKmsKeyLocked(c.project, scope, rel, d, c.body)
 	}
 	return nil, unimplemented("%s on %s/%s is not served (#2206)", c.method, rel, c.parts[4])
 }
@@ -511,6 +516,10 @@ func (s *Server) createSnapshot(project, diskRel string, b obj, scope string) (o
 		return nil, errf(http.StatusBadRequest, "resourceInUseByAnotherResource",
 			"The disk resource '%s' is a secondary disk in the process of replication: it can't be snapshotted until replication stops.", diskRel)
 	}
+	// "You can't ... create a snapshot from the disk" with a revoked key.
+	if err := s.checkDiskKeyLocked(d); err != nil {
+		return nil, err
+	}
 	snap := obj{"kind": "compute#snapshot", "id": newID(), "name": name, "status": "CREATING", "selfLink": rel,
 		"sourceDisk": diskRel, "sourceDiskId": d["id"], "diskSizeGb": d["sizeGb"], "storageBytes": "0",
 		"storageBytesStatus": "UP_TO_DATE", "storageLocations": []any{diskRegion(d)},
@@ -526,6 +535,11 @@ func (s *Server) createSnapshot(project, diskRel string, b obj, scope string) (o
 	}
 	if si := str(d, "sourceImage"); si != "" {
 		snap["_sourceImage"] = si
+	}
+	// A CMEK disk's snapshot is "encrypted with the same key" (#2206).
+	if ek, ok := d["diskEncryptionKey"]; ok {
+		snap["snapshotEncryptionKey"] = ek
+		snap[wrappedKeyKey] = d[wrappedKeyKey]
 	}
 	if v, _ := b[VaultSnapshot].(bool); v {
 		// A Backup and DR vault's (#2075): kept out of the project's own

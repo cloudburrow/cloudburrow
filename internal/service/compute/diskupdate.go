@@ -278,12 +278,40 @@ func (s *Server) updateDiskLocked(c call, scope, rel string, d obj) (obj, error)
 		switch p {
 		case "sizeGb", "provisionedIops", "provisionedThroughput", "accessMode", "architecture":
 		case "licenses", "licenseCodes", "userLicenses", "guestOsFeatures":
-			return nil, unimplemented("updating a disk's %s is not served: the images here carry no licenses or guest OS features to change (#2206)", p)
 		default:
 			return nil, invalid("Invalid value for field 'paths': '%s'. The field can't be updated: disks.update updates sizeGb, provisionedIops, provisionedThroughput, accessMode, architecture, licenses, licenseCodes, userLicenses and guestOsFeatures.", p)
 		}
 	}
 	b := c.body
+	if set["licenses"] && set["licenseCodes"] {
+		return nil, invalid("Invalid value for field 'paths': 'licenseCodes'. Update licenses or licenseCodes, not both.")
+	}
+	// Licenses, user licenses and guest OS features, on a copy until every
+	// field is valid.
+	lic := obj{}
+	for k, v := range d {
+		lic[k] = v
+	}
+	switch {
+	case set["licenses"]:
+		if err := s.updateLicensesLocked(c.project, rel, lic, b, false); err != nil {
+			return nil, err
+		}
+	case set["licenseCodes"]:
+		if err := s.updateLicensesLocked(c.project, rel, lic, b, true); err != nil {
+			return nil, err
+		}
+	}
+	if set["userLicenses"] {
+		if err := updateUserLicenses(c.project, lic, b); err != nil {
+			return nil, err
+		}
+	}
+	if set["guestOsFeatures"] {
+		if err := updateGuestOsFeatures(lic, b); err != nil {
+			return nil, err
+		}
+	}
 	typ := lastSeg(str(d, "type"))
 	cur, _, _ := sizeGb(d["sizeGb"])
 	size := cur
@@ -386,6 +414,13 @@ func (s *Server) updateDiskLocked(c call, scope, rel string, d obj) (obj, error)
 	}
 	if set["architecture"] {
 		d["architecture"] = architecture
+	}
+	for _, k := range []string{"licenses", "licenseCodes", "userLicenses", "guestOsFeatures"} {
+		if v, ok := lic[k]; ok {
+			d[k] = v
+		} else {
+			delete(d, k)
+		}
 	}
 	var specs []DiskSpec
 	if grow {

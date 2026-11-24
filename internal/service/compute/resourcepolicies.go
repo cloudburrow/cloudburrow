@@ -31,6 +31,13 @@ func (s *Server) resourcePolicies(c call, region string) (obj, error) {
 		return s.insertResourcePolicy(c.project, region, c.body)
 	case n == 4 && c.method == http.MethodGet:
 		return s.getRes(coll + "/" + p[3])
+	case n == 4 && c.method == http.MethodPatch:
+		rel := coll + "/" + p[3]
+		po, ok := s.res[rel]
+		if !ok {
+			return nil, notFound(rel)
+		}
+		return s.patchResourcePolicy(c, rel, po)
 	case n == 4 && c.method == http.MethodDelete:
 		rel := coll + "/" + p[3]
 		if _, ok := s.res[rel]; !ok {
@@ -42,7 +49,7 @@ func (s *Server) resourcePolicies(c call, region string) (obj, error) {
 		delete(s.res, rel)
 		return s.done(c.project, scope, "delete", rel, nil)
 	}
-	return nil, unimplemented("%s on resourcePolicies/%s is not served (#2206): resource policies are served as disk consistency groups (insert, get, list, delete)", c.method, strings.Join(p[3:], "/"))
+	return nil, unimplemented("%s on resourcePolicies/%s is not served (#2206): resource policies are served as disk consistency groups and snapshot schedules (insert, get, list, patch, delete)", c.method, strings.Join(p[3:], "/"))
 }
 
 func (s *Server) insertResourcePolicy(project, region string, b obj) (obj, error) {
@@ -65,11 +72,23 @@ func (s *Server) insertResourcePolicy(project, region string, b obj) (obj, error
 		return nil, invalid("Invalid value for field 'resource': a resource policy needs one of snapshotSchedulePolicy, groupPlacementPolicy, instanceSchedulePolicy, diskConsistencyGroupPolicy or workloadPolicy.")
 	case len(kinds) > 1:
 		return nil, invalid("Invalid value for field 'resource': at most one of %s may be set.", strings.Join(kinds, ", "))
-	case kinds[0] != "diskConsistencyGroupPolicy":
-		return nil, unimplemented("%s resource policies are not served (#2206): resource policies are served as disk consistency groups (diskConsistencyGroupPolicy)", kinds[0])
+	case kinds[0] != "diskConsistencyGroupPolicy" && kinds[0] != "snapshotSchedulePolicy":
+		return nil, unimplemented("%s resource policies are not served (#2206): they apply to VM instances, whose addResourcePolicies is not served; resource policies are served as disk consistency groups (diskConsistencyGroupPolicy) and snapshot schedules (snapshotSchedulePolicy)", kinds[0])
 	}
 	o := obj{"kind": "compute#resourcePolicy", "id": newID(), "name": name, "region": "projects/" + project + "/regions/" + region,
-		"selfLink": rel, "creationTimestamp": s.stamp(), "status": "READY", "diskConsistencyGroupPolicy": obj{}}
+		"selfLink": rel, "creationTimestamp": s.stamp(), "status": "READY"}
+	if kinds[0] == "snapshotSchedulePolicy" {
+		sp, err := s.newSnapshotSchedule(project, region, b)
+		if err != nil {
+			return nil, err
+		}
+		o["snapshotSchedulePolicy"] = sp
+	} else {
+		o["diskConsistencyGroupPolicy"] = obj{}
+	}
+	if l, ok := b["labels"].(map[string]any); ok && len(l) > 0 {
+		o["labels"] = l
+	}
 	if d := str(b, "description"); d != "" {
 		o["description"] = d
 	}
@@ -121,6 +140,14 @@ func (s *Server) checkDiskPoliciesLocked(project string, d obj, add []string, fi
 		}
 		if r := lastSeg(str(po, "region")); r != region {
 			return nil, invalid("Invalid value for field '%s[%d]': '%s'. The resource policy must be in the disk's region, %s.", field, i, rel, region)
+		}
+		if !isSchedule(po) && po["diskConsistencyGroupPolicy"] == nil {
+			return nil, invalid("Invalid value for field '%s[%d]': '%s'. Only snapshot schedules and consistency groups can be attached to a disk.", field, i, rel)
+		}
+		if isSchedule(po) {
+			if err := s.checkScheduleAttachLocked(cur, rel, field, i); err != nil {
+				return nil, err
+			}
 		}
 		if po["diskConsistencyGroupPolicy"] != nil {
 			if g := s.consistencyGroupLocked(obj{"resourcePolicies": out}); g != "" {

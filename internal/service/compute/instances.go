@@ -126,6 +126,10 @@ func (s *Server) attachedDiskLocked(project, zone, instance, machineType string,
 		if force && !isRegional(d) {
 			return nil, nil, invalid("Invalid value for field '%s.forceAttach': 'true'. Force-attach applies to regional disks only: '%s' is a zonal disk.", field, rel)
 		}
+		// "You can't attach a disk with a revoked key to a VM."
+		if err := s.checkDiskKeyLocked(d); err != nil {
+			return nil, nil, err
+		}
 		users := strs(d, "users")
 		if err := s.haAttachOK(d, rel, machineType, e, mode, boot, users, field); err != nil {
 			return nil, nil, err
@@ -157,7 +161,8 @@ func (s *Server) attachedDiskLocked(project, zone, instance, machineType string,
 		}
 		b := obj{"name": name, "sourceImage": str(ip, "sourceImage"), "sourceSnapshot": str(ip, "sourceSnapshot"),
 			"type": str(ip, "diskType"), "sizeGb": ip["diskSizeGb"], "labels": ip["labels"], "description": str(ip, "description"),
-			"provisionedIops": ip["provisionedIops"], "provisionedThroughput": ip["provisionedThroughput"]}
+			"provisionedIops": ip["provisionedIops"], "provisionedThroughput": ip["provisionedThroughput"],
+			"diskEncryptionKey": e["diskEncryptionKey"]}
 		if boot && str(ip, "sourceImage") == "" && str(ip, "sourceSnapshot") == "" {
 			return nil, nil, required(field + ".initializeParams.sourceImage")
 		}
@@ -205,6 +210,9 @@ func (s *Server) attachedDiskLocked(project, zone, instance, machineType string,
 		"diskSizeGb": d["sizeGb"], "architecture": arch()}
 	if l, ok := d["licenses"]; ok {
 		ad["licenses"] = l
+	}
+	if ek, ok := d["diskEncryptionKey"]; ok {
+		ad["diskEncryptionKey"] = ek
 	}
 	if boot {
 		ad["guestOsFeatures"] = []any{obj{"type": "UEFI_COMPATIBLE"}, obj{"type": "VIRTIO_SCSI_MULTIQUEUE"}, obj{"type": "GVNIC"}}
@@ -309,6 +317,11 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		}
 		if status != stTerminated {
 			return nil, notReady(rel, status)
+		}
+		// "You can't boot a VM if any of its attached disks have revoked
+		// keys."
+		if err := s.checkInstanceKeysLocked(o); err != nil {
+			return nil, err
 		}
 		return s.transition(c.project, scope, "start", rel, o, stProvisioning, stRunning, stTerminated, func(ctx context.Context, vm VMSpec) error {
 			return s.opts.VMs.Start(ctx, vm)

@@ -441,6 +441,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	computeSvc := newComputeService(cfg)
 	if computeSvc != nil {
 		computeSvc.gke = gkeSvc
+		computeSvc.kms = kmsSvc
 		if gkeSvc != nil {
 			gkeSvc.networks = computeSvc.gkeNetworks
 		}

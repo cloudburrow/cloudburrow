@@ -42,7 +42,10 @@ type computeService struct {
 	// wrapJSON wraps the API (IAM enforcement, #1879); nil is none.
 	wrapJSON func(http.Handler) http.Handler
 	gke      *gkeService
-	api      *compute.Server
+	// kms is this instance's Cloud KMS: disks' customer-managed
+	// encryption keys (#2206); nil when kms is not in --services.
+	kms *kmsService
+	api *compute.Server
 	// vms runs the VM instances (#1963); guestBase and metadataHost are
 	// set by up once the cluster host is known.
 	vms          *computeVMs
@@ -118,6 +121,13 @@ func (s *computeService) Start(ctx context.Context) error {
 		return err
 	}
 	s.api = api
+	// diskEncryptionKey.kmsKeyName (#2206) wraps a disk's data key with
+	// this instance's Cloud KMS, in process.
+	if s.kms != nil {
+		api.UseKMS(sqlAdminKMS{svc: s.kms})
+	}
+	// Snapshot schedules (#2206) take their snapshots while up runs.
+	go api.RunSnapshotSchedules(bg)
 	ln, err := net.Listen("tcp", net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Compute)))
 	if err != nil {
 		return fmt.Errorf("compute: %w", err)
