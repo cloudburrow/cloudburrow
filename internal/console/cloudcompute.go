@@ -127,6 +127,10 @@ type computeOverview struct {
 	// LocalCompute is whether this instance's Docker is this machine's,
 	// so it can be moved onto a VM.
 	LocalCompute bool `json:"local_compute"`
+	// ComputeMachine is the VM this instance runs on, when it runs on one
+	// of the machines listed: Move goes from it to another VM or back to
+	// this machine.
+	ComputeMachine string `json:"compute_machine,omitempty"`
 }
 
 func (s *Server) handleComputeOverview(w http.ResponseWriter, r *http.Request) {
@@ -158,8 +162,19 @@ func (s *Server) handleComputeOverview(w http.ResponseWriter, r *http.Request) {
 	if l, ok := s.computeSrc.(interface{ Local() bool }); ok {
 		local = l.Local()
 	}
+	on := ""
+	if cm, ok := s.computeSrc.(interface{ ComputeMachine() string }); ok {
+		on = cm.ComputeMachine()
+	}
+	if on == "" && !local {
+		for _, mc := range machines {
+			if mc.UsedBy == s.cloudInstance || (mc.Instance == s.cloudInstance && mc.UsedBy == "") {
+				on = mc.Instance
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, computeOverview{Clouds: s.cloud.Clouds(), Connections: conns, Machines: machines,
-		Operations: ops, Instance: s.cloudInstance, Presets: byoc.Presets, Engine: eng, LocalCompute: local})
+		Operations: ops, Instance: s.cloudInstance, Presets: byoc.Presets, Engine: eng, LocalCompute: local, ComputeMachine: on})
 }
 
 func (s *Server) handleComputeSignIn(w http.ResponseWriter, r *http.Request) {
@@ -518,4 +533,9 @@ func (s *Server) cloudRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/compute/operations/{id}", s.handleComputeOperation)
 	mux.HandleFunc("POST /api/compute/machines/{instance}/move", s.handleComputeMove)
 	mux.HandleFunc("GET /api/compute/moves/{instance}", s.handleComputeMoveStatus)
+	mux.HandleFunc("POST /api/compute/moves/{instance}/back", s.handleComputeMoveBack)
+	mux.HandleFunc("POST /api/compute/moves/{instance}/resume", s.handleComputeMoveResume)
+	mux.HandleFunc("POST /api/compute/moves/{instance}/rollback", s.handleComputeMoveRollback)
+	mux.HandleFunc("GET /api/compute/machines/{instance}/resize-plan", s.handleComputeResizePlan)
+	mux.HandleFunc("POST /api/compute/machines/{instance}/replace", s.handleComputeReplace)
 }

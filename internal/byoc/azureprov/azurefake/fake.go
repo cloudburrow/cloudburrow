@@ -16,6 +16,7 @@ package azurefake
 import (
 	"context"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -119,6 +120,10 @@ func (s *Server) Client() *http.Client { return s.srv.Client() }
 
 // Close stops the fake.
 func (s *Server) Close() { s.srv.Close() }
+
+// Certificate is the fake's TLS certificate, for a client in another
+// process (test/byocfakes writes it out as PEM).
+func (s *Server) Certificate() *x509.Certificate { return s.srv.Certificate() }
 
 // Options are azureprov.Options pointing every endpoint at the fake, with a
 // fast poll.

@@ -82,6 +82,12 @@ func connectCompute(ctx context.Context, cfg config.Config, out io.Writer, recor
 // connectComputeWith is connectCompute; skipChecks leaves the host's
 // prerequisites to the caller, doctor, which reports each one.
 func connectComputeWith(ctx context.Context, cfg config.Config, out io.Writer, record, skipChecks bool) (*computeConn, error) {
+	if record {
+		// up waits for an unfinished move: the cluster is half carried.
+		if err := pendingMove(cfg); err != nil {
+			return nil, err
+		}
+	}
 	t, ok, err := computeTarget(cfg)
 	if err != nil || !ok {
 		return nil, err
@@ -92,7 +98,7 @@ func connectComputeWith(ctx context.Context, cfg config.Config, out io.Writer, r
 				"`cloudburrow delete` it, or choose another --name, to run it on %s", cfg.Name, cfg.ClusterName(), t)
 		}
 	}
-	opts := remotecompute.Options{Target: t, StateDir: cfg.InstanceDir(), Instance: cfg.Name, SkipPrerequisites: skipChecks}
+	opts := remotecompute.Options{Target: t, StateDir: cfg.InstanceDir(), Instance: cfg.Name, SkipPrerequisites: skipChecks, SSHConfig: byocSSHConfig()}
 	rec, _, _ := remotecompute.LoadRecord(cfg.InstanceDir())
 	if rec.Provisioned {
 		// A VM `cloudburrow cloud create` made (#2209): its key is in the
@@ -312,3 +318,13 @@ type consoleCompute struct{}
 func (consoleCompute) Compute() any                        { return currentComputeView() }
 func (consoleCompute) Reconnect(ctx context.Context) error { return reconnectCompute(ctx) }
 func (consoleCompute) Local() bool                         { return currentCompute() == nil }
+
+// ComputeMachine is the provisioned VM this process's compute is, when it
+// is not the instance's own (the console takes that one by its name).
+func (consoleCompute) ComputeMachine() string {
+	c := currentCompute()
+	if c == nil || !c.record.Provisioned {
+		return ""
+	}
+	return c.record.Machine
+}

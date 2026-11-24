@@ -21,6 +21,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/byoc/azureprov"
 	"github.com/cloudburrow/cloudburrow/internal/byoc/keychain"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/remotecompute"
 )
 
@@ -59,17 +60,25 @@ Commands:
               (CloudBurrow also does so before each connection)
   status [--format json]
               Connections, and the instance's VM read from its cloud
-  scale --size small|medium|large [--yes]
-              Resize the VM (stopping and starting it where the cloud must)
+  scale [<vm>] --size small|medium|large|gpu [--yes]
+              Resize the VM (stopping and starting it where the cloud must),
+              with the price difference shown first. To or from GPU, which
+              no cloud resizes in place, a new VM of that size is made, the
+              instance moves onto it with its state, and the old VM is
+              deleted, as one action
   start, stop Start or stop the VM; its disk and the cluster's state stay
   delete [--yes]
               Delete everything tagged cloudburrow-instance=<name>, and verify
   resources   List everything tagged cloudburrow-instance=<name>
-  move <instance> --to <vm>|ssh://user@host [--yes]
-              Move an instance that runs on this machine onto a VM made with
-              create (or a host of your own): it stops, its cluster's state
-              is copied, and it starts and is checked there; a failure rolls
-              back
+  move <instance> --to <vm>|ssh://user@host|local [--yes]
+              Move an instance, with its cluster's state, from where it runs
+              (this machine, a VM, or a host of your own) onto a VM made with
+              create (in the same or another cloud), a host, or back to this
+              machine (local): it stops, its state is copied, and it starts
+              and is checked there; a failure rolls back
+  move <instance> --resume | --rollback [--yes]
+              Continue a move that was interrupted from where it stopped, or
+              undo it
 
 Every command takes --name, --state-dir and --config as up does.
 `
@@ -81,17 +90,26 @@ var newCloudManager = func(cfg config.Config) (*byoc.Manager, error) {
 	if abs, err := filepath.Abs(ns); err == nil {
 		ns = abs
 	}
-	return byoc.NewManager(byoc.Options{
+	o := byoc.Options{
 		Dir:      dir,
 		Keychain: keychain.OS{Namespace: ns},
 		Drivers:  []byoc.Driver{awsprov.NewDriver(awsprov.Options{ClientName: "CloudBurrow"}), azureprov.New(azureprov.Options{})},
 		// Phase 1 (#2209): a running VM becomes the instance's compute.
-		Engine: &remotecompute.Engine{StateDir: cfg.StateDir, LocalState: func(instance string) bool {
+		Engine: &remotecompute.Engine{StateDir: cfg.StateDir, SSHConfig: byocSSHConfig(), LocalState: func(instance string) bool {
 			c := cfg
 			c.Name = instance
 			return localClusterExists(context.Background(), c)
 		}},
-	})
+	}
+	if f, ok, err := loadByocFakes(); err != nil {
+		return nil, err
+	} else if ok {
+		// The tests' and the walk-through's local fakes of the clouds.
+		if o, err = fakeCloudOptions(f, o); err != nil {
+			return nil, err
+		}
+	}
+	return byoc.NewManager(o)
 }
 
 // cloudStdin is where interactive answers are read; tests replace it.
@@ -172,9 +190,9 @@ func cloudFlags(sub string, args []string) (map[string]string, []string, error) 
 		"create":     {"connection", "region", "size", "auto-stop", "disk-gib", "connect", "yes!"},
 		"set":        {"auto-stop"},
 		"status":     {"format"},
-		"scale":      {"size", "yes!"},
+		"scale":      {"size", "for", "yes!"},
 		"delete":     {"yes!"},
-		"move":       {"to", "yes!"},
+		"move":       {"to", "resume!", "rollback!", "yes!"},
 	}[sub]
 	out := map[string]string{}
 	rest := args
@@ -523,27 +541,146 @@ func (c cloudCmd) scale(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	mc, err := c.m.Machine(c.cfg.Name)
+	vm := c.cfg.Name
+	if len(c.args) == 1 {
+		vm = c.args[0]
+	} else if len(c.args) > 1 {
+		return errors.New("usage: cloudburrow cloud scale [<vm>] --size small|medium|large|gpu [--yes]")
+	}
+	plan, err := c.m.PlanResize(ctx, vm, preset, "")
 	if err != nil {
 		return err
 	}
-	sizes, err := c.m.Sizes(ctx, mc.Connection, mc.Region)
-	if err != nil {
-		return err
+	fmt.Fprintf(c.stdout, "%s: %s (%s) to %s (%s)\n", vm, plan.From.Name, priceLine(plan.From), plan.To.Name, describeSize(plan.To))
+	fmt.Fprintf(c.stdout, "Price: %s, %s\n", priceLine(plan.To), deltaLine(plan.DeltaUSD))
+	if plan.Note != "" {
+		fmt.Fprintln(c.stdout, plan.Note+".")
 	}
-	for _, s := range sizes {
-		if s.Preset == preset {
-			fmt.Fprintf(c.stdout, "%s: %s to %s (%s), %s\n", mc.Instance, mc.Size, s.Name, describeSize(s), priceLine(s))
+	if !plan.NewVM {
+		ok, err := c.confirm("Resize it?")
+		if err != nil || !ok {
+			return err
 		}
+		_, err = c.m.Scale(ctx, vm, preset, "", true, c.printEvent)
+		return err
 	}
-	if mc.State == byoc.Running && mc.Cloud == byoc.AWS {
-		fmt.Fprintln(c.stdout, "AWS resizes a stopped instance: it is stopped, resized and started again.")
-	}
-	ok, err := c.confirm("Resize it?")
+	ok, err := c.confirm("Make the new VM, move the instance onto it and delete " + vm + "?")
 	if err != nil || !ok {
 		return err
 	}
-	_, err = c.m.Scale(ctx, c.cfg.Name, preset, "", true, c.printEvent)
+	return c.replace(ctx, vm, plan)
+}
+
+// deltaLine is a price difference in words.
+func deltaLine(d float64) string {
+	switch {
+	case d > 0.0005:
+		return fmt.Sprintf("$%.3f/h more than now", d)
+	case d < -0.0005:
+		return fmt.Sprintf("$%.3f/h less than now", -d)
+	}
+	return "the same as now"
+}
+
+// vmUser is the instance whose compute vm is, if one is.
+func vmUser(cfg config.Config, m *byoc.Manager, vm string) (string, bool) {
+	mc, err := m.Machine(vm)
+	if err != nil {
+		return "", false
+	}
+	for _, inst := range []string{mc.UsedBy, mc.Instance} {
+		if inst == "" {
+			continue
+		}
+		c := cfg
+		c.Name = inst
+		if rec, had, _ := remotecompute.LoadRecord(c.InstanceDir()); had && rec.Provisioned && rec.MachineName(inst) == vm {
+			return inst, true
+		}
+		if j, pending, _ := loadMoveJournal(c); pending && (j.DestMachine == vm || j.FromMachine == vm) {
+			return inst, true
+		}
+	}
+	return "", false
+}
+
+// moveInstanceFn is moveInstance; tests replace it.
+var moveInstanceFn = moveInstance
+
+// replaceVMs is the guided change across size families: a new VM of the
+// plan's size, the instance (if one runs on vm) moved onto it with its
+// state, and vm deleted. A failure before the old VM's delete leaves the
+// instance where it was and the new VM deleted.
+var replaceVMs = func(ctx context.Context, cfg config.Config, m *byoc.Manager, vm string, plan byoc.ResizePlan, step moveStep, event byoc.Progress, out io.Writer) error {
+	instance, used := vmUser(cfg, m, vm)
+	if c := cfg; used {
+		c.Name = instance
+		if err := pendingMove(c); err != nil {
+			return err
+		}
+	}
+	step("create", fmt.Sprintf("Making %s, a %s VM (%s)", plan.NewName, plan.To.Name, priceLine(plan.To)))
+	if _, err := m.CreateLike(ctx, vm, plan.NewName, plan.To.Name, true, event); err != nil {
+		return fmt.Errorf("make %s: %w (nothing else was changed)", plan.NewName, err)
+	}
+	dropNew := func(cause error) error {
+		step("rollback", "Deleting "+plan.NewName+": "+cause.Error())
+		if _, err := m.Delete(context.WithoutCancel(ctx), plan.NewName, true, event); err != nil {
+			step("rollback", "Could not delete "+plan.NewName+": "+err.Error())
+		}
+		return cause
+	}
+	if used {
+		c := cfg
+		c.Name = instance
+		step("move", "Moving "+instance+" from "+vm+" to "+plan.NewName)
+		if err := moveInstanceFn(ctx, c, m, plan.NewName, step, out); err != nil {
+			if remotecompute.Interrupted(ctx, err) {
+				return fmt.Errorf("the change of %s was interrupted during the move: resume the move with `cloudburrow cloud move %s --resume` (or roll it back), then delete %s: %w", vm, instance, vm, err)
+			}
+			return dropNew(fmt.Errorf("move %s onto %s: %w", instance, plan.NewName, err))
+		}
+	}
+	step("delete", "Deleting "+vm+", which nothing uses now")
+	if _, err := m.Delete(ctx, vm, true, event); err != nil {
+		return fmt.Errorf("%s runs on %s; %s could not be deleted, delete it again with `cloudburrow cloud delete %s`: %w", orNothing(instance), plan.NewName, vm, vm, err)
+	}
+	step("done", fmt.Sprintf("%s is %s now (%s); %s is deleted", plan.NewName, plan.To.Name, priceLine(plan.To), vm))
+	return nil
+}
+
+func orNothing(s string) string {
+	if s == "" {
+		return "Nothing"
+	}
+	return s
+}
+
+// replace runs replaceVMs with its progress at the terminal and in the
+// instance's move.json, which the console follows.
+func (c cloudCmd) replace(ctx context.Context, vm string, plan byoc.ResizePlan) error {
+	cfg := c.cfg
+	if inst := c.flags["for"]; inst != "" {
+		cfg.Name = inst
+	} else if inst, ok := vmUser(c.cfg, c.m, vm); ok {
+		cfg.Name = inst
+	}
+	ctx, cancel := context.WithTimeout(ctx, moveTimeout)
+	defer cancel()
+	p := &moveProgress{path: moveFile(cfg), st: console.MoveStatus{Instance: cfg.Name, Kind: "replace", To: plan.NewName, Started: time.Now().UTC(), Steps: []console.MoveStep{}}}
+	if path := os.Getenv(moveProgressEnv); path != "" {
+		p.path = path
+		if b, err := os.ReadFile(path); err == nil {
+			_ = json.Unmarshal(b, &p.st)
+		}
+		p.st.To = plan.NewName
+	}
+	p.st.PID = os.Getpid()
+	err := replaceVMs(ctx, c.cfg, c.m, vm, plan, func(step, msg string) {
+		fmt.Fprintf(c.stdout, "%-11s %s\n", step, msg)
+		p.step(step, msg)
+	}, c.printEvent, c.stdout)
+	p.finish(err, cfg)
 	return err
 }
 

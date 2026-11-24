@@ -3,13 +3,16 @@
 // on its standard input rather than its command line, or the Secret
 // Service (GNOME Keyring, KWallet) over D-Bus on Linux, through
 // github.com/zalando/go-keyring, which is pure Go, so the Linux CLI stays
-// static. Nothing here writes a secret to disk or to a log.
+// static. Nothing here writes a secret to disk or to a log, but Dir, the
+// store of the local fakes' own test credentials.
 package keychain
 
 import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -131,4 +134,44 @@ func (m *Memory) Names() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// Dir is a Store of owner-only files in a directory, shared between
+// processes: only for the local fakes of AWS and Azure that the tests and
+// the first-run walk-through run against (CLOUDBURROW_BYOC_FAKES), whose
+// credentials are the fakes' own. Real credentials always go to OS.
+type Dir struct{ Path string }
+
+func (d Dir) file(name string) string {
+	return filepath.Join(d.Path, base64.RawURLEncoding.EncodeToString([]byte(name)))
+}
+
+// Get reads an item.
+func (d Dir) Get(name string) ([]byte, error) {
+	b, err := os.ReadFile(d.file(name))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("%s: %w", name, ErrNotFound)
+	}
+	return b, err
+}
+
+// Set writes an item, owner-only.
+func (d Dir) Set(name string, secret []byte) error {
+	if err := os.MkdirAll(d.Path, 0o700); err != nil {
+		return err
+	}
+	tmp := d.file(name) + ".tmp"
+	if err := os.WriteFile(tmp, secret, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, d.file(name))
+}
+
+// Delete removes an item.
+func (d Dir) Delete(name string) error {
+	err := os.Remove(d.file(name))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }

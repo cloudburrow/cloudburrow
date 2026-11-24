@@ -43,6 +43,12 @@ import (
 // instance on the target: Rollback removes what the carry made on the
 // target and starts the source's containers again, and RemoveSource
 // removes the source's once the move is done.
+//
+// With a Journal, the carry records each unit it finishes (an image
+// loaded, a volume copied, a container made) as it goes, so a carry that
+// was interrupted (the process killed, the laptop asleep, ^C) is resumed
+// by ResumeCarry from the first unfinished unit, or undone by OpenCarry's
+// Rollback. A carry that fails (rather than is interrupted) rolls back.
 
 // DockerEndpoint is one Docker the carry reaches: Host is the DOCKER_HOST
 // value, "" for this process's own environment.
@@ -64,6 +70,11 @@ type CarryOptions struct {
 	Docker string
 	// An empty To.Helper is the first carried container's image once it is
 	// loaded: a kind control plane's, which has tar.
+
+	// Journal, when set, is the file the carry records its progress in,
+	// owner-only, so an interrupted carry resumes (ResumeCarry) or is
+	// undone (OpenCarry, then Rollback).
+	Journal string
 }
 
 // Carry is one carry, its record of what it did on each side.
@@ -81,8 +92,104 @@ type Carry struct {
 	madeVolumes    []string
 	madeNetworks   []string
 	loadedImages   []string // image IDs loaded on To
+	// What is finished, for a resume: the image ref loaded on To per
+	// source container ID, the volumes (and bind copies) whose content is
+	// whole on To, and the container made on To per source container ID.
+	images  map[string]string
+	copied  map[string]bool
+	created map[string]string
+	// resumed is a carry ResumeCarry continues.
+	resumed bool
 	// Bytes is how much was copied, for the progress.
 	bytes atomic.Int64
+}
+
+// carryJournal is what CarryOptions.Journal holds.
+type carryJournal struct {
+	Instance       string            `json:"instance"`
+	Containers     []containerInfo   `json:"containers"`
+	WasRunning     []string          `json:"was_running"`
+	Committed      []string          `json:"committed"`
+	Volumes        []string          `json:"volumes"`
+	MadeContainers []string          `json:"made_containers"`
+	MadeVolumes    []string          `json:"made_volumes"`
+	MadeNetworks   []string          `json:"made_networks"`
+	LoadedImages   []string          `json:"loaded_images"`
+	Images         map[string]string `json:"images"`
+	Copied         map[string]bool   `json:"copied"`
+	Created        map[string]string `json:"created"`
+	Helper         string            `json:"helper,omitempty"`
+	Bytes          int64             `json:"bytes"`
+}
+
+// save records the carry's progress in its journal; with no journal it
+// does nothing. The caller holds no lock.
+func (c *Carry) save() error {
+	if c.o.Journal == "" {
+		return nil
+	}
+	j := carryJournal{Instance: c.o.Instance, Containers: c.containers, WasRunning: c.wasRunning, Committed: c.committed,
+		Volumes: c.volumes, MadeContainers: c.madeContainers, MadeVolumes: c.madeVolumes, MadeNetworks: c.madeNetworks,
+		LoadedImages: c.loadedImages, Images: c.images, Copied: c.copied, Created: c.created, Helper: c.o.To.Helper, Bytes: c.bytes.Load()}
+	b, err := json.Marshal(j)
+	if err != nil {
+		return err
+	}
+	tmp := c.o.Journal + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return fmt.Errorf("record the move's progress: %w", err)
+	}
+	return os.Rename(tmp, c.o.Journal)
+}
+
+// load reads the carry's journal.
+func (c *Carry) load() error {
+	b, err := os.ReadFile(c.o.Journal)
+	if err != nil {
+		return fmt.Errorf("read the move's progress: %w", err)
+	}
+	var j carryJournal
+	if err := json.Unmarshal(b, &j); err != nil {
+		return fmt.Errorf("read the move's progress %s: %w", c.o.Journal, err)
+	}
+	if j.Instance != c.o.Instance {
+		return fmt.Errorf("the move's progress %s is instance %s's, not %s's", c.o.Journal, j.Instance, c.o.Instance)
+	}
+	c.containers, c.wasRunning, c.committed, c.volumes = j.Containers, j.WasRunning, j.Committed, j.Volumes
+	c.madeContainers, c.madeVolumes, c.madeNetworks, c.loadedImages = j.MadeContainers, j.MadeVolumes, j.MadeNetworks, j.LoadedImages
+	c.images, c.copied, c.created = j.Images, j.Copied, j.Created
+	if c.o.To.Helper == "" {
+		c.o.To.Helper = j.Helper
+	}
+	c.bytes.Store(j.Bytes)
+	c.init()
+	return nil
+}
+
+func (c *Carry) init() {
+	if c.images == nil {
+		c.images = map[string]string{}
+	}
+	if c.copied == nil {
+		c.copied = map[string]bool{}
+	}
+	if c.created == nil {
+		c.created = map[string]string{}
+	}
+}
+
+// Interrupted reports whether err is an interruption (the context ended)
+// rather than a failure: such a carry keeps its journal and is resumed.
+func Interrupted(ctx context.Context, err error) bool {
+	return err != nil && (ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
+}
+
+// RemoveJournal removes the carry's journal once the move is done or
+// undone.
+func (c *Carry) RemoveJournal() {
+	if c.o.Journal != "" {
+		_ = os.Remove(c.o.Journal)
+	}
 }
 
 type containerInfo struct {
@@ -276,13 +383,53 @@ func systemBind(src string) bool {
 // StartCarry stops the instance's containers on From and carries them, with
 // their volumes and networks, to To, created but not started. On an error
 // it has rolled back already.
+//
+// With a Journal, an interruption (ctx ended) does not roll back: the
+// journal stays, and ResumeCarry continues the carry, or OpenCarry's
+// Rollback undoes it. The error then satisfies Interrupted.
 func StartCarry(ctx context.Context, o CarryOptions) (*Carry, error) {
 	c := &Carry{o: o}
-	if err := c.carry(ctx); err != nil {
-		c.Rollback(context.WithoutCancel(ctx))
+	c.init()
+	return c.finish(ctx, c.carry(ctx))
+}
+
+// ResumeCarry continues the carry o.Journal records from its first
+// unfinished unit: the images already loaded on To, the volumes already
+// copied and the containers already made are not done again, and a unit
+// cut off half way is done again from its start.
+func ResumeCarry(ctx context.Context, o CarryOptions) (*Carry, error) {
+	if o.Journal == "" {
+		return nil, errors.New("no journal to resume the carry from")
+	}
+	c := &Carry{o: o, resumed: true}
+	if err := c.load(); err != nil {
+		return nil, err
+	}
+	c.progress("resume", "Resuming the move of %s: %d of %d containers made on the target, %s copied before",
+		o.Instance, len(c.created), len(c.containers), humanBytes(c.bytes.Load()))
+	return c.finish(ctx, c.carry(ctx))
+}
+
+// OpenCarry is the carry o.Journal records, to roll back or to finish
+// (StartTarget, RemoveSource) without carrying anything.
+func OpenCarry(o CarryOptions) (*Carry, error) {
+	c := &Carry{o: o, resumed: true}
+	if err := c.load(); err != nil {
 		return nil, err
 	}
 	return c, nil
+}
+
+func (c *Carry) finish(ctx context.Context, err error) (*Carry, error) {
+	if err == nil {
+		return c, c.save()
+	}
+	if c.o.Journal != "" && Interrupted(ctx, err) {
+		_ = c.save()
+		return nil, fmt.Errorf("the move was interrupted; resume it, or roll it back: %w", err)
+	}
+	c.Rollback(context.WithoutCancel(ctx))
+	return nil, err
 }
 
 func (c *Carry) list(ctx context.Context) ([]string, error) {
@@ -308,37 +455,55 @@ func (c *Carry) list(ctx context.Context) ([]string, error) {
 }
 
 func (c *Carry) carry(ctx context.Context) error {
-	ids, err := c.list(ctx)
-	if err != nil {
-		return err
-	}
-	if len(ids) == 0 {
-		return fmt.Errorf("instance %s has no containers on this Docker to move", c.o.Instance)
-	}
-	out, err := c.run(ctx, c.o.From, append([]string{"inspect"}, ids...)...)
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal([]byte(out), &c.containers); err != nil {
-		return fmt.Errorf("read the containers' configuration: %w", err)
-	}
-	// Nodes first: the kind control plane's image is To's helper.
-	sort.SliceStable(c.containers, func(i, j int) bool {
-		return c.containers[i].Config.Labels["io.x-k8s.kind.role"] == "control-plane" && c.containers[j].Config.Labels["io.x-k8s.kind.role"] != "control-plane"
-	})
-	for _, ct := range c.containers {
-		if _, err := c.run(ctx, c.o.To, "container", "inspect", strings.TrimPrefix(ct.Name, "/")); err == nil {
-			return fmt.Errorf("the target already has a container named %s; it would be replaced, so nothing was moved", strings.TrimPrefix(ct.Name, "/"))
+	if !c.resumed {
+		ids, err := c.list(ctx)
+		if err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return fmt.Errorf("instance %s has no containers on this Docker to move", c.o.Instance)
+		}
+		out, err := c.run(ctx, c.o.From, append([]string{"inspect"}, ids...)...)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal([]byte(out), &c.containers); err != nil {
+			return fmt.Errorf("read the containers' configuration: %w", err)
+		}
+		// Nodes first: the kind control plane's image is To's helper.
+		sort.SliceStable(c.containers, func(i, j int) bool {
+			return c.containers[i].Config.Labels["io.x-k8s.kind.role"] == "control-plane" && c.containers[j].Config.Labels["io.x-k8s.kind.role"] != "control-plane"
+		})
+		for _, ct := range c.containers {
+			if _, err := c.run(ctx, c.o.To, "container", "inspect", strings.TrimPrefix(ct.Name, "/")); err == nil {
+				return fmt.Errorf("the target already has a container named %s; it would be replaced, so nothing was moved", strings.TrimPrefix(ct.Name, "/"))
+			}
+		}
+		for _, ct := range c.containers {
+			if ct.State.Running {
+				c.wasRunning = append(c.wasRunning, ct.ID)
+			}
+		}
+		// From here the journal is the carry's: a resume trusts it.
+		if err := c.save(); err != nil {
+			return err
 		}
 	}
 
+	if c.o.From.Helper == "" && len(c.containers) > 0 {
+		// A remote source: the control plane's image is there, and has tar.
+		c.o.From.Helper = c.containers[0].Config.Image
+	}
 	c.progress("stop", "Stopping %d containers of %s", len(c.containers), c.o.Instance)
-	for _, ct := range c.containers {
-		if ct.State.Running {
-			c.wasRunning = append(c.wasRunning, ct.ID)
-			if _, err := c.run(ctx, c.o.From, "stop", "-t", "30", ct.ID); err != nil {
-				return err
+	for _, id := range c.wasRunning {
+		if c.resumed {
+			// Stopped already, unless the interruption came first.
+			if st, err := c.run(ctx, c.o.From, "inspect", "--format", "{{.State.Running}}", id); err == nil && st != "true" {
+				continue
 			}
+		}
+		if _, err := c.run(ctx, c.o.From, "stop", "-t", "30", id); err != nil {
+			return err
 		}
 	}
 
@@ -346,15 +511,23 @@ func (c *Carry) carry(ctx context.Context) error {
 		return err
 	}
 	stamp := strconv.FormatInt(time.Now().Unix(), 10)
-	images := map[string]string{} // container ID -> image ref on both sides
 	for _, ct := range c.containers {
 		name := strings.TrimPrefix(ct.Name, "/")
+		if ref := c.images[ct.ID]; ref != "" {
+			if _, err := c.run(ctx, c.o.To, "image", "inspect", "--format", "{{.Id}}", ref); err == nil {
+				c.progress("image", "%s's image is on the target already", name)
+				continue
+			}
+		}
 		ref := "cloudburrow.local/move-" + sanitize(c.o.Instance) + "-" + sanitize(name) + ":" + stamp
 		c.progress("image", "Saving %s's filesystem", name)
 		if _, err := c.run(ctx, c.o.From, "commit", "--pause=false", ct.ID, ref); err != nil {
 			return err
 		}
 		c.committed = append(c.committed, ref)
+		if err := c.save(); err != nil {
+			return err
+		}
 		c.progress("image", "Copying %s's image to the target", name)
 		if err := c.pipe(ctx, name+"'s image", []string{"save", ref}, []string{"load", "-q"}); err != nil {
 			return err
@@ -364,16 +537,25 @@ func (c *Carry) carry(ctx context.Context) error {
 			return err
 		}
 		c.loadedImages = append(c.loadedImages, id)
-		images[ct.ID] = ref
+		c.images[ct.ID] = ref
 		if c.o.To.Helper == "" {
 			c.o.To.Helper = ref
+		}
+		if err := c.save(); err != nil {
+			return err
 		}
 	}
 	if err := c.volumesAcross(ctx); err != nil {
 		return err
 	}
 	for _, ct := range c.containers {
-		if err := c.create(ctx, ct, images[ct.ID]); err != nil {
+		if c.created[ct.ID] != "" {
+			continue
+		}
+		if err := c.create(ctx, ct, c.images[ct.ID]); err != nil {
+			return err
+		}
+		if err := c.save(); err != nil {
 			return err
 		}
 	}
@@ -509,8 +691,18 @@ func (c *Carry) volumesAcross(ctx context.Context) error {
 	}
 	helper := c.o.From.Helper
 	for _, v := range vols {
+		if c.copied[v] {
+			continue
+		}
 		if _, err := c.run(ctx, c.o.To, "volume", "inspect", v); err == nil {
-			return fmt.Errorf("the target already has a volume named %s; it would be overwritten, so nothing was moved", v)
+			if !c.resumed || !contains(c.madeVolumes, v) {
+				return fmt.Errorf("the target already has a volume named %s; it would be overwritten, so nothing was moved", v)
+			}
+			// Cut off half way: copied again from the start.
+			if _, err := c.run(ctx, c.o.To, "volume", "rm", "-f", v); err != nil {
+				return err
+			}
+			c.madeVolumes = remove(c.madeVolumes, v)
 		}
 		var info []struct {
 			Labels map[string]string `json:"Labels"`
@@ -531,15 +723,43 @@ func (c *Carry) volumesAcross(ctx context.Context) error {
 			return err
 		}
 		c.madeVolumes = append(c.madeVolumes, v)
-		c.volumes = append(c.volumes, v)
+		if !contains(c.volumes, v) {
+			c.volumes = append(c.volumes, v)
+		}
+		if err := c.save(); err != nil {
+			return err
+		}
 		c.progress("volume", "Copying volume %s", short(v))
 		if err := c.pipe(ctx, "volume "+short(v),
 			[]string{"run", "--rm", "--network", "none", "-v", v + ":/v:ro", "--entrypoint", "tar", helper, "-C", "/v", "-cf", "-", "."},
 			[]string{"run", "--rm", "-i", "--network", "none", "-v", v + ":/v", "--entrypoint", "tar", c.o.To.Helper, "-C", "/v", "-xpf", "-"}); err != nil {
 			return err
 		}
+		c.copied[v] = true
+		if err := c.save(); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func remove(list []string, s string) []string {
+	out := list[:0]
+	for _, x := range list {
+		if x != s {
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 func short(v string) string {
@@ -707,11 +927,21 @@ func (c *Carry) create(ctx context.Context, ct containerInfo, image string) erro
 		args = append(args, "-e", e)
 	}
 	args = append(args, image)
+	if c.resumed {
+		// A container made just before the interruption, not yet recorded:
+		// the name was free when the carry began, so it is the carry's.
+		if id, err := c.run(ctx, c.o.To, "container", "inspect", "--format", "{{.Id}}", name); err == nil {
+			if _, err := c.run(ctx, c.o.To, "rm", "-f", "-v", id); err != nil {
+				return err
+			}
+		}
+	}
 	id, err := c.run(ctx, c.o.To, args...)
 	if err != nil {
 		return fmt.Errorf("create %s on the target: %w", name, err)
 	}
 	c.madeContainers = append(c.madeContainers, id)
+	c.created[ct.ID] = id
 	for _, n := range nets[min(1, len(nets)):] {
 		a := append([]string{"network", "connect"}, netArgs(n)...)
 		if _, err := c.run(ctx, c.o.To, append(a, n, id)...); err != nil {
@@ -732,12 +962,34 @@ func (c *Carry) bindVolume(ctx context.Context, src string) (string, error) {
 	sum := sha256.Sum256([]byte(c.o.Instance + "\x00" + src))
 	v := "cb-mount-" + sanitize(c.o.Instance) + "-moved-" + hex.EncodeToString(sum[:8])
 	if _, err := c.run(ctx, c.o.To, "volume", "inspect", v); err == nil {
-		return v, nil
+		if !contains(c.madeVolumes, v) || c.copied[v] {
+			return v, nil
+		}
+		// Cut off half way: copied again.
+		if _, err := c.run(ctx, c.o.To, "volume", "rm", "-f", v); err != nil {
+			return "", err
+		}
+		c.madeVolumes = remove(c.madeVolumes, v)
 	}
 	if _, err := c.run(ctx, c.o.To, "volume", "create", "--label", "io.cloudburrow.instance="+c.o.Instance, v); err != nil {
 		return "", err
 	}
 	c.madeVolumes = append(c.madeVolumes, v)
+	if err := c.save(); err != nil {
+		return "", err
+	}
+	if c.o.From.Host != "" {
+		// The source is a remote host: the path is that host's, read there
+		// through a helper container.
+		c.progress("volume", "Copying %s of the source host into volume %s", src, v)
+		if err := c.pipe(ctx, src,
+			[]string{"run", "--rm", "--network", "none", "-v", src + ":/v:ro", "--entrypoint", "tar", c.o.From.Helper, "-C", "/v", "-cf", "-", "."},
+			[]string{"run", "--rm", "-i", "--network", "none", "-v", v + ":/v", "--entrypoint", "tar", c.o.To.Helper, "-C", "/v", "-xpf", "-"}); err != nil {
+			return "", err
+		}
+		c.copied[v] = true
+		return v, c.save()
+	}
 	c.progress("volume", "Copying %s of this machine into volume %s", src, v)
 	cmd := c.cmd(ctx, c.o.To, "run", "--rm", "-i", "--network", "none", "-v", v+":/v", "--entrypoint", "tar", c.o.To.Helper, "-C", "/v", "-xpf", "-")
 	pr, pw := io.Pipe()
@@ -752,7 +1004,11 @@ func (c *Carry) bindVolume(ctx context.Context, src string) (string, error) {
 	if err := cmd.Wait(); err != nil {
 		return "", fmt.Errorf("copy %s: %v: %s", src, err, strings.TrimSpace(errOut.String()))
 	}
-	return v, werr
+	if werr != nil {
+		return "", werr
+	}
+	c.copied[v] = true
+	return v, c.save()
 }
 
 // tarPath writes a directory's tree, or a file, as a tar.
@@ -817,11 +1073,12 @@ func (c *Carry) StartTarget(ctx context.Context) error {
 	for _, id := range c.wasRunning {
 		running[id] = true
 	}
-	for i, ct := range c.containers {
-		if !running[ct.ID] || i >= len(c.madeContainers) {
+	for _, ct := range c.containers {
+		id := c.created[ct.ID]
+		if !running[ct.ID] || id == "" {
 			continue
 		}
-		if _, err := c.run(ctx, c.o.To, "start", c.madeContainers[i]); err != nil {
+		if _, err := c.run(ctx, c.o.To, "start", id); err != nil {
 			return err
 		}
 	}
@@ -850,10 +1107,12 @@ func (c *Carry) Rollback(ctx context.Context) {
 		_, _ = c.run(ctx, c.o.From, "rmi", ref)
 	}
 	c.madeContainers, c.madeVolumes, c.loadedImages, c.madeNetworks, c.committed = nil, nil, nil, nil, nil
+	c.images, c.copied, c.created = map[string]string{}, map[string]bool{}, map[string]string{}
 	for _, id := range c.wasRunning {
 		_, _ = c.run(ctx, c.o.From, "start", id)
 	}
-	c.progress("rollback", "Rolled back: the instance's containers are on this machine again")
+	c.RemoveJournal()
+	c.progress("rollback", "Rolled back: the instance's containers are on the source again")
 }
 
 // RemoveSource removes the carried containers and volumes from From, and
@@ -877,6 +1136,16 @@ func (c *Carry) RemoveSource(ctx context.Context) error {
 		_, _ = c.run(ctx, c.o.From, "rmi", ref)
 	}
 	c.committed = nil
+	// A source that an earlier move made runs from that move's images; they
+	// go with it.
+	for _, ct := range c.containers {
+		if strings.HasPrefix(ct.Config.Image, "cloudburrow.local/move-") {
+			_, _ = c.run(ctx, c.o.From, "rmi", ct.Config.Image)
+		}
+	}
+	if len(errs) == 0 {
+		c.RemoveJournal()
+	}
 	return errors.Join(errs...)
 }
 

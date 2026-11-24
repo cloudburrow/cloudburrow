@@ -12558,6 +12558,7 @@ async function renderComputeCapacity(view) {
   }
   const running = data.operations.filter((o) => !o.done);
   setChildren(view, pageHeader(CAPACITY_TITLE, CAPACITY_SUBTITLE, { actions: [create] }),
+    computeInstanceSection(data, redraw),
     ...data.machines.map((m) => computeMachineCard(m, data, running.find((o) => o.instance === m.instance), redraw)));
   if (location.hash) {
     const card = document.getElementById(`capacity-${decodeURIComponent(location.hash.slice(1))}`);
@@ -12583,18 +12584,23 @@ function computeMachineCard(m, data, running, redraw) {
   const drawSlider = () => {
     const s = ladder[Number(slider.value)];
     if (!s) return;
-    const text = `${PRESET_TITLES[s.preset]} · ${s.name} · ${sizeSummary(s)} · ${hourly(s)}`;
+    const cross = (s.preset === "gpu") !== (m.preset === "gpu");
+    const delta = s.hourly_usd && m.hourly_usd ? s.hourly_usd - m.hourly_usd : 0;
+    const diff = s.name === m.size ? "" : Math.abs(delta) < 0.0005 ? " · same price" : ` · ${delta > 0 ? "+" : "−"}${usdFormat.format(Math.abs(delta))}/hour`;
+    const text = `${PRESET_TITLES[s.preset]} · ${s.name} · ${sizeSummary(s)} · ${hourly(s)}${diff}${cross ? " · a new VM" : ""}`;
     sliderValue.textContent = text;
     slider.setAttribute("aria-valuetext", text);
+    resize.textContent = cross ? "Change VM" : "Resize";
     resize.disabled = busy || s.name === m.size;
   };
   slider.addEventListener("input", drawSlider);
   (async () => {
     try {
       const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(m.connection)}/sizes?region=${encodeURIComponent(m.region)}`);
-      // The slider moves within the machine's kind: GPU sizes need the
-      // driver cloud-init installs at create.
-      ladder = (res.sizes || []).filter((s) => (s.preset === "gpu") === (m.preset === "gpu"));
+      // Every size: one of the other kind (to or from GPU, whose driver
+      // cloud-init installs at create) is a new VM, the instance moved
+      // onto it and this one deleted, as one guided action.
+      ladder = (res.sizes || []).slice();
       slider.max = String(Math.max(ladder.length - 1, 0));
       const at = ladder.findIndex((s) => s.name === m.size);
       slider.value = String(at < 0 ? 0 : at);
@@ -12627,9 +12633,39 @@ function computeMachineCard(m, data, running, redraw) {
     redraw();
   };
   const base = `/api/compute/machines/${encodeURIComponent(m.instance)}`;
-  resize.addEventListener("click", () => {
+  resize.addEventListener("click", async () => {
     const s = ladder[Number(slider.value)];
-    if (s) act("Resize", `${base}/scale`, { preset: s.preset, size: s.name });
+    if (!s) return;
+    if ((s.preset === "gpu") === (m.preset === "gpu")) {
+      act("Resize", `${base}/scale`, { preset: s.preset, size: s.name });
+      return;
+    }
+    showError("");
+    let plan;
+    try {
+      plan = await computeJSON(`${base}/resize-plan?preset=${encodeURIComponent(s.preset)}`);
+    } catch (err) {
+      showError(`Change VM failed: ${err.message}`);
+      return;
+    }
+    const delta = plan.delta_usd;
+    confirmDestructive({
+      title: `Change ${m.instance} to ${plan.to.name}`,
+      detail: `${CLOUD_TITLES[m.cloud]} cannot resize ${plan.from.name} to ${plan.to.name} in place: a GPU VM's NVIDIA driver is installed when it is made. ` +
+        `${plan.note}. Price: ${hourly(plan.from)} now, ${hourly(plan.to)} after: ` +
+        `${Math.abs(delta) < 0.0005 ? "the same" : `${usdFormat.format(Math.abs(delta))}/hour ${delta > 0 ? "more" : "less"}`}. ` +
+        "If the move fails, the new VM is deleted and the instance stays here. The console restarts during the move.",
+      confirmLabel: "Change VM", consequence: `${m.instance} is deleted only once the instance runs on ${plan.new_name}.`, style: "confirm",
+      onConfirm: async () => {
+        try {
+          await computeJSON(`${base}/replace`, { method: "POST", body: { preset: s.preset, instance: data.instance } });
+        } catch (err) {
+          showError(`Change VM failed: ${err.message}`);
+          return;
+        }
+        followMove(data.instance, progress, `${idp}-replace-steps`, showError).then(redraw);
+      },
+    });
   });
   const start = el("button", { type: "button", class: "secondary", id: `${idp}-start`, text: "Start",
     disabled: busy || m.state === "running", onclick: () => act("Start", `${base}/start`, {}) });
@@ -12705,25 +12741,92 @@ function computeMachineCard(m, data, running, redraw) {
   return card;
 }
 
+// computeInstanceSection is where this instance runs (#2209): this
+// machine's Docker or one of the VMs, with Move back to this machine, and
+// Resume and Roll back for a move that was interrupted (its process ended,
+// or the machine slept).
+function computeInstanceSection(data, redraw) {
+  const instance = data.instance;
+  const id = "capacity-instance";
+  const error = el("p", { class: "form-error", role: "alert", id: `${id}-error`, hidden: true });
+  const progress = el("div", { id: `${id}-progress` });
+  const showError = (msg) => { error.textContent = msg; error.hidden = !msg; };
+  const where = data.local_compute ? "This machine's Docker"
+    : data.compute_machine ? `VM ${data.compute_machine}` : (data.engine && data.engine.message) || "A remote host";
+  const actions = el("div", { class: "card-actions", id: `${id}-actions` });
+  const post = async (label, path) => {
+    showError("");
+    try {
+      await computeJSON(path, { method: "POST", body: {} });
+    } catch (err) {
+      showError(`${label} failed: ${err.message}`);
+      return;
+    }
+    followMove(instance, progress, `${id}-move-steps`, showError).then(redraw);
+  };
+  const back = el("button", { type: "button", class: "secondary", id: `${id}-move-back`, text: "Move back to this machine",
+    onclick: () => confirmDestructive({
+      title: `Move ${instance} back to this machine`,
+      detail: `${instance} stops on ${data.compute_machine || "its host"}. Its cluster's state is copied to this machine's Docker, where it starts and is checked. ` +
+        "If any step fails, the move rolls back and the instance runs on the VM again. The VM is kept: stop or delete it afterwards.",
+      confirmLabel: "Move", consequence: "Nothing is removed from the VM until the instance runs here.", style: "confirm",
+      onConfirm: async () => post("Move", `/api/compute/moves/${encodeURIComponent(instance)}/back`),
+    }) });
+  if (!data.local_compute) actions.append(back);
+  const section = el("section", { class: "card", id, "aria-labelledby": `${id}-title` },
+    el("h2", { id: `${id}-title`, text: `Instance ${instance}` }),
+    el("dl", {}, el("dt", { text: "Runs on" }), el("dd", { id: `${id}-where`, text: where })),
+    actions, error, progress);
+  (async () => {
+    let st;
+    try {
+      st = await computeJSON(`/api/compute/moves/${encodeURIComponent(instance)}`);
+    } catch { return; }
+    if (!st || st.none) return;
+    if (st.interrupted) {
+      const resume = el("button", { type: "button", class: "primary", id: `${id}-move-resume`, text: "Resume move",
+        onclick: () => post("Resume", `/api/compute/moves/${encodeURIComponent(instance)}/resume`) });
+      const rollback = el("button", { type: "button", class: "secondary", id: `${id}-move-rollback`, text: "Roll back move",
+        onclick: () => confirmDestructive({
+          title: `Roll back the move of ${instance}`,
+          detail: `What the move made on ${st.to} is removed, and ${instance} starts where it ran before, with its state.`,
+          confirmLabel: "Roll back", consequence: "The copy made so far is lost; a new move starts from the beginning.", style: "confirm",
+          onConfirm: async () => post("Roll back", `/api/compute/moves/${encodeURIComponent(instance)}/rollback`),
+        }) });
+      actions.prepend(el("p", { class: "form-help", id: `${id}-move-interrupted`, role: "status",
+        text: `The move of ${instance} to ${st.to} was interrupted. Resume it from where it stopped, or roll it back.` }), resume, rollback);
+      back.disabled = true;
+      return;
+    }
+    if (st.to === "local" && (!st.done || Date.now() - Date.parse(st.started) < 10 * 60 * 1000)) {
+      followMove(instance, progress, `${id}-move-steps`, showError);
+    }
+  })();
+  return section;
+}
+
 // computeMoveButton is the card's Move (#2209): this instance, running on
-// this machine's Docker, moves onto the VM. The move stops the instance's
+// this machine's Docker or another VM, moves onto the VM. The move stops the instance's
 // up, which serves this page, so it runs in a process of its own and the
 // page follows its progress across the restart.
 function computeMoveButton(m, data, idp, busy, progress, showError, redraw) {
   const instance = data.instance;
   const usedByOther = m.used_by && m.used_by !== instance;
-  const canMove = data.local_compute && m.state === "running" && !usedByOther;
-  const why = !data.local_compute ? `${instance}'s compute is not this machine's Docker`
+  const here = !data.local_compute && data.compute_machine === m.instance;
+  const from = data.local_compute ? "this machine" : data.compute_machine || "its host";
+  const canMove = !here && m.state === "running" && !usedByOther;
+  const why = here ? `${instance} runs on this VM`
     : m.state !== "running" ? "Start the VM first" : usedByOther ? `The VM is ${m.used_by}'s compute` : "";
   const button = el("button", { type: "button", class: "secondary", id: `${idp}-move`, text: "Move instance here",
     disabled: busy || !canMove, title: why || `Move ${instance} onto ${m.instance}`,
     "aria-describedby": why ? `${idp}-move-why` : null,
     onclick: () => confirmDestructive({
       title: `Move ${instance} to ${m.instance}`,
-      detail: `${instance} stops on this machine. Its cluster's state (the kind node, its volumes, and every container and volume of the instance) ` +
+      detail: `${instance} stops on ${from}. Its cluster's state (the kind node, its volumes, and every container and volume of the instance) ` +
         `is copied to ${m.instance} in ${CLOUD_TITLES[m.cloud]} ${m.region}, where it starts and is checked. ` +
-        "If any step fails, the move rolls back and the instance runs here again. The console restarts during the move.",
-      confirmLabel: "Move", consequence: "Nothing is removed from this machine until the instance runs on the VM.", style: "confirm",
+        `If any step fails, the move rolls back and the instance runs on ${from} again. An interrupted move resumes from where it stopped. The console restarts during the move.`,
+      confirmLabel: "Move", consequence: data.local_compute ? "Nothing is removed from this machine until the instance runs on the VM."
+        : `Nothing is removed from ${from} until the instance runs on ${m.instance}.`, style: "confirm",
       onConfirm: async () => {
         showError("");
         try {
@@ -12771,10 +12874,13 @@ async function followMove(instance, node, id, showError) {
           el("span", { text: ` ${s.message}` })))),
         gap ? el("p", { class: "muted", role: "status", id: `${id}-gap`, text: gap }) : null,
         last.done ? el("p", { role: last.error ? "alert" : "status", class: last.error ? "form-error" : "", id: `${id}-outcome`,
-          text: last.error ? `The move failed${last.rolled_back ? " and was rolled back" : ""}: ${last.error}` : `${instance} runs on ${last.to}.` }) : null);
+          text: last.interrupted ? `The ${last.kind === "replace" ? "change" : "move"} was interrupted: ${last.error || "its process ended"}. Resume it or roll it back.`
+            : last.error ? `The ${last.kind === "replace" ? "change" : "move"} failed${last.rolled_back ? " and was rolled back" : ""}: ${last.error}`
+              : `${instance} runs on ${last.to === "local" ? "this machine" : last.to}.` }) : null);
       if (last.done) {
-        announce(last.error ? `Move of ${instance} failed` : `${instance} moved to ${last.to}`);
-        if (last.error) showError(`Move failed: ${last.error}`);
+        const what = last.kind === "replace" ? "Change of VM" : "Move";
+        announce(last.error ? `${what} of ${instance} failed` : `${instance} moved to ${last.to === "local" ? "this machine" : last.to}`);
+        if (last.error) showError(`${what} failed: ${last.error}`);
         return last;
       }
     } else if (gap) {

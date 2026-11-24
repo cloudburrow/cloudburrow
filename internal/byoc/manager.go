@@ -969,7 +969,7 @@ func (m *Manager) Scale(ctx context.Context, instance string, preset Preset, siz
 			return &mc, nil
 		}
 		if (s.Preset == GPU) != (mc.Preset == GPU) {
-			return nil, fmt.Errorf("the GPU size needs the NVIDIA driver, which cloud-init installs only at create: delete and create %s again to move to or from GPU", instance)
+			return nil, &FamilyChangeError{VM: instance, From: mc.Size, To: s.Name}
 		}
 		mc.State = Resizing
 		_ = m.putMachine(mc)
@@ -987,6 +987,105 @@ func (m *Manager) Scale(ctx context.Context, instance string, preset Preset, siz
 		m.handOver(ctx, got, progress)
 		return &got, nil
 	})
+}
+
+// FamilyChangeError is Scale's refusal of a size the VM cannot be resized
+// to in place: to or from a GPU size, whose NVIDIA driver and container
+// toolkit cloud-init installs only at create. Such a change is a new VM
+// (PlanResize, CreateLike), the instance moved onto it, and the old VM
+// deleted: `cloudburrow cloud scale` and Compute capacity do it as one
+// guided action.
+type FamilyChangeError struct{ VM, From, To string }
+
+func (e *FamilyChangeError) Error() string {
+	return fmt.Sprintf("%s cannot be resized from %s to %s in place: a GPU VM's NVIDIA driver is installed at create, so the change is a new %s VM, "+
+		"the instance moved onto it, and %s deleted (`cloudburrow cloud scale %s --size …` does all three, as Compute capacity does)", e.VM, e.From, e.To, e.To, e.VM, e.VM)
+}
+
+// ResizePlan is what a size change does and costs, shown before it is
+// confirmed.
+type ResizePlan struct {
+	VM   string `json:"vm"`
+	From Size   `json:"from"`
+	To   Size   `json:"to"`
+	// NewVM is a change across size families (to or from GPU): a new VM,
+	// NewName, is made, the instance moves onto it, and VM is deleted.
+	NewVM   bool   `json:"new_vm"`
+	NewName string `json:"new_name,omitempty"`
+	// DeltaUSD is the hourly price difference, To less From.
+	DeltaUSD float64 `json:"delta_usd"`
+	// Note says what happens to the VM while it changes.
+	Note string `json:"note,omitempty"`
+}
+
+// PlanResize is the plan for changing vm to a preset or a named size.
+func (m *Manager) PlanResize(ctx context.Context, vm string, preset Preset, size string) (ResizePlan, error) {
+	mc, err := m.Machine(vm)
+	if err != nil {
+		return ResizePlan{}, err
+	}
+	sizes, err := m.Sizes(ctx, mc.Connection, mc.Region)
+	if err != nil {
+		return ResizePlan{}, err
+	}
+	to, err := sizeFor(sizes, preset, size)
+	if err != nil {
+		return ResizePlan{}, err
+	}
+	from := Size{Name: mc.Size, Preset: mc.Preset, HourlyUSD: mc.HourlyUSD}
+	if cur, err := sizeFor(sizes, "", mc.Size); err == nil {
+		from = cur
+	}
+	p := ResizePlan{VM: vm, From: from, To: to, DeltaUSD: to.HourlyUSD - from.HourlyUSD}
+	if (to.Preset == GPU) != (mc.Preset == GPU) {
+		p.NewVM = true
+		if p.NewName, err = m.freeName(vm, to.Preset); err != nil {
+			return ResizePlan{}, err
+		}
+		p.Note = fmt.Sprintf("A new %s VM, %s, is made in %s; the instance moves onto it with its state; then %s is deleted", to.Name, p.NewName, mc.Region, vm)
+	} else if mc.State == Running && mc.Cloud == AWS {
+		p.Note = "AWS resizes a stopped instance: it is stopped, resized and started again"
+	}
+	return p, nil
+}
+
+// freeName is a name for vm's replacement of preset that no machine has.
+func (m *Manager) freeName(vm string, preset Preset) (string, error) {
+	suffix := "-cpu"
+	if preset == GPU {
+		suffix = "-gpu"
+	}
+	base := strings.TrimSuffix(strings.TrimSuffix(vm, "-gpu"), "-cpu")
+	for i := 1; i < 100; i++ {
+		s := suffix
+		if i > 1 {
+			s += fmt.Sprint(i)
+		}
+		b := base
+		if len(b)+len(s) > 40 {
+			b = strings.TrimRight(b[:40-len(s)], "-")
+		}
+		name := b + s
+		if ValidateInstance(name) != nil {
+			continue
+		}
+		if _, err := m.Machine(name); errors.Is(err, ErrNotFound) {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("no free name for %s's replacement", vm)
+}
+
+// CreateLike makes name, a machine like vm (its connection, region, disk,
+// auto-stop and connection mode) of another size: the first step of a
+// change across size families.
+func (m *Manager) CreateLike(ctx context.Context, vm, name, size string, wait bool, also Progress) (Operation, error) {
+	mc, err := m.Machine(vm)
+	if err != nil {
+		return Operation{}, err
+	}
+	return m.Create(ctx, CreateRequest{Instance: name, Connection: mc.Connection, Region: mc.Region, Size: size,
+		AutoStopMinutes: mc.AutoStopMinutes, DiskGiB: mc.DiskGiB, ConnectMode: mc.ConnectMode}, wait, also)
 }
 
 // Start starts a stopped machine.
