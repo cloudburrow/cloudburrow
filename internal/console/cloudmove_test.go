@@ -63,6 +63,16 @@ func (f *fakeMover) StartReplace(instance, vm, size string) error {
 	return nil
 }
 
+func (f *fakeMover) StartDeleteWithData(instance, vm string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.moves[instance] = MoveStatus{Instance: instance, Kind: "delete", To: vm, Started: time.Now(), Done: true, Steps: []MoveStep{
+		{Time: time.Now(), Step: "stop", Message: "Stopping " + instance + " on " + vm},
+		{Time: time.Now(), Step: "delete", Message: "Deleting " + vm},
+		{Time: time.Now(), Step: "done", Message: vm + " and " + instance + "'s data on it are deleted"}}}
+	return nil
+}
+
 func (f *fakeMover) MoveStatus(instance string) (MoveStatus, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -198,5 +208,78 @@ func TestComputeMoveBackResumeRollbackAndReplace(t *testing.T) {
 	}
 	if code := computeCall(t, srv, "GET", "/api/compute/machines/nope/resize-plan?preset=gpu", "", true, nil); code != http.StatusNotFound {
 		t.Fatalf("plan for no VM = %d", code)
+	}
+}
+
+// Compute capacity's Delete of a VM an instance runs on (#2209): a plain
+// Delete is refused with the instance named; "Delete VM and this
+// instance's data" starts the delete in the mover's own process.
+func TestComputeDeleteOfAVMInUse(t *testing.T) {
+	aws := byoctest.New(byoc.AWS)
+	user := "dev"
+	m, err := byoc.NewManager(byoc.Options{Dir: t.TempDir(), Keychain: keychain.NewMemory(), Drivers: []byoc.Driver{aws},
+		IPLookup: func(context.Context) (string, error) { return "203.0.113.1", nil }, OpenBrowser: func(string) error { return nil },
+		InUse: func(machine string) string {
+			if machine == "dev-vm" {
+				return user
+			}
+			return ""
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := m.ConnectKey(context.Background(), byoc.AWS, byoc.AccessKey{AccessKeyID: "A", SecretAccessKey: "B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Create(context.Background(), byoc.CreateRequest{Instance: "dev-vm", Connection: conn.ID, Region: "us-east-1"}, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	s := New("", func(context.Context) Status { return Status{} })
+	s.SetCloudCompute(m, "dev", func(_ context.Context, authz string) error {
+		if authz != "Bearer "+computeTestToken {
+			return &InstanceRefusal{Status: http.StatusUnauthorized, Message: "missing or wrong admin token"}
+		}
+		return nil
+	})
+	mover := &fakeMover{moves: map[string]MoveStatus{}}
+	s.SetMover(mover)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	var ov struct {
+		Machines []byoc.Machine `json:"machines"`
+	}
+	if code := computeCall(t, srv, "GET", "/api/compute", "", true, &ov); code != http.StatusOK || len(ov.Machines) != 1 || ov.Machines[0].InUseBy != "dev" {
+		t.Fatalf("overview = %d %+v; want dev-vm in use by dev", code, ov.Machines)
+	}
+	var out map[string]string
+	if code := computeCall(t, srv, "DELETE", "/api/compute/machines/dev-vm", "", true, &out); code != http.StatusConflict || out["in_use_by"] != "dev" {
+		t.Fatalf("a plain Delete of the VM dev runs on = %d %v", code, out)
+	}
+	if _, err := m.Machine("dev-vm"); err != nil {
+		t.Fatalf("the refused Delete removed dev-vm: %v", err)
+	}
+	var st MoveStatus
+	if code := computeCall(t, srv, "DELETE", "/api/compute/machines/dev-vm?with_instance_data=true", "", true, &st); code != http.StatusAccepted ||
+		st.Kind != "delete" || st.Instance != "dev" || st.To != "dev-vm" {
+		t.Fatalf("Delete VM and this instance's data = %d %+v", code, st)
+	}
+	// Nobody runs on it now: with_instance_data is refused, a plain Delete
+	// goes ahead.
+	user = ""
+	if code := computeCall(t, srv, "DELETE", "/api/compute/machines/dev-vm?with_instance_data=true", "", true, &out); code != http.StatusBadRequest {
+		t.Fatalf("with_instance_data with nothing on the VM = %d %v", code, out)
+	}
+	if code := computeCall(t, srv, "DELETE", "/api/compute/machines/dev-vm", "", true, nil); code != http.StatusOK {
+		t.Fatalf("a plain Delete of a free VM = %d", code)
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := m.Machine("dev-vm"); errors.Is(err, byoc.ErrNotFound) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("dev-vm was not deleted")
+		}
 	}
 }

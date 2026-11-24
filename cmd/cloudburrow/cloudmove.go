@@ -572,6 +572,15 @@ func runMove(ctx context.Context, cfg config.Config, m *byoc.Manager, j moveJour
 		}
 	}
 	if j.Phase == phaseRecorded {
+		if dst.local {
+			// The instance's connection to the VM forwarded the ports its
+			// containers publish to this machine's: each must be free here
+			// before they start, or Docker refuses them (address already in
+			// use).
+			if err := freeLocalPorts(ctx, cfg, src, carry.PublishedPorts(), step); err != nil {
+				return fail(err)
+			}
+		}
 		step("start", "Starting "+cfg.Name+" on "+dst.String())
 		if err := runDetached(j.UpArgs, 30*time.Minute, j.Offline, out, out); err != nil {
 			return fail(fmt.Errorf("start %s on %s: %w", cfg.Name, dst, err))
@@ -614,6 +623,44 @@ func runMove(ctx context.Context, cfg config.Config, m *byoc.Manager, j moveJour
 	_ = os.Remove(moveJournalPath(cfg))
 	step("done", fmt.Sprintf("%s runs on %s; %s carried", cfg.Name, dst, humanSize(carry.Bytes())))
 	return nil
+}
+
+// movePortWait bounds the wait for this machine's ports to come free in a
+// move back to it.
+var movePortWait = 2 * time.Minute
+
+// freeLocalPorts closes what is left of the instance's connections to the
+// VM it leaves (an SSH master whose process is gone forwards the VM's
+// published ports here still), then waits, bounded, until each of ports is
+// free on this machine. Its error names each port still taken and what
+// holds it; the move then rolls back to the VM, its data kept.
+func freeLocalPorts(ctx context.Context, cfg config.Config, src moveEnd, ports []int, step moveStep) error {
+	step("ports", "Closing the connection to "+src.String()+" and waiting for its forwarded ports to be free on this machine")
+	if ended, err := remotecompute.CloseOrphanedMasters(ctx, cfg.InstanceDir()); err != nil {
+		step("ports", "A connection to "+src.String()+" could not be closed: "+err.Error())
+	} else if len(ended) > 0 {
+		step("ports", fmt.Sprintf("Closed %d leftover connection(s) to %s", len(ended), src))
+	}
+	if len(ports) == 0 {
+		return nil
+	}
+	if err := remotecompute.WaitPortsFree(ctx, ports, movePortWait, 250*time.Millisecond); err != nil {
+		var held *remotecompute.PortsHeldError
+		if errors.As(err, &held) {
+			return fmt.Errorf("%w; stop what holds them and move again (the instance stays on %s)", err, src)
+		}
+		return err
+	}
+	step("ports", fmt.Sprintf("Ports %s are free on this machine", joinInts(ports)))
+	return nil
+}
+
+func joinInts(ns []int) string {
+	s := make([]string, len(ns))
+	for i, n := range ns {
+		s[i] = fmt.Sprint(n)
+	}
+	return strings.Join(s, ", ")
 }
 
 func shellWord(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
@@ -859,6 +906,45 @@ func (m consoleMover) StartReplace(instance, vm, size string) error {
 		return fmt.Errorf("%s has an unfinished move: resume it or roll it back first", instance)
 	}
 	return m.spawn(cfg, "replace", vm, "Replacing "+vm+" with a "+size+" VM", "cloud", "scale", vm, "--size", size, "--for", instance)
+}
+
+// StartDeleteWithData is Compute capacity's "Delete VM and this
+// instance's data": `cloudburrow cloud delete --name <vm>
+// --with-instance-data --yes` in a process of its own, since it stops the
+// instance's up (which may serve this console). Its steps go to the
+// instance's move.json, as a move's do.
+func (m consoleMover) StartDeleteWithData(instance, vm string) error {
+	cfg := m.cfg
+	cfg.Name = instance
+	if err := m.idle(cfg); err != nil {
+		return err
+	}
+	if _, pending, _ := loadMoveJournal(cfg); pending {
+		return fmt.Errorf("%s has an unfinished move: resume it or roll it back first", instance)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	p := &moveProgress{path: moveFile(cfg), st: console.MoveStatus{Instance: instance, Kind: "delete", To: vm, Started: time.Now().UTC(), Steps: []console.MoveStep{}}}
+	p.step("queued", "Deleting "+vm+" and "+instance+"'s data on it")
+	logf, err := os.OpenFile(filepath.Join(cfg.InstanceDir(), "move.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer logf.Close()
+	child := exec.Command(exe, "cloud", "delete", "--with-instance-data", "--yes", "--name", vm, "--state-dir", cfg.StateDir)
+	child.Env = append(os.Environ(), moveProgressEnv+"="+p.path)
+	child.Stdout, child.Stderr = logf, logf
+	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := child.Start(); err != nil {
+		p.finish(err, cfg)
+		return fmt.Errorf("start the delete: %w", err)
+	}
+	p.st.PID = child.Process.Pid
+	p.write()
+	go func() { _ = child.Wait() }()
+	return nil
 }
 
 // idle refuses while a move or replace of the instance still runs.

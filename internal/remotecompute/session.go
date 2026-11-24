@@ -193,7 +193,7 @@ func Connect(ctx context.Context, opts Options) (*Session, error) {
 	s.tr = opts.transport
 	if s.tr == nil {
 		st := &sshTransport{ssh: opts.SSH, target: opts.Target, ctl: filepath.Join(dir, "ctl"), config: opts.SSHConfig,
-			knownHosts: filepath.Join(remoteDir(opts.StateDir, opts.Target), "known_hosts")}
+			knownHosts: filepath.Join(remoteDir(opts.StateDir, opts.Target), "known_hosts"), pidDir: mastersDir(opts.StateDir)}
 		if opts.Key == nil {
 			if st.key, err = EnsureKey(opts.StateDir, opts.Target, "cloudburrow-"+opts.Instance); err != nil {
 				return fail("CloudBurrow's SSH key could not be prepared", err)

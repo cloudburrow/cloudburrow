@@ -472,11 +472,43 @@ func (s *Server) handleComputeDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	instance := r.PathValue("instance")
+	// A VM an instance runs on is deleted only with that instance's data,
+	// chosen as such (?with_instance_data=true, the page's typed "Delete VM
+	// and this instance's data"); a plain Delete of it is refused (#2209).
+	if r.URL.Query().Get("with_instance_data") == "true" {
+		if _, err := s.cloud.Machine(instance); err != nil {
+			computeError(w, err)
+			return
+		}
+		user := s.cloud.InUseBy(instance)
+		if user == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no instance runs on " + instance + ": delete it without with_instance_data"})
+			return
+		}
+		if s.mover == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "Delete VM and this instance's data is not available on this console"})
+			return
+		}
+		err := s.mover.StartDeleteWithData(user, instance)
+		s.computeLog("Delete compute VM and instance data", instance, err)
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		st, _ := s.mover.MoveStatus(user)
+		writeJSON(w, http.StatusAccepted, st)
+		return
+	}
 	op, err := s.cloud.Delete(r.Context(), instance, false, nil)
 	s.computeLog("Delete compute VM", instance, err)
 	if err != nil {
 		if errors.Is(err, byoc.ErrNotFound) {
 			computeError(w, err)
+			return
+		}
+		var inUse *byoc.InUseError
+		if errors.As(err, &inUse) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "in_use_by": inUse.Instance})
 			return
 		}
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})

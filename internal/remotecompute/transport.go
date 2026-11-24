@@ -50,6 +50,12 @@ type sshTransport struct {
 
 	mu  sync.Mutex
 	cmd *exec.Cmd
+	// exited is closed when the master process has exited, and with it
+	// every listener its forwards held.
+	exited chan struct{}
+	// pidDir, when set, records the master's process while it runs, so a
+	// master that outlived its process (killed) is found and closed.
+	pidDir string
 }
 
 // common are the options every ssh invocation carries.
@@ -176,17 +182,23 @@ func (s *sshTransport) Master(ctx context.Context, initial []string) (<-chan err
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	s.mu.Lock()
-	s.cmd = cmd
-	s.mu.Unlock()
 	done := make(chan error, 1)
 	exited := make(chan struct{})
+	s.mu.Lock()
+	s.cmd, s.exited = cmd, exited
+	s.mu.Unlock()
+	if s.pidDir != "" {
+		_ = writeMasterPID(s.pidDir, cmd.Process.Pid, s.ctl, s.target)
+	}
 	go func() {
 		err := cmd.Wait()
 		if err != nil {
 			if msg := strings.TrimSpace(errOut.String()); msg != "" {
 				err = fmt.Errorf("%w: %s", err, msg)
 			}
+		}
+		if s.pidDir != "" {
+			removeMasterPID(s.pidDir, cmd.Process.Pid)
 		}
 		done <- err
 		close(done)
@@ -223,11 +235,27 @@ func (s *sshTransport) Control(ctx context.Context, op string, args ...string) (
 	out, err := s.run(ctx, nil, a...)
 	if op == "exit" {
 		// The master may be gone already; exit then has nothing to do.
+		// Otherwise ssh -O exit returns as the master starts to exit, not
+		// once it has: its forwards' listeners are closed only then, so
+		// the master is waited for (and killed if it lingers). A port it
+		// held is free when Close returns.
 		s.mu.Lock()
-		if s.cmd != nil && s.cmd.Process != nil && err != nil {
-			_ = s.cmd.Process.Kill()
-		}
+		cmd, exited := s.cmd, s.exited
 		s.mu.Unlock()
+		if cmd != nil && cmd.Process != nil && exited != nil {
+			if err != nil {
+				_ = cmd.Process.Kill()
+			}
+			select {
+			case <-exited:
+			case <-time.After(masterExitWait):
+				_ = cmd.Process.Kill()
+				select {
+				case <-exited:
+				case <-time.After(5 * time.Second):
+				}
+			}
+		}
 		return out, nil
 	}
 	return out, err
@@ -237,6 +265,9 @@ func (s *sshTransport) Run(ctx context.Context, command string) (string, error) 
 	a := append(append(s.common(), s.own()...), "-S", s.ctl, s.target.destination(), command)
 	return s.run(ctx, nil, a...)
 }
+
+// masterExitWait bounds the wait for the master to exit after -O exit.
+const masterExitWait = 10 * time.Second
 
 // lockedBuffer is a bytes.Buffer safe for exec's writer goroutine and a
 // reader.

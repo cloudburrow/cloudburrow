@@ -1244,3 +1244,31 @@ func (c *Carry) Containers() []string {
 	}
 	return n
 }
+
+// PublishedPorts is the TCP ports of the target's host that the carried
+// containers publish on a loopback or wildcard address (kind's API server,
+// the ingress), each once: what must be free there before they start.
+func (c *Carry) PublishedPorts() []int {
+	seen := map[int]bool{}
+	for _, ct := range c.containers {
+		for spec, bs := range ct.HostConfig.PortBindings {
+			if strings.HasSuffix(spec, "/udp") || strings.HasSuffix(spec, "/sctp") {
+				continue
+			}
+			for _, b := range bs {
+				if b.HostIP != "" && b.HostIP != "127.0.0.1" && b.HostIP != "0.0.0.0" {
+					continue
+				}
+				if p, err := strconv.Atoi(b.HostPort); err == nil && p > 0 {
+					seen[p] = true
+				}
+			}
+		}
+	}
+	out := make([]int, 0, len(seen))
+	for p := range seen {
+		out = append(out, p)
+	}
+	sort.Ints(out)
+	return out
+}

@@ -46,6 +46,9 @@ type Manager struct {
 	tunnels map[string]Tunnel // instance -> its Session Manager tunnel
 	addrMu  sync.Mutex        // one firewall update at a time
 	addrLog map[string][]AddressChange
+	// inUse names the instance whose cluster runs on (or whose state is on
+	// the disk of) a machine; nil is none.
+	inUse func(machine string) string
 }
 
 // Options configure a Manager.
@@ -66,6 +69,10 @@ type Options struct {
 	// Location is where the user is, for the closest region; the default
 	// reads this machine's time zone.
 	Location func() (lat, lon float64, ok bool)
+	// InUse names the instance that runs on the machine (its cluster and
+	// data are on the VM's disk), or "" when none does: Delete refuses such
+	// a machine (#2209). nil is none.
+	InUse func(machine string) string
 }
 
 // NewManager is a Manager over o.
@@ -77,7 +84,7 @@ func NewManager(o Options) (*Manager, error) {
 		dir: o.Dir, keys: o.Keychain, drivers: map[Cloud]Driver{}, engine: o.Engine,
 		ipLookup: o.IPLookup, browser: o.OpenBrowser, now: o.Now, zone: o.Location,
 		signIns: map[string]*signInState{}, ops: map[string]*Operation{}, busy: map[string]string{},
-		tunnels: map[string]Tunnel{},
+		tunnels: map[string]Tunnel{}, inUse: o.InUse,
 	}
 	for _, d := range o.Drivers {
 		m.drivers[d.Cloud()] = d
@@ -543,6 +550,9 @@ func sizeFor(sizes []Size, preset Preset, name string) (Size, error) {
 // Machines lists the machines, as last recorded.
 func (m *Manager) Machines() ([]Machine, error) {
 	s, err := m.snapshot()
+	for i := range s.Machines {
+		s.Machines[i].InUseBy = m.InUseBy(s.Machines[i].Instance)
+	}
 	return s.Machines, err
 }
 
@@ -562,6 +572,7 @@ func (m *Manager) Machine(instance string) (Machine, error) {
 
 func (m *Manager) putMachine(mc Machine) error {
 	mc.UpdatedAt = m.now()
+	mc.InUseBy = ""
 	return m.update(func(s *stateFile) error {
 		for i, x := range s.Machines {
 			if x.Instance == mc.Instance {
@@ -1133,9 +1144,60 @@ func (m *Manager) power(kind, instance string, wait bool, also Progress) (Operat
 	})
 }
 
+// ErrInUse is a Delete refused because an instance runs on the machine.
+var ErrInUse = errors.New("an instance runs on the VM")
+
+// InUseError is Delete's refusal of a machine an instance runs on: the
+// instance's cluster and data are on the VM's disk, which Delete removes.
+type InUseError struct {
+	Machine, Instance string
+}
+
+func (e *InUseError) Error() string {
+	return fmt.Sprintf("instance %s runs on VM %s: its cluster and data are on the VM's disk, which Delete removes. "+
+		"Move %s off it first (`cloudburrow cloud move %s --to local`, or another VM; in the console, Move back to this machine), "+
+		"or delete the VM and the instance's data together (`cloudburrow cloud delete --name %s --with-instance-data`; "+
+		"in the console, Delete VM and this instance's data)", e.Instance, e.Machine, e.Instance, e.Instance, e.Machine)
+}
+
+func (e *InUseError) Is(target error) bool { return target == ErrInUse }
+
+// InUseBy is the instance that runs on the machine, or "".
+func (m *Manager) InUseBy(machine string) string {
+	if m.inUse == nil {
+		return ""
+	}
+	return m.inUse(machine)
+}
+
 // Delete removes everything the machine's create made, verifies nothing
-// tagged is left, and then forgets the machine and its key.
+// tagged is left, and then forgets the machine and its key. It refuses a
+// machine an instance runs on (an *InUseError): that instance is moved off
+// it first, or deleted with it (DeleteWithInstanceData).
 func (m *Manager) Delete(ctx context.Context, instance string, wait bool, also Progress) (Operation, error) {
+	if user := m.InUseBy(instance); user != "" {
+		return Operation{}, &InUseError{Machine: instance, Instance: user}
+	}
+	return m.deleteMachine(ctx, instance, wait, also)
+}
+
+// DeleteWithInstanceData is Delete of a machine an instance runs on, that
+// instance's cluster and data with it: the user chose "Delete VM and this
+// instance's data". release stops the instance and forgets that it ran
+// there; it runs first, and a failure of it deletes nothing.
+func (m *Manager) DeleteWithInstanceData(ctx context.Context, instance string, wait bool, also Progress, release func(ctx context.Context, user string) error) (Operation, error) {
+	if user := m.InUseBy(instance); user != "" {
+		if release == nil {
+			return Operation{}, &InUseError{Machine: instance, Instance: user}
+		}
+		if err := release(ctx, user); err != nil {
+			return Operation{}, fmt.Errorf("stop instance %s before deleting VM %s: %w", user, instance, err)
+		}
+	}
+	return m.deleteMachine(ctx, instance, wait, also)
+}
+
+func (m *Manager) deleteMachine(ctx context.Context, instance string, wait bool, also Progress) (Operation, error) {
 	mc, err := m.Machine(instance)
 	if err != nil {
 		return Operation{}, err

@@ -250,6 +250,10 @@ type Machine struct {
 	// instance it was created for (`cloudburrow cloud move <instance> --to
 	// <vm>`).
 	UsedBy string `json:"used_by,omitempty"`
+	// InUseBy is the instance that runs on the VM now, its cluster and data
+	// on the VM's disk (Machines reads it; it is never stored): Delete is
+	// refused while it is set.
+	InUseBy string `json:"in_use_by,omitempty"`
 }
 
 // User is the instance whose compute the machine is.

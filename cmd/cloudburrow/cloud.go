@@ -67,8 +67,11 @@ Commands:
               instance moves onto it with its state, and the old VM is
               deleted, as one action
   start, stop Start or stop the VM; its disk and the cluster's state stay
-  delete [--yes]
+  delete [--with-instance-data] [--yes]
               Delete everything tagged cloudburrow-instance=<name>, and verify
+              nothing is left. Refused while an instance runs on the VM: move
+              it off first, or pass --with-instance-data to stop it and delete
+              its cluster and data on the VM with it
   resources   List everything tagged cloudburrow-instance=<name>
   move <instance> --to <vm>|ssh://user@host|local [--yes]
               Move an instance, with its cluster's state, from where it runs
@@ -100,6 +103,8 @@ var newCloudManager = func(cfg config.Config) (*byoc.Manager, error) {
 			c.Name = instance
 			return localClusterExists(context.Background(), c)
 		}},
+		// A VM an instance runs on is never deleted from under it.
+		InUse: func(machine string) string { return instanceOnMachine(cfg, machine) },
 	}
 	if f, ok, err := loadByocFakes(); err != nil {
 		return nil, err
@@ -191,7 +196,7 @@ func cloudFlags(sub string, args []string) (map[string]string, []string, error) 
 		"set":        {"auto-stop"},
 		"status":     {"format"},
 		"scale":      {"size", "for", "yes!"},
-		"delete":     {"yes!"},
+		"delete":     {"with-instance-data!", "yes!"},
 		"move":       {"to", "resume!", "rollback!", "yes!"},
 	}[sub]
 	out := map[string]string{}
@@ -700,15 +705,114 @@ func (c cloudCmd) delete(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	_, withData := c.flags["with-instance-data"]
+	user := c.m.InUseBy(mc.Instance)
+	if user != "" && !withData {
+		return &byoc.InUseError{Machine: mc.Instance, Instance: user}
+	}
 	fmt.Fprintf(c.stdout, "Deletes every resource tagged %s=%s in %s %s, the VM's disk with it.\n", byoc.TagKey, mc.Instance, mc.Cloud.Title(), mc.Region)
-	ok, err := c.confirm("Delete it?")
+	question := "Delete it?"
+	if user != "" {
+		fmt.Fprintf(c.stdout, "Instance %s runs on it: it stops, and its cluster and data on the VM's disk are deleted with the VM. It starts afresh on this machine at its next `cloudburrow up`.\n", user)
+		question = "Delete the VM and instance " + user + "'s data?"
+	}
+	ok, err := c.confirm(question)
 	if err != nil || !ok {
 		return err
 	}
-	if _, err := c.m.Delete(ctx, c.cfg.Name, true, c.printEvent); err != nil {
+	if user != "" {
+		// The console's Delete VM and this instance's data runs this in a
+		// process of its own (it stops the up serving the console), and
+		// follows its steps in the instance's move.json.
+		var p *moveProgress
+		event := c.printEvent
+		if path := os.Getenv(moveProgressEnv); path != "" {
+			p = &moveProgress{path: path, st: console.MoveStatus{Instance: user, Kind: "delete", To: mc.Instance, Started: time.Now().UTC(), Steps: []console.MoveStep{}}}
+			if b, err := os.ReadFile(path); err == nil {
+				_ = json.Unmarshal(b, &p.st)
+			}
+			p.st.PID = os.Getpid()
+			event = func(e byoc.Event) {
+				c.printEvent(e)
+				p.step(e.Step, e.Message)
+			}
+			p.step("stop", "Stopping "+user+" on "+mc.Instance)
+		}
+		_, err = c.m.DeleteWithInstanceData(ctx, c.cfg.Name, true, event, func(ctx context.Context, user string) error {
+			return releaseInstance(c.cfg, user, mc.Instance, c.stdout)
+		})
+		if p != nil {
+			if err == nil {
+				p.step("done", mc.Instance+" and "+user+"'s data on it are deleted")
+			}
+			c2 := c.cfg
+			c2.Name = user
+			p.finish(err, c2)
+		}
+	} else {
+		_, err = c.m.Delete(ctx, c.cfg.Name, true, c.printEvent)
+	}
+	if err != nil {
 		return err
 	}
 	fmt.Fprintf(c.stdout, "Deleted: nothing tagged %s=%s is left.\n", byoc.TagKey, mc.Instance)
+	if user != "" {
+		fmt.Fprintf(c.stdout, "Instance %s's data on the VM went with it; it runs on this machine at its next `cloudburrow up --name %s`.\n", user, user)
+	}
+	return nil
+}
+
+// instanceOnMachine is the instance that runs on the provisioned VM
+// machine, or "": one whose compute record names it (and that has run:
+// Create's record for an instance of the VM's own name that never started
+// holds nothing), or one whose unfinished move has it at either end.
+func instanceOnMachine(cfg config.Config, machine string) string {
+	entries, err := os.ReadDir(cfg.StateDir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "byoc" {
+			continue
+		}
+		c := cfg
+		c.Name = e.Name()
+		if j, pending, _ := loadMoveJournal(c); pending && (j.FromMachine == machine || j.DestMachine == machine) {
+			return c.Name
+		}
+		rec, had, err := remotecompute.LoadRecord(c.InstanceDir())
+		if err != nil || !had || !rec.Provisioned || rec.MachineName(c.Name) != machine {
+			continue
+		}
+		if neverStarted(cfg, c.Name) {
+			continue
+		}
+		return c.Name
+	}
+	return ""
+}
+
+// releaseInstance is the first half of "Delete VM and this instance's
+// data": instance's up stops, and the instance forgets that its compute is
+// the VM, so its next up starts afresh on this machine.
+func releaseInstance(cfg config.Config, instance, machine string, out io.Writer) error {
+	c := cfg
+	c.Name = instance
+	if _, pending, err := loadMoveJournal(c); err != nil {
+		return err
+	} else if pending {
+		return fmt.Errorf("instance %s has an unfinished move: resume it or roll it back first", instance)
+	}
+	if err := stopRunning(c, out); err != nil {
+		return err
+	}
+	if _, err := remotecompute.CloseOrphanedMasters(context.Background(), c.InstanceDir()); err != nil {
+		fmt.Fprintf(out, "warning: %v\n", err)
+	}
+	if err := remotecompute.RemoveRecord(c.InstanceDir()); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Instance %s no longer runs on %s.\n", instance, machine)
 	return nil
 }
 

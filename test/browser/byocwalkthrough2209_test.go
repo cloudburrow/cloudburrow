@@ -351,6 +351,43 @@ func TestByocFirstRunWalkThrough(t *testing.T) {
 	w.clickWhenEnabled("capacity-" + w.vmB + "-start")
 	w.waitState(w.vmB, "Running")
 
+	// 6b. The VM the instance runs on cannot be deleted from under it: the
+	// API refuses a plain Delete, and the page offers only "Delete VM and
+	// this instance's data", typed, which is cancelled here.
+	req, _ := http.NewRequest(http.MethodDelete, w.p.origin+"/api/compute/machines/"+w.vmB, nil)
+	req.Header.Set("Authorization", "Bearer "+w.token())
+	if res, err := http.DefaultClient.Do(req); err != nil {
+		t.Fatal(err)
+	} else {
+		var body map[string]string
+		_ = json.NewDecoder(res.Body).Decode(&body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusConflict || body["in_use_by"] != w.instance || !strings.Contains(body["error"], "Move "+w.instance+" off it first") {
+			t.Fatalf("a plain Delete of the VM the instance runs on = %d %v", res.StatusCode, body)
+		}
+	}
+	p.navigate("/compute-capacity")
+	p.waitForWithin(fmt.Sprintf(`document.getElementById("capacity-%s-in-use") !== null && !document.getElementById("capacity-%s-delete").disabled`, w.vmB, w.vmB), time.Minute)
+	var label string
+	p.eval(fmt.Sprintf(`document.getElementById("capacity-%s-delete").textContent`, w.vmB), &label)
+	if label != "Delete VM and this instance's data" {
+		t.Errorf("the in-use VM's Delete reads %q", label)
+	}
+	p.run(chromedp.Click(chromedp.CSS("#capacity-" + w.vmB + "-delete")))
+	p.waitFor(`document.getElementById("confirm-input") !== null`)
+	var dialog string
+	p.eval(`document.querySelector(".modal").textContent`, &dialog)
+	for _, want := range []string{"Delete " + w.vmB + " and " + w.instance + "'s data", "move " + w.instance + " off the VM first", "Type " + w.vmB} {
+		if !strings.Contains(dialog, want) {
+			t.Errorf("the delete-with-data dialog lacks %q: %s", want, dialog)
+		}
+	}
+	p.run(chromedp.KeyEvent(kb.Escape))
+	p.waitFor(`document.getElementById("confirm-input") === null`)
+	if !w.nodeOn(w.standB) {
+		t.Fatal("the cancelled dialog touched the instance's node")
+	}
+
 	t.Run("WCAG", func(t *testing.T) {
 		p.navigate("/compute-capacity")
 		p.waitFor(`document.getElementById("capacity-instance-move-back") !== null`)
@@ -367,6 +404,16 @@ func TestByocFirstRunWalkThrough(t *testing.T) {
 		}
 		p.run(chromedp.KeyEvent(kb.Escape))
 		p.waitFor(`document.querySelector(".modal form[data-confirm=confirm]") === null`)
+		p.run(chromedp.Click(chromedp.CSS("#capacity-" + w.vmB + "-delete")))
+		p.waitFor(`document.getElementById("confirm-input") !== null`)
+		for _, u := range p.unnamedControls() {
+			t.Errorf("the Delete VM and this instance's data dialog: an unnamed %s", u)
+		}
+		for _, c := range p.contrastFailures() {
+			t.Errorf("the Delete VM and this instance's data dialog: %s", c)
+		}
+		p.run(chromedp.KeyEvent(kb.Escape))
+		p.waitFor(`document.getElementById("confirm-input") === null`)
 	})
 	t.Run("keyboard", func(t *testing.T) {
 		p.run(reducedMotion())

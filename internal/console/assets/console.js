@@ -12674,8 +12674,28 @@ function computeMachineCard(m, data, running, redraw) {
     disabled: busy || m.state === "running", onclick: () => act("Start", `${base}/start`, {}) });
   const stop = el("button", { type: "button", class: "secondary", id: `${idp}-stop`, text: "Stop",
     disabled: busy || m.state !== "running", onclick: () => act("Stop", `${base}/stop`, {}) });
-  const del = el("button", { type: "button", class: "secondary danger", id: `${idp}-delete`, text: "Delete", disabled: busy,
-    onclick: () => confirmDestructive({
+  // A VM an instance runs on holds that instance's cluster and data: a
+  // plain Delete of it is refused (#2209). The instance moves off first, or
+  // the user chooses, typing the VM's name, to delete its data with it.
+  const user = m.in_use_by || "";
+  const inUse = user ? el("p", { class: "form-help", id: `${idp}-in-use`,
+    text: `${user} runs on this VM: its cluster and data are on the VM's disk. Move ${user} off the VM before you delete it, or delete the VM and ${user}'s data.` }) : null;
+  const del = el("button", { type: "button", class: "secondary danger", id: `${idp}-delete`,
+    text: user ? "Delete VM and this instance's data" : "Delete", disabled: busy,
+    "aria-describedby": user ? `${idp}-in-use` : null,
+    onclick: () => user ? confirmDestructive({
+      title: `Delete ${m.instance} and ${user}'s data`,
+      detail: `${user} runs on ${m.instance}. To keep ${user}'s cluster and data, cancel and move ${user} off the VM first (Move back to this machine, or Move instance here on another VM). ` +
+        `Deleting stops ${user}, then deletes the VM, its disk, network and firewall in ${CLOUD_TITLES[m.cloud]} ${m.region}: everything tagged cloudburrow-instance=${m.instance}, ` +
+        `with ${user}'s cluster, its volumes and every object in it. ${user} starts afresh on this machine at its next start.`,
+      confirmWord: m.instance, confirmLabel: "Delete VM and this instance's data",
+      consequence: `${user}'s data on the VM cannot be recovered.`,
+      onConfirm: async () => {
+        showError("");
+        await computeJSON(`${base}?with_instance_data=true`, { method: "DELETE" });
+        followMove(user, progress, `${idp}-delete-steps`, showError).then(redraw);
+      },
+    }) : confirmDestructive({
       title: `Delete ${m.instance}`,
       detail: `Deletes the VM, its disk, network and firewall in ${CLOUD_TITLES[m.cloud]} ${m.region}: everything tagged cloudburrow-instance=${m.instance}. ` +
         "The cluster's state on the disk is gone afterwards.",
@@ -12738,6 +12758,7 @@ function computeMachineCard(m, data, running, redraw) {
       el("p", { class: "form-help", text: m.cloud === "aws"
         ? "AWS resizes a stopped instance: a running one is stopped, resized and started again, its disk kept."
         : "Azure resizes in place where it can, else deallocates, resizes and starts the VM, its disk kept." })),
+    inUse,
     el("div", { class: "card-actions" }, resize, start, stop, move, del, resources),
     error, progress, resourcesOut);
   if (running) computeFollow(running, progress, `${idp}-events`).then(redraw);
@@ -12895,12 +12916,14 @@ async function followMove(instance, node, id, showError) {
           el("span", { text: ` ${s.message}` })))),
         gap ? el("p", { class: "muted", role: "status", id: `${id}-gap`, text: gap }) : null,
         last.done ? el("p", { role: last.error ? "alert" : "status", class: last.error ? "form-error" : "", id: `${id}-outcome`,
-          text: last.interrupted ? `The ${last.kind === "replace" ? "change" : "move"} was interrupted: ${last.error || "its process ended"}. Resume it or roll it back.`
+          text: last.kind === "delete" ? (last.error ? `The delete failed: ${last.error}` : `${last.to} and ${instance}'s data on it are deleted.`)
+            : last.interrupted ? `The ${last.kind === "replace" ? "change" : "move"} was interrupted: ${last.error || "its process ended"}. Resume it or roll it back.`
             : last.error ? `The ${last.kind === "replace" ? "change" : "move"} failed${last.rolled_back ? " and was rolled back" : ""}: ${last.error}`
               : `${instance} runs on ${last.to === "local" ? "this machine" : last.to}.` }) : null);
       if (last.done) {
-        const what = last.kind === "replace" ? "Change of VM" : "Move";
-        announce(last.error ? `${what} of ${instance} failed` : `${instance} moved to ${last.to === "local" ? "this machine" : last.to}`);
+        const what = last.kind === "replace" ? "Change of VM" : last.kind === "delete" ? "Delete" : "Move";
+        announce(last.kind === "delete" ? (last.error ? `Delete of ${last.to} failed` : `${last.to} deleted`)
+          : last.error ? `${what} of ${instance} failed` : `${instance} moved to ${last.to === "local" ? "this machine" : last.to}`);
         if (last.error) showError(`${what} failed: ${last.error}`);
         return last;
       }

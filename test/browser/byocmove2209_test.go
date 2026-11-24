@@ -121,6 +121,16 @@ func (m *scriptedMover) StartReplace(instance, vm, size string) error {
 	return nil
 }
 
+func (m *scriptedMover) StartDeleteWithData(instance, vm string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.moves[instance] = console.MoveStatus{Instance: instance, Kind: "delete", To: vm, Started: time.Now(), Done: true, Steps: []console.MoveStep{
+		{Time: time.Now(), Step: "stop", Message: "Stopping " + instance + " on " + vm},
+		{Time: time.Now(), Step: "delete", Message: "Deleting " + vm},
+		{Time: time.Now(), Step: "done", Message: vm + " and " + instance + "'s data on it are deleted"}}}
+	return nil
+}
+
 func (m *scriptedMover) MoveStatus(instance string) (console.MoveStatus, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

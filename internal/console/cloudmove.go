@@ -32,7 +32,8 @@ type MoveStatus struct {
 	// where it ran before.
 	RolledBack bool `json:"rolled_back,omitempty"`
 	// Kind is "move" (or empty), or "replace": a VM changed for one of
-	// another size family, the instance moved onto it.
+	// another size family, the instance moved onto it; or "delete": the VM
+	// To deleted with the instance's data on it.
 	Kind string `json:"kind,omitempty"`
 	// PID is the process running it.
 	PID int `json:"pid,omitempty"`
@@ -52,6 +53,10 @@ type ComputeMover interface {
 	// StartReplace changes the VM vm, which instance runs on, for a new
 	// one of size, moving the instance onto it and deleting vm.
 	StartReplace(instance, vm, size string) error
+	// StartDeleteWithData deletes the VM vm, which instance runs on, with
+	// instance's cluster and data on it ("Delete VM and this instance's
+	// data"), in a process of its own: instance stops first.
+	StartDeleteWithData(instance, vm string) error
 	// MoveStatus is instance's last move, if it has one.
 	MoveStatus(instance string) (MoveStatus, bool)
 }
