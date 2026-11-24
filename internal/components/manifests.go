@@ -132,6 +132,11 @@ type Backend struct {
 	// memory request and limit, Kubernetes quantities such as "512Mi".
 	// Empty leaves the request at 64Mi and sets no limit.
 	MemoryRequest, MemoryLimit string
+	// ShmSize, when set, mounts a memory volume of that size (a
+	// Kubernetes quantity) at the backend container's /dev/shm, as
+	// `docker run --shm-size` sizes it: an AlloyDB Omni server's columnar
+	// engine keeps its store there (#2207).
+	ShmSize string
 	// RunAsUser, when not 0, is the user and group the backend's
 	// container runs as: Firestore's emulator runs as the front's user,
 	// so each can remove the other's files in the volume they share
@@ -745,8 +750,11 @@ spec:
 	// the front's container starts, so it can never land under the front
 	// (#915, TestPersistentBackendWithFrontMountsEachVolumeInItsOwnContainer).
 	shared := b.sharesState()
-	if b.dataMount() || b.supervised() || shared || b.Sealed != nil {
+	if b.dataMount() || b.supervised() || shared || b.Sealed != nil || b.ShmSize != "" {
 		sb.WriteString("          volumeMounts:\n")
+	}
+	if b.ShmSize != "" {
+		sb.WriteString("            - name: dshm\n              mountPath: /dev/shm\n")
 	}
 	if b.Sealed != nil {
 		fmt.Fprintf(&sb, "            - name: plain\n              mountPath: %s\n", b.MountPath)
@@ -818,8 +826,11 @@ spec:
 `, c.Port, c.Port)
 	}
 
-	if b.Persistent || b.dataMount() || (b.Front != nil && b.Front.StateDir != "") || b.supervised() || b.Sealed != nil {
+	if b.Persistent || b.dataMount() || (b.Front != nil && b.Front.StateDir != "") || b.supervised() || b.Sealed != nil || b.ShmSize != "" {
 		sb.WriteString("      volumes:\n")
+	}
+	if b.ShmSize != "" {
+		fmt.Fprintf(&sb, "        - name: dshm\n          emptyDir:\n            medium: Memory\n            sizeLimit: %s\n", b.ShmSize)
 	}
 	if b.Sealed != nil {
 		sb.WriteString("        - name: plain\n          emptyDir:\n            medium: Memory\n")

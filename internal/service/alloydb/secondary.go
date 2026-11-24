@@ -114,6 +114,8 @@ func (s *Server) CreateSecondaryCluster(_ context.Context, req *alloydbpb.Create
 	c.Reconciling = false
 	s.clusters[name] = c
 	s.passwords[name] = s.passwords[primaryName]
+	// The primary's engine, under its acceptance: the servers replicate.
+	s.recordOmni(name, s.omni[primaryName])
 	// The users are the primary's: its roles replicate.
 	for _, u := range s.usersOf(primaryName) {
 		u.Name = name + "/users/" + lastSegment(u.GetName())
@@ -246,7 +248,8 @@ func (s *Server) PromoteCluster(_ context.Context, req *alloydbpb.PromoteCluster
 // promotion makes it; the caller holds mu.
 func (s *Server) primarySpec(in *alloydbpb.Instance, c *alloydbpb.Cluster) ServerSpec {
 	spec := ServerSpec{Server: serverName(in.GetName()), Version: c.GetDatabaseVersion().String(), Flags: map[string]string{},
-		Password: s.passwords[c.GetName()], PITR: c.GetContinuousBackupConfig().GetEnabled(), Pooler: poolerOf(in)}
+		Password: s.passwords[c.GetName()], PITR: c.GetContinuousBackupConfig().GetEnabled(), Pooler: poolerOf(in),
+		Omni: s.omniSpec(c.GetName())}
 	for k, v := range in.GetDatabaseFlags() {
 		spec.Flags[k] = v
 	}

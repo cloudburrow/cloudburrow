@@ -812,6 +812,9 @@ type Config struct {
 	// nobody accepts it on the user's behalf. Source.MSSQLEULA says which.
 	AcceptMSSQLEULA bool `json:"-"`
 
+	// AlloyDB holds AlloyDB for PostgreSQL's settings (#2207).
+	AlloyDB AlloyDBSettings `json:"alloydb,omitempty"`
+
 	// HooksDir holds ready.d and shutdown.d, scripts run on the host when
 	// the instance becomes ready and before it stops (#285). A missing
 	// directory runs nothing. Relative paths are taken from the working
@@ -906,7 +909,27 @@ type Source struct {
 	// MSSQLEULA is how AcceptMSSQLEULA was set: "flag" or "env", "" when
 	// it was not.
 	MSSQLEULA string
+	// OmniTerms is how AlloyDB.AcceptOmniTerms was set: "flag", "env" or
+	// "file", "" when it was not.
+	OmniTerms string
 }
+
+// AlloyDBSettings are AlloyDB for PostgreSQL's settings.
+type AlloyDBSettings struct {
+	// AcceptOmniTerms is the user's acceptance of Google's AlloyDB Omni
+	// licence terms (OmniTermsURL) for the AlloyDB clusters this instance
+	// creates, whose servers then run Google's AlloyDB Omni image (#2207):
+	// set by `up --accept-alloydb-omni-terms`,
+	// CLOUDBURROW_ACCEPT_ALLOYDB_OMNI_TERMS=Y, or alloydb.acceptOmniTerms in
+	// a configuration file the user named with --config or
+	// CLOUDBURROW_CONFIG; never by default, and never by a ./cloudburrow.json
+	// found in the working directory, which a repository can ship and the
+	// developer has not necessarily read. Source.OmniTerms says which.
+	AcceptOmniTerms bool `json:"acceptOmniTerms,omitempty"`
+}
+
+// OmniTermsURL is Google's AlloyDB Omni licence terms.
+const OmniTermsURL = "https://cloud.google.com/terms/alloydb-omni-marketplace-terms"
 
 // DefaultNodeImage is the pinned Kubernetes node image. It is duplicated from
 // dependencies.json, which remains the source of truth; TestPinsMatchTheInventory

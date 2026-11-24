@@ -150,6 +150,16 @@ func (p alloyDBProvider) CreateForm() (string, []console.Field) {
 		{Name: "password", Label: "Password", Type: "password", Required: true, Section: basics,
 			Help: "The password of the postgres user, the cluster's default user."},
 		{Name: "version", Label: "Database version", Type: "select", Section: basics, Options: alloyDBVersions, OptionLabels: alloyDBVersionLabels, Default: "POSTGRES_16"},
+		// CloudBurrow's own (#2207): Google's page has no such box, as
+		// Google holds AlloyDB's licence; as Cloud SQL's SQL Server box.
+		{Name: "omniTerms", Label: "I accept the AlloyDB Omni licence terms", Type: "checkbox", Section: basics,
+			Help: "Checked, this cluster's instances run Google's AlloyDB Omni image (POSTGRES_15, 16 or 17), with AlloyDB's columnar " +
+				"engine, google_ml_integration, alloydb_scann, query plan cache and index advisor; unchecked, they run PostgreSQL. " +
+				"Omni's use is governed by Google's terms, and CloudBurrow never accepts them for you: checking this accepts them, as you, " +
+				"for this cluster; who accepted and when is recorded with the cluster and shown by cloudburrow status. Not needed when " +
+				"cloudburrow up was started with --accept-alloydb-omni-terms.",
+			Links: []console.Link{{Label: "AlloyDB Omni License Terms", URL: alloydb.OmniTermsURL},
+				{Label: "Run AlloyDB Omni in a container", URL: alloydb.OmniDocsURL}}},
 		{Name: "region", Label: "Region", Type: "select", Section: basics, Options: alloydb.Locations(), Default: "us-central1"},
 		{Name: "network", Label: "Network", Type: "text", Section: basics, Default: "default",
 			Help: "The VPC network the cluster's instances are reached on, by private services access."},
@@ -175,6 +185,11 @@ func (p alloyDBProvider) Create(ctx context.Context, project string, values map[
 		network = "projects/" + project + "/global/networks/" + network
 	}
 	version := alloydbpb.DatabaseVersion(alloydbpb.DatabaseVersion_value[values["version"]])
+	if values["omniTerms"] == "true" {
+		// The user's own acceptance of Google's AlloyDB Omni terms for
+		// this cluster, the checkbox they checked (#2207); never otherwise.
+		ctx = alloydb.WithOmniTermsAccepted(ctx)
+	}
 	op, err := s.CreateCluster(ctx, &alloydbpb.CreateClusterRequest{Parent: parent, ClusterId: id, Cluster: &alloydbpb.Cluster{
 		DatabaseVersion: version, NetworkConfig: &alloydbpb.Cluster_NetworkConfig{Network: network},
 		InitialUser: &alloydbpb.UserPassword{User: "postgres", Password: values["password"]}}})
@@ -281,6 +296,7 @@ func (p alloyDBProvider) Detail(ctx context.Context, project string, path []stri
 	overview := []console.PropertyGroup{{Heading: "Cluster", Properties: []console.Property{
 		{Label: "Cluster ID", Value: lastSegment(c.GetName())}, {Label: "Status", Value: alloyDBState(c.GetState())},
 		{Label: "Region", Value: kmsLocation(c.GetName())}, {Label: "Database version", Value: alloyDBVersionLabel(c.GetDatabaseVersion())},
+		{Label: "Database engine", Value: omniEngineLabel(s.OmniOf(c.GetName()))},
 		{Label: "Network", Value: kmsOrDash(c.GetNetworkConfig().GetNetwork())}, {Label: "Encryption", Value: enc},
 		{Label: "Continuous backup and recovery", Value: cb}, {Label: "Earliest restore point", Value: earliest},
 		{Label: "Automated backups", Value: auto}, {Label: "Created", Value: kmsTime(c.GetCreateTime())}}}}

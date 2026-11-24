@@ -46,7 +46,7 @@ const builtinUser = "postgres"
 // SuperuserRole is the role AlloyDB's built-in users are granted.
 const SuperuserRole = "alloydbsuperuser"
 
-func (s *Server) CreateCluster(_ context.Context, req *alloydbpb.CreateClusterRequest) (*longrunningpb.Operation, error) {
+func (s *Server) CreateCluster(ctx context.Context, req *alloydbpb.CreateClusterRequest) (*longrunningpb.Operation, error) {
 	project, location, err := checkParent("parent", req.GetParent(), false)
 	if err != nil {
 		return nil, err
@@ -70,9 +70,14 @@ func (s *Server) CreateCluster(_ context.Context, req *alloydbpb.CreateClusterRe
 	if _, ok := s.clusters[name]; ok {
 		return nil, apierror.AlreadyExists("Resource '%s' already exists", name)
 	}
+	omni, err := s.omniFor(ctx, c.GetDatabaseVersion())
+	if err != nil {
+		return nil, err
+	}
 	if req.GetValidateOnly() {
 		return s.validateOnly(req.GetParent(), "create", name), nil
 	}
+	s.recordOmni(name, omni)
 	password := c.GetInitialUser().GetPassword()
 	user := c.GetInitialUser().GetUser()
 	s.stampCluster(name, c, location)
@@ -511,6 +516,7 @@ func (s *Server) DeleteCluster(_ context.Context, req *alloydbpb.DeleteClusterRe
 		}
 		delete(s.clusters, name)
 		delete(s.passwords, name)
+		delete(s.omni, name)
 		delete(s.lastAuto, name)
 		if d := s.restores[name]; d != "" && strings.HasPrefix(d, s.restoreRoot()) {
 			_ = os.RemoveAll(d)
@@ -529,7 +535,7 @@ func (s *Server) restoreRoot() string {
 	return filepath.Join(s.opts.BackupsDir, "restores")
 }
 
-func (s *Server) RestoreCluster(_ context.Context, req *alloydbpb.RestoreClusterRequest) (*longrunningpb.Operation, error) {
+func (s *Server) RestoreCluster(ctx context.Context, req *alloydbpb.RestoreClusterRequest) (*longrunningpb.Operation, error) {
 	_, location, err := checkParent("parent", req.GetParent(), false)
 	if err != nil {
 		return nil, err
@@ -603,9 +609,14 @@ func (s *Server) RestoreCluster(_ context.Context, req *alloydbpb.RestoreCluster
 	if err := s.prepareCluster(strings.Split(req.GetParent(), "/")[1], c); err != nil {
 		return nil, err
 	}
+	omni, err := s.omniFor(ctx, c.GetDatabaseVersion())
+	if err != nil {
+		return nil, err
+	}
 	if req.GetValidateOnly() {
 		return s.validateOnly(req.GetParent(), "restore", name), nil
 	}
+	s.recordOmni(name, omni)
 	s.stampCluster(name, c, location)
 	s.clusters[name] = c
 	s.addBuiltinUser(name, "")
