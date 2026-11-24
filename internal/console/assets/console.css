@@ -967,6 +967,10 @@ td a { color: var(--accent); }
 /* Sections group a longer form. A two-field form declares none and renders
    as one block, which is what a two-field form should look like. */
 .form-section { margin-bottom: 24px; }
+/* A titled group inside a section, as Create an instance's Shielded VM. */
+.form-subsection { margin: 0 0 16px; padding: 0; border: 0; min-width: 0; }
+.form-subsection-title { padding: 0; margin: 0 0 4px; font-size: var(--text-body-size); font-weight: 500; color: var(--text); }
+.form-subsection-note { margin: 0 0 8px; }
 .form-section-title {
   margin: 0 0 12px; font-size: var(--text-body-size); font-weight: 500; color: var(--text);
   padding-bottom: 8px; border-bottom: 1px solid var(--border);
@@ -2086,7 +2090,10 @@ dd.has-property-action { display: flex; flex-wrap: wrap; align-items: baseline; 
 
 /* Logs Explorer (#1863): the query pane, the Fields pane beside the Query
    results, and an entry expanded to its fields. */
-.log-query { display: grid; gap: 8px; margin-bottom: 12px; }
+/* One column no wider than the pane: a long log name in the picker, as
+   compute.googleapis.com/shielded_vm_integrity (#2181), must not widen it
+   past a 320px viewport. */
+.log-query { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-bottom: 12px; }
 .log-query-editor { width: 100%; box-sizing: border-box; min-height: 72px; resize: vertical;
   border: 1px solid var(--text-muted); border-radius: var(--radius-control); padding: 8px;
   background: var(--surface); color: var(--text); }

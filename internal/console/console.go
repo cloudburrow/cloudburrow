@@ -446,6 +446,14 @@ type Field struct {
 	// "Containers, Volumes, Networking, Security" (#1852). The section's
 	// fields with no Tab are drawn above the strip.
 	Tab string `json:"tab,omitempty"`
+	// Subsection, inside a Section, draws the consecutive fields naming it
+	// as one titled group (a fieldset with its legend), with
+	// SubsectionNote, given on its first field, under the title: Google's
+	// Create an instance has Shielded VM inside its Security pane, "Turn
+	// on all settings for the most secure configuration." over its three
+	// checkboxes (#2181).
+	Subsection     string `json:"subsection,omitempty"`
+	SubsectionNote string `json:"subsectionNote,omitempty"`
 	// Immutable marks a field shown for context and refused on submit. An
 	// edit form that hides a resource's identity makes the operator guess
 	// which resource they are editing; one that accepts a change to it lies,
