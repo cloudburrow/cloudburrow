@@ -564,6 +564,7 @@ func (c cloudCmd) scale(ctx context.Context) error {
 		_, err = c.m.Scale(ctx, vm, preset, "", true, c.printEvent)
 		return err
 	}
+	fmt.Fprintf(c.stdout, "%s cannot be resized to %s in place: a GPU VM's NVIDIA driver and container toolkit are installed when it is made.\n", vm, plan.To.Name)
 	ok, err := c.confirm("Make the new VM, move the instance onto it and delete " + vm + "?")
 	if err != nil || !ok {
 		return err

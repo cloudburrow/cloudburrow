@@ -299,8 +299,9 @@ func TestByocFirstRunWalkThrough(t *testing.T) {
 	service := fmt.Sprintf("walk-%d", time.Now().UnixNano()%1e6)
 	p.navigate("/run/create?project=" + project)
 	p.waitFor(`document.querySelector("#view #f-image") !== null && document.querySelector("#view #f-name") !== null`)
-	p.run(chromedp.SendKeys(chromedp.CSS(`#view #f-image`), "ghcr.io/knative/helloworld-go:latest"),
-		chromedp.SendKeys(chromedp.CSS(`#view #f-name`), service))
+	// The image field starts with the page's example; it is replaced.
+	p.setField("#view #f-image", "ghcr.io/knative/helloworld-go:latest")
+	p.setField("#view #f-name", service)
 	p.clickText("#view .is-radio label", "Allow public access")
 	p.clickText(`#view button[type="submit"]`, "Create")
 	p.waitForWithin(`location.pathname === "/run"`, 6*time.Minute)

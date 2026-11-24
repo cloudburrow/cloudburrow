@@ -158,11 +158,19 @@ func TestCloudCLIAzureAndFailures(t *testing.T) {
 	if out, err = cloudRun(t, "create", "--region", "eastus", "--size", "gpu", "--auto-stop", "0", "--yes"); err != nil {
 		t.Fatalf("create gpu: %v\n%s", err, out)
 	}
-	if out, err = cloudRun(t, "scale", "--size", "small", "--yes"); err == nil || !strings.Contains(err.Error(), "NVIDIA driver") {
+	// No cloud resizes a GPU VM to a CPU size in place: the scale is a
+	// change of VM, a new byoc-cli-cpu made and byoc-cli deleted (no
+	// instance runs on it here, so nothing moves).
+	if out, err = cloudRun(t, "scale", "--size", "small", "--yes"); err != nil ||
+		!strings.Contains(out, "NVIDIA driver") || !strings.Contains(out, "byoc-cli-cpu") || !strings.Contains(out, "byoc-cli is deleted") {
 		t.Fatalf("scale gpu to cpu: %v\n%s", err, out)
 	}
-	if out, err = cloudRun(t, "delete", "--yes"); err != nil {
-		t.Fatalf("delete: %v\n%s", err, out)
+	var del, delErr bytes.Buffer
+	if err := run([]string{"cloud", "delete", "--yes", "--name", "byoc-cli-cpu", "--state-dir", t.TempDir()}, &del, &delErr); err != nil {
+		t.Fatalf("delete byoc-cli-cpu: %v\n%s%s", err, del.String(), delErr.String())
+	}
+	if ids := f.az.IDs(); len(ids) != 0 {
+		t.Fatalf("after the change of VM and its delete, Azure still holds %v", ids)
 	}
 	if _, err := cloudRun(t, "connect", "azure", "--access-key"); err == nil {
 		t.Fatal("an Azure access key was accepted")
