@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -92,6 +93,19 @@ func TestCompatBrowserShardsMatchTheCIStep(t *testing.T) {
 	got := compatShard(t, "")["COMPAT_BROWSER_SHARDS"]
 	if want := strings.Join(shards, " "); got != want {
 		t.Errorf("COMPAT_BROWSER_SHARDS = %q, the browser step runs in %q", got, want)
+	}
+	// The compat step writes the instance's flags for the browser step,
+	// which reads them back, in each of those shards: without them the
+	// step has no instance to bring up again.
+	args := regexp.MustCompile(`(?m)^\s+([a-z|]+)\) printf '%s\\n' "\$\{CB\[@\]\}" > "\$RUNNER_TEMP/cb-args" ;;`).FindStringSubmatch(ci["compat"])
+	if args == nil {
+		t.Fatal("ci.yml's compat step does not write cb-args for the browser step")
+	}
+	have, want := strings.Split(args[1], "|"), strings.Fields(got)
+	slices.Sort(have)
+	slices.Sort(want)
+	if !slices.Equal(have, want) {
+		t.Errorf("the compat step writes cb-args in %q; the browser step runs in %q", args[1], got)
 	}
 }
 

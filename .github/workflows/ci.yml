@@ -1035,9 +1035,10 @@ jobs:
           # browser step below, which brings it up again (#594): in the
           # storage shard, and in the run, crossservice, emulators,
           # memorystore and sql shards for the screens only their instances
-          # serve (#700, #854, #1472, #1568).
+          # serve (#700, #854, #1472, #1568), and in served and vpcvms for
+          # Compute Engine's and Kubernetes Engine's.
           case "$SHARD" in
-            storage|served|run|crossservice|emulators|memorystore|sql|localai) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
+            storage|served|vpcvms|run|crossservice|emulators|memorystore|sql|localai) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
           esac
           if [ "$SHARD" = storage ]; then
             # The official Python clients against the same instance (#287),
