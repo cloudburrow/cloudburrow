@@ -24,6 +24,26 @@ SHARES="${SHARES:-}"
 
 log() { echo "filestore-nfs: $*"; }
 
+# attach puts the image $1 on a free loop device and prints it. The
+# container's /dev is a copy made when it started: a loop device the
+# kernel adds later (other instances' servers take them too) has no node
+# here, so attach makes it; another server may take the device first.
+attach() {
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    # losetup -f names the device even when it fails for want of its node.
+    d=$(losetup -f 2>&1 | grep -o '/dev/loop[0-9][0-9]*' | head -n 1) || true
+    if [ -n "$d" ]; then
+      [ -b "$d" ] || mknod "$d" b 7 "${d#/dev/loop}" 2>/dev/null || true
+      if losetup --direct-io=on "$d" "$1" 2>/dev/null; then
+        echo "$d"
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+  losetup -f --show --direct-io=on "$1"
+}
+
 # release closes every share's filesystem, mapping and loop device.
 release() {
   for m in $(awk '$2 ~ "^/export/fs/" {print $2}' /proc/mounts | sort -r); do
@@ -65,7 +85,7 @@ if [ -n "$SHARES" ]; then
     elif [ "$(stat -c %s "$img")" -lt "$bytes" ]; then
       truncate -s "$bytes" "$img"
     fi
-    loop=$(losetup -f --show --direct-io=on "$img")
+    loop=$(attach "$img")
     dev=$loop
     if [ "${CRYPT:-}" = 1 ]; then
       cryptsetup open --type plain --cipher aes-xts-plain64 --key-size 512 \

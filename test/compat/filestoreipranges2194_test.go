@@ -129,7 +129,9 @@ spec:
 	}
 	holds := func(addr string) bool {
 		for _, l := range strings.Split(peers(), "\n") {
-			if f := strings.Fields(l); len(f) >= 4 && strings.HasPrefix(f[len(f)-1], addr+":") {
+			// The server listens on IPv6 too: a client is [::ffff:ADDRESS]:PORT.
+			if f := strings.Fields(l); len(f) >= 4 && strings.HasPrefix(strings.TrimPrefix(f[len(f)-1], "[::ffff:"), addr+"]:") ||
+				len(f) >= 4 && strings.HasPrefix(f[len(f)-1], addr+":") {
 				return true
 			}
 		}

@@ -119,7 +119,9 @@ const srcChain = "CLOUDBURROW-FILESTORE-SRC"
 // POD_IP INTERNAL_IP" lines; $1 is 1 on a Kubernetes Engine node. It
 // prints "route ADDRESS" for each address the servers must route back to
 // this node: its VMs' internal IPs, and its pods' IPs on a Kubernetes
-// Engine node.
+// Engine node. VMs run on the instance's own nodes only: a Kubernetes
+// Engine node's pods share kind's 10.244.0.0/16 with them. A pod's packets are accepted out of the nat table's
+// POSTROUTING, so kind's masquerade, later in it, leaves their address.
 const srcScript = `set -e
 servers=""; vms=""
 while read -r kind a b; do
@@ -131,6 +133,7 @@ done
 local=$(ip -4 route show | awk '$2 == "dev" && $3 ~ /^veth/ {print $1}')
 rules="*nat
 :` + srcChain + ` - [0:0]"
+[ "$1" = 1 ] && vms=""
 for v in $vms; do
   pod=${v%,*}; vpc=${v#*,}
   if printf '%s\n' $local | grep -qx "$pod"; then
@@ -141,7 +144,7 @@ for v in $vms; do
 done
 if [ "$1" = 1 ]; then
   for s in $servers; do rules="$rules
--A ` + srcChain + ` -s 10.244.0.0/16 -d $s/32 -j RETURN"; done
+-A ` + srcChain + ` -s 10.244.0.0/16 -d $s/32 -j ACCEPT"; done
   for p in $local; do echo "route $p"; done
 fi
 printf '%s\nCOMMIT\n' "$rules" | iptables-restore --noflush
@@ -155,7 +158,7 @@ for a in $(ip -4 route show proto 199 | awk '{print $1}'); do
   printf '%s\n' "$want" | awk '{print $1}' | grep -qx "$a" || ip route del "$a" proto 199 2>/dev/null || true
 done
 printf '%s\n' "$want" | while read -r a n; do
-  [ -n "$a" ] && ip route replace "$a" via "$n" proto 199
+  [ -z "$a" ] || ip route replace "$a" via "$n" proto 199
 done
 true`
 
