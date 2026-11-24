@@ -43,8 +43,8 @@ landings since v0.5.0 (#2085 to #2196), the issues they closed, and the v0.6.0 d
   cluster, with vLLM, Text Embeddings Inference, the PyTorch inference server, llama.cpp, mlx-lm or
   ONNX Runtime (#2148). The console's Marketplace serves Docker Hub and deploys to the cluster
   (#2149).
-- Vertex AI generation serves `candidateCount`, `responseLogprobs`/`logprobs`, `thinkingConfig`
-  and context caching (`cachedContents`), with Vertex AI Studio controls for each (#2107, #2121,
+- Agent Platform generation serves `candidateCount`, `responseLogprobs`/`logprobs`, `thinkingConfig`
+  and context caching (`cachedContents`), with Agent Studio controls for each (#2107, #2121,
   #2122). multimodalembedding@001's `:predict` request and `EmbedContent` audio, video, PDF and
   `file_data` run on EmbeddingGemma 2 (#1651).
 - Document AI custom processors (Build, Train, Evaluate, v1beta3 datasets), Speech adaptation and

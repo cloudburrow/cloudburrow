@@ -134,7 +134,7 @@ Started by default:
 | **Cloud Run** | Knative Serving and Kubernetes, behind CloudBurrow's Cloud Run v2 and v1 adapters | Services and revisions with real containers, traffic splits, env from Secret Manager, volumes; **jobs and executions** as Kubernetes batch Jobs; **worker pools and instances**. Min-instances is verified; max-instances, concurrency, timeout and resource limits are mapped but not load-tested |
 | **Artifact Registry, Cloud Build, Cloud Functions, Eventarc** | CloudBurrow, on the Cloud Run port | Repositories (Docker, language packages, Go modules, KFP) with cleanup policies and vulnerability scanning (Container Analysis, Google's OSV-Scanner run locally); builds and `gcloud run deploy --source` through Google Buildpacks; Cloud Functions v1 and v2 with Pub/Sub and Storage triggers; Eventarc triggers; Secure Source Manager and Developer Connect ([docs/functions-and-builds.md](docs/functions-and-builds.md)) |
 | **Secret Manager** | CloudBurrow | Secrets and versions over gRPC and JSON. **Not a secret store**: nothing is authenticated |
-| **Vertex AI (local)** | CloudBurrow's runtimes, on the local AI endpoint | Online prediction, the Model Registry and Endpoints, **Model Garden deploys of Hugging Face models**, Document AI processors and Speech-to-Text; generation and embeddings when enabled ([below](#local-ai)) |
+| **Agent Platform (local; formerly Vertex AI)** | CloudBurrow's runtimes, on the local AI endpoint | Online prediction, the Model Registry and Endpoints, **Model Garden deploys of Hugging Face models**, Document AI processors and Speech-to-Text; generation and embeddings when enabled ([below](#local-ai)) |
 
 Always served, whatever `--services` says:
 
@@ -174,7 +174,7 @@ Each row is a summary: the per-operation status, and what each service refuses, 
 
 ### Local AI
 
-Vertex AI runs on this machine, on runtimes CloudBurrow builds or pins; nothing is sent to Google.
+Gemini Enterprise Agent Platform (formerly Vertex AI) runs on this machine, on runtimes CloudBurrow builds or pins; nothing is sent to Google.
 
 - **Text generation**: a subset of `generateContent` and `streamGenerateContent`, verified through
   the official `genai` SDK, on Gemma 4 E2B with `--local-ai-model`. The model is a **community**
