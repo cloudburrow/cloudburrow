@@ -18,6 +18,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // API is the served Filestore API the controller provisions through.
@@ -38,7 +40,8 @@ type Cluster struct {
 	Project, Location, Network string
 }
 
-// Runner runs a program (kubectl, docker); injected for tests.
+// Runner runs a program (docker); injected for tests. kubectl goes
+// through internal/k8s (Kube).
 type Runner interface {
 	Run(ctx context.Context, stdin io.Reader, stdout io.Writer, name string, args ...string) error
 }
@@ -52,7 +55,9 @@ type Controller struct {
 	// the node plugin.
 	Binary func(arch string) ([]byte, error)
 	Runner Runner
-	Logf   func(format string, args ...any)
+	// Kube makes the kubectl Runner of a kubeconfig (k8s.New when nil).
+	Kube func(kubeconfig, kubeContext, namespace string) *k8s.Runner
+	Logf func(format string, args ...any)
 	// Every is how often each cluster is looked at (3s when zero).
 	Every time.Duration
 
@@ -78,8 +83,15 @@ func (c *Controller) run(ctx context.Context, stdin string, name string, args ..
 	return out.String(), err
 }
 
+// kubectl runs kubectl against cl through internal/k8s, the one package
+// that execs it (docs/architecture.md §3 rule 2); Kube, when set, makes
+// the Runner (tests).
 func (c *Controller) kubectl(ctx context.Context, cl Cluster, stdin string, args ...string) (string, error) {
-	return c.run(ctx, stdin, "kubectl", append([]string{"--kubeconfig", cl.Kubeconfig}, args...)...)
+	kube := k8s.New
+	if c.Kube != nil {
+		kube = c.Kube
+	}
+	return kube(cl.Kubeconfig, "", "").Do(ctx, stdin, args...)
 }
 
 // Run looks at every cluster every Every until ctx ends.
