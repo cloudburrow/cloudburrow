@@ -40,6 +40,10 @@ type cloudSQLInstancesProvider struct {
 	// compute is Compute Engine's API, whose VPC networks the private IP
 	// fields offer (#2141); nil without it.
 	compute func() *compute.Server
+	// savedQueries is Cloud SQL Studio's saved queries record, and
+	// iamPrincipal the principal its IAM sign-in is made as (#2208).
+	savedQueries string
+	iamPrincipal string
 }
 
 func (cloudSQLInstancesProvider) ID() string    { return "cloudsql-instances" }

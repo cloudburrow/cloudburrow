@@ -456,7 +456,46 @@ func (s *Server) ExecuteSql(ctx context.Context, req *alloydbpb.ExecuteSqlReques
 	}
 	// Signed in as the user with the password given, which the server
 	// checks (#2208).
-	conn, err := s.pgConnAs(ctx, server, roleName(req.GetUser()), req.GetPassword(), req.GetDatabase())
+	return s.executeAs(ctx, server, roleName(req.GetUser()), req.GetPassword(), req)
+}
+
+// StudioExecuteSql is AlloyDB Studio's run (#2208): ExecuteSql signed in
+// with the password given, or, when iamEmail is set, with IAM database
+// authentication as that principal, whose credentials the caller (the
+// console, signed in as it) has checked. The principal must be one of the
+// cluster's IAM users, as the connectors' IAM sign-in requires.
+func (s *Server) StudioExecuteSql(ctx context.Context, req *alloydbpb.ExecuteSqlRequest, iamEmail string) (*alloydbpb.ExecuteSqlResponse, error) {
+	if iamEmail == "" {
+		return s.ExecuteSql(ctx, req)
+	}
+	if req.GetDatabase() == "" || strings.TrimSpace(req.GetSqlStatement()) == "" {
+		return nil, apierror.InvalidArgument("instance, database and sql_statement are required")
+	}
+	s.mu.Lock()
+	in, err := s.instance(req.GetInstance())
+	if err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	if in.GetState() != alloydbpb.Instance_READY {
+		s.mu.Unlock()
+		return nil, apierror.FailedPrecondition("instance %s is %s, not READY", in.GetName(), in.GetState())
+	}
+	server := serverName(in.GetName())
+	s.mu.Unlock()
+	cluster, _, _ := strings.Cut(req.GetInstance(), "/instances/")
+	role := roleName(strings.ToLower(iamEmail))
+	if !s.isIAMRole(cluster, role) {
+		// UNVERIFIED: Google's words for a refused IAM sign-in, as the
+		// connector listener's (listeners.go).
+		return nil, apierror.FailedPrecondition("IAM authentication failed for user %q", role)
+	}
+	return s.executeAs(ctx, server, role, s.iamRolePassword(role), req)
+}
+
+// executeAs runs req's statements on server as user with password.
+func (s *Server) executeAs(ctx context.Context, server, user, password string, req *alloydbpb.ExecuteSqlRequest) (*alloydbpb.ExecuteSqlResponse, error) {
+	conn, err := s.pgConnAs(ctx, server, user, password, req.GetDatabase())
 	if err != nil {
 		return nil, err
 	}

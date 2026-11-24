@@ -550,7 +550,14 @@ func googleLayout(ctx context.Context, svc *sqladminapi.Service, project string,
 		return console.Section{ID: id, Label: label, Kind: console.KindProperties,
 			Groups: []console.PropertyGroup{{Heading: "Not available locally", Properties: []console.Property{{Label: label, Value: why}}}}}
 	}
-	sections := []console.Section{overview,
+	// Cloud SQL Studio (#2208), second in Google's menu: its sign-in
+	// dialog, Explorer, editor and results (consoledbstudio.go).
+	studio := console.Section{ID: "studio", Label: "Cloud SQL Studio", Kind: console.KindStudio}
+	if strings.HasPrefix(in.DatabaseVersion, "SQLSERVER_") {
+		studio = notLocal("studio", "Cloud SQL Studio", "Cloud SQL Studio for SQL Server is not served here yet (#2208): "+
+			"its server runs Studio's statements only on PostgreSQL and MySQL. Connect with sqlcmd through the Cloud SQL Auth Proxy.")
+	}
+	sections := []console.Section{overview, studio,
 		notLocal("system-insights", "System insights", "System insights charts Cloud Monitoring metrics, which CloudBurrow does not emulate. "+
 			"The instance's operations are on Operations and its log lines in Logs."),
 		notLocal("query-insights", "Query insights", "Query insights is not available locally: it reads Cloud SQL's query telemetry, which CloudBurrow does not collect. "+
@@ -579,15 +586,6 @@ func googleLayout(ctx context.Context, svc *sqladminapi.Service, project string,
 		if s, ok := byID[id]; ok {
 			sections = append(sections, s)
 		}
-	}
-	if upSQLInstance(in.Name) {
-		studio := "/cloudsql"
-		if strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
-			studio = "/cloudsql-mysql"
-		}
-		sections = append(sections, console.Section{ID: "studio", Label: "Cloud SQL Studio", Kind: console.KindProperties,
-			Groups: []console.PropertyGroup{{Heading: "Cloud SQL Studio", Properties: []console.Property{
-				{Label: "Explore and query the databases", Value: "Open Cloud SQL Studio", Link: studio}}}}})
 	}
 	index := map[string]int{}
 	for i, s := range sections {

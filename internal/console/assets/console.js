@@ -28515,7 +28515,9 @@ function spannerExplanation(r) {
       el("aside", { class: "spanner-plan-side" }, download, info)));
 }
 
-const STUDIO_SECTIONS = { spanner: renderSpannerStudio, "bigtable-instances": renderBigtableStudio };
+const STUDIO_SECTIONS = { spanner: renderSpannerStudio, "bigtable-instances": renderBigtableStudio,
+  "cloudsql-instances": (panel, route, segments, project) => renderDBStudio(panel, route, segments, project, "cloudsql"),
+  alloydb: (panel, route, segments, project) => renderDBStudio(panel, route, segments, project, "alloydb") };
 
 function renderSpannerStudio(panel, route, segments, project) {
   const [instance, database] = segments;
@@ -28681,6 +28683,387 @@ function renderSpannerStudio(panel, route, segments, project) {
       results)));
   loadExplorer();
 }
+// --- Cloud SQL Studio and AlloyDB Studio (#2208) ---------------------------
+//
+// An instance's Cloud SQL Studio and a cluster's AlloyDB Studio, as Google's
+// console draws them (https://docs.cloud.google.com/sql/docs/postgres/manage-data-using-studio,
+// https://docs.cloud.google.com/alloydb/docs/manage-data-using-studio): the
+// sign-in dialog (Database; Built-in database authentication with a User
+// and its Password, or IAM database authentication), the Explorer of the
+// database's schemas, tables (columns and indexes), views, sequences,
+// functions and procedures, each table with View actions that fill the
+// editor, and the saved queries; the editor's tabs (Editor 1, ...) with
+// Run, Run selected, Clear, Save and Save as; and the Results, with All
+// results when a script returns several, and Export. Ctrl+Enter (Command+
+// Enter) runs. The calls are the provider's Studio (consoledbstudio.go): the
+// sign-in is held there, and the page keeps only its session ID.
+
+const DBS_SAVED_NOTE = "CloudBurrow-only: Google keeps a saved query as a Studio asset of the project, which CloudBurrow does not serve. " +
+  "This one is kept in the instance's state directory, listed under Saved queries in the Explorer, and reachable by no API.";
+
+function renderDBStudio(panel, route, segments, project, product) {
+  const instance = segments[0];
+  const service = route.service;
+  const title = product === "alloydb" ? "AlloyDB Studio" : "Cloud SQL Studio";
+  const call = (name, body = {}) => send(
+    `/api/studio/${encodeURIComponent(service)}?project=${encodeURIComponent(project)}&call=${name}`, "POST", { instance, ...body });
+  const sessionKey = `cb.dbstudio.session.${service}.${project}.${instance}`;
+  const tabsKey = `cb.dbstudio.tabs.${service}.${project}.${instance}`;
+  const readJSON = (k, fallback) => { try { return JSON.parse(sessionStorage.getItem(k) || "null") ?? fallback; } catch { return fallback; } };
+  const writeJSON = (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch { /* this tab only */ } };
+  let session = readJSON(sessionKey, null);
+  let store = readJSON(tabsKey, null);
+  if (!store || !Array.isArray(store.tabs) || !store.tabs.length) store = { tabs: [{ title: "Editor 1", sql: "" }], current: 0, next: 2 };
+  store.current = Math.min(Math.max(0, store.current | 0), store.tabs.length - 1);
+  const saveTabs = () => writeJSON(tabsKey, store);
+  let saved = [];
+  let catalog = null;
+  const lastOf = new Map();
+
+  // --- the sign-in dialog -------------------------------------------------
+  const signIn = async () => {
+    let options;
+    try {
+      options = await call("options");
+    } catch (err) {
+      setChildren(panel, el("div", { class: "dbs-signed-out", id: "dbs-signed-out" },
+        el("h2", { text: title }), el("p", { class: "form-error", role: "alert", id: "dbs-options-error", text: err.message })));
+      return;
+    }
+    const { dialog, close } = openModal({ labelledBy: "dbs-signin-title" });
+    const database = el("select", { id: "dbs-database", required: true },
+      el("option", { value: "", text: "Select a database" }),
+      ...(options.databases || []).map((d) => el("option", { value: d, text: d })));
+    if ((options.databases || []).includes(session?.database)) database.value = session.database;
+    const builtIn = (options.users || []).filter((u) => !/IAM/.test(u.type));
+    const user = el("select", { id: "dbs-user" },
+      el("option", { value: "", text: "Select a user" }),
+      ...builtIn.map((u) => el("option", { value: u.name, text: u.name })));
+    const password = el("input", { type: "password", id: "dbs-password", autocomplete: "current-password" });
+    const method = (value, label, checked) => el("label", { class: "check-line" },
+      el("input", { type: "radio", name: "dbs-auth", value, id: `dbs-auth-${value}`, checked: checked || null }), el("span", { text: label }));
+    const builtInBox = el("div", { id: "dbs-builtin" },
+      el("label", { for: "dbs-user", text: "User" }), user,
+      el("label", { for: "dbs-password", text: "Password" }), password);
+    const iamBox = el("div", { id: "dbs-iam", hidden: true },
+      el("p", { class: "form-help", id: "dbs-iam-principal",
+        text: options.iamPrincipal
+          ? `Signs in as ${options.iamPrincipal}, the principal this console uses. It must be an IAM user of the ${product === "alloydb" ? "cluster" : "instance"}.`
+          : "This console has no principal to sign in as." }));
+    const error = el("p", { class: "form-error", role: "alert", id: "dbs-signin-error", hidden: true });
+    const submit = el("button", { type: "submit", class: "primary", id: "dbs-authenticate", text: "Authenticate" });
+    const iam = () => dialog.querySelector("input[name=dbs-auth]:checked")?.value === "iam";
+    const form = el("form", { class: "modal-body", novalidate: true, onsubmit: async (e) => {
+      e.preventDefault();
+      error.hidden = true;
+      const fail = (msg, focus) => { error.textContent = msg; error.hidden = false; focus?.focus(); };
+      if (!database.value) return fail("Select a database.", database);
+      if (!iam() && !user.value) return fail("Select a user.", user);
+      setBusy(submit, true);
+      try {
+        const res = await call("signin", { database: database.value, user: user.value, password: password.value, iam: iam() });
+        // Switch user/database ends the sign-in it replaces.
+        if (session && session.session) call("signout", { session: session.session }).catch(() => {});
+        session = { session: res.session, database: res.database, user: res.user, engine: res.engine };
+        writeJSON(sessionKey, session);
+        close();
+        announce(`Signed in to ${res.database} as ${res.user}`);
+        drawStudio();
+      } catch (err) {
+        setBusy(submit, false);
+        fail(err.message, iam() ? database : password);
+      }
+    } },
+    el("h2", { id: "dbs-signin-title", text: `Sign in to ${title}` }),
+    el("p", { class: "form-help", text: `Sign in to ${title} using the name of your database, username, and password, or IAM database authentication.` }),
+    error,
+    el("label", { for: "dbs-database", text: "Database" }), database,
+    el("fieldset", { class: "dbs-auth", id: "dbs-auth" },
+      el("legend", { text: "Authentication" }),
+      method("builtin", "Built-in database authentication", true),
+      method("iam", "IAM database authentication", false)),
+    builtInBox, iamBox,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", id: "dbs-cancel", text: "Cancel", onclick: () => close() }), submit));
+    form.addEventListener("change", (e) => {
+      if (e.target.name !== "dbs-auth") return;
+      builtInBox.hidden = iam();
+      iamBox.hidden = !iam();
+    });
+    dialog.append(form);
+    database.focus();
+    dialog.addEventListener("cb-closed", () => { if (!session) drawSignedOut(); });
+  };
+  const drawSignedOut = () => setChildren(panel, el("div", { class: "dbs-signed-out", id: "dbs-signed-out" },
+    el("h2", { text: title }),
+    el("p", { text: "Sign in to a database to explore its objects and run queries." }),
+    el("button", { type: "button", class: "primary", id: "dbs-signin", text: "Sign in", onclick: () => signIn() })));
+  const signOut = async () => {
+    const s = session;
+    session = null;
+    try { sessionStorage.removeItem(sessionKey); } catch { /* none */ }
+    if (s) { try { await call("signout", { session: s.session }); } catch { /* gone already */ } }
+  };
+
+  // --- the Studio ---------------------------------------------------------
+  const drawStudio = () => {
+    let state = store.tabs[store.current];
+    const explorer = el("nav", { class: "spanner-explorer dbs-explorer", id: "dbs-explorer", "aria-label": "Explorer" },
+      el("h3", { text: "Explorer" }), loadingState(3, { what: "explorer" }));
+    const strip = el("div", { class: "tab-strip spanner-editor-tabs", id: "dbs-editor-tabs", role: "tablist", "aria-label": "Editor tabs" });
+    const editor = el("textarea", { class: "mono spanner-editor", id: "dbs-editor", rows: "10", spellcheck: "false",
+      "aria-label": "Query editor", placeholder: session.engine === "MYSQL" ? "SELECT * FROM my_table;" : "SELECT * FROM public.my_table;" });
+    const run = el("button", { class: "primary", id: "dbs-run", type: "button", text: "Run", title: "Run all statements (Ctrl+Enter)" });
+    const runSelected = el("button", { class: "secondary", id: "dbs-run-selected", type: "button", text: "Run selected",
+      title: "Run the highlighted statements" });
+    const clear = el("button", { class: "secondary", id: "dbs-clear", type: "button", text: "Clear" });
+    const saveButton = el("button", { class: "secondary", id: "dbs-save", type: "button", text: "Save" });
+    const saveAs = bqMenu("Save as", [{ label: "Save as new query", run: () => saveQuery(true) }]);
+    bqMenuButton(saveAs, "Save as", "Save as a new query");
+    saveAs.querySelector("button").id = "dbs-save-as";
+    const savedNote = el("p", { class: "unavailable", id: "dbs-saved-note", text: DBS_SAVED_NOTE, hidden: true });
+    const results = el("section", { class: "spanner-results dbs-results", id: "dbs-results", "aria-label": "Results" });
+
+    const exportAs = (r, kind) => {
+      const cols = r.columns || [];
+      const cell = (v) => (v === null || v === undefined ? "" : String(v));
+      const csv = [cols, ...(r.rows || [])].map((row) => row.map((v) => `"${cell(v).replaceAll('"', '""')}"`).join(",")).join("\n");
+      if (kind === "clipboard") {
+        navigator.clipboard?.writeText(csv).then(() => announce("Copied to clipboard"), () => announce("Copy failed"));
+        return;
+      }
+      const body = kind === "json" ? JSON.stringify((r.rows || []).map((row) => Object.fromEntries(cols.map((c, i) => [c, row[i]]))), null, 2) : csv;
+      const a = el("a", { href: URL.createObjectURL(new Blob([body], { type: kind === "json" ? "application/json" : "text/csv" })),
+        download: `results.${kind}` });
+      document.body.append(a); a.click(); a.remove();
+    };
+    const drawResults = () => {
+      const last = lastOf.get(state);
+      if (!last) return setChildren(results, el("h3", { text: "Results" }), el("p", { class: "unavailable", text: "Run a statement to see its results." }));
+      if (last.error) {
+        return setChildren(results, el("h3", { text: "Results" }),
+          el("p", { class: "form-error", role: "alert", id: "dbs-error", text: last.error }),
+          last.elapsed ? el("p", { class: "unavailable", text: `(${last.elapsed})` }) : null);
+      }
+      const all = last.results || [];
+      if (!all.length) {
+        return setChildren(results, el("h3", { text: "Results" }),
+          el("p", { class: "spanner-message", id: "dbs-message", text: `${last.message || "Statement executed successfully"} (${last.elapsed})` }));
+      }
+      const pick = Math.min(last.pick || 0, all.length - 1);
+      const r = all[pick];
+      const choose = all.length > 1 ? el("select", { id: "dbs-all-results", "aria-label": "All results",
+        onchange: (e) => { last.pick = Number(e.target.value); drawResults(); } },
+      ...all.map((x, i) => el("option", { value: String(i), text: `Result ${i + 1} (${(x.rows || []).length} rows)`, selected: i === pick || null }))) : null;
+      const exportMenu = bqMenu("Export", [
+        { label: "Export to CSV", run: () => exportAs(r, "csv") },
+        { label: "Export to JSON", run: () => exportAs(r, "json") },
+        { label: "Copy to clipboard", run: () => exportAs(r, "clipboard") },
+      ]);
+      bqMenuButton(exportMenu, "Export", "Export results");
+      exportMenu.querySelector("button").id = "dbs-export";
+      setChildren(results, el("h3", { text: "Results" }),
+        el("div", { class: "action-bar" },
+          choose,
+          el("p", { class: "spanner-message", id: "dbs-message",
+            text: `${(r.rows || []).length} rows (${last.elapsed})${r.partial ? ": partial results" : ""}${last.message ? `. ${last.message}` : ""}` }),
+          exportMenu),
+        el("div", { class: "table-wrap" }, el("table", { id: "dbs-results-table" },
+          el("thead", {}, el("tr", {}, ...(r.columns || []).map((c) => el("th", { scope: "col", text: c })))),
+          el("tbody", {}, ...(r.rows || []).map((row) => el("tr", {}, ...row.map((v) =>
+            el("td", { class: "mono" + (v === null ? " is-null" : ""), text: v === null ? "NULL" : v }))))))));
+    };
+    const execute = async (button, sql) => {
+      if (!sql.trim()) { notify("The editor is empty: write a statement to run.", "error"); editor.focus(); return; }
+      const tab = state;
+      setBusy(button, true);
+      setChildren(results, el("h3", { text: "Results" }), el("p", { class: "unavailable" }, spinner("Running"), " Running…"));
+      let res;
+      try {
+        res = await call("run", { session: session.session, sql });
+        announce(res.error ? `Query failed: ${res.error}` : `Query complete${(res.results || []).length ? `: ${res.results[0].rows.length} rows` : ""}`);
+      } catch (err) {
+        if (/signed out/.test(err.message)) { await signOut(); signIn(); return; }
+        res = { error: err.message };
+      } finally {
+        setBusy(button, false);
+      }
+      lastOf.set(tab, res);
+      if (tab === state) drawResults();
+      if (!res.error && /\b(CREATE|DROP|ALTER|RENAME)\b/i.test(sql)) loadExplorer();
+    };
+    run.addEventListener("click", () => execute(run, editor.value));
+    runSelected.addEventListener("click", () => {
+      const sel = editor.value.slice(editor.selectionStart, editor.selectionEnd);
+      if (!sel.trim()) { notify("Highlight the statements to run.", "error"); editor.focus(); return; }
+      execute(runSelected, sel);
+    });
+    editor.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); execute(run, editor.value); }
+    });
+    editor.addEventListener("input", () => { state.sql = editor.value; saveTabs(); });
+    clear.addEventListener("click", () => { editor.value = ""; state.sql = ""; saveTabs(); editor.focus(); });
+
+    const drawTabs = () => setChildren(strip, ...store.tabs.map((t, i) => el("span", { class: "spanner-editor-tab" },
+      el("button", { class: "tab" + (i === store.current ? " is-selected" : ""), role: "tab", type: "button",
+        "aria-selected": i === store.current ? "true" : "false", text: t.title, onclick: () => selectTab(i) }),
+      store.tabs.length > 1 ? el("button", { class: "icon-button", type: "button", "aria-label": `Close ${t.title}`, text: "×",
+        onclick: () => {
+          lastOf.delete(t);
+          store.tabs.splice(i, 1);
+          selectTab(Math.min(store.current >= i && store.current > 0 ? store.current - 1 : store.current, store.tabs.length - 1));
+        } }) : null)),
+    el("button", { class: "icon-button", id: "dbs-new-tab", type: "button", "aria-label": "New editor tab", title: "New editor tab", text: "+",
+      onclick: () => openTab("") }));
+    const selectTab = (i) => {
+      store.current = i;
+      state = store.tabs[i];
+      saveTabs();
+      editor.value = state.sql || "";
+      savedNote.hidden = !state.savedId;
+      drawTabs();
+      drawResults();
+    };
+    const openTab = (sql, extra = {}) => {
+      store.tabs.push({ title: `Editor ${store.next || store.tabs.length + 1}`, sql, ...extra });
+      store.next = (store.next || store.tabs.length) + 1;
+      selectTab(store.tabs.length - 1);
+      editor.focus();
+    };
+
+    // --- saved queries ---
+    const savedGroup = el("div", { id: "dbs-explorer-saved" });
+    const saveQuery = async (asNew) => {
+      if (!editor.value.trim()) { notify("The editor is empty: write a query to save.", "error"); editor.focus(); return; }
+      if (state.savedId && !asNew) {
+        try {
+          const sq = await call("savequery", { id: state.savedId, name: state.title, sql: editor.value });
+          notify(`Saved query ${sq.name}`);
+          await loadSaved();
+        } catch (err) {
+          notify(`Save query failed: ${err.message}`, "error");
+        }
+        return;
+      }
+      const sq = await btSaveDialog({ title: asNew ? "Save as new query" : "Save query", label: "Query name",
+        value: state.savedId ? `Copy of ${state.title}` : "",
+        submit: (name) => call("savequery", { name, sql: editor.value }) });
+      if (!sq) return;
+      state.savedId = sq.id;
+      state.title = sq.name;
+      saveTabs();
+      drawTabs();
+      savedNote.hidden = false;
+      notify(`Saved query ${sq.name}`);
+      await loadSaved();
+    };
+    const openSaved = (sq) => {
+      const at = store.tabs.findIndex((t) => t.savedId === sq.id);
+      if (at >= 0) { store.tabs[at].sql = sq.query; selectTab(at); return; }
+      openTab(sq.query, { title: sq.name, savedId: sq.id });
+    };
+    const deleteSaved = async (sq) => {
+      await confirmDestructive({ title: "Delete query", detail: sq.name, style: "confirm",
+        consequence: "The saved query is deleted. Editor tabs that hold it keep their text.",
+        onConfirm: () => call("deletequery", { id: sq.id }) });
+      await loadSaved();
+    };
+    const loadSaved = async () => {
+      try {
+        saved = (await call("savedqueries")).queries || [];
+        for (const t of store.tabs) if (t.savedId && !saved.some((x) => x.id === t.savedId)) delete t.savedId;
+        savedNote.hidden = !state.savedId;
+        setChildren(savedGroup, el("details", { class: "spanner-explorer-group", open: true },
+          el("summary", { text: `Saved queries (${saved.length})` }),
+          saved.length ? el("ul", {}, ...saved.map((sq) => el("li", { class: "bigtable-saved-query" },
+            el("button", { class: "link-button", type: "button", text: sq.name, title: `Open query ${sq.name}`, onclick: () => openSaved(sq) }),
+            bqMenu(`View actions for ${sq.name}`, [
+              { label: "Open query", run: () => openSaved(sq) },
+              { label: "Delete query", danger: true, run: () => deleteSaved(sq) },
+            ])))) : el("p", { class: "unavailable", text: "No saved queries" })));
+      } catch (err) {
+        setChildren(savedGroup, el("p", { class: "unavailable", text: `Saved queries: ${err.message}` }));
+      }
+    };
+
+    // --- the Explorer ---
+    const mysql = session.engine === "MYSQL";
+    const quote = (n) => (mysql ? `\`${n.replaceAll("`", "``")}\`` : `"${n.replaceAll('"', '""')}"`);
+    const qualified = (schema, n) => (mysql ? quote(n) : `${quote(schema)}.${quote(n)}`);
+    const group = (label, items, row) => el("details", { class: "spanner-explorer-group" },
+      el("summary", { text: `${label} (${items.length})` }),
+      items.length ? el("ul", {}, ...items.map(row)) : el("p", { class: "unavailable", text: `No ${label.toLowerCase()}` }));
+    const tableRow = (schema, isView) => (t) => {
+      const name = qualified(schema, t.name);
+      const cols = (t.columns || []).map((c) => quote(c[0]));
+      const actions = [{ label: "SELECT", run: () => openTab(`SELECT\n  ${cols.join(",\n  ") || "*"}\nFROM\n  ${name}\nLIMIT\n  1000;`) }];
+      if (!isView) {
+        actions.push(
+          { label: "INSERT", run: () => openTab(`INSERT INTO ${name} (${cols.join(", ")})\nVALUES\n  (${(t.columns || []).map((c) => `/* ${c[1]} */`).join(", ")});`) },
+          { label: "UPDATE", run: () => openTab(`UPDATE ${name}\nSET\n  ${cols.map((c) => `${c} = /* value */`).join(",\n  ")}\nWHERE\n  /* condition */;`) },
+          { label: "DELETE", run: () => openTab(`DELETE FROM ${name}\nWHERE\n  /* condition */;`) });
+      }
+      actions.push({ label: "DROP", danger: true, run: () => openTab(`DROP ${isView ? (t.kind === "materialized view" ? "MATERIALIZED VIEW" : "VIEW") : "TABLE"} ${name};`) });
+      return el("li", { class: "spanner-explorer-table" },
+        el("details", {},
+          el("summary", {}, el("span", { class: "mono", text: t.name }), t.kind ? el("span", { class: "unavailable", text: ` ${t.kind}` }) : null,
+            bqMenu(`View actions for ${t.name}`, actions)),
+          el("ul", { class: "spanner-columns" },
+            el("li", { class: "dbs-explorer-heading", text: "Columns" }),
+            ...(t.columns || []).map((c) => el("li", {}, el("span", { class: "mono", text: c[0] }), el("span", { class: "unavailable", text: ` ${c[1]}` }))),
+            ...((t.indexes || []).length ? [el("li", { class: "dbs-explorer-heading", text: "Indexes and keys" }),
+              ...t.indexes.map((i) => el("li", { class: "mono", text: i }))] : []))));
+    };
+    const routineRow = (schema, kind) => (n) => el("li", {}, el("button", { class: "link-button mono", type: "button", text: n,
+      title: `Call ${n}`, onclick: () => openTab(kind === "procedure" ? `CALL ${qualified(schema, n)}();` : `SELECT ${qualified(schema, n)}();`) }));
+    const loadExplorer = async () => {
+      try {
+        catalog = await call("explorer", { session: session.session });
+      } catch (err) {
+        if (/signed out/.test(err.message)) { await signOut(); signIn(); return; }
+        setChildren(explorer, el("h3", { text: "Explorer" }), el("p", { class: "form-error", role: "alert", text: err.message }));
+        return;
+      }
+      const schemas = catalog.schemas || [];
+      const schemaNode = (g) => el("details", { class: "spanner-explorer-group dbs-schema", open: mysql || g.name === "public" || null },
+        el("summary", {}, el("span", { class: "mono", text: g.name })),
+        group("Tables", g.tables || [], tableRow(g.name, false)),
+        group("Views", g.views || [], tableRow(g.name, true)),
+        mysql ? null : group("Sequences", g.sequences || [], (n) => el("li", { class: "mono", text: n })),
+        group("Functions", g.functions || [], routineRow(g.name, "function")),
+        group(mysql ? "Stored procedures" : "Procedures", g.procedures || [], routineRow(g.name, "procedure")));
+      setChildren(explorer, el("h3", { text: "Explorer" }),
+        el("div", { class: "dbs-signed-in", id: "dbs-signed-in" },
+          el("p", { class: "mono", id: "dbs-current", text: `${catalog.database} · ${catalog.user}` }),
+          el("button", { type: "button", class: "link-button", id: "dbs-switch", text: "Switch user/database",
+            onclick: () => signIn() }),
+          el("button", { type: "button", class: "link-button", id: "dbs-signout", text: "Sign out",
+            onclick: async () => { await signOut(); drawSignedOut(); } })),
+        savedGroup,
+        mysql ? schemaNode(schemas[0] || { name: catalog.database }) :
+          el("details", { class: "spanner-explorer-group", open: true },
+            el("summary", { text: `Schemas (${schemas.length})` }),
+            el("div", {}, ...schemas.map(schemaNode))));
+      loadSaved();
+    };
+
+    editor.value = state.sql || "";
+    savedNote.hidden = !state.savedId;
+    drawTabs();
+    drawResults();
+    setChildren(panel, el("div", { class: "spanner-studio dbs-studio", id: "dbs-studio" },
+      explorer,
+      el("div", { class: "spanner-workspace" },
+        strip, editor,
+        el("div", { class: "action-bar spanner-editor-actions" }, run, runSelected, saveButton, saveAs, clear),
+        savedNote, results)));
+    saveButton.addEventListener("click", () => saveQuery(false));
+    loadExplorer();
+  };
+
+  if (session && session.session) drawStudio(); else { drawSignedOut(); signIn(); }
+}
+
 // Manage resources (#1865), Google's page of that name: the organization,
 // its folders and the projects under each in one tree table (Name, ID,
 // Status, Labels, Tags, Actions), Create project (the New project page)
