@@ -10,6 +10,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/doctor"
 	"github.com/cloudburrow/cloudburrow/internal/prefetch"
+	"github.com/cloudburrow/cloudburrow/internal/remotecompute"
 )
 
 // errBlocking signals that doctor found a problem that stops `up`, so the
@@ -31,7 +32,43 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 
 	fmt.Fprintf(stdout, "cloudburrow doctor: checking prerequisites for instance %q\n\n", cfg.Name)
 
-	report := doctor.Run(ctx, doctor.RealEnv(), doctorOptions(cfg))
+	env := doctor.RealEnv()
+	var remote []doctor.Result
+	if _, ok, err := computeTarget(cfg); err != nil {
+		remote = append(remote, doctor.Result{Name: "remote host", Level: doctor.LevelFail, Detail: err.Error(),
+			Remedy: "fix --compute or the instance's " + remotecompute.RecordFile})
+	} else if ok {
+		// The compute host (#2209): Docker, CPU, memory and disk are the
+		// host's, measured over the connection; the ports and binaries
+		// are still this machine's.
+		compute, err := connectComputeWith(ctx, cfg, io.Discard, false, true)
+		if err != nil {
+			remote = append(remote, doctor.Result{Name: "remote host", Level: doctor.LevelFail, Detail: err.Error(),
+				Remedy: "check that `ssh` reaches the host with your agent and config, and that it runs Linux with Docker"})
+		} else {
+			defer compute.Close()
+			_, checks := compute.session.Checks(ctx)
+			remote = append(remote, doctor.Result{Name: "remote compute", Level: doctor.LevelOK,
+				Detail: "the instance's Docker runs on " + compute.record.Target.String() + " over SSH; the CLI and console run here"})
+			for _, c := range checks {
+				r := doctor.Result{Name: c.Name, Level: doctor.LevelOK, Detail: c.Detail, Remedy: c.Remedy}
+				switch {
+				case !c.OK:
+					r.Level = doctor.LevelFail
+				case c.Warn:
+					r.Level = doctor.LevelWarn
+				default:
+					r.Remedy = ""
+				}
+				remote = append(remote, r)
+			}
+			s := compute.session
+			env.GOOS = "linux"
+			env.DiskFree = func(path string) (uint64, string, error) { return s.DiskFree(ctx, path) }
+		}
+	}
+	report := doctor.Run(ctx, env, doctorOptions(cfg))
+	report.Results = append(remote, report.Results...)
 	arch := daemonArch(ctx, prefetch.ExecRunner{})
 	report.Results = append(report.Results, storageEmbedResult(cfg, arch), bigQueryEmbedResult(cfg, arch))
 	report.Results = append(report.Results, offlineCacheResult(ctx, cfg, prefetch.ExecRunner{}, report))

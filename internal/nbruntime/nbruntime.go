@@ -267,7 +267,7 @@ func (m *Manager) ensureImage(ctx context.Context, s *session) error {
 func (m *Manager) target(ctx context.Context, rest string) (string, func(), error) {
 	m.once.Do(func() {
 		out, _ := m.docker(ctx, "info", "--format", "{{.OperatingSystem}}")
-		m.desktop = strings.Contains(out, "Docker Desktop")
+		m.desktop = strings.Contains(out, "Docker Desktop") && hostrelay.Remote() == nil
 	})
 	_, port, err := net.SplitHostPort(rest)
 	if err != nil {

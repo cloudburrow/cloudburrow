@@ -12005,10 +12005,76 @@ async function renderInstance(view) {
     return true;
   };
   setChildren(view, header(),
+    instanceComputeCard(refused),
     instanceSaveCard(info, refused),
     instanceLoadCard(info, instance, refused),
     instanceResetCard(info, refused),
     instanceSeedCard(info, refused));
+}
+
+// instanceComputeCard says where the instance's compute runs (#2209): this
+// machine's Docker, or a remote host over SSH, with its size and the
+// connection's state. Reconnect needs the admin token, like the cards below.
+function instanceComputeCard(refused) {
+  const body = el("div", { id: "instance-compute-body" }, el("p", { class: "muted", text: "Loading…" }));
+  const result = instanceResult("instance-compute-result");
+  const error = el("p", { class: "form-error", role: "alert", id: "instance-compute-error", hidden: true });
+  const button = el("button", { id: "instance-compute-reconnect", text: "Reconnect", hidden: true });
+  const row = (label, value, id) => [el("dt", { text: label }), el("dd", { id, text: value })];
+  const fill = (c) => {
+    if (c.location !== "ssh") {
+      setChildren(body, el("dl", { class: "info-fields", id: "instance-compute-details" },
+        ...row("Location", "This machine", "instance-compute-location"),
+        ...row("Runs on", "This machine's Docker", "instance-compute-target")));
+      button.hidden = true;
+      return;
+    }
+    const h = c.host || {};
+    setChildren(body, el("dl", { class: "info-fields", id: "instance-compute-details" },
+      ...row("Location", "Remote host over SSH", "instance-compute-location"),
+      ...row("Runs on", c.target || "", "instance-compute-target"),
+      ...row("Size", c.size || "unknown", "instance-compute-size"),
+      ...row("System", [h.os, h.arch, h.dockerVersion ? `Docker ${h.dockerVersion}` : ""].filter(Boolean).join(", "), "instance-compute-system"),
+      ...row("Connection", c.connected ? "Connected" : `Reconnecting${c.lastError ? `: ${c.lastError}` : ""}`, "instance-compute-state"),
+      ...row("Reconnects", String(c.reconnects || 0), "instance-compute-reconnects"),
+      ...row("Forwarded ports", (c.published || []).join(", ") || "none", "instance-compute-ports")));
+    button.hidden = false;
+  };
+  const load = async () => {
+    try {
+      const res = await fetch("/api/instance/compute", { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error(`/api/instance/compute responded ${res.status}`);
+      fill(await res.json());
+    } catch (err) {
+      setChildren(body, el("p", { class: "form-error", text: `Where the compute runs is unknown: ${err.message}` }));
+    }
+  };
+  button.addEventListener("click", async () => {
+    error.hidden = true;
+    result.textContent = "";
+    setBusy(button, true);
+    const op = recordOperation("Reconnect compute host");
+    try {
+      fill(await (await instanceFetch("/api/instance/compute/reconnect", { method: "POST", deadline: INSTANCE_DEADLINE_MS })).json());
+      op.succeeded("compute host");
+      result.textContent = "Reconnected.";
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      if (refused(err)) return;
+      error.textContent = `The connection was not re-established: ${err.message}`;
+      error.hidden = false;
+    } finally {
+      setBusy(button, false);
+    }
+  });
+  load();
+  return el("section", { class: "card", id: "instance-compute-card", "aria-labelledby": "instance-compute-title" },
+    el("h2", { id: "instance-compute-title", text: "Compute" }),
+    el("p", { text: "Where this instance's cluster and containers run. The console, the APIs and the metadata server always run on this machine." }),
+    body,
+    error,
+    el("div", { class: "form-actions" }, button),
+    result);
 }
 
 // instanceResult is a card's outcome line.

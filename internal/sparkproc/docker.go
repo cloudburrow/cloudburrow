@@ -315,7 +315,7 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 func (d *Docker) targets(ctx context.Context, rest, storage string) (string, string, func(), error) {
 	d.once.Do(func() {
 		out, err := d.docker(ctx, "info", "--format", "{{.OperatingSystem}}")
-		d.desktop, d.desktopOK = strings.Contains(out, "Docker Desktop"), err
+		d.desktop, d.desktopOK = strings.Contains(out, "Docker Desktop") && hostrelay.Remote() == nil, err
 	})
 	_, restPortHost, _ := net.SplitHostPort(rest)
 	_, storagePortHost, _ := net.SplitHostPort(storage)

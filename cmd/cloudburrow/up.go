@@ -87,6 +87,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err := preflightPorts(cfg, doctor.RealEnv(), stderr); err != nil {
 		return err
 	}
+	// The compute host (#2209), before anything asks Docker a question:
+	// from here every docker and kind this process runs reaches it.
+	compute, err := connectCompute(ctx, cfg, stdout, true)
+	if err != nil {
+		return err
+	}
+	defer compute.Close()
 	// Before anything is created too: with --offline, every artifact the
 	// cluster would download must be in the cache, and the first that is
 	// not is named here rather than found as a pull timeout minutes in
@@ -1673,6 +1680,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// through the admin API in process with the token the page sends,
 		// never one the console holds (#553).
 		consoleSrv.SetInstance(newConsoleInstance(cfg, adminAPI), adminTokenPath(cfg))
+		consoleSrv.SetCompute(consoleCompute{})
 	}
 	// Last: ready hooks run once everything above has started, and shutdown
 	// hooks run first, before anything they use is stopped.
@@ -1996,6 +2004,9 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 
 	fmt.Fprintf(stdout, "instance:   %s\n", cfg.Name)
 	fmt.Fprintf(stdout, "project:    %s\n", projectLine(cfg))
+	if where, err := computeSummary(cfg); err == nil {
+		fmt.Fprintf(stdout, "compute:    %s\n", where)
+	}
 	fmt.Fprintf(stdout, "cluster:    %s (%s)\n", cfg.ClusterName(), cfg.Cluster.NodeImage)
 	fmt.Fprintf(stdout, "namespace:  %s\n", cfg.Cluster.Namespace)
 	fmt.Fprintf(stdout, "kubeconfig: %s\n", cfg.KubeconfigPath())
@@ -2028,6 +2039,16 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	compute, err := connectCompute(ctx, cfg, io.Discard, false)
+	if err != nil {
+		fmt.Fprintf(stdout, "\ncluster state: unknown (%v)\n", err)
+		return nil
+	}
+	defer compute.Close()
+	if compute != nil {
+		st := compute.session.Status()
+		fmt.Fprintf(stdout, "\ncompute host:  %s, connected (%s; Docker %s, %s)\n", st.Target, st.Host.Size(), st.Host.DockerVersion, st.Host.Arch)
+	}
 
 	status, err := c.Status(ctx)
 	if err != nil {

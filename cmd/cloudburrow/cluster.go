@@ -10,6 +10,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/cluster"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/remotecompute"
 	"github.com/cloudburrow/cloudburrow/internal/version"
 )
 
@@ -62,6 +63,11 @@ func runStop(args []string, stdout, stderr io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ShutdownTimeout))
 	defer cancel()
+	compute, err := connectCompute(ctx, cfg, stderr, false)
+	if err != nil {
+		return err
+	}
+	defer compute.Close()
 
 	used := instanceNodeImages(ctx, cfg.Name)
 	if err := c.Stop(ctx); err != nil {
@@ -93,6 +99,11 @@ func runDelete(args []string, stdout, stderr io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	compute, err := connectCompute(ctx, cfg, stderr, false)
+	if err != nil {
+		return err
+	}
+	defer compute.Close()
 
 	// The Kubernetes Engine API's clusters (#1913) go with the instance.
 	if err := deleteGKEClusters(ctx, cfg, stdout); err != nil {
@@ -104,6 +115,14 @@ func runDelete(args []string, stdout, stderr io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "deleted cluster %s and its state\n", c.Name())
 	cleanInstanceDocker(cfg.Name, used, stdout)
+	if compute != nil {
+		// The instance is gone from the host; a next up may choose again.
+		if err := remotecompute.RemoveRecord(cfg.InstanceDir()); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "the instance no longer runs on %s; CloudBurrow's key for it stays in %s\n",
+			compute.record.Target, cfg.InstanceDir())
+	}
 	return nil
 }
 
@@ -148,6 +167,11 @@ var resetNamespace = func(cfg config.Config, stdout io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ReadyTimeout))
 	defer cancel()
+	compute, err := connectCompute(ctx, cfg, io.Discard, false)
+	if err != nil {
+		return err
+	}
+	defer compute.Close()
 
 	status, err := c.Status(ctx)
 	if err != nil {

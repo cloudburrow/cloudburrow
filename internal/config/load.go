@@ -184,6 +184,7 @@ type rawFlags struct {
 	project          string
 	bindAddress      string
 	cloudsqlConn     string
+	computeTarget    string
 	allowRemote      bool
 	cbHostSteps      bool
 	acceptMSSQLEULA  bool
@@ -287,6 +288,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.name, "name", "", "instance name; scopes the cluster, namespace and every owned resource")
 	fs.StringVar(&r.project, "project", "", "default project ID (default: the instance name when it is a valid project ID, otherwise derived from it)")
 	fs.StringVar(&r.bindAddress, "bind-address", "", "IP address to publish host endpoints on")
+	fs.StringVar(&r.computeTarget, "compute", "", "where the instance's Docker (its kind cluster and every container) runs: empty for this machine, or ssh://[user@]host[:port] for a remote Linux host reached over SSH (docs/remote-compute.md)")
 	fs.StringVar(&r.cloudsqlConn, "cloudsql-connector", "", "host:port the Cloud SQL connectors' TLS listener binds; they dial port 3307, so a second instance takes another loopback address (default: bind address, port 3307)")
 	fs.BoolVar(&r.allowRemote, "allow-remote", false, "permit binding a non-loopback address (unsafe)")
 	fs.IntVar(&r.portBase, "port-base", 0, "move every fixed default port so the layout starts here (control here, ingress +80, console +90); explicit --port-* flags still win (0 = the defaults, from 9000)")
@@ -501,6 +503,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	str("PROJECT", &cfg.Project)
 	str("BIND_ADDRESS", &cfg.BindAddress)
 	str("CLOUDSQL_CONNECTOR", &cfg.CloudSQLConnector)
+	str("COMPUTE", &cfg.Compute)
 
 	if v := getenv(EnvPrefix + "ALLOW_REMOTE"); v != "" {
 		b, err := strconv.ParseBool(v)
@@ -671,6 +674,9 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["cloudsql-connector"] {
 		cfg.CloudSQLConnector = raw.cloudsqlConn
+	}
+	if set["compute"] {
+		cfg.Compute = raw.computeTarget
 	}
 	for _, p := range []struct {
 		name string

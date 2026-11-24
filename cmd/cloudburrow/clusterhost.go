@@ -166,7 +166,9 @@ func (h *clusterHost) InClusterAll() map[string]string {
 // CLI must listen there itself.
 func (h *clusterHost) discover(ctx context.Context) (address string, relay bool, err error) {
 	node := h.cfg.ClusterName() + "-control-plane"
-	if out, err := h.docker.Run(ctx, "docker", "exec", node, "getent", "ahostsv4", "host.docker.internal"); err == nil {
+	// On a compute host (#2209) host.docker.internal, where it resolves at
+	// all, is that host, not this machine, so the gateway is always used.
+	if out, err := h.docker.Run(ctx, "docker", "exec", node, "getent", "ahostsv4", "host.docker.internal"); err == nil && hostrelay.Remote() == nil {
 		if f := strings.Fields(out); len(f) > 0 && net.ParseIP(f[0]) != nil {
 			return f[0], false, nil
 		}
@@ -178,6 +180,11 @@ func (h *clusterHost) discover(ctx context.Context) (address string, relay bool,
 	}
 	for _, f := range strings.Fields(out) {
 		if ip := net.ParseIP(f); ip != nil && ip.To4() != nil {
+			if hostrelay.Remote() != nil {
+				// The compute host's gateway (#2209): the SSH connection
+				// binds it there, so it is never an address here.
+				return f, true, nil
+			}
 			if err := h.gatewayBindable(ctx, f); err != nil {
 				return "", false, err
 			}
@@ -271,6 +278,9 @@ func (h *clusterHost) Start(ctx context.Context) error {
 	mode := "host.docker.internal"
 	if relay {
 		mode = "a relay on the kind network gateway"
+		if hostrelay.Remote() != nil {
+			mode = "reverse SSH forwards on the compute host's kind network gateway"
+		}
 	}
 	h.mu.Lock()
 	h.address, h.mode, h.ports, h.relays, h.clusterIP = address, mode, ports, relays, clusterIP

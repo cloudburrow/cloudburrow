@@ -2143,6 +2143,9 @@ type Server struct {
 	// offers no page. instanceTokenFile is where the token is, not the token.
 	instanceSrc       InstanceSource
 	instanceTokenFile string
+	// computeSrc is where the instance's compute runs (#2209); nil is this
+	// machine's Docker.
+	computeSrc ComputeSource
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -2221,6 +2224,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/logs", s.handleDeleteLog)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/instance", s.handleInstance)
+	mux.HandleFunc("GET /api/instance/compute", s.handleCompute)
+	mux.HandleFunc("POST /api/instance/compute/reconnect", s.handleComputeReconnect)
 	mux.HandleFunc("POST /api/instance/save", s.handleStateSave)
 	mux.HandleFunc("POST /api/instance/load", s.handleStateLoad)
 	mux.HandleFunc("POST /api/instance/reset", s.handleInstanceReset)
