@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // EXPORT MODEL of a model with a TRANSFORM clause, and of a TRANSFORM_ONLY
@@ -47,14 +49,22 @@ import (
 // FARM_FINGERPRINT is TensorFlow's tf.fingerprint, FarmHash's
 // Fingerprint64, as BigQuery's is.
 //
-// UNVERIFIED (the page does not say): the preprocessing signature's output
-// names and dtypes beyond "the same as the columns" (CloudBurrow's are
+// UNVERIFIED (the page does not say; re-read 2026-11-24): the
+// preprocessing signature's output names and dtypes beyond "the same as the columns" (CloudBurrow's are
 // above); how a NULL output is written (CloudBurrow writes the input
 // table's NULL values; a BOOL NULL is false); NUMERIC and BIGNUMERIC are
 // computed in float64, as the page says the signatures carry them. A
-// function the page lists that CloudBurrow does not compile, an ARRAY
-// input, and a named time zone (the export carries no time zone database)
-// are refused 501 naming them; ERROR() in the TRANSFORM gives NULL.
+// time zone argument is computed from the tz database's offsets, written
+// into the graph (a local time in a transition's gap or fold takes the
+// offset before it, UNVERIFIED; %Z is the zone's abbreviation, as absl's
+// FormatTime writes it, UNVERIFIED). Every function the page lists
+// compiles; one it does not list, and that ML preprocessing's SQL does not
+// use, is refused 400, as the page's list is all a TRANSFORM can use. An
+// ARRAY input is in the signature as the page's table gives it (an
+// ARRAY<STRUCT<INT64, FLOAT64>> a SparseTensor, NAME, NAME_1 and NAME_2
+// its indices, values and shape, UNVERIFIED); an output that reads one is
+// refused, the functions the page lists of one giving an ARRAY. ERROR()
+// in the TRANSFORM gives NULL.
 
 // Missing values of the preprocessing model's inputs, as the page's NULL row
 // gives them.
@@ -783,8 +793,18 @@ func (c *tgCompiler) column(name string) tgVal {
 	if !ok {
 		panic(&tgFail{400, "cloudburrow: the TRANSFORM reads " + name + ", which is not one of the model's input columns"})
 	}
+	if v.node == nil && !v.isArr && strings.HasPrefix(v.typ, "ARRAY") {
+		// An ARRAY input: the functions the page lists for a TRANSFORM
+		// that take one (ML.MULTI_HOT_ENCODER, ML.NGRAMS, ML.NORMALIZER)
+		// give an ARRAY, and the page lists no other function of one.
+		panic(&tgFail{400, "an ARRAY input"})
+	}
 	return v
 }
+
+// structIntFloat is ARRAY<STRUCT<INT64, FLOAT64>>'s element type, its
+// fields named.
+var structIntFloat = regexp.MustCompile(`^STRUCT<\s*(\w+\s+)?(INT64|INTEGER)\s*,\s*(\w+\s+)?(FLOAT64|FLOAT)\s*>$`)
 
 func (c *tgCompiler) arrayLit(elem string) tgVal {
 	var items []tgVal
@@ -1158,12 +1178,18 @@ func (c *tgCompiler) call(name string) tgVal {
 		a := c.expr(0)
 		c.expectPunct(",")
 		unit := c.partName()
+		var zn *tgZone
 		if c.acceptPunct(",") {
 			z := c.expr(0)
-			c.zone(c.constString(z, "the time zone"))
+			zn = c.zoneOf(c.constString(z, "the time zone"))
 		}
 		c.expectPunct(")")
 		typ := strings.SplitN(name, "_", 2)[0]
+		if typ == "TIMESTAMP" && zn != nil {
+			// Truncated in the zone's civil time, as a DATETIME is.
+			local := toLocal(c.as(a, typ).node, zn)
+			return tgVal{typ: typ, node: fromLocal(node("date_trunc", "i", map[string]any{"type": "DATETIME", "unit": unit}, local), zn)}
+		}
 		return tgVal{typ: typ, node: node("date_trunc", "i", map[string]any{"type": typ, "unit": unit}, c.as(a, typ).node)}
 	}
 	args := c.args()
@@ -1324,10 +1350,11 @@ func (c *tgCompiler) call(name string) tgVal {
 		panic(tgUnsupported("ARRAY_LENGTH of an array that is not constant or SPLIT's"))
 	case "STRING":
 		c.nargs(name, args, 1, 2)
+		var zn *tgZone
 		if len(args) == 2 {
-			c.zone(c.constString(args[1], "the time zone"))
+			zn = c.zoneOf(c.constString(args[1], "the time zone"))
 		}
-		return c.formatDate(c.as(args[0], "TIMESTAMP"), "%Y-%m-%d %H:%M:%E*S+00", false)
+		return c.formatDate(c.as(args[0], "TIMESTAMP"), "%Y-%m-%d %H:%M:%E*S%\x00", zn)
 	case "DATE", "DATETIME", "TIME", "TIMESTAMP":
 		return c.dateCtor(name, args)
 	case "UNIX_SECONDS", "UNIX_MILLIS", "UNIX_MICROS", "UNIX_DATE":
@@ -1346,18 +1373,20 @@ func (c *tgCompiler) call(name string) tgVal {
 		return tgVal{typ: "TIMESTAMP", node: node("mul", "i", nil, c.toInt(args[0]).node, litVal("INT64", m).node)}
 	case "FORMAT_DATE", "FORMAT_DATETIME", "FORMAT_TIME", "FORMAT_TIMESTAMP":
 		c.nargs(name, args, 2, 3)
+		var zn *tgZone
 		if len(args) == 3 {
-			c.zone(c.constString(args[2], "the time zone"))
+			zn = c.zoneOf(c.constString(args[2], "the time zone"))
 		}
 		typ := strings.TrimPrefix(name, "FORMAT_")
-		return c.formatDate(c.as(args[1], typ), c.constString(args[0], name+"'s format"), false)
+		return c.formatDate(c.as(args[1], typ), c.constString(args[0], name+"'s format"), zn)
 	case "PARSE_DATE", "PARSE_DATETIME", "PARSE_TIME", "PARSE_TIMESTAMP":
 		c.nargs(name, args, 2, 3)
+		var zn *tgZone
 		if len(args) == 3 {
-			c.zone(c.constString(args[2], "the time zone"))
+			zn = c.zoneOf(c.constString(args[2], "the time zone"))
 		}
 		typ := strings.TrimPrefix(name, "PARSE_")
-		return c.parseDate(typ, c.str(args[1]), c.constString(args[0], name+"'s format"), safe)
+		return c.parseDate(typ, c.str(args[1]), c.constString(args[0], name+"'s format"), safe, zn)
 	}
 	if fn, ok := tgMath1[name]; ok {
 		c.nargs(name, args, 1, 1)
@@ -1377,7 +1406,9 @@ func (c *tgCompiler) call(name string) tgVal {
 	if strings.HasPrefix(name, "ML.") {
 		panic(tgUnsupported("%s, which CloudBurrow does not write out as SQL", name))
 	}
-	panic(tgUnsupported("the function %s, which the export's TensorFlow graph does not compute", name))
+	// Not one of the functions "Export models" lists for a TRANSFORM (all
+	// of which compile), nor one ML preprocessing's SQL uses.
+	panic(&tgFail{400, "Model export does not support the function " + name + " in a TRANSFORM clause: the TRANSFORM can use the SQL functions listed in \"Export models\" (https://cloud.google.com/bigquery/docs/exporting-models)"})
 }
 
 func unitOf(s tgVal) string {
@@ -1397,12 +1428,146 @@ func (c *tgCompiler) partName() string {
 	return p
 }
 
-// zone accepts only time zones that are fixed offsets of UTC.
-func (c *tgCompiler) zone(z string) {
-	if strings.EqualFold(z, "UTC") || strings.EqualFold(z, "Etc/UTC") || z == "+00" || z == "+00:00" || z == "Z" {
-		return
+// tgZone is a time zone as the graph computes it: the UTC instants (in
+// microseconds) each of its offsets starts at, the offsets (microseconds
+// east of UTC) and their abbreviations, and the local times each starts
+// at as the zone's local-to-UTC conversion reads them.
+type tgZone struct {
+	starts, lstarts, offs []int64
+	abbrs                 []string
+}
+
+// zoneOf is time zone z, a tz database name or an offset from UTC, as
+// BigQuery takes them; nil is UTC. A named zone's offsets are written out
+// from the tz database (Go's), every transition from year 1 to 9999, so
+// the graph needs no database of its own.
+func (c *tgCompiler) zoneOf(z string) *tgZone {
+	if !validTimeZone(z) {
+		panic(&tgFail{400, "Invalid time zone: " + z})
 	}
-	panic(tgUnsupported("the time zone %s: the export's graph carries no time zone database, so only UTC is computed", z))
+	if m := offsetZone.FindStringSubmatch(z); m != nil {
+		hh, _ := strconv.Atoi(m[2])
+		mm, _ := strconv.Atoi(m[4])
+		off := int64(hh*3600+mm*60) * 1000000
+		if m[1] == "-" {
+			off = -off
+		}
+		if off == 0 {
+			return nil
+		}
+		return &tgZone{starts: []int64{math.MinInt64}, lstarts: []int64{math.MinInt64}, offs: []int64{off},
+			abbrs: []string{"UTC" + engineZone(z)}}
+	}
+	loc, err := time.LoadLocation(z)
+	if err != nil {
+		panic(&tgFail{400, "Invalid time zone: " + z})
+	}
+	zn := &tgZone{}
+	add := func(start int64, off int, name string) {
+		o := int64(off) * 1000000
+		n := len(zn.offs)
+		if n > 0 && zn.offs[n-1] == o && zn.abbrs[n-1] == name {
+			return // a transition that changes nothing (its DST flag only)
+		}
+		ls := int64(math.MinInt64)
+		if n > 0 {
+			// A local time in the gap or the fold of a transition takes
+			// the offset before it: absl's TimeZone::At(...).pre, which
+			// GoogleSQL's conversions use
+			// (UNVERIFIED; re-read 2026-11-24, the timestamp functions page).
+			ls = start + max(o, zn.offs[n-1])
+		}
+		zn.starts = append(zn.starts, start)
+		zn.lstarts = append(zn.lstarts, ls)
+		zn.offs = append(zn.offs, o)
+		zn.abbrs = append(zn.abbrs, name)
+	}
+	end := time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
+	t := time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC).In(loc)
+	name, off := t.Zone()
+	add(math.MinInt64, off, name)
+	// The tz database's own transitions, while Go's ZoneBounds gives them.
+	for {
+		_, next := t.ZoneBounds()
+		if next.IsZero() || !next.Before(end) {
+			return zn.orUTC()
+		}
+		if !next.After(t) {
+			break // past them, into the zone's rule
+		}
+		t = next
+		name, off = t.Zone()
+		add(t.UnixMicro(), off, name)
+	}
+	// The zone's rule (its TZ string) repeats every 400 Gregorian years,
+	// 146097 days, a whole number of weeks: its transitions are found a
+	// day at a time over one cycle, to the second, then repeated.
+	const cycleUS = int64(146097) * 86400 * 1000000
+	from := len(zn.starts)
+	stop := t.UTC().AddDate(400, 0, 0)
+	for t.Before(stop) {
+		n := t.Add(24 * time.Hour)
+		nn, no := n.Zone()
+		if nn != name || no != off {
+			lo, hi := t, n // the change is in (lo, hi]
+			for hi.Sub(lo) > time.Second {
+				mid := lo.Add(hi.Sub(lo) / 2).Truncate(time.Second)
+				if mn, mo := mid.Zone(); mn == name && mo == off {
+					lo = mid
+				} else {
+					hi = mid
+				}
+			}
+			name, off = hi.Zone()
+			add(hi.UnixMicro(), off, name)
+			t = hi
+			continue
+		}
+		t = n
+	}
+	us := cycleUS
+	one := len(zn.starts) - from
+	for k := int64(1); one > 0; k++ {
+		for i := from; i < from+one; i++ {
+			st := zn.starts[i] + k*us
+			if st >= end.UnixMicro() {
+				return zn.orUTC()
+			}
+			add(st, int(zn.offs[i]/1000000), zn.abbrs[i])
+		}
+	}
+	return zn.orUTC()
+}
+
+// orUTC is z, or nil when it is UTC throughout.
+func (z *tgZone) orUTC() *tgZone {
+	if len(z.offs) == 1 && z.offs[0] == 0 {
+		return nil
+	}
+	return z
+}
+
+func (z *tgZone) attrs(local bool) map[string]any {
+	if local {
+		return map[string]any{"starts": z.lstarts, "offs": z.offs}
+	}
+	return map[string]any{"starts": z.starts, "offs": z.offs}
+}
+
+// toLocal is TIMESTAMP ts as its civil time in z, in microseconds.
+func toLocal(ts *tgNode, z *tgZone) *tgNode {
+	if z == nil {
+		return ts
+	}
+	return node("add", "i", nil, ts, node("tz_offset", "i", z.attrs(false), ts))
+}
+
+// fromLocal is civil time local in z as a TIMESTAMP.
+func fromLocal(local *tgNode, z *tgZone) *tgNode {
+	if z == nil {
+		return local
+	}
+	return node("sub", "i", nil, local, node("tz_offset", "i", z.attrs(true), local))
 }
 
 var tgDateUnits = map[string]bool{"MICROSECOND": true, "MILLISECOND": true, "SECOND": true, "MINUTE": true, "HOUR": true, "DAY": true,
@@ -1421,15 +1586,16 @@ func (c *tgCompiler) dateAdd(typ string, x, iv tgVal, sub bool) tgVal {
 }
 
 func (c *tgCompiler) extract(part string, x tgVal, zone string) tgVal {
-	if zone != "" {
-		c.zone(zone)
+	if !strings.Contains(x.typ, "DATE") && !strings.Contains(x.typ, "TIME") {
+		x = c.as(x, "TIMESTAMP")
+	}
+	if zone != "" && x.typ == "TIMESTAMP" {
+		// The part of the zone's civil time.
+		x = tgVal{typ: "DATETIME", node: toLocal(x.node, c.zoneOf(zone))}
 	}
 	switch part {
 	case "DATE", "TIME", "DATETIME":
 		return c.dateCtor(part, []tgVal{x})
-	}
-	if !strings.Contains(x.typ, "DATE") && !strings.Contains(x.typ, "TIME") {
-		x = c.as(x, "TIMESTAMP")
 	}
 	return tgVal{typ: "INT64", node: node("extract", "i", map[string]any{"type": x.typ, "part": part}, x.node)}
 }
@@ -1446,10 +1612,7 @@ func (c *tgCompiler) dateCtor(name string, args []tgVal) tgVal {
 		case len(args) == 3:
 			return tgVal{typ: "DATE", node: node("make_date", "i", nil, c.toInt(args[0]).node, c.toInt(args[1]).node, c.toInt(args[2]).node)}
 		case a0.typ == "DATETIME" || a0.typ == "TIMESTAMP":
-			if len(args) == 2 {
-				c.zone(c.constString(args[1], "the time zone"))
-			}
-			return tgVal{typ: "DATE", node: node("floordiv_const", "i", map[string]any{"d": int64(86400000000)}, a0.node)}
+			return tgVal{typ: "DATE", node: node("floordiv_const", "i", map[string]any{"d": int64(86400000000)}, c.civil(args))}
 		case a0.typ == "DATE":
 			return a0
 		case a0.typ == "STRING":
@@ -1469,10 +1632,7 @@ func (c *tgCompiler) dateCtor(name string, args []tgVal) tgVal {
 		case a0.typ == "DATE":
 			return tgVal{typ: "DATETIME", node: node("mul", "i", nil, a0.node, litVal("INT64", int64(86400000000)).node)}
 		case a0.typ == "TIMESTAMP":
-			if len(args) == 2 {
-				c.zone(c.constString(args[1], "the time zone"))
-			}
-			return tgVal{typ: "DATETIME", node: a0.node}
+			return tgVal{typ: "DATETIME", node: c.civil(args)}
 		case a0.typ == "DATETIME":
 			return a0
 		case a0.typ == "STRING":
@@ -1483,26 +1643,31 @@ func (c *tgCompiler) dateCtor(name string, args []tgVal) tgVal {
 		case len(args) == 3:
 			return tgVal{typ: "TIME", node: node("make_time", "i", nil, c.toInt(args[0]).node, c.toInt(args[1]).node, c.toInt(args[2]).node)}
 		case a0.typ == "DATETIME" || a0.typ == "TIMESTAMP":
-			if len(args) == 2 {
-				c.zone(c.constString(args[1], "the time zone"))
-			}
-			return tgVal{typ: "TIME", node: node("floormod_const", "i", map[string]any{"d": int64(86400000000)}, a0.node)}
+			return tgVal{typ: "TIME", node: node("floormod_const", "i", map[string]any{"d": int64(86400000000)}, c.civil(args))}
 		case a0.typ == "TIME":
 			return a0
 		case a0.typ == "STRING":
 			return c.cast(a0, "TIME", false)
 		}
 	case "TIMESTAMP":
+		var zn *tgZone
 		if len(args) == 2 {
-			c.zone(c.constString(args[1], "the time zone"))
+			zn = c.zoneOf(c.constString(args[1], "the time zone"))
 		}
 		switch a0.typ {
 		case "DATE":
-			return tgVal{typ: "TIMESTAMP", node: node("mul", "i", nil, a0.node, litVal("INT64", int64(86400000000)).node)}
-		case "DATETIME", "TIMESTAMP":
-			return tgVal{typ: "TIMESTAMP", node: a0.node}
+			return tgVal{typ: "TIMESTAMP", node: fromLocal(node("mul", "i", nil, a0.node, litVal("INT64", int64(86400000000)).node), zn)}
+		case "DATETIME":
+			return tgVal{typ: "TIMESTAMP", node: fromLocal(a0.node, zn)}
+		case "TIMESTAMP":
+			return a0
 		case "STRING":
-			return c.cast(a0, "TIMESTAMP", false)
+			v := c.cast(a0, "TIMESTAMP", false)
+			if zn != nil && v.node.Op == "cast" {
+				// A string with no offset of its own is in the zone.
+				v.node.A["tz"] = zn.attrs(true)
+			}
+			return v
 		}
 	}
 	panic(&tgFail{400, fmt.Sprintf("No matching signature for function %s for argument types: %s", name, a0.typ)})
@@ -1512,6 +1677,9 @@ func (c *tgCompiler) dateCtor(name string, args []tgVal) tgVal {
 var tgFormatSpecs = map[string]bool{"Y": true, "m": true, "d": true, "H": true, "M": true, "S": true, "F": true, "T": true, "D": true, "R": true,
 	"y": true, "j": true, "e": true, "I": true, "p": true, "a": true, "A": true, "b": true, "B": true, "h": true, "u": true, "w": true, "Q": true,
 	"C": true, "k": true, "l": true, "s": true, "%": true, "n": true, "t": true, "z": true, "Z": true}
+
+// formatParts also reads "%\x00", which no format element is: STRING(ts)'s
+// offset, "+HH", or "+HH:MM" when it has minutes, as "%cbz".
 
 // formatParts splits a format string into literals and specifiers
 // ("%Y", "%E6S", "%E*S", "%Ez").
@@ -1535,6 +1703,9 @@ func formatParts(f string) ([]string, *tgFail) {
 			flush()
 			out = append(out, "%E"+string(f[k+1])+"S")
 			k += 2
+		case f[k] == 0:
+			flush()
+			out = append(out, "%cbz")
 		case f[k] == 'E' && k+1 < len(f) && f[k+1] == 'z':
 			flush()
 			out = append(out, "%Ez")
@@ -1569,16 +1740,38 @@ func formatParts(f string) ([]string, *tgFail) {
 
 // formatDate is FORMAT_<type>(f, x): the parts the convert.py side
 // writes, a specifier each.
-func (c *tgCompiler) formatDate(x tgVal, f string, _ bool) tgVal {
+// A TIMESTAMP in time zone zn (nil UTC) is written in the zone's civil
+// time, %z, %Ez and %Z its offset and abbreviation there.
+func (c *tgCompiler) formatDate(x tgVal, f string, zn *tgZone) tgVal {
 	parts, err := formatParts(f)
 	if err != nil {
 		panic(err)
 	}
-	return tgVal{typ: "STRING", node: node("format_date", "s", map[string]any{"type": x.typ, "parts": parts}, x.node)}
+	a := map[string]any{"type": x.typ, "parts": parts}
+	if x.typ != "TIMESTAMP" || zn == nil {
+		return tgVal{typ: "STRING", node: node("format_date", "s", a, x.node)}
+	}
+	za := zn.attrs(false)
+	za["abbrs"] = zn.abbrs
+	return tgVal{typ: "STRING", node: node("format_date", "s", a, toLocal(x.node, zn), node("tz_offset", "i", zn.attrs(false), x.node),
+		node("tz_abbr", "s", za, x.node))}
+}
+
+// civil is DATE, DATETIME or TIME(args...)'s first argument as civil
+// microseconds: a TIMESTAMP in its time zone argument (UTC by default).
+func (c *tgCompiler) civil(args []tgVal) *tgNode {
+	if args[0].typ != "TIMESTAMP" {
+		return args[0].node
+	}
+	var zn *tgZone
+	if len(args) == 2 {
+		zn = c.zoneOf(c.constString(args[1], "the time zone"))
+	}
+	return toLocal(args[0].node, zn)
 }
 
 // parseDate is PARSE_<type>(f, s).
-func (c *tgCompiler) parseDate(typ string, s tgVal, f string, safe bool) tgVal {
+func (c *tgCompiler) parseDate(typ string, s tgVal, f string, safe bool, zn *tgZone) tgVal {
 	parts, err := formatParts(f)
 	if err != nil {
 		panic(err)
@@ -1592,7 +1785,12 @@ func (c *tgCompiler) parseDate(typ string, s tgVal, f string, safe bool) tgVal {
 			}
 		}
 	}
-	return tgVal{typ: typ, node: node("parse_date", "i", map[string]any{"type": typ, "parts": parts, "safe": safe}, s.node)}
+	v := node("parse_date", "i", map[string]any{"type": typ, "parts": parts, "safe": safe}, s.node)
+	if typ == "TIMESTAMP" && zn != nil && !slices.Contains(parts, "%z") && !slices.Contains(parts, "%Ez") && !slices.Contains(parts, "%s") {
+		// No offset in the string: its time is the zone's.
+		v = fromLocal(v, zn)
+	}
+	return tgVal{typ: typ, node: v}
 }
 
 // subquery compiles (SELECT ...): over UNNEST of a constant array, or of
@@ -1796,8 +1994,31 @@ func transformSpec(md bqModel) (map[string]any, int, string) {
 			dtype = "bool"
 		case "STRING", "BYTES", "DATE", "DATETIME", "TIME", "TIMESTAMP":
 			dtype = "string"
-		default:
-			return nil, 501, fmt.Sprintf("Not implemented here: EXPORT MODEL of a TRANSFORM that reads %s, of type %s; CloudBurrow exports TRANSFORMs of scalar inputs. Nothing was written.", in.Name, in.Type)
+		}
+		if strings.HasPrefix(t, "ARRAY<") {
+			// Pre-transformed data only: in the signature, as the page's
+			// table gives it, and refused where an output reads it.
+			elem := sqlTypeOfColumn(strings.TrimSuffix(strings.TrimPrefix(t, "ARRAY<"), ">"))
+			in := map[string]any{"name": in.Name, "type": t}
+			switch {
+			case elem == "RECORD" || structIntFloat.MatchString(elem):
+				// The schema of a query's REPEATED RECORD does not carry
+				// its fields here: ARRAY<STRUCT<INT64, FLOAT64>> is the one
+				// the page takes.
+				in["dtype"], in["sparse"] = "float64", true
+			case isNumericType(elem) || elem == "BOOL" || elem == "STRING" || elem == "BYTES":
+				in["dtype"], in["rank"] = map[string]string{"i": "int64", "f": "float64", "s": "string", "b": "bool"}[tfDtypeOf(elem)], 2
+			case elem == "DATE" || elem == "DATETIME" || elem == "TIME" || elem == "TIMESTAMP":
+				in["dtype"], in["rank"] = "string", 2
+			default:
+				return nil, 400, fmt.Sprintf("Model %s:%s.%s cannot be exported: its TRANSFORM reads %s, of type %s; during model export, ARRAY<STRUCT<INT64, FLOAT64>>, ARRAY and TIMESTAMP are supported as pre-transformed data", md.Project, md.Dataset, md.ID, in["name"], t)
+			}
+			cols[strings.ToLower(in["name"].(string))] = tgVal{typ: t}
+			inputs = append(inputs, in)
+			continue
+		}
+		if dtype == "" {
+			return nil, 400, fmt.Sprintf("Model %s:%s.%s cannot be exported: its TRANSFORM reads %s, of type %s, which model export does not take", md.Project, md.Dataset, md.ID, in.Name, in.Type)
 		}
 		cols[strings.ToLower(in.Name)] = tgVal{typ: t, node: node("input", tfDtypeOf(t), map[string]any{"name": in.Name, "type": t})}
 		inputs = append(inputs, map[string]any{"name": in.Name, "dtype": dtype, "type": t})
@@ -1808,6 +2029,9 @@ func transformSpec(md bqModel) (map[string]any, int, string) {
 		v, fail := compileTransformItem(expr, cols)
 		if fail == tgArrayOut {
 			v, fail = tgVal{typ: "ARRAY<>"}, nil
+		}
+		if fail != nil && fail.msg == "an ARRAY input" {
+			return nil, 400, fmt.Sprintf("Model %s:%s.%s cannot be exported: its TRANSFORM column %s reads an ARRAY input; the TRANSFORM functions model export supports give an ARRAY of an ARRAY, and during model export, ARRAY<STRUCT<INT64, FLOAT64>>, ARRAY and TIMESTAMP are supported as pre-transformed data, but are not supported as post-transformed data", md.Project, md.Dataset, md.ID, name)
 		}
 		if fail != nil {
 			return nil, fail.code, fail.msg

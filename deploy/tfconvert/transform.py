@@ -164,7 +164,22 @@ def export(spec, fail):
             return tf.strings.join([".", tf.strings.substr(s, 0, digits)])
         return tf.strings.join([".", s, "0" * (digits - 6)])
 
-    def fmt(t, typ, parts):
+    def offset_text(off, colon, short=False):
+        # An offset in microseconds as +HHMM, +HH:MM, or (short) +HH with
+        # :MM only when it has minutes.
+        sign = tf.where(off < 0, "-", "+")
+        mins = fdiv(tf.abs(off), 60000000)
+        hh, mm = pad(fdiv(mins, 60), 2), pad(fmod(mins, 60), 2)
+        if short:
+            return tf.strings.join([sign, hh, tf.where(fmod(mins, 60) == 0, "", tf.strings.join([":", mm]))])
+        return tf.strings.join([sign, hh, ":" if colon else "", mm])
+
+    def zone_index(v, starts):
+        st = tf.constant(starts, tf.int64)
+        i = tf.searchsorted(st, v, side="right") - 1
+        return tf.clip_by_value(i, 0, len(starts) - 1)
+
+    def fmt(t, typ, parts, off=None, abbr=None):
         if typ == "DATE":
             days, us = t, tf.zeros_like(t)
         else:
@@ -224,11 +239,13 @@ def export(spec, fail):
             elif k == "s":
                 out.append(tf.strings.as_string(fdiv(t, 1000000) if typ != "DATE" else t * 86400))
             elif k == "z":
-                out.append(tf.fill(tf.shape(t), "+0000"))
+                out.append(tf.fill(tf.shape(t), "+0000") if off is None else offset_text(off, False))
             elif k == "Ez":
-                out.append(tf.fill(tf.shape(t), "+00:00"))
+                out.append(tf.fill(tf.shape(t), "+00:00") if off is None else offset_text(off, True))
+            elif k == "cbz":
+                out.append(tf.fill(tf.shape(t), "+00") if off is None else offset_text(off, True, True))
             elif k == "Z":
-                out.append(tf.fill(tf.shape(t), "UTC"))
+                out.append(tf.fill(tf.shape(t), "UTC") if abbr is None else abbr)
             else:
                 raise ValueError("format element %" + k)
         if not out:
@@ -338,7 +355,7 @@ def export(spec, fail):
                      "TIME": ["%H", "=:", "%M", "=:", "%E6S"],
                      "TIMESTAMP": ["%Y", "=-", "%m", "=-", "%d", "=T", "%H", "=:", "%M", "=:", "%E6S", "= ", "%Ez"]}
 
-    def parse_input(s, typ):
+    def parse_input(s, typ, tz=None):
         # A DATE, DATETIME, TIME or TIMESTAMP in its input format; a space
         # or T between the date and the time, the TIMESTAMP's offset
         # optional.
@@ -349,6 +366,11 @@ def export(spec, fail):
             # The offset: Z or UTC is +0000, none is UTC, +HH is +HH00.
             s = tf.strings.regex_replace(s, r"^(\S+T[0-9:.]+)\s*(?:Z|UTC)$", r"\1 +0000")
             has = tf.strings.regex_full_match(s, r"^\S+T[0-9:.]+\s*[+-][0-9]{2}(?::?[0-9]{2})?$")
+            if tz is not None:
+                # A string with no offset is in time zone tz.
+                v, bad = parse_input(s, typ)
+                local = tz_offset(v, tz)
+                return tf.where(has, v, v - local), bad
             s = tf.where(has, s, tf.strings.join([s, " +0000"]))
             s = tf.strings.regex_replace(s, r"^(\S+T[0-9:.]+)\s*([+-][0-9]{2}(?::?[0-9]{2})?)$", r"\1 \2")
             s = tf.strings.regex_replace(s, r"^(.* [+-][0-9]{2})$", r"\100")
@@ -408,7 +430,7 @@ def export(spec, fail):
                 low = tf.strings.lower(s)
                 return low == "true", null | ~((low == "true") | (low == "false"))
             if to in dated:
-                pv, pn = parse_input(s, to)
+                pv, pn = parse_input(s, to, a.get("tz"))
                 return pv, null | pn
             return v, null
         if to in ("STRING", "BYTES"):
@@ -438,6 +460,10 @@ def export(spec, fail):
                 return fmod(v, US_DAY), null
             return v, null
         return tf.cast(v, tfd(t)), null
+
+    def tz_offset(v, z):
+        # The offset (microseconds) in effect at v, of the zone's table.
+        return tf.gather(tf.constant(z["offs"], tf.int64), zone_index(v, z["starts"]))
 
     memo = {}
 
@@ -758,20 +784,45 @@ def export(spec, fail):
             if s is not None:
                 return week_of_year(days, s), anynull
             raise ValueError("EXTRACT " + part)
+        if op == "tz_offset":
+            return tz_offset(vs[0], a), anynull
+        if op == "tz_abbr":
+            return tf.gather(tf.constant(a["abbrs"]), zone_index(vs[0], a["starts"])), anynull
         if op == "format_date":
+            if len(vs) == 3:
+                return fmt(vs[0], a["type"], a["parts"], vs[1], vs[2]), anynull
             return fmt(vs[0], a["type"], a["parts"]), anynull
         if op == "parse_date":
             v, bad = parse(vs[0], a["type"], a["parts"])
             return v, anynull | bad
         raise ValueError("op " + op)
 
-    specs = [tf.TensorSpec([None], dtypes[s["dtype"]], name=s["name"]) for s in spec["inputs"]]
+    def spec_of(s):
+        # An ARRAY input is a row per example (the page's
+        # tf.constant([['a', 'b'], ['c', 'd']])); an
+        # ARRAY<STRUCT<INT64, FLOAT64>> a SparseTensor of the FLOAT64s at
+        # the INT64s (tf.sparse.from_dense).
+        if s.get("sparse"):
+            return tf.SparseTensorSpec([None, None], tf.float64)
+        if s.get("rank") == 2:
+            return tf.TensorSpec([None, None], dtypes[s["dtype"]], name=s["name"])
+        return tf.TensorSpec([None], dtypes[s["dtype"]], name=s["name"])
+
+    specs = [spec_of(s) for s in spec["inputs"]]
 
     def serve(*args):
         inputs = {}
         memo.clear()
+        rows = None
         for s, x in zip(spec["inputs"], args):
             typ = s["type"]
+            if s.get("sparse") or s.get("rank") == 2:
+                # No TRANSFORM output reads an ARRAY input (transformSpec
+                # refuses one that does); it is in the signature only.
+                if rows is None:
+                    n = x.dense_shape[0] if s.get("sparse") else tf.shape(x, out_type=tf.int64)[0]
+                    rows = tf.zeros(tf.reshape(n, [1]), tf.int64)
+                continue
             if s["dtype"] == "float64":
                 null = tf.equal(x, nulls["float64"])
             elif s["dtype"] == "int64":
@@ -785,8 +836,12 @@ def export(spec, fail):
                 v, bad = parse_input(tf.strings.strip(x), typ)
                 null = null | bad
             inputs[s["name"]] = (v, null)
-        if args:
-            inputs["__n"] = args[0]
+            if "__n" not in inputs:
+                inputs["__n"] = x
+        if "__n" in inputs:
+            pass
+        elif rows is not None:
+            inputs["__n"] = rows
         else:
             inputs["__n"] = tf.zeros([1], tf.int64)
         out = {}
@@ -806,8 +861,18 @@ def export(spec, fail):
             out[o["name"]] = v
         return out
 
+    # The signature's inputs are named as the columns: a TensorSpec by its
+    # name, a SparseTensor (indices, values, dense shape) by the
+    # parameter's, NAME, NAME_1 and NAME_2.
+    import keyword
+
+    params = [s["name"] if s["name"].isidentifier() and not keyword.iskeyword(s["name"]) and s["name"] != "serve"
+              else "args_%d" % k for k, s in enumerate(spec["inputs"])]
+    scope = {"serve": serve}
+    exec("def named(%s):\n    return serve(%s)\n" % (", ".join(params), ", ".join(params)), scope)
+
     try:
-        fn = tf.function(serve, input_signature=specs)
+        fn = tf.function(scope["named"], input_signature=specs)
         module.serve = fn
         tf.saved_model.save(module, "/out/model", signatures={"serving_default": fn.get_concrete_function()})
     except ValueError as e:

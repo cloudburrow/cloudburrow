@@ -305,6 +305,29 @@ func TestBigQueryMLExportModelTransform(t *testing.T) {
 	}
 	matchTransform("to", serve(download("export/to/"), tfIn), []string{"cu", "dd", "fd", "hb", "sz", "mm", "dm"})
 
+	// Time zones, named (daylight saving time included) and an offset.
+	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.tz` TRANSFORM("+
+		"FORMAT_TIMESTAMP('%%F %%H:%%M %%Ez', TIMESTAMP(d, 'America/New_York'), 'Europe/Paris') AS fz, "+
+		"EXTRACT(HOUR FROM TIMESTAMP(DATETIME(d), 'Asia/Kolkata') AT TIME ZONE 'America/Los_Angeles') AS hl, "+
+		"STRING(TIMESTAMP(d), 'America/New_York') AS sn, "+
+		"DATE(TIMESTAMP_TRUNC(TIMESTAMP(d, '+05:30'), MONTH, 'Australia/Sydney'), 'Australia/Sydney') AS ts) "+
+		"OPTIONS(model_type='transform_only') AS SELECT d FROM `%s.tr`", name, name)); err != nil {
+		t.Fatalf("CREATE MODEL transform_only with time zones: %v", err)
+	}
+	if err := mlRun(h, c, fmt.Sprintf("EXPORT MODEL `%s.tz` OPTIONS(URI = 'gs://%s/export/tz')", name, b)); err != nil {
+		t.Fatalf("EXPORT MODEL of a TRANSFORM with time zones: %v", err)
+	}
+	matchTransform("tz", serve(download("export/tz/"), map[string][]any{"d": tfIn["d"]}), []string{"fz", "hl", "sn", "ts"})
+
+	// An ARRAY input is pre-transformed data only: no function the page
+	// lists makes a scalar of one.
+	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.ar` TRANSFORM(ARRAY_LENGTH(arr) AS al) OPTIONS(model_type='transform_only') AS SELECT [x, x] AS arr FROM `%s.tr`", name, name)); err != nil {
+		t.Fatalf("CREATE MODEL transform_only of an ARRAY: %v", err)
+	}
+	if err := mlRun(h, c, fmt.Sprintf("EXPORT MODEL `%s.ar` OPTIONS(URI = 'gs://%s/export/ar')", name, b)); err == nil || !strings.Contains(err.Error(), "reads an ARRAY input") {
+		t.Errorf("EXPORT MODEL of a TRANSFORM output of an ARRAY input: %v", err)
+	}
+
 	// An ARRAY output: "not supported as post-transformed data".
 	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.oh` TRANSFORM(ML.ONE_HOT_ENCODER(c) OVER () AS oh) OPTIONS(model_type='transform_only') AS SELECT c FROM `%s.tr`", name, name)); err != nil {
 		t.Fatalf("CREATE MODEL transform_only with ML.ONE_HOT_ENCODER: %v", err)

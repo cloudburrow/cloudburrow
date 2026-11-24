@@ -20,7 +20,8 @@ import (
 func exportTransformModel(items []string) bqModel {
 	return bqModel{Project: "p", Dataset: "d", ID: "m", Type: "TRANSFORM_ONLY", Transform: items, Inputs: []mlColumn{
 		{Name: "x", Type: "FLOAT"}, {Name: "n", Type: "INTEGER"}, {Name: "s", Type: "STRING"}, {Name: "s2", Type: "STRING"},
-		{Name: "d", Type: "DATE"}, {Name: "dt", Type: "DATETIME"}, {Name: "ts", Type: "TIMESTAMP"}, {Name: "b", Type: "BOOLEAN"}}}
+		{Name: "d", Type: "DATE"}, {Name: "dt", Type: "DATETIME"}, {Name: "ts", Type: "TIMESTAMP"}, {Name: "b", Type: "BOOLEAN"},
+		{Name: "arr", Type: "ARRAY<STRING>"}, {Name: "sp", Type: "ARRAY<RECORD>"}}}
 }
 
 // exportTransformRows are two rows of the preprocessing model's inputs, as
@@ -30,6 +31,11 @@ var exportTransformRows = map[string][]any{
 	"x": {transformNullFloat, 2.5}, "n": {-3, 7}, "s": {"abc", "Hello World"}, "s2": {"a", "b"},
 	"d": {"2021-12-31", "2020-02-29"}, "dt": {"2021-01-01 00:00:00.000000", "2023-02-02 02:02:01.152903"},
 	"ts": {"2021-01-01 00:00:00.0 +0000", "2017-02-28 20:30:30.4 +0000"}, "b": {false, true},
+	// The ARRAY inputs, which no output reads: arr as the page's table gives
+	// it, sp the SparseTensor of tf.sparse.from_dense([[0, 1.0, 1.0, 0],
+	// [0, 0, 1.0, 1.0]]), its indices, values and dense shape.
+	"arr": {[]string{"a", "b"}, []string{"c", "d"}},
+	"sp":  {[]int{0, 1}, []int{0, 2}, []int{1, 2}, []int{1, 3}}, "sp_1": {1.0, 1.0, 1.0, 1.0}, "sp_2": {2, 4},
 }
 
 // exportTransformCases are TRANSFORM items, as the front keeps them (the
@@ -81,6 +87,20 @@ func exportTransformCases() []struct {
 		{"n IN (7, 8) AS inn", []any{false, true}},
 		{"x BETWEEN 1 AND 3 OR b AS bt", []any{nil, true}},
 		{"SQRT(ABS(n)) + POW(2, 3) AS mth", []any{math.Sqrt(3) + 8, math.Sqrt(7) + 8}},
+		// Time zones: the tz database's offsets, DST included.
+		{"FORMAT_TIMESTAMP('%F %H:%M %Ez %z %Z', ts, 'America/New_York') AS fz", []any{"2020-12-31 19:00 -05:00 -0500 EST", "2017-02-28 15:30 -05:00 -0500 EST"}},
+		{"EXTRACT(HOUR FROM ts AT TIME ZONE 'Asia/Kolkata') AS hk", []any{int64(5), int64(2)}},
+		{"DATE(ts, 'Asia/Kolkata') AS dk", []any{"2021-01-01", "2017-03-01"}},
+		{"STRING(ts, '+05:30') AS so", []any{"2021-01-01 05:30:00+05:30", "2017-03-01 02:00:30.4+05:30"}},
+		{"STRING(ts) AS su", []any{"2021-01-01 00:00:00+00", "2017-02-28 20:30:30.4+00"}},
+		{"STRING(ts, 'America/Los_Angeles') AS sl", []any{"2020-12-31 16:00:00-08", "2017-02-28 12:30:30.4-08"}},
+		{"UNIX_SECONDS(TIMESTAMP(dt, 'America/Los_Angeles')) AS tl", []any{int64(1609488000), int64(1675332121)}},
+		{"UNIX_SECONDS(TIMESTAMP_TRUNC(ts, DAY, 'America/New_York')) AS tt", []any{int64(1609390800), int64(1488258000)}},
+		{"UNIX_SECONDS(PARSE_TIMESTAMP('%Y-%m-%d %H:%M', '2021-07-04 12:00', 'America/New_York')) AS pn", []any{int64(1625414400), int64(1625414400)}},
+		{"UNIX_SECONDS(TIMESTAMP('2021-07-04 12:00:00', 'Europe/Paris')) AS tp", []any{int64(1625392800), int64(1625392800)}},
+		{"UNIX_SECONDS(TIMESTAMP('2021-07-04 12:00:00+00', 'Europe/Paris')) AS t0", []any{int64(1625400000), int64(1625400000)}},
+		{"UNIX_SECONDS(TIMESTAMP(DATETIME '2021-03-14 02:30:00', 'America/New_York')) AS gap", []any{int64(1615707000), int64(1615707000)}},
+		{"DATETIME(ts, 'UTC-3') AS dm3", []any{"2020-12-31 21:00:00.000000", "2017-02-28 17:30:30.400000"}},
 	}
 }
 
@@ -94,20 +114,36 @@ func TestTransformSpecCompiles(t *testing.T) {
 	}
 	onehot := mlEncodedSQL("ONE_HOT_ENCODER", "ARRAY<STRING>['a']", "CAST(NULL AS STRING)", "", "(s)", "")
 	for item, want := range map[string]string{
-		onehot + " AS oh":                                     "is an ARRAY",
-		"TIMESTAMP_ADD(ts, INTERVAL 1 HOUR) AS t":             "is a TIMESTAMP",
-		"FORMAT_TIMESTAMP('%H', ts, 'America/New_York') AS z": "no time zone database",
-		"ST_GEOGPOINT(x, x) AS g":                             "the function ST_GEOGPOINT",
+		onehot + " AS oh":                                 "is an ARRAY",
+		"TIMESTAMP_ADD(ts, INTERVAL 1 HOUR) AS t":         "is a TIMESTAMP",
+		"FORMAT_TIMESTAMP('%H', ts, 'Mars/Olympus') AS z": "Invalid time zone: Mars/Olympus",
+		"ST_GEOGPOINT(x, x) AS g":                         "does not support the function ST_GEOGPOINT",
 	} {
 		_, code, msg := transformSpec(exportTransformModel([]string{item}))
 		if code == 0 || !strings.Contains(msg, want) {
 			t.Errorf("%s: %d %q, want %q", item, code, msg, want)
 		}
 	}
+	// An ARRAY input is in the signature; an output that reads it is
+	// refused, as no TRANSFORM function the page lists makes a scalar of one.
+	spec, code, msg := transformSpec(exportTransformModel([]string{"x AS x"}))
+	if code != 0 {
+		t.Fatalf("ARRAY inputs no output reads: %d %s", code, msg)
+	}
+	got := map[string]any{}
+	for _, in := range spec["transform"].(map[string]any)["inputs"].([]map[string]any) {
+		got[in["name"].(string)] = fmt.Sprintf("%v/%v/%v", in["dtype"], in["rank"], in["sparse"])
+	}
+	if got["arr"] != "string/2/<nil>" || got["sp"] != "float64/<nil>/true" {
+		t.Errorf("ARRAY inputs: %v", got)
+	}
+	if _, code, msg := transformSpec(exportTransformModel([]string{"ARRAY_LENGTH(arr) AS al"})); code != 400 || !strings.Contains(msg, "column al reads an ARRAY input") {
+		t.Errorf("an output of an ARRAY input: %d %q", code, msg)
+	}
 	md := exportTransformModel([]string{"x AS x"})
-	md.Inputs = append(md.Inputs, mlColumn{Name: "arr", Type: "ARRAY<FLOAT64>"})
-	if _, code, msg := transformSpec(md); code != 501 || !strings.Contains(msg, "arr") {
-		t.Errorf("an ARRAY input: %d %q", code, msg)
+	md.Inputs = append(md.Inputs, mlColumn{Name: "g", Type: "ARRAY<GEOGRAPHY>"})
+	if _, code, msg := transformSpec(md); code != 400 || !strings.Contains(msg, "g, of type ARRAY<GEOGRAPHY>") {
+		t.Errorf("an ARRAY<GEOGRAPHY> input: %d %q", code, msg)
 	}
 }
 
