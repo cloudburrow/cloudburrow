@@ -1517,7 +1517,12 @@ results, a query runs at most 5 minutes, at most 10 at once on an instance, a sc
 statements shows only its queries' results, and MySQL's `root` and empty passwords are refused
 ([Cloud SQL Studio](https://cloud.google.com/sql/docs/mysql/manage-data-using-studio)). SQL
 Server instances are not served. Verified by `TestCloudSQLStudioThroughThePage` (browser, on
-PostgreSQL and MySQL) and `TestStudioSQL`, `TestDBStudioSignInAndRun` (unit).
+PostgreSQL and MySQL, each signed in as a user `users.insert` made; on PostgreSQL that user
+creates and owns its own database, as PostgreSQL 15 and later let only a database's owner create
+in its public schema), `TestCloudSQLStudioIAMSignIn` (browser: a `CLOUD_IAM_USER` is no built-in
+user and is refused a password sign-in; the console's principal, a service account, is refused
+as a `CLOUD_IAM_USER`, then signs in as its `CLOUD_IAM_SERVICE_ACCOUNT` role once it holds
+`roles/cloudsql.instanceUser`) and `TestStudioSQL`, `TestDBStudioSignInAndRun` (unit).
 
 ## 5. The console screen
 

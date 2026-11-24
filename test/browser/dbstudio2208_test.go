@@ -4,16 +4,17 @@ package browser
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
+	"google.golang.org/api/googleapi"
 	sqladmin "google.golang.org/api/sqladmin/v1"
 )
 
@@ -176,25 +177,44 @@ func TestCloudSQLStudioThroughThePage(t *testing.T) {
 	for _, e := range engines {
 		t.Run(e.instance, func(t *testing.T) {
 			needService(t, e.service)
-			user := fmt.Sprintf("studio%d", time.Now().UnixNano()%1e6)
+			sfx := time.Now().UnixNano() % 1e6
+			user := fmt.Sprintf("studio%d", sfx)
 			password := "Studio-pw-2208"
+			host := "%"
 			if e.instance == "postgres" {
-				// PostgreSQL 15 and later let only the database's owner
-				// create in its public schema: the application's user,
-				// cloudburrow, owns the cloudburrow database.
-				user, password = "cloudburrow", os.Getenv("CLOUDBURROW_TEST_CLOUDSQL_PASSWORD")
-				if password == "" {
-					t.Skip("needs CLOUDBURROW_TEST_CLOUDSQL_PASSWORD, the application user's password")
-				}
-			} else {
-				op, err := svc.Users.Insert(project, e.instance, &sqladmin.User{Name: user, Password: password, Host: "%"}).Do()
-				if err != nil {
-					t.Fatalf("users.insert: %v", err)
-				}
-				waitSQL(t, svc, project, op, 2*time.Minute)
-				t.Cleanup(func() { _, _ = svc.Users.Delete(project, e.instance).Name(user).Host("%").Do() })
+				host = ""
 			}
-			dbStudioThroughThePage(t, "/cloudsql-instances/"+e.instance+"?project="+url.QueryEscape(project), "cloudburrow", user, password,
+			op, err := svc.Users.Insert(project, e.instance, &sqladmin.User{Name: user, Password: password, Host: host}).Do()
+			if err != nil {
+				t.Fatalf("users.insert: %v", err)
+			}
+			waitSQL(t, svc, project, op, 2*time.Minute)
+			t.Cleanup(func() {
+				call := svc.Users.Delete(project, e.instance).Name(user)
+				if host != "" {
+					call = call.Host(host)
+				}
+				if op, err := call.Do(); err == nil {
+					waitSQL(t, svc, project, op, 2*time.Minute)
+				}
+			})
+			database := "cloudburrow"
+			if e.instance == "postgres" {
+				// PostgreSQL 15 and later let only a database's owner
+				// create in its public schema. A user users.insert makes
+				// has CREATEDB, as Google's cloudsqlsuperuser members have
+				// (https://docs.cloud.google.com/sql/docs/postgres/users),
+				// so it makes a database of its own, signed in through
+				// Studio, and owns it.
+				database = fmt.Sprintf("studio_db%d", sfx)
+				dbStudioAPI(t, "cloudsql-instances", project, e.instance, "cloudburrow", user, password, "CREATE DATABASE "+database+";")
+				t.Cleanup(func() {
+					if op, err := svc.Databases.Delete(project, e.instance, database).Do(); err == nil {
+						waitSQL(t, svc, project, op, 2*time.Minute)
+					}
+				})
+			}
+			dbStudioThroughThePage(t, "/cloudsql-instances/"+e.instance+"?project="+url.QueryEscape(project), database, user, password,
 				fmt.Sprintf(e.refused, user))
 		})
 	}
@@ -286,5 +306,226 @@ func TestAlloyDBStudioThroughThePage(t *testing.T) {
 		if len(cells) != 1 || cells[0] != role {
 			t.Errorf("current_user under IAM is %q; want %s", cells, role)
 		}
+	})
+}
+
+// dbStudioAPI signs in to a Studio's database as user through the calls
+// the page makes (POST /api/studio/{service}), runs sql, and signs out,
+// failing on a refusal.
+func dbStudioAPI(t *testing.T, service, project, instance, database, user, password, sql string) {
+	t.Helper()
+	path := "/api/studio/" + service + "?project=" + url.QueryEscape(project) + "&call="
+	b, _ := json.Marshal(map[string]any{"instance": instance, "database": database, "user": user, "password": password})
+	code, body := consoleDo(t, http.MethodPost, path+"signin", string(b))
+	var s struct{ Session string }
+	if code != http.StatusOK || json.Unmarshal([]byte(body), &s) != nil || s.Session == "" {
+		t.Fatalf("Studio sign-in to %s as %s = %d: %s", database, user, code, body)
+	}
+	defer func() {
+		b, _ := json.Marshal(map[string]any{"instance": instance, "session": s.Session})
+		_, _ = consoleDo(t, http.MethodPost, path+"signout", string(b))
+	}()
+	b, _ = json.Marshal(map[string]any{"instance": instance, "session": s.Session, "sql": sql})
+	if code, body := consoleDo(t, http.MethodPost, path+"run", string(b)); code != http.StatusOK || strings.Contains(body, `"error"`) {
+		t.Fatalf("Studio run of %q = %d: %s", sql, code, body)
+	}
+}
+
+// TestCloudSQLStudioIAMSignIn (#2208), in the sql shard: Cloud SQL
+// Studio's IAM database authentication on a PostgreSQL instance created
+// with cloudsql.iam_authentication on, as Google documents it
+// (https://docs.cloud.google.com/sql/docs/postgres/manage-data-using-studio,
+// .../add-manage-iam-users). Studio signs in as the console's principal,
+// which is a service account here (Google's console signs in as the
+// person using it):
+//   - before the principal is an IAM user of the instance, the sign-in is
+//     refused;
+//   - users.insert of type CLOUD_IAM_USER makes a person's IAM user, whose
+//     role users.get answers as CLOUD_IAM_USER; it is not in the dialog's
+//     built-in User list, and built-in authentication as it, with any
+//     password, is refused: an IAM user signs in by token only;
+//   - users.insert refuses the principal as a CLOUD_IAM_USER with Google's
+//     words, as it is a service account;
+//   - added as CLOUD_IAM_SERVICE_ACCOUNT, the principal is refused until
+//     it holds roles/cloudsql.instanceUser (granted on the IAM page), then
+//     signs in with no password, as the role Google names (its email without
+//     .gserviceaccount.com), which current_user answers;
+//   - the IAM sign-in is made from the keyboard alone, and the dialog with
+//     IAM database authentication chosen meets WCAG 2.1 AA.
+func TestCloudSQLStudioIAMSignIn(t *testing.T) {
+	needService(t, "cloudsql-instances")
+	svc := sqlAdminSDK(t)
+	project := servedProject(t)
+	name := fmt.Sprintf("studio-iam-%d", time.Now().UnixNano()%1e6)
+	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1",
+		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840",
+			DatabaseFlags: []*sqladmin.DatabaseFlags{{Name: "cloudsql.iam_authentication", Value: "on"}}}}).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if d, err := svc.Instances.Delete(project, name).Do(); err == nil {
+			waitSQL(t, svc, project, d, 5*time.Minute)
+		}
+	})
+	waitSQL(t, svc, project, op, 10*time.Minute)
+
+	code, body := consoleDo(t, http.MethodGet, "/api/status", "")
+	var st struct {
+		Identity struct{ ServiceAccount string }
+	}
+	if code != http.StatusOK || json.Unmarshal([]byte(body), &st) != nil || st.Identity.ServiceAccount == "" {
+		t.Fatalf("the console's status = %d: %s", code, body)
+	}
+	principal := st.Identity.ServiceAccount
+	role := strings.TrimSuffix(principal, ".gserviceaccount.com")
+	page := "/cloudsql-instances/" + name + "?project=" + url.QueryEscape(project) + "&tab=studio"
+	insert := func(u *sqladmin.User) error {
+		t.Helper()
+		op, err := svc.Users.Insert(project, name, u).Do()
+		if err == nil {
+			waitSQL(t, svc, project, op, 2*time.Minute)
+		}
+		return err
+	}
+	signInIAM := `(() => { const d = document.getElementById("dbs-database"); d.value = "postgres";
+		d.dispatchEvent(new Event("change", { bubbles: true }));
+		document.getElementById("dbs-auth-iam").click(); document.getElementById("dbs-authenticate").click(); return true; })()`
+	signInError := func(p *tab) string {
+		p.t.Helper()
+		p.waitFor(`(() => { const e = document.getElementById("dbs-signin-error"); return e && !e.hidden && e.textContent.length > 0; })()`)
+		var msg string
+		p.eval(`document.getElementById("dbs-signin-error").textContent`, &msg)
+		return msg
+	}
+
+	// Not yet an IAM user: refused.
+	p := open(t)
+	p.expected = append(p.expected, "/api/studio/")
+	p.navigate(page)
+	p.waitFor(`document.querySelector("#dbs-database option[value='postgres']") !== null`)
+	var says string
+	p.eval(`document.getElementById("dbs-auth-iam").click(); document.getElementById("dbs-iam-principal").textContent`, &says)
+	if !strings.Contains(says, "Signs in as "+principal) {
+		t.Errorf("IAM database authentication says %q; want it to name %s", says, principal)
+	}
+	p.eval(signInIAM, nil)
+	if msg := signInError(p); !strings.Contains(msg, principal+" is not an IAM user of instance "+name) {
+		t.Errorf("an IAM sign-in as no IAM user was refused with %q", msg)
+	}
+
+	// A person's IAM user: CLOUD_IAM_USER, signing in by token only.
+	person := fmt.Sprintf("studio.person%d@example.com", time.Now().UnixNano()%1e6)
+	if err := insert(&sqladmin.User{Name: person, Type: "CLOUD_IAM_USER"}); err != nil {
+		t.Fatalf("users.insert of %s as CLOUD_IAM_USER: %v", person, err)
+	}
+	if u, err := svc.Users.Get(project, name, person).Do(); err != nil || u.Type != "CLOUD_IAM_USER" {
+		t.Errorf("users.get %s: %+v, %v; want type CLOUD_IAM_USER", person, u, err)
+	}
+	// The principal is a service account: Google's refusal.
+	err = insert(&sqladmin.User{Name: principal, Type: "CLOUD_IAM_USER"})
+	var gerr *googleapi.Error
+	if !errors.As(err, &gerr) || gerr.Code != http.StatusBadRequest || !strings.Contains(gerr.Message, "create it as type CLOUD_IAM_SERVICE_ACCOUNT") {
+		t.Errorf("users.insert of the service account %s as CLOUD_IAM_USER: %v; want 400 naming CLOUD_IAM_SERVICE_ACCOUNT", principal, err)
+	}
+	p.navigate(page)
+	p.waitFor(`document.querySelector("#dbs-database option[value='postgres']") !== null && document.querySelector("#dbs-user option[value='postgres']") !== null`)
+	var builtIn []string
+	p.eval(`[...document.querySelectorAll("#dbs-user option")].map((o) => o.value)`, &builtIn)
+	if contains(builtIn, person) {
+		t.Errorf("the built-in User list %q has the IAM user %s", builtIn, person)
+	}
+	// Built-in authentication as the IAM user's role, which the dialog
+	// does not offer, sent as the page sends a sign-in: refused whatever
+	// the password, as the server holds the role to one only the
+	// connector's token sign-in knows.
+	b, _ := json.Marshal(map[string]any{"instance": name, "database": "postgres", "user": person, "password": "Root-pass1"})
+	code, body = consoleDo(t, http.MethodPost, "/api/studio/cloudsql-instances?project="+url.QueryEscape(project)+"&call=signin", string(b))
+	if code != http.StatusBadRequest || !strings.Contains(body, `password authentication failed for user \"`+person+`\"`) {
+		t.Errorf("built-in authentication as the IAM user %s = %d: %s; want the server's refusal", person, code, body)
+	}
+
+	// The principal as CLOUD_IAM_SERVICE_ACCOUNT: signed in as its role.
+	if err := insert(&sqladmin.User{Name: principal, Type: "CLOUD_IAM_SERVICE_ACCOUNT"}); err != nil {
+		t.Fatalf("users.insert of %s as CLOUD_IAM_SERVICE_ACCOUNT: %v", principal, err)
+	}
+	if u, err := svc.Users.Get(project, name, role).Do(); err != nil || u.Type != "CLOUD_IAM_SERVICE_ACCOUNT" {
+		t.Errorf("users.get %s: %+v, %v; want type CLOUD_IAM_SERVICE_ACCOUNT", role, u, err)
+	}
+	// Without roles/cloudsql.instanceUser, which holds
+	// cloudsql.instances.login: refused.
+	p.navigate(page)
+	p.waitFor(`document.querySelector("#dbs-database option[value='postgres']") !== null`)
+	p.eval(signInIAM, nil)
+	if msg := signInError(p); !strings.Contains(msg, principal+" does not have cloudsql.instances.login") {
+		t.Errorf("an IAM sign-in without roles/cloudsql.instanceUser was refused with %q", msg)
+	}
+	// Granted on the project, as the IAM page's Grant access saves it.
+	iamChange := func(add bool) {
+		t.Helper()
+		path := "/api/studio/iam?project=" + url.QueryEscape(project) + "&call="
+		code, body := consoleDo(t, http.MethodPost, path+"policy", "{}")
+		var pol struct{ Etag string }
+		if code != http.StatusOK || json.Unmarshal([]byte(body), &pol) != nil || pol.Etag == "" {
+			t.Fatalf("the IAM page's policy = %d: %s", code, body)
+		}
+		change := map[string]any{"etag": pol.Etag, "members": []string{"serviceAccount:" + principal}}
+		roles := []map[string]string{{"role": "roles/cloudsql.instanceUser"}}
+		if add {
+			change["add"] = roles
+		} else {
+			change["remove"] = roles
+		}
+		b, _ := json.Marshal(change)
+		if code, body := consoleDo(t, http.MethodPost, path+"change", string(b)); code != http.StatusOK {
+			t.Fatalf("the IAM page's change (add %v) = %d: %s", add, code, body)
+		}
+	}
+	iamChange(true)
+	t.Cleanup(func() { iamChange(false) })
+	p.navigate(page)
+	p.waitFor(`document.querySelector("#dbs-database option[value='postgres']") !== null`)
+	p.eval(signInIAM, nil)
+	p.waitFor(`document.querySelector("#dbs-explorer #dbs-current") !== null || (document.getElementById("dbs-signin-error") && !document.getElementById("dbs-signin-error").hidden)`)
+	var current string
+	p.eval(`(document.getElementById("dbs-current") || {}).textContent || document.getElementById("dbs-signin-error").textContent`, &current)
+	if current != "postgres · "+role {
+		t.Fatalf("signed in with IAM as %q; want postgres · %s", current, role)
+	}
+	p.dbStudioRun("SELECT current_user;")
+	var cells []string
+	p.eval(`[...document.querySelectorAll("#dbs-results-table td")].map((n) => n.textContent)`, &cells)
+	if len(cells) != 1 || cells[0] != role {
+		t.Errorf("current_user under IAM is %q; want %s", cells, role)
+	}
+
+	t.Run("keyboard", func(t *testing.T) {
+		k := open(t)
+		k.run(reducedMotion())
+		// A tab of its own has no sign-in yet: the page opens on the dialog.
+		k.navigate(page)
+		k.waitFor(`document.getElementById("dbs-signin-title") !== null && document.activeElement && document.activeElement.id === "dbs-database"` +
+			` && document.querySelector("#dbs-database option[value='postgres']") !== null`)
+		k.run(chromedp.KeyEvent("postgres"))
+		k.tabTo(`a.id === "dbs-auth-builtin"`)
+		// Arrow keys move a radio group's choice, as in Google's dialog.
+		k.run(chromedp.KeyEvent(kb.ArrowDown))
+		k.waitFor(`document.getElementById("dbs-auth-iam").checked && !document.getElementById("dbs-iam").hidden`)
+		k.tabTo(`a.id === "dbs-authenticate"`)
+		k.run(chromedp.KeyEvent(kb.Enter))
+		k.waitFor(`document.querySelector("#dbs-explorer #dbs-current") !== null`)
+		var current string
+		k.eval(`document.getElementById("dbs-current").textContent`, &current)
+		if current != "postgres · "+role {
+			t.Errorf("signed in from the keyboard as %q; want postgres · %s", current, role)
+		}
+	})
+
+	auditScreens(t, []a11yPage{
+		{"Studio sign-in dialog, IAM database authentication", page,
+			`document.getElementById("dbs-signin-title") !== null && document.querySelector("#dbs-database option[value='postgres']") !== null`,
+			`document.getElementById("dbs-auth-iam").click();
+			await new Promise((r) => { const end = Date.now() + 5000; const look = () =>
+				(!document.getElementById("dbs-iam").hidden || Date.now() > end) ? r() : setTimeout(look, 50); look(); })`},
 	})
 }
