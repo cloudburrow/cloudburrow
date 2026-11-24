@@ -566,11 +566,16 @@ func (g *gcpcRun) bigquery(ctx context.Context, project, location, launcher stri
 		return fmt.Errorf("the %s launcher runs a BigQuery job, and BigQuery is not served on this instance (start with --services including bigquery)", launcher)
 	}
 	kind := g.args["type"]
+	var sql, tableArt string
+	var err error
 	if launcher == "export_model" {
-		return fmt.Errorf("Google Cloud Pipeline Components' BigqueryExportModelJob exports a model to Cloud Storage with EXPORT MODEL, which this instance's BigQuery does not run")
-	}
-	sql, tableArt, err := bqQuery(kind, g.args)
-	if err != nil {
+		// bigquery_export_model_job: the model must be there, then EXPORT
+		// MODEL as GCPC writes it (#2210).
+		if sql, err = g.exportModelQuery(ctx, bq); err != nil {
+			return err
+		}
+		kind = "BigqueryExportModelJob"
+	} else if sql, tableArt, err = bqQuery(kind, g.args); err != nil {
 		return err
 	}
 	var job map[string]any
@@ -699,6 +704,12 @@ func (g *gcpcRun) bigquery(ctx context.Context, project, location, launcher stri
 		return g.writeOutputs(bqModel("model", t.ProjectID, t.DatasetID, t.TableID))
 	case "BigqueryDropModelJob":
 		return nil
+	case "BigqueryExportModelJob":
+		p := g.args["exported_model_path"]
+		if p == "" {
+			return fmt.Errorf("the launcher has no --exported_model_path")
+		}
+		return os.WriteFile(g.local(p), []byte(g.args["model_destination_path"]), 0o666)
 	}
 	if name, ok := bqMetricsArtifacts[kind]; ok {
 		code, out, err := bq.BigQueryREST(ctx, "GET", "/bigquery/v2/projects/"+url.PathEscape(project)+"/queries/"+url.PathEscape(jobID)+"?location="+url.QueryEscape(jobLoc), nil)
@@ -716,6 +727,29 @@ func (g *gcpcRun) bigquery(ctx context.Context, project, location, launcher stri
 		return g.writeOutputs(bqTable(tableArt, t.ProjectID, t.DatasetID, t.TableID))
 	}
 	return nil
+}
+
+// exportModelQuery is bigquery_export_model_job's query: model_name must
+// be projectId.datasetId.modelId and name a model, and the statement is
+// EXPORT MODEL `name` OPTIONS(URI="<model_destination_path>",
+// add_serving_default_signature=True), as GCPC 2.23.0's remote runner
+// writes it.
+func (g *gcpcRun) exportModelQuery(ctx context.Context, bq PipelineBigQuery) (string, error) {
+	name := g.args["model_name"]
+	parts := strings.Split(name, ".")
+	if len(parts) != 3 {
+		return "", fmt.Errorf(`The model name must be in the format "projectId.datasetId.modelId"`)
+	}
+	code, out, err := bq.BigQueryREST(ctx, "GET", "/bigquery/v2/projects/"+url.PathEscape(parts[0])+"/datasets/"+url.PathEscape(parts[1])+"/models/"+url.PathEscape(parts[2]), nil)
+	if err != nil {
+		return "", err
+	}
+	var model map[string]any
+	_ = json.Unmarshal(out, &model)
+	if _, ok := model["modelType"]; code/100 != 2 || !ok {
+		return "", fmt.Errorf(`Cannot get model resource. The model name must be in the format "projectId.datasetId.modelId" `)
+	}
+	return fmt.Sprintf(`EXPORT MODEL %s OPTIONS(URI="%s",add_serving_default_signature=True)`, backQuoted(name), g.args["model_destination_path"]), nil
 }
 
 // resolveRunPlaceholders replaces the pipeline-level placeholders GCPC

@@ -13,8 +13,9 @@ google-cloud-aiplatform 1.x), as Google's guides use them:
   - components: a pipeline of CustomTrainingJobOp (a custom job whose
     container writes a file to AIP_MODEL_DIR), BigqueryQueryJobOp (a query
     into a destination table), BigqueryCreateModelJobOp (a linear
-    regression) and, on its model, BigqueryEvaluateModelJobOp and
-    BigqueryPredictModelJobOp;
+    regression) and, on its model, BigqueryEvaluateModelJobOp,
+    BigqueryPredictModelJobOp and BigqueryExportModelJobOp (EXPORT MODEL
+    to CB_EXPORT_DIR);
   - training: aiplatform.CustomContainerTrainingJob(...).run(), a
     TrainingPipeline whose custom job uploads a Model.
 
@@ -40,6 +41,7 @@ from google.protobuf import json_format
 from google_cloud_pipeline_components.v1.bigquery import (
     BigqueryCreateModelJobOp,
     BigqueryEvaluateModelJobOp,
+    BigqueryExportModelJobOp,
     BigqueryPredictModelJobOp,
     BigqueryQueryJobOp,
 )
@@ -140,6 +142,9 @@ def components(project: str, bq_project: str, dataset: str, model_dir: str):
             "destinationTable": {"projectId": os.environ["CB_BQ_PROJECT"], "datasetId": os.environ["CB_BQ_DATASET"], "tableId": "predicted"},
         },
     ).set_display_name("predict")
+    BigqueryExportModelJobOp(
+        project=bq_project, location="US", model=model.outputs["model"], model_destination_path=os.environ["CB_EXPORT_DIR"],
+    ).set_display_name("export-model")
 
 
 def run(path, root, params, template_path=None):

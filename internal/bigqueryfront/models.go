@@ -1735,6 +1735,7 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 	}
 	stmts := splitStatements(toks)
 	var found *modelDDL
+	var export *exportDDL
 	others := 0
 	var code int
 	var msg string
@@ -1742,18 +1743,27 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		if len(stmt) == 0 {
 			continue
 		}
+		if e, is, c, m := parseExportModel(stmt); is {
+			// EXPORT MODEL (modelexport.go, #2210).
+			if found == nil && export == nil {
+				export, code, msg = &e, c, m
+			} else {
+				others++
+			}
+			continue
+		}
 		d, is, c, m := parseModelDDL(stmt, q.Query)
 		if !is {
 			others++
 			continue
 		}
-		if found == nil {
+		if found == nil && export == nil {
 			found, code, msg = &d, c, m
 		} else {
 			others++
 		}
 	}
-	if found == nil {
+	if found == nil && export == nil {
 		return false
 	}
 	fail := func(code int, msg string) {
@@ -1765,11 +1775,15 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
 	}
 	if others > 0 {
-		fail(501, "Not implemented here: CREATE MODEL or DROP MODEL in a script; CloudBurrow carries them out as a query of their own. Nothing was run.")
+		fail(501, "Not implemented here: CREATE MODEL, DROP MODEL or EXPORT MODEL in a script; CloudBurrow carries them out as a query of their own. Nothing was run.")
 		return true
 	}
 	if code != 0 {
 		fail(code, msg)
+		return true
+	}
+	if export != nil {
+		f.exportStatement(w, r, q, insert, *export, fail)
 		return true
 	}
 	d := *found

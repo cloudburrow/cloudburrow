@@ -17,6 +17,7 @@ import (
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	"cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	"cloud.google.com/go/bigquery"
+	"cloud.google.com/go/storage"
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -206,7 +207,7 @@ func TestPythonGCPC(t *testing.T) {
 		"-e", "CB_CREDENTIALS=/creds/adc.json", "-e", "CB_TASK_IMAGE="+gcpcPyImage,
 		"-e", "CB_KFP_REPO="+repoID,
 		"-e", "CB_PIPELINE_ROOT=gs://"+bucket+"/root", "-e", "CB_STAGING=gs://"+bucket+"/staging",
-		"-e", "CB_MODEL_DIR=gs://"+bucket+"/custom",
+		"-e", "CB_MODEL_DIR=gs://"+bucket+"/custom", "-e", "CB_EXPORT_DIR=gs://"+bucket+"/exported",
 		"-e", "CB_BQ_PROJECT="+bqProject, "-e", "CB_BQ_DATASET="+dataset,
 		"-e", "GOOGLE_CLOUD_UNIVERSE_DOMAIN=cloudburrow.localhost",
 		gcpcPyImage, "/flow/flow.py")
@@ -262,7 +263,7 @@ func TestPythonGCPC(t *testing.T) {
 	if comp.GetState() != aiplatformpb.PipelineState_PIPELINE_STATE_SUCCEEDED {
 		t.Fatalf("the components run = %v %v\n%s", comp.GetState(), comp.GetError(), out)
 	}
-	for _, name := range []string{"custom-job", "query", "create-model", "evaluate", "predict"} {
+	for _, name := range []string{"custom-job", "query", "create-model", "evaluate", "predict", "export-model"} {
 		if d := gcpcTask(t, comp, name); d != nil && d.GetState() != aiplatformpb.PipelineTaskDetail_SUCCEEDED {
 			t.Errorf("task %s = %v %v", name, d.GetState(), d.GetError())
 		}
@@ -272,7 +273,7 @@ func TestPythonGCPC(t *testing.T) {
 	if len(cj) != 1 || cj[0].ResourceType != "CustomJob" || !strings.HasPrefix(cj[0].ResourceURI, prefix) {
 		t.Errorf("custom-job's gcp_resources = %v, want one CustomJob under %s", cj, prefix)
 	}
-	for _, name := range []string{"query", "create-model", "evaluate", "predict"} {
+	for _, name := range []string{"query", "create-model", "evaluate", "predict", "export-model"} {
 		r := gcpcResources(t, gcpcTask(t, comp, name))
 		bqPrefix := "https://www.googleapis.com/bigquery/v2/projects/" + bqProject + "/jobs/"
 		if len(r) != 1 || r[0].ResourceType != "BigQueryJob" || !strings.HasPrefix(r[0].ResourceURI, bqPrefix) {
@@ -293,6 +294,22 @@ func TestPythonGCPC(t *testing.T) {
 	if m := gcpcArtifact(t, gcpcTask(t, comp, "predict"), "destination_table", "google.BQTable"); m != nil &&
 		(m["datasetId"] != dataset || m["tableId"] != "predicted") {
 		t.Errorf("predict's destination_table = %v", m)
+	}
+	// BigqueryExportModelJobOp: EXPORT MODEL wrote the linear regression's
+	// TF SavedModel, and exported_model_path names where.
+	if d := gcpcTask(t, comp, "export-model"); d != nil && taskOutput(d, "exported_model_path").GetStringValue() != "gs://"+bucket+"/exported" {
+		t.Errorf("export-model's exported_model_path = %v", taskOutput(d, "exported_model_path"))
+	}
+	saved := map[string]bool{}
+	for objs := gcs.Bucket(bucket).Objects(ctx, &storage.Query{Prefix: "exported/"}); ; {
+		o, err := objs.Next()
+		if err != nil {
+			break
+		}
+		saved[strings.TrimPrefix(o.Name, "exported/")] = true
+	}
+	if !saved["saved_model.pb"] || !saved["variables/variables.index"] {
+		t.Errorf("EXPORT MODEL wrote %v under gs://%s/exported/, want a TF SavedModel", saved, bucket)
 	}
 	it := bq.Dataset(dataset).Table("predicted").Read(ctx)
 	rows := 0
