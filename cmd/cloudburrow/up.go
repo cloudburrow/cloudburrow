@@ -1375,6 +1375,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// An Apache Spark notebook's sessions are Serverless for Apache
 	// Spark's (#2156).
 	notebooks.Dataproc = dataprocSvc.Addr
+	// A Workbench instance's google-cloud-storage reaches Cloud Storage
+	// (#2198).
+	notebooks.Storage = func() string {
+		if f := forwarderFor(forwarders, "storage"); f != nil {
+			return f.HostAddr()
+		}
+		return ""
+	}
 	defer notebooks.Close()
 	// Colab Enterprise's runtime templates and runtimes (#2105), on the
 	// local Vertex AI endpoint, run on them.
@@ -1446,6 +1454,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// is not a path around the admin token (#553).
 		consoleSrv.SetFaults(adminHandler(adminAPI), adminTokenPath(cfg))
 		consoleSrv.SetRequestMetrics(requestMetrics)
+		// Vertex AI Workbench instances' JupyterLab (#2198), on their
+		// proxy_uri hosts at the console's port.
+		if localAISrv != nil {
+			localAISrv.SetWorkbenchConsole(consoleSrv.Addr)
+			consoleSrv.SetJupyterLabs(workbenchLabs{srv: localAISrv})
+		}
 		coord.Register(consoleSrv)
 		// The metric sampler runs on the instance's own clock, so the history
 		// a chart draws exists whether or not anybody has the dashboard open.

@@ -1795,6 +1795,11 @@ type Action struct {
 	// another origin opens in a new window: Developer Connect's Connect
 	// your account opens the provider's consent page (#2105).
 	Href string `json:"href,omitempty"`
+	// OpenWindow, when set, makes the action open a page on another origin
+	// the console mints a link to: a POST to this console API path answers
+	// {"url"}, which opens in a new window, as Workbench's Open JupyterLab
+	// opens the instance's JupyterLab (#2198) with a one-time code.
+	OpenWindow string `json:"openWindow,omitempty"`
 	// Terminal, when set, makes the action Google's Run in Cloud Shell: it
 	// opens the console's terminal (#781) and runs this command line in its
 	// active tab, as a Testing tab's test command runs (#2049). The action
@@ -2086,6 +2091,10 @@ type Server struct {
 	terminal     Terminal
 	termSessions *terminalSessions
 
+	// jupyter is the Workbench instances' JupyterLab proxy (#2198,
+	// jupyterproxy.go).
+	jupyter jupyterState
+
 	// instanceSrc performs the Instance page's state save and load, reset
 	// and seed through the admin API, with the page's own token (#801); nil
 	// offers no page. instanceTokenFile is where the token is, not the token.
@@ -2211,6 +2220,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/objects/{service}", s.handleDeleteObject)
 	mux.HandleFunc("GET /api/terminal", s.handleTerminalStatus)
 	mux.HandleFunc("GET /api/terminal/socket", s.handleTerminalSocket)
+	mux.HandleFunc("POST /api/workbench/open", s.handleWorkbenchOpen)
 	mux.HandleFunc("GET /api/about", s.handleAbout)
 	mux.HandleFunc("GET /api/connect", s.handleConnect)
 	mux.HandleFunc("GET /api/diagnose", s.handleDiagnose)
@@ -2246,7 +2256,8 @@ func (s *Server) Handler() http.Handler {
 
 	// The Host check runs first: sameOriginOnly compares Origin with Host,
 	// which proves nothing when both name a rebound attacker domain (#676).
-	return hostguard.Wrap(sameOriginOnly(noStore(withScope(mux))))
+	// A Workbench instance's proxy host is its JupyterLab (#2198).
+	return hostguard.Wrap(s.withJupyter(sameOriginOnly(noStore(withScope(mux)))))
 }
 
 func isAsset(path string) bool {

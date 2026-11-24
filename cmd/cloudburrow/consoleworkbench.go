@@ -14,8 +14,13 @@ package main
 //   - Advanced options: Region and Zone, Machine type, Idle shutdown
 //     ("an integer from 10 through 1440"), Single user's User email.
 //
-// Local differences: JupyterLab is not served; Open JupyterLab opens the
-// instance's page, whose code box runs Python on the instance's kernel.
+// Open JupyterLab opens the instance's own JupyterLab (#2198) in a new
+// window, on its proxy_uri, which the console proxies (internal/console's
+// jupyterproxy.go): the real JupyterLab, as on Google, with its kernels,
+// terminals and files. Idle shutdown off is the metadata key
+// idle-timeout-seconds present and empty, as gcloud's
+// --metadata=idle-timeout-seconds= sets it (idle-shutdown, read
+// 2026-11-23).
 // UNVERIFIED (re-read 2026-11-22, the same pages): the list's columns, the
 // zones offered and the machine types offered.
 
@@ -35,6 +40,7 @@ import (
 	"google.golang.org/api/iterator"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
 var (
@@ -51,11 +57,8 @@ func (v vertexAPI) workbench(ctx context.Context) (*notebooks.NotebookClient, er
 	return notebooks.NewNotebookClient(ctx, v.opts()...)
 }
 
-// workbenchProvider's exec runs Python on an instance (the local Vertex AI
-// endpoint's WorkbenchExecute), nil when it is not served in-process.
 type workbenchProvider struct {
-	api  vertexAPI
-	exec func(ctx context.Context, name, code string) ([]json.RawMessage, error)
+	api vertexAPI
 }
 
 func (workbenchProvider) ID() string                    { return "workbench-instances" }
@@ -89,9 +92,12 @@ func workbenchZone(name string) string {
 }
 
 func workbenchIdleText(md map[string]string) string {
-	v := md["idle-timeout-seconds"]
-	if v == "" {
+	v, ok := md["idle-timeout-seconds"]
+	if !ok {
 		return "180 minutes"
+	}
+	if v == "" {
+		return "Off"
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil {
@@ -151,7 +157,7 @@ func workbenchActions(project string, in *nbpb.Instance) []console.Action {
 	switch in.GetState() {
 	case nbpb.State_ACTIVE:
 		return []console.Action{
-			{ID: "open-jupyterlab", Label: "Open JupyterLab", Href: workbenchRoute + "/" + url.PathEscape(vertexLast(in.GetName())) + "?project=" + url.QueryEscape(project) + "&tab=query"},
+			{ID: "open-jupyterlab", Label: "Open JupyterLab", OpenWindow: "/api/workbench/open?name=" + url.QueryEscape(in.GetName())},
 			{ID: "stop", Label: "Stop"},
 			{ID: "reset", Label: "Reset", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, Confirm: "A reset forcibly wipes the memory contents of the instance."},
 		}
@@ -164,8 +170,8 @@ func workbenchActions(project string, in *nbpb.Instance) []console.Action {
 func (p workbenchProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	l := console.Listing{Columns: []string{"Zone", "Machine type", "Owner", "Idle shutdown", "Labels", "Created"},
 		NameColumn: "Instance name", Noun: "instances", AlwaysStatus: true,
-		Note: "Each instance is a notebook runtime of this CloudBurrow instance: a kernel container whose only route is its BigQuery. " +
-			"JupyterLab is not served: Open JupyterLab opens the instance's page, which runs Python on its kernel. Stop deletes the container; Start makes a new one."}
+		Note: "Each instance runs JupyterLab in a container of this machine whose only routes are this CloudBurrow instance's APIs. " +
+			"Open JupyterLab opens it in a new window. Its files in /home/jupyter are on its data disk, kept when it stops."}
 	if project == "" {
 		l.Prompt = "Instances are listed per project. Choose one in the toolbar."
 		return l, nil
@@ -224,12 +230,10 @@ func (p workbenchProvider) Detail(ctx context.Context, project string, path []st
 	if msg := in.GetHealthInfo()["error"]; msg != "" {
 		d.Summary = append(d.Summary, console.Property{Label: "Error", Value: msg})
 	}
-	// The details, then the code box Open JupyterLab opens (JupyterLab is
-	// not served). UNVERIFIED (re-read 2026-11-22: create-console-quickstart
-	// shows no instance page): the tab names.
+	// UNVERIFIED (re-read 2026-11-22: create-console-quickstart shows no
+	// instance page): the tab names.
 	d.Sections = []console.Section{
 		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: d.Summary}}},
-		{ID: "query", Label: "Notebook", Kind: console.KindQuery},
 	}
 	return d, nil
 }
@@ -242,13 +246,7 @@ func (p workbenchProvider) DetailActions(ctx context.Context, project string, pa
 	if err != nil {
 		return nil
 	}
-	var out []console.Action
-	for _, a := range workbenchActions(project, in) {
-		if a.ID != "open-jupyterlab" {
-			out = append(out, a)
-		}
-	}
-	return out
+	return workbenchActions(project, in)
 }
 
 func (workbenchProvider) CreateForm() (string, []console.Field) {
@@ -281,9 +279,8 @@ func (p workbenchProvider) Create(ctx context.Context, project string, values ma
 		}
 		g.Metadata["idle-timeout-seconds"] = strconv.Itoa(m * 60)
 	} else {
-		// Idle shutdown off: the longest the API takes.
-		// UNVERIFIED (re-read 2026-11-22: idle-shutdown): the metadata for off.
-		g.Metadata["idle-timeout-seconds"] = "86400"
+		// Idle shutdown off: the key, empty (idle-shutdown).
+		g.Metadata["idle-timeout-seconds"] = ""
 	}
 	if sa := strings.TrimSpace(values["serviceAccount"]); sa != "" {
 		g.ServiceAccounts = []*nbpb.ServiceAccount{{Email: sa}}
@@ -380,67 +377,25 @@ func (p workbenchProvider) ActAt(ctx context.Context, project string, path []str
 	return wait(ctx)
 }
 
-// Query runs Python on the instance's kernel: CloudBurrow's stand-in for
-// JupyterLab, which it does not serve.
-func (p workbenchProvider) Query(ctx context.Context, project string, path []string, statement string) (console.Listing, error) {
-	l := console.Listing{Columns: []string{"Output"}, NameColumn: "#", Noun: "outputs"}
-	if len(path) != 1 {
-		return l, errors.New("open an instance to run code on it")
-	}
-	if p.exec == nil {
-		return l, errors.New("running code needs the local Vertex AI endpoint in this process")
-	}
-	in, err := p.find(ctx, project, path[0])
+// workbenchLabs is console.JupyterLabs over the local Vertex AI endpoint
+// (#2198): an instance's proxy_uri, and the JupyterLab behind a proxy
+// host.
+type workbenchLabs struct{ srv *vertexai.Server }
+
+func (l workbenchLabs) ProxyURI(ctx context.Context, name string) (string, error) {
+	in, err := l.srv.WorkbenchInstance(name)
 	if err != nil {
-		return l, err
+		return "", err
 	}
-	outs, err := p.exec(ctx, in.GetName(), statement)
-	if err != nil {
-		return l, err
+	if in.GetState() != nbpb.State_ACTIVE {
+		return "", fmt.Errorf("instance %s is %s: Open JupyterLab is available once it is active", vertexLast(name), workbenchStateText(in.GetState()))
 	}
-	for i, raw := range outs {
-		l.Items = append(l.Items, console.Resource{Name: strconv.Itoa(i + 1), Fields: map[string]string{"Output": workbenchOutputText(raw)}})
+	if in.GetProxyUri() == "" {
+		return "", fmt.Errorf("instance %s has no proxy_uri: the console is not running", vertexLast(name))
 	}
-	l.Total = len(l.Items)
-	return l, nil
+	return in.GetProxyUri(), nil
 }
 
-func (workbenchProvider) QueryHint() string {
-	return "Python, run on the instance's kernel as a JupyterLab cell is: its state is kept until the instance stops or is reset."
-}
-
-// workbenchOutputText is an nbformat output's text.
-func workbenchOutputText(raw json.RawMessage) string {
-	var o struct {
-		OutputType string          `json:"output_type"`
-		Text       json.RawMessage `json:"text"`
-		Data       map[string]any  `json:"data"`
-		Ename      string          `json:"ename"`
-		Evalue     string          `json:"evalue"`
-	}
-	if json.Unmarshal(raw, &o) != nil {
-		return string(raw)
-	}
-	joined := func(r json.RawMessage) string {
-		var s string
-		if json.Unmarshal(r, &s) == nil {
-			return s
-		}
-		var ss []string
-		if json.Unmarshal(r, &ss) == nil {
-			return strings.Join(ss, "")
-		}
-		return string(r)
-	}
-	switch o.OutputType {
-	case "stream":
-		return strings.TrimRight(joined(o.Text), "\n")
-	case "error":
-		return o.Ename + ": " + o.Evalue
-	}
-	if t, ok := o.Data["text/plain"]; ok {
-		b, _ := json.Marshal(t)
-		return joined(b)
-	}
-	return string(raw)
+func (l workbenchLabs) Endpoint(label string) (string, string, string, error) {
+	return l.srv.WorkbenchJupyterLab(label)
 }

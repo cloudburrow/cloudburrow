@@ -8,7 +8,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -32,7 +31,12 @@ import (
 type colabHost struct{ m *nbruntime.Manager }
 
 func nbOptions(o vertexai.NotebookRuntimeOptions) nbruntime.Options {
-	return nbruntime.Options{IdleTimeout: o.IdleTimeout, IdleDisabled: o.IdleDisabled, Env: o.Env, Token: o.Token}
+	n := nbruntime.Options{IdleTimeout: o.IdleTimeout, IdleDisabled: o.IdleDisabled, Env: o.Env, Token: o.Token}
+	if j := o.Jupyter; j != nil {
+		n.Jupyter = &nbruntime.Jupyter{Volume: j.Volume, Account: j.Account, Mint: j.Mint,
+			Name: j.Name, Zone: j.Zone, ID: j.ID, Attributes: j.Attributes}
+	}
+	return n
 }
 
 func (h colabHost) Start(key, project string, o vertexai.NotebookRuntimeOptions) {
@@ -63,15 +67,14 @@ func (h colabHost) Exec(ctx context.Context, key, code string) error {
 
 func (h colabHost) Stop(key string) error { return h.m.Disconnect(key) }
 
-// Outputs runs code and returns its outputs (vertexai.NotebookOutputs),
-// for a Workbench instance's console page (#2173).
-func (h colabHost) Outputs(ctx context.Context, key, code string) ([]json.RawMessage, error) {
-	r, err := h.m.Execute(ctx, key, code)
-	if err != nil {
-		return nil, err
-	}
-	return r.Outputs, nil
+// JupyterEndpoint is a Workbench instance's JupyterLab (#2198,
+// vertexai.JupyterHost).
+func (h colabHost) JupyterEndpoint(key string) (string, string, bool) {
+	return h.m.JupyterEndpoint(key)
 }
+
+// DeleteDisk deletes a Workbench instance's data disk.
+func (h colabHost) DeleteDisk(volume string) error { return h.m.DeleteDisk(volume) }
 
 func (h colabHost) Version() string { return nbruntime.Tag() }
 

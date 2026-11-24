@@ -17,11 +17,19 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
-// outputsHost is a fakeHost that returns a cell's outputs.
+// outputsHost is a fakeHost that serves JupyterLab (JupyterHost).
 type outputsHost struct{ *fakeHost }
 
-func (h outputsHost) Outputs(_ context.Context, key, code string) ([]json.RawMessage, error) {
-	return []json.RawMessage{json.RawMessage(`{"output_type":"stream","name":"stdout","text":"ran ` + strings.TrimSpace(code) + `"}`)}, nil
+func (h outputsHost) JupyterEndpoint(key string) (string, string, bool) {
+	st, _ := h.State(key)
+	return "127.0.0.1:1", "tok-" + key, st == "CONNECTED"
+}
+
+func (h outputsHost) DeleteDisk(volume string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.ran = append(h.ran, "delete-disk "+volume)
+	return nil
 }
 
 func wbInstance(t *testing.T, op interface {
@@ -41,6 +49,7 @@ func TestWorkbenchInstances(t *testing.T) {
 	host := outputsHost{newFakeHost()}
 	file := filepath.Join(t.TempDir(), "wb.json")
 	s.SetWorkbench(host, file)
+	s.SetWorkbenchConsole(func() string { return "127.0.0.1:9091" })
 	w := &workbenchService{s: s}
 	parent := "projects/p/locations/us-central1-a"
 
@@ -90,9 +99,21 @@ func TestWorkbenchInstances(t *testing.T) {
 	if _, err := w.CreateInstance(ctx, &nbpb.CreateInstanceRequest{Parent: parent, InstanceId: "my-instance", Instance: &nbpb.Instance{}}); code(err) != codes.AlreadyExists {
 		t.Errorf("duplicate = %v", err)
 	}
-	outs, err := s.WorkbenchExecute(ctx, name, "print(1)")
-	if err != nil || len(outs) != 1 || !strings.Contains(string(outs[0]), "ran print(1)") {
-		t.Errorf("execute = %s, %v", outs, err)
+	// JupyterLab: the instance's setup, and its proxy_uri, which names
+	// the instance's JupyterLab.
+	j := host.opts[workbenchKey(name)].Jupyter
+	if j == nil || j.Volume != "cb-workbench-"+in.GetId() || j.Name != "my-instance" || j.Zone != "us-central1-a" || j.ID != in.GetId() || j.Mint == nil {
+		t.Errorf("jupyter setup = %+v", j)
+	}
+	label, port, ok := strings.Cut(in.GetProxyUri(), "."+WorkbenchProxyDomain+":")
+	if !ok || port != "9091" || !strings.HasSuffix(label, "-dot-us-central1") {
+		t.Errorf("proxy_uri = %q", in.GetProxyUri())
+	}
+	if addr, tok, n, err := s.WorkbenchJupyterLab(label); err != nil || addr != "127.0.0.1:1" || tok != "tok-"+workbenchKey(name) || n != name {
+		t.Errorf("JupyterLab of %s = %s %s %s %v", label, addr, tok, n, err)
+	}
+	if _, _, _, err := s.WorkbenchJupyterLab("nope-dot-us-central1"); code(err) != codes.NotFound {
+		t.Errorf("unknown proxy host = %v", err)
 	}
 
 	// Update: labels and metadata; machine type only while STOPPED.
@@ -123,8 +144,11 @@ func TestWorkbenchInstances(t *testing.T) {
 	if in := wbInstance(t, op, s, w, name); in.GetState() != nbpb.State_STOPPED {
 		t.Errorf("after stop: %v", in.GetState())
 	}
-	if _, err := s.WorkbenchExecute(ctx, name, "1"); code(err) != codes.FailedPrecondition {
-		t.Errorf("execute on a stopped instance = %v", err)
+	if _, _, _, err := s.WorkbenchJupyterLab(label); code(err) != codes.FailedPrecondition {
+		t.Errorf("JupyterLab of a stopped instance = %v", err)
+	}
+	if in := wbInstance(t, op, s, w, name); in.GetProxyUri() == "" {
+		t.Error("a stopped instance lost its proxy_uri")
 	}
 	if _, err := w.ResetInstance(ctx, &nbpb.ResetInstanceRequest{Name: name}); code(err) != codes.FailedPrecondition {
 		t.Errorf("reset a stopped instance = %v", err)
@@ -218,6 +242,22 @@ func TestWorkbenchInstances(t *testing.T) {
 	}
 	if _, ok := host.state[workbenchKey(name)]; ok {
 		t.Error("the deleted instance's runtime is still running")
+	}
+	if !strings.Contains(strings.Join(host.ran, "\n"), "delete-disk cb-workbench-"+in.GetId()) {
+		t.Errorf("the data disk was not deleted: %v", host.ran)
+	}
+
+	// Idle shutdown off: idle-timeout-seconds present and empty.
+	op, err = w.CreateInstance(ctx, &nbpb.CreateInstanceRequest{Parent: parent, InstanceId: "no-idle", Instance: &nbpb.Instance{
+		Infrastructure: &nbpb.Instance_GceSetup{GceSetup: &nbpb.GceSetup{Metadata: map[string]string{"idle-timeout-seconds": ""}}}}})
+	if err != nil || waitNotebookOp(t, s, op).GetError() != nil {
+		t.Fatalf("create without idle shutdown = %v, %v", op, err)
+	}
+	if o := host.opts[workbenchKey(parent+"/instances/no-idle")]; !o.IdleDisabled {
+		t.Errorf("idle shutdown with an empty idle-timeout-seconds = %+v, want off", o)
+	}
+	if o := host.opts[workbenchKey(parent+"/instances/second")]; o.IdleDisabled || o.IdleTimeout != defaultIdleTimeout {
+		t.Errorf("default idle shutdown = %+v, want 180 minutes", o)
 	}
 }
 

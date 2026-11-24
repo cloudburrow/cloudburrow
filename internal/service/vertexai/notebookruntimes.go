@@ -113,6 +113,8 @@ type NotebookRuntimeOptions struct {
 	// Token is the bearer token the runtime's clients use: the identity
 	// a run executes as (runas.go), "" for the instance's own.
 	Token string
+	// Jupyter runs a Workbench instance's JupyterLab (#2198).
+	Jupyter *WorkbenchJupyter
 }
 
 const (

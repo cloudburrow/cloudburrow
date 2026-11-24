@@ -290,11 +290,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			// Vertex AI Pipelines' Runs and Schedules (consolepipelines.go, #2173).
 			pipelineRunsProvider{api: api, storage: map[bool]string{true: storageAddr}[enabled[config.ServiceStorage]]}, pipelineSchedulesProvider{colabSchedulesProvider{api: api}})
 		// Vertex AI Workbench's Instances (consoleworkbench.go, #2173).
-		wb := workbenchProvider{api: api}
-		if d.localAI != nil {
-			wb.exec = d.localAI.WorkbenchExecute
-		}
-		providers = append(providers, wb)
+		providers = append(providers, workbenchProvider{api: api})
 	}
 	if enabled[config.ServiceRun] {
 		// Two screens of one product: services, and jobs with their

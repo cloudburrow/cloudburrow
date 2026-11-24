@@ -30,13 +30,27 @@ package vertexai
 //   - "The Open JupyterLab link is disabled while the instance
 //     provisions".
 //
+// JupyterLab (#2198): an ACTIVE instance runs the real Jupyter Server and
+// JupyterLab in its container (internal/nbruntime's jupyter.go), Python 3
+// kernels with Google's client libraries and %%bigquery, its service
+// account's identity through its own metadata server, /home/jupyter on
+// its data disk (a Docker volume kept across stop and start and removed
+// with the instance). proxy_uri is "The proxy endpoint that is used to
+// access the Jupyter notebook", as Google's
+// HASH-dot-REGION.notebooks.googleusercontent.com is: here
+// HASH-dot-REGION.notebooks.localhost:PORT, the console's port, whose proxy
+// (internal/console's jupyterproxy.go) serves the instance's JupyterLab
+// to a browser the console opened it for. Idle shutdown is the metadata
+// key idle-timeout-seconds: 180 minutes when absent, off when present and
+// empty ("gcloud workbench instances update INSTANCE_NAME
+// --metadata=idle-timeout-seconds=", idle-shutdown, read 2026-11-23), the
+// instance STOPPED after that long with no kernel or terminal activity.
+//
 // Local differences: the instance runs on this machine's CPU, so one with
 // accelerator_configs is refused (FAILED_PRECONDITION); it has no route to
-// the internet whatever disable_public_ip says; proxy_uri is empty and
-// JupyterLab itself is not served: the console's instance page runs cells
-// on the instance's kernel (WorkbenchExecute) where Google opens
-// JupyterLab; container_image instances are refused (FAILED_PRECONDITION:
-// the kernel is the instance's notebook runtime image).
+// the internet whatever disable_public_ip says; container_image instances
+// are refused (FAILED_PRECONDITION: the image is the instance's notebook
+// runtime image).
 //
 // UNVERIFIED (re-read 2026-11-22, the same pages): the default
 // machine_type (n1-standard-4, the console's) and disk types
@@ -50,8 +64,10 @@ package vertexai
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -88,10 +104,28 @@ var (
 	workbenchOrder = aipfilter.Fields("name", "create_time", "update_time")
 )
 
-// NotebookOutputs is a NotebookHost that also returns a cell's outputs
-// (nbformat 4 output objects), for the console's instance page.
-type NotebookOutputs interface {
-	Outputs(ctx context.Context, key, code string) ([]json.RawMessage, error)
+// JupyterHost is a NotebookHost that runs a Workbench instance's
+// JupyterLab (NotebookRuntimeOptions.Jupyter).
+type JupyterHost interface {
+	// JupyterEndpoint is the loopback address and server token of the
+	// running instance key's JupyterLab.
+	JupyterEndpoint(key string) (addr, token string, ok bool)
+	// DeleteDisk deletes an instance's data disk.
+	DeleteDisk(volume string) error
+}
+
+// WorkbenchJupyter is a Workbench instance's JupyterLab setup.
+type WorkbenchJupyter struct {
+	// Volume is the data disk, mounted at /home/jupyter.
+	Volume string
+	// Account is the instance's service account, "" for the Compute
+	// Engine default service account.
+	Account string
+	// Mint mints an access token for the account, nil for none.
+	Mint func(account string) (string, error)
+	// Name, Zone and ID are the instance's; Attributes its metadata.
+	Name, Zone, ID string
+	Attributes     map[string]string
 }
 
 type workbenchEntry struct {
@@ -108,6 +142,9 @@ type workbenchStore struct {
 	host      NotebookHost
 	instances map[string]*workbenchEntry
 	now       func() time.Time
+	// console is the console's host:port, which proxy_uri names; "" when
+	// the console is not running.
+	console func() string
 }
 
 func (s *Server) workbench() *workbenchStore {
@@ -190,6 +227,9 @@ func (st *workbenchStore) refresh(e *workbenchEntry) {
 	case "CONNECTED":
 		in.State, in.HealthState = nbpb.State_ACTIVE, nbpb.HealthState_HEALTHY
 		in.HealthInfo = nil
+		if in.ProxyUri == "" {
+			in.ProxyUri = st.proxyURI(in)
+		}
 	case "STARTING", "BUILDING":
 		in.State, in.HealthState = nbpb.State_PROVISIONING, nbpb.HealthState_HEALTH_STATE_UNSPECIFIED
 	case "FAILED":
@@ -221,11 +261,15 @@ func (st *workbenchStore) instance(name string) (*workbenchEntry, error) {
 	return e, nil
 }
 
-// workbenchIdle is the idle shutdown the metadata sets.
+// workbenchIdle is the idle shutdown the metadata sets: the default when
+// the key is absent, 0 (off) when it is empty.
 func workbenchIdle(md map[string]string) (time.Duration, error) {
 	v, ok := md[workbenchIdleKey]
-	if !ok || v == "" {
+	if !ok {
 		return defaultIdleTimeout, nil
+	}
+	if v == "" {
+		return 0, nil
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n < 600 || n > 86400 {
@@ -345,11 +389,96 @@ func (s *Server) workbenchDone(op string, resp proto.Message, err error) {
 	_ = s.ops.Succeed(op, resp)
 }
 
+// workbenchVolume is an instance's data disk's Docker volume.
+func workbenchVolume(in *nbpb.Instance) string { return "cb-workbench-" + in.GetId() }
+
 // startLocked starts e on the host; the caller holds st.mu.
-func (st *workbenchStore) startLocked(e *workbenchEntry, project string) {
-	idle, _ := workbenchIdle(e.I.GetGceSetup().GetMetadata())
+func (s *Server) startLocked(st *workbenchStore, e *workbenchEntry, project string) {
+	g := e.I.GetGceSetup()
+	idle, _ := workbenchIdle(g.GetMetadata())
 	e.Running, e.Message = true, ""
-	st.host.Start(workbenchKey(e.I.GetName()), project, NotebookRuntimeOptions{IdleTimeout: idle})
+	account := ""
+	if sa := g.GetServiceAccounts(); len(sa) == 1 {
+		account = sa[0].GetEmail()
+	}
+	o := NotebookRuntimeOptions{IdleTimeout: idle, IdleDisabled: idle == 0, Jupyter: &WorkbenchJupyter{
+		Volume: workbenchVolume(e.I), Account: account, Mint: s.runAsToken,
+		Name: lastSegment(e.I.GetName()), Zone: workbenchZone(e.I.GetName()), ID: e.I.GetId(), Attributes: g.GetMetadata(),
+	}}
+	st.host.Start(workbenchKey(e.I.GetName()), project, o)
+}
+
+func workbenchZone(name string) string {
+	if p := strings.Split(name, "/"); len(p) >= 4 {
+		return p[3]
+	}
+	return ""
+}
+
+// SetWorkbenchConsole names the console's host:port, the host proxy_uri
+// is served on.
+func (s *Server) SetWorkbenchConsole(addr func() string) {
+	st := s.workbench()
+	st.mu.Lock()
+	st.console = addr
+	st.mu.Unlock()
+}
+
+// workbenchProxyLabel is the first label of an instance's proxy host, as
+// Google's is a hash of the instance's: HASH-dot-REGION.
+func workbenchProxyLabel(in *nbpb.Instance) string {
+	sum := sha256.Sum256([]byte(in.GetName() + "/" + in.GetId()))
+	zone := workbenchZone(in.GetName())
+	region := zone
+	if i := strings.LastIndex(zone, "-"); i > 0 {
+		region = zone[:i]
+	}
+	return hex.EncodeToString(sum[:8]) + "-dot-" + region
+}
+
+// WorkbenchProxyDomain is the domain the proxy hosts are under.
+const WorkbenchProxyDomain = "notebooks.localhost"
+
+// proxyURI is in's proxy_uri, "" while the console is not running.
+func (st *workbenchStore) proxyURI(in *nbpb.Instance) string {
+	if st.console == nil {
+		return ""
+	}
+	addr := st.console()
+	_, port, err := net.SplitHostPort(addr)
+	if addr == "" || err != nil {
+		return ""
+	}
+	return workbenchProxyLabel(in) + "." + WorkbenchProxyDomain + ":" + port
+}
+
+// WorkbenchJupyterLab is the JupyterLab behind a proxy host's first label:
+// its loopback address and token, the instance's name, or an error when
+// no ACTIVE instance has that proxy host.
+func (s *Server) WorkbenchJupyterLab(label string) (addr, token, name string, err error) {
+	st := s.workbench()
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	for _, n := range sortedNames(st.instances) {
+		e := st.instances[n]
+		if workbenchProxyLabel(e.I) != label {
+			continue
+		}
+		st.refresh(e)
+		if e.I.GetState() != nbpb.State_ACTIVE {
+			return "", "", n, apierror.FailedPrecondition("Instance %s is %s: start it to open JupyterLab", lastSegment(n), e.I.GetState())
+		}
+		h, ok := st.host.(JupyterHost)
+		if !ok {
+			return "", "", n, apierror.FailedPrecondition("this instance's notebook runtime does not serve JupyterLab")
+		}
+		a, t, ok := h.JupyterEndpoint(workbenchKey(n))
+		if !ok {
+			return "", "", n, apierror.FailedPrecondition("Instance %s's JupyterLab is not running", lastSegment(n))
+		}
+		return a, t, n, nil
+	}
+	return "", "", "", apierror.NotFound("no Workbench instance has the proxy host %s", label)
 }
 
 // awaitActive completes op with the instance when it is ACTIVE, or fails
@@ -439,7 +568,7 @@ func (w *workbenchService) CreateInstance(ctx context.Context, req *nbpb.CreateI
 	in.State, in.HealthState, in.HealthInfo, in.UpgradeHistory = nbpb.State_PROVISIONING, nbpb.HealthState_HEALTH_STATE_UNSPECIFIED, nil, nil
 	e := &workbenchEntry{I: in}
 	st.instances[name] = e
-	st.startLocked(e, project)
+	w.s.startLocked(st, e, project)
 	st.save()
 	op := w.s.workbenchOp(name, "create")
 	go w.s.awaitActive(op, e)
@@ -560,6 +689,10 @@ func (w *workbenchService) DeleteInstance(_ context.Context, req *nbpb.DeleteIns
 	st.mu.Unlock()
 	if host != nil {
 		_ = host.Stop(workbenchKey(req.GetName()))
+		// The data disk goes with the instance.
+		if h, ok := host.(JupyterHost); ok {
+			_ = h.DeleteDisk(workbenchVolume(e.I))
+		}
 	}
 	op := w.s.workbenchOp(req.GetName(), "delete")
 	w.s.workbenchDone(op, &emptypb.Empty{}, nil)
@@ -602,7 +735,7 @@ func (w *workbenchService) start(name, verb string, reset bool) (*longrunningpb.
 	}
 	if !e.Running {
 		project, _, _, _ := parseChild("name", "instances", name)
-		st.startLocked(e, project)
+		w.s.startLocked(st, e, project)
 		e.I.UpdateTime = timestamppb.New(st.now())
 		st.save()
 	}
@@ -658,26 +791,14 @@ func (w *workbenchService) UpgradeInstance(_ context.Context, req *nbpb.UpgradeI
 	return nil, grpcError(apierror.FailedPrecondition("Instance %s is not upgradeable: it runs this CloudBurrow instance's notebook runtime image (CheckInstanceUpgradability)", req.GetName()))
 }
 
-// WorkbenchExecute runs Python on an ACTIVE instance's kernel and returns
-// its outputs, for the console's instance page.
-func (s *Server) WorkbenchExecute(ctx context.Context, name, code string) ([]json.RawMessage, error) {
+// WorkbenchInstance is the instance name, as GetInstance answers it.
+func (s *Server) WorkbenchInstance(name string) (*nbpb.Instance, error) {
 	st := s.workbench()
 	st.mu.Lock()
+	defer st.mu.Unlock()
 	e, err := st.instance(name)
-	if err == nil {
-		st.refresh(e)
-		if e.I.GetState() != nbpb.State_ACTIVE {
-			err = apierror.FailedPrecondition("Instance %s is %s: start it first", lastSegment(name), e.I.GetState())
-		}
-	}
-	host := st.host
-	st.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	o, ok := host.(NotebookOutputs)
-	if !ok {
-		return nil, fmt.Errorf("this instance's notebook runtime does not return outputs")
-	}
-	return o.Outputs(ctx, workbenchKey(name), code)
+	return st.view(e), nil
 }

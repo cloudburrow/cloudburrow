@@ -43,10 +43,11 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed image/Dockerfile image/kernel.py image/relay.py
+//go:embed image/Dockerfile image/kernel.py image/relay.py image/requirements.txt image/spark.txt image/cloudburrow_endpoints.py image/jupyter_server_config.py image/ipython_kernel_config.py
 var context_ embed.FS
 
-var contextFiles = []string{"Dockerfile", "kernel.py", "relay.py"}
+var contextFiles = []string{"Dockerfile", "kernel.py", "relay.py", "requirements.txt", "spark.txt",
+	"cloudburrow_endpoints.py", "jupyter_server_config.py", "ipython_kernel_config.py"}
 
 // Tag is the runtime image's tag: its build context's hash, so a changed
 // Dockerfile or kernel is a new image, never a stale one.
@@ -136,6 +137,10 @@ type Manager struct {
 	// DataprocSparkSession creates its Spark Connect session there and
 	// reaches it through the same port (#2156).
 	Dataproc func() string
+	// Storage is the instance's Cloud Storage JSON API address on the
+	// host (host:port), "" when it is not served: a Workbench instance's
+	// google-cloud-storage reaches it (#2198).
+	Storage func() string
 	// Region is the Dataproc region a notebook's sessions are made in;
 	// "" is us-central1.
 	Region string
@@ -163,6 +168,9 @@ type session struct {
 	run          sync.Mutex // one cell at a time, as a kernel runs them
 	last         time.Time
 	timer        *time.Timer
+	// A Workbench instance's JupyterLab (jupyter.go): its address on the
+	// host's loopback and its server's token.
+	jupyterAddr, jupyterToken string
 }
 
 var nameSafe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -213,6 +221,9 @@ type Options struct {
 	// send (CB_ACCESS_TOKEN): the identity a run executes as (#2173),
 	// instead of the anonymous credentials the instance takes as its own.
 	Token string
+	// Jupyter, when set, runs the image's JupyterLab for a Vertex AI
+	// Workbench instance (jupyter.go) instead of kernel.py.
+	Jupyter *Jupyter
 }
 
 // idleTimeout is the session's idle shutdown, 0 when it has none.
@@ -262,7 +273,11 @@ func (m *Manager) start(s *session) {
 		return
 	}
 	m.set(s, func(st *Status) { st.State = StateStarting })
-	if err := m.launch(ctx, s); err != nil {
+	launch := m.launch
+	if s.opts.Jupyter != nil {
+		launch = m.launchJupyter
+	}
+	if err := launch(ctx, s); err != nil {
 		m.fail(s, err)
 		return
 	}
@@ -530,9 +545,13 @@ func (m *Manager) Execute(ctx context.Context, key, code string) (Result, error)
 	m.mu.Lock()
 	s := m.sessions[key]
 	connected := s != nil && s.status.State == StateConnected
+	jupyter := connected && s.opts.Jupyter != nil
 	m.mu.Unlock()
 	if !connected {
 		return Result{}, ErrNotConnected
+	}
+	if jupyter {
+		return Result{}, errors.New("this runtime is a Workbench instance's JupyterLab: run code in JupyterLab")
 	}
 	s.run.Lock()
 	defer s.run.Unlock()
@@ -606,9 +625,9 @@ func (m *Manager) Restart(key string) Status {
 	if s == nil {
 		return Status{State: StateDisconnected}
 	}
-	project := s.project
+	project, opts := s.project, s.opts
 	_ = m.Disconnect(key)
-	return m.Connect(key, project)
+	return m.ConnectWith(key, project, opts)
 }
 
 // Disconnect deletes the notebook's runtime (Disconnect and delete
