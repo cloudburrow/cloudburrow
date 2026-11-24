@@ -32,7 +32,7 @@ const envAlloyDBBrowser = "CLOUDBURROW_TEST_ALLOYDB"
 //   - the cluster's page: Create on-demand backup takes a backup; Restore
 //     (the cluster ID pre-filled with "-restore-" and a time) and
 //     Point-in-time restore each make a new cluster, read back through the
-//     console API with the backup or the data source it came from.
+//     console API, the first naming the backup it came from.
 //
 // The rows' data is checked by TestBackupDRAlloyDBRoundTrip (compat).
 // Each screen meets WCAG 2.1 AA, and Vaulted backups opens the cluster's
@@ -229,8 +229,9 @@ func TestBackupDRAlloyDBRestoresThroughThePages(t *testing.T) {
 	// Point-in-time restore: a new cluster at a time after the backup.
 	p.navigate(page)
 	p.waitFor(`document.querySelector("#view h1") !== null`)
-	p.pageActionWithin("Point-in-time restore", map[string]string{"time": mid.Format(time.RFC3339), "name": pitr}, p.confirmWord(), 2*time.Minute)
-	waitCluster(pitr, a.DataSource)
+	p.pageActionWithin("Point-in-time restore", map[string]string{"time": mid.Format(time.RFC3339), "name": pitr}, "", 2*time.Minute)
+	// Google's Cluster has no output field naming a backupdrPitrSource.
+	waitCluster(pitr, `"name":"`+loc+"/clusters/"+pitr+`"`)
 
 	openRestore := fmt.Sprintf(`%s.querySelector(".overflow-trigger").click();
 		[...document.querySelectorAll(".overflow-item")].find((b) => b.textContent.trim() === "Restore").click()`, find)

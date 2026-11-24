@@ -35,7 +35,7 @@ const envFilestoreBackupDR = "CLOUDBURROW_TEST_FILESTORE_BACKUPDR"
 // holds the changed one. The documented refusals are checked on the way: a
 // Basic HDD instance's association, a restore below the source's capacity,
 // a restore to a Basic tier (Filestore's own capacity rules allow both), backups.restore of the instance's backup.
-// covers: backupdr.projects.locations.backupPlans.create, backupdr.projects.locations.backupPlanAssociations.create, backupdr.projects.locations.backupPlanAssociations.triggerBackup, backupdr.projects.locations.backupVaults.dataSources.get, backupdr.projects.locations.backupVaults.dataSources.backups.list, file.projects.locations.instances.create
+// covers: backupdr.projects.locations.backupPlans.create, backupdr.projects.locations.backupPlanAssociations.create, backupdr.projects.locations.backupPlanAssociations.triggerBackup, backupdr.projects.locations.backupVaults.dataSources.get, backupdr.projects.locations.backupVaults.dataSources.backups.list, google.cloud.filestore.v1.CloudFilestoreManager/CreateInstance
 func TestGKEFilestoreBackupDRRoundTrip(t *testing.T) {
 	h := New(t)
 	bdrAddr := runShardEndpoint(h, envFilestoreBackupDR, EnvBackupDR)

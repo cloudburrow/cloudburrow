@@ -251,8 +251,8 @@ func workloadPITRAction(project string, s bdrSource) console.Action {
 		{Name: "region", Label: "Region", Type: "select", Required: true, Options: backupdr.Regions, OptionLabels: bdrRegionLabels(), Default: s.location()},
 		{Name: "name", Label: "Cluster ID", Type: "text", Required: true, Default: bdrRestoreName(s.instanceName(), time.Now()),
 			Pattern: `[a-z]([a-z0-9\-]{0,61}[a-z0-9])?`},
-		{Name: "network", Label: "Network", Type: "text", Required: true, Default: "default"}},
-		Confirm: "A new cluster is made at the point in time; the source is not changed."}
+		{Name: "network", Label: "Network", Type: "text", Required: true, Default: "default",
+			Help: "A new cluster is made at the point in time; the source is not changed."}}}
 }
 
 // restoreWorkload restores a cluster's or instance's backup, or a cluster

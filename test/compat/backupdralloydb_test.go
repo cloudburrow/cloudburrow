@@ -74,7 +74,7 @@ func alloyDBRESTWait(ctx context.Context, t *testing.T, svc *adbrest.Service, op
 // a plan in another vault, backups.restore of the cluster's backup, both
 // sources at once. Removing the association gives the cluster back its
 // backup settings and keeps the backup.
-// covers: backupdr.projects.locations.backupPlanAssociations.create, backupdr.projects.locations.backupPlanAssociations.triggerBackup, backupdr.projects.locations.backupPlanAssociations.patch, backupdr.projects.locations.backupPlanAssociations.delete, backupdr.projects.locations.backupVaults.dataSources.get, backupdr.projects.locations.backupVaults.dataSources.backups.list, alloydb.projects.locations.clusters.restore, alloydb.projects.locations.clusters.get
+// covers: backupdr.projects.locations.backupPlanAssociations.create, backupdr.projects.locations.backupPlanAssociations.triggerBackup, backupdr.projects.locations.backupPlanAssociations.patch, backupdr.projects.locations.backupPlanAssociations.delete, backupdr.projects.locations.backupVaults.dataSources.get, backupdr.projects.locations.backupVaults.dataSources.backups.list, google.cloud.alloydb.v1.AlloyDBAdmin/RestoreCluster, google.cloud.alloydb.v1.AlloyDBAdmin/GetCluster
 func TestBackupDRAlloyDBRoundTrip(t *testing.T) {
 	h := New(t)
 	if h.Endpoint(EnvBackupDR) == "" {

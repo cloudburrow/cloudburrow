@@ -2,6 +2,8 @@ package filestore
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"time"
 
@@ -138,7 +140,12 @@ func bdrTier(in *filestorepb.Instance) error {
 	return nil
 }
 
-func bdrKey(runID string) string { return "backupdr-" + runID }
+// bdrKey is the backend's key for a run's copy: a word, a hyphen and hex,
+// as the NFS servers' keys are.
+func bdrKey(runID string) string {
+	sum := sha256.Sum256([]byte(runID))
+	return "backupdr-" + hex.EncodeToString(sum[:16])
+}
 
 // BackupDRBackup copies instance name's share out as a vault's backup kept
 // as runID, and answers its size when it is taken. The instance is busy

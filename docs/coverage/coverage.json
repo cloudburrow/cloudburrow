@@ -16828,9 +16828,11 @@
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip",
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
           "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute",
-          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip"
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/backupdrfilestore_test.go:39 TestGKEFilestoreBackupDRRoundTrip"
         ]
       },
       {
@@ -16840,6 +16842,7 @@
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip",
           "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute"
         ]
       },
@@ -16872,7 +16875,8 @@
         "method": "backupdr.projects.locations.backupPlanAssociations.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip"
         ]
       },
       {
@@ -16883,8 +16887,10 @@
           "test/compat/backupdr1922_test.go:46 TestBackupDRRestoreToANewInstance",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip",
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
-          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip"
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/backupdrfilestore_test.go:39 TestGKEFilestoreBackupDRRoundTrip"
         ]
       },
       {
@@ -16900,6 +16906,7 @@
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
           "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute",
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/backupdrfilestore_test.go:39 TestGKEFilestoreBackupDRRoundTrip",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
@@ -17013,7 +17020,9 @@
           "test/compat/backupdr1922_test.go:46 TestBackupDRRestoreToANewInstance",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip",
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/backupdrfilestore_test.go:39 TestGKEFilestoreBackupDRRoundTrip",
           "test/compat/terraform_batch12_sql_test.go:207 TestTerraformBackupDRDataSources"
         ]
       },
@@ -17055,7 +17064,9 @@
         "tests": [
           "test/compat/backupdr1921_test.go:252 TestBackupDRJobLogsStoredBytesAndOnDemandRetention",
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip",
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/backupdrfilestore_test.go:39 TestGKEFilestoreBackupDRRoundTrip",
           "test/compat/terraform_batch12_sql_test.go:207 TestTerraformBackupDRDataSources"
         ]
       },
@@ -21040,7 +21051,8 @@
         "method": "google.cloud.alloydb.v1.AlloyDBAdmin/GetCluster",
         "status": "Verified",
         "tests": [
-          "test/compat/alloydb_test.go:129 TestAlloyDBClusterLifecycle"
+          "test/compat/alloydb_test.go:129 TestAlloyDBClusterLifecycle",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip"
         ]
       },
       {
@@ -21140,7 +21152,8 @@
         "method": "google.cloud.alloydb.v1.AlloyDBAdmin/RestoreCluster",
         "status": "Verified",
         "tests": [
-          "test/compat/alloydb_test.go:214 TestAlloyDBInstancesConnectorAndBackups"
+          "test/compat/alloydb_test.go:214 TestAlloyDBInstancesConnectorAndBackups",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip"
         ]
       },
       {
@@ -21209,6 +21222,7 @@
         "method": "google.cloud.filestore.v1.CloudFilestoreManager/CreateInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdrfilestore_test.go:39 TestGKEFilestoreBackupDRRoundTrip",
           "test/compat/filestore_test.go:92 TestFilestoreInstancesSnapshotsAndBackups",
           "test/compat/filestoretools_test.go:139 TestTerraformFilestore",
           "test/compat/filestoretools_test.go:55 TestGcloudFilestore"
