@@ -123,6 +123,8 @@ type consoleDeps struct {
 	alloyDB *alloyDBService
 	// filestore is Filestore (#2192), nil unless enabled.
 	filestore *filestoreService
+	// dataflow is Dataflow (#2215), nil unless enabled.
+	dataflow *dataflowService
 	// trace is Cloud Trace (#2118), nil unless enabled.
 	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
@@ -930,6 +932,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceAppHub:           "App Hub",
 	config.ServiceAlloyDB:          "AlloyDB",
 	config.ServiceFilestore:        "Filestore",
+	config.ServiceDataflow:         "Dataflow",
 	config.ServiceTrace:            "Cloud Trace",
 }
 

@@ -46,6 +46,7 @@ var apiLibrary = map[string]apiLibraryInfo{
 	"dataform.googleapis.com":             {"Big data", "Develops, version controls and runs SQL workflows in BigQuery with SQLX.", "dataform"},
 	"dataproc.googleapis.com":             {"Big data", "Runs Apache Spark batch workloads and interactive Spark Connect sessions without managing clusters (Serverless for Apache Spark).", "dataproc"},
 	"file.googleapis.com":                 {"Storage", "Creates and manages fully managed NFS file servers.", "filestore"},
+	"dataflow.googleapis.com":             {"Big data", "Runs Apache Beam batch and streaming pipelines, from the Beam SDKs and from templates.", "dataflow"},
 	"apphub.googleapis.com":               {"Management tools", "Discovers a boundary's services and workloads and groups them into applications.", "apphub"},
 	"alloydb.googleapis.com":              {"Databases", "AlloyDB for PostgreSQL: a fully managed, PostgreSQL-compatible database service.", "alloydb"},
 	"cloudtrace.googleapis.com":           {"Management tools", "Sends application latency data to Cloud Trace for viewing, and reads traces back.", "trace"},

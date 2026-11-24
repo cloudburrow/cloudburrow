@@ -198,6 +198,9 @@ var terraformEndpoints = []terraformEndpoint{
 	// apply, plan clean, update in place and destroy in
 	// TestTerraformFilestore.
 	{config.ServiceFilestore, "filestore_custom_endpoint", "GOOGLE_FILESTORE_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Dataflow (#2215): google_dataflow_job applies, plans clean and
+	// destroys (cancels, or drains with on_delete) in TestTerraformDataflow.
+	{config.ServiceDataflow, "dataflow_custom_endpoint", "GOOGLE_DATAFLOW_CUSTOM_ENDPOINT", "/", true, ""},
 	// Cloud Monitoring (#1939): google_monitoring_metric_descriptor.
 	{config.ServiceMonitoring, "monitoring_custom_endpoint", "GOOGLE_MONITORING_CUSTOM_ENDPOINT", "/", true, ""},
 	// The Compute Engine API's VPC networking (#1936), on its own port,
@@ -418,6 +421,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceMonitoring:       cfg.Endpoints.Monitoring,
 		config.ServiceCompute:          cfg.Endpoints.Compute,
 		config.ServiceFilestore:        cfg.Endpoints.Filestore,
+		config.ServiceDataflow:         cfg.Endpoints.Dataflow,
 		config.ServiceWorkflows:        cfg.Endpoints.Workflows,
 		config.ServiceParameterManager: cfg.Endpoints.ParameterManager,
 		config.ServiceDataform:         cfg.Endpoints.Dataform,
@@ -445,6 +449,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	enabled[config.ServiceDataform] = dataformEnabled(cfg)
 	enabled[config.ServiceAppHub] = appHubEnabled(cfg)
 	enabled[config.ServiceAlloyDB] = alloyDBEnabled(cfg)
+	enabled[config.ServiceDataflow] = dataflowEnabled(cfg)
 	enabled[localAIEndpoint] = localAIServed(cfg)
 	enabled[storageTransferService] = storageJobsEnabled(cfg)
 	enabled[storageInsightsService] = storageJobsEnabled(cfg)

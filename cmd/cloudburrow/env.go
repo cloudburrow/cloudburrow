@@ -662,6 +662,16 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"the Telemetry API's OTLP trace ingestion (telemetry.googleapis.com); set OTEL_EXPORTER_OTLP_ENDPOINT to it, with OTEL_EXPORTER_OTLP_INSECURE=true for gRPC"})
 	}
 
+	// Dataflow (#2215): gcloud dataflow, the Go client, and the Apache
+	// Beam SDKs' DataflowRunner (--dataflow_endpoint; Python speaks REST
+	// to an endpoint whose host is localhost).
+	if dataflowEnabled(cfg) && cfg.Endpoints.Dataflow != 0 {
+		df := addr(cfg.Endpoints.Dataflow)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_DATAFLOW", "http://" + df + "/", "read by gcloud; gcloud dataflow"},
+			envVar{cliEndpointVar("dataflow"), df,
+				"Dataflow v1b3, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint, or --dataflow_endpoint=http://localhost:PORT to the Beam SDKs"})
+	}
 	// Filestore (#2192): the Go client and gcloud filestore (file).
 	if filestoreEnabled(cfg) && cfg.Endpoints.Filestore != 0 {
 		fs := addr(cfg.Endpoints.Filestore)
@@ -922,6 +932,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"apphub":                 &e.AppHub,
 		"alloydb":                &e.AlloyDB,
 		"filestore":              &e.Filestore,
+		"dataflow":               &e.Dataflow,
 		"trace":                  &e.Trace,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
 		// and Endpoints (#1940) to gcloud-setup and terraform, and Document

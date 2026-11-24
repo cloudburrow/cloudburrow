@@ -103,6 +103,7 @@ var targetEndpoints = []targetEndpoint{
 	{"PARAMETERMANAGER", envKey("CLOUDBURROW_PARAMETERMANAGER_ENDPOINT")},
 	{"DATAFORM", envKey("CLOUDBURROW_DATAFORM_ENDPOINT")},
 	{"DATAPROC", envKey("CLOUDBURROW_DATAPROC_ENDPOINT")},
+	{"DATAFLOW", envKey("CLOUDBURROW_DATAFLOW_ENDPOINT")},
 	{"APPHUB", envKey("CLOUDBURROW_APPHUB_ENDPOINT")},
 	{"ALLOYDB", envKey("CLOUDBURROW_ALLOYDB_ENDPOINT")},
 	{"ALLOYDB_CONNECTOR", envKey("CLOUDBURROW_ALLOYDB_CONNECTOR_ENDPOINT")},
@@ -272,6 +273,8 @@ var gcloudOverrides = []struct {
 	{"apphub", []string{"APPHUB"}},
 	// Dataproc (#2162): gcloud dataproc's REST, on the Dataproc port.
 	{"dataproc", []string{"DATAPROC"}},
+	// Dataflow (#2215): gcloud dataflow's REST, on the Dataflow port.
+	{"dataflow", []string{"DATAFLOW"}},
 	{"alloydb", []string{"ALLOYDB"}},
 	{"file", []string{"FILESTORE"}},
 	// Bigtable's admin REST API, on the Bigtable front's port (#1440).
