@@ -95,15 +95,15 @@ func TestCloudBuildRepositories2ndGenThroughThePage(t *testing.T) {
 	p := open(t)
 	p.navigate(path)
 	p.waitFor(`document.querySelector("#view").textContent.includes("2nd gen")`)
-	p.pageAction("Create host connection", map[string]string{"provider": "GitLab", "region": "us-central1", "id": "gl",
-		"apiToken": "glpat-api-token", "readToken": "glpat-read-token"}, "")
+	cb2ListAction(p, "create-connection", map[string]string{"provider": "GitLab", "region": "us-central1", "id": "gl",
+		"apiToken": "glpat-api-token", "readToken": "glpat-read-token"})
 	c, err := rm.GetConnection(ctx, &cb2pb.GetConnectionRequest{Name: conn})
 	if err != nil || c.GetInstallationState().GetStage() != cb2pb.InstallationState_COMPLETE || c.GetGitlabConfig() == nil ||
 		!strings.HasPrefix(c.GetGitlabConfig().GetAuthorizerCredential().GetUserTokenSecretVersion(), "projects/"+project+"/secrets/") {
 		t.Fatalf("GetConnection after Create host connection = %v, %v; want an installed GitLab connection whose tokens are secrets", c, err)
 	}
 	p.navigate(path)
-	p.pageAction("Link repository", map[string]string{"connection": conn, "repository": ssmRepo, "id": "web"}, "")
+	cb2ListAction(p, "create-link", map[string]string{"connection": conn, "repository": ssmRepo, "id": "web"})
 	r, err := rm.GetRepository(ctx, &cb2pb.GetRepositoryRequest{Name: repo})
 	if err != nil || !strings.HasSuffix(r.GetRemoteUri(), "/sourcemanager/git/"+project+"/us-central1/web.git") {
 		t.Fatalf("GetRepository after Link repository = %v, %v", r, err)
@@ -116,13 +116,65 @@ func TestCloudBuildRepositories2ndGenThroughThePage(t *testing.T) {
 		t.Error("the 2nd gen tab does not list the GitLab host connection")
 	}
 
-	p.rowAction("2nd gen", "web", "Delete", nil, "web")
+	cb2RowDelete(p, "web")
 	if _, err := rm.GetRepository(ctx, &cb2pb.GetRepositoryRequest{Name: repo}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetRepository after Delete = %v; want NotFound", err)
 	}
 	p.navigate(path)
-	p.rowAction("2nd gen", "gl", "Delete", nil, "gl")
+	cb2RowDelete(p, "gl")
 	if _, err := rm.GetConnection(ctx, &cb2pb.GetConnectionRequest{Name: conn}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetConnection after Delete = %v; want NotFound", err)
 	}
+}
+
+// cb2ListAction opens a list action's form by its button, sets its
+// fields (the provider first, so the fields it shows are visible), submits
+// it and fails on a refusal.
+func cb2ListAction(p *tab, id string, values map[string]string) {
+	p.t.Helper()
+	p.waitFor(`document.querySelector(".modal") === null`)
+	btn := "#list-action-" + id
+	p.waitFor(fmt.Sprintf(`(() => { const b = document.querySelector(%q); return !!b && b.getClientRects().length > 0; })()`, btn))
+	p.run(chromedp.Click(chromedp.CSS(btn)))
+	p.waitFor(`document.querySelector(".modal.is-open form") !== null`)
+	set := func(f, v string) {
+		p.eval(fmt.Sprintf(`(() => { const f = document.querySelector(".modal.is-open #f-%s");
+			f.value = %q; f.dispatchEvent(new Event("input", { bubbles: true })); f.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, f, v), nil)
+	}
+	if v, ok := values["provider"]; ok {
+		set("provider", v)
+	}
+	for f, v := range values {
+		if f != "provider" {
+			set(f, v)
+		}
+	}
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open button[type="submit"]`)))
+	p.waitForWithin(`document.querySelector(".modal.is-open") === null || document.querySelector("#action-result-table") !== null ||
+		[...document.querySelectorAll(".modal.is-open .form-error")].some((e) => !e.hidden && e.textContent)`, 30*time.Second)
+	var refused string
+	p.eval(`[...document.querySelectorAll(".modal.is-open .form-error")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ")`, &refused)
+	if refused != "" {
+		p.t.Fatalf("%s was refused: %s", id, refused)
+	}
+	if document := `document.querySelector("#action-result-table") !== null`; document != "" {
+		var shown bool
+		p.eval(document, &shown)
+		if shown {
+			p.clickText(".modal.is-open .modal-actions button", "Close")
+		}
+	}
+	p.waitFor(`document.querySelector(".modal") === null`)
+}
+
+// cb2RowDelete chooses Delete in the menu of the 2nd gen tab's row named
+// row and confirms it with the word the dialog asks for.
+func cb2RowDelete(p *tab, row string) {
+	p.t.Helper()
+	find := fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].find((r) => [...r.querySelectorAll("td, th")].some((c) => c.textContent.trim() === %q))`, row)
+	p.waitFor(find + ` !== undefined`)
+	p.eval(find+`.querySelector(".overflow-trigger").click()`, nil)
+	p.clickText("#view .overflow-item, .overflow-item", "Delete")
+	p.confirmByName(p.confirmWord())
+	p.waitFor(`document.querySelector(".modal.is-open") === null`)
 }
