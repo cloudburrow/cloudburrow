@@ -1312,7 +1312,9 @@ jobs:
           # And 30m in vpcvms, whose 43 Compute Engine and VPC console tests
           # (Landing 168) make VMs, subnets, routers and load balancers
           # through the pages beside its compat suite's 766 s.
-          BROWSER_TIMEOUT=10m; case "$SHARD" in served) BROWSER_TIMEOUT=20m ;; run|crossservice|storage|sql|vpcvms) BROWSER_TIMEOUT=30m ;; esac
+          # served's GKE browser tests take about 2 minutes each, and its
+          # suite reached 20m (main run 45477746718), so it gets 30m too.
+          BROWSER_TIMEOUT=10m; case "$SHARD" in served|run|crossservice|storage|sql|vpcvms) BROWSER_TIMEOUT=30m ;; esac
           go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
           for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | grep -E "${BROWSER_RUN:-^Test}" | grep -vE "$BROWSER_SKIP"); do
             grep -q -- "^--- PASS: $t (" browser.log ||
