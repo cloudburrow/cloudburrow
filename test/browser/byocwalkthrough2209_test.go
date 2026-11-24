@@ -337,7 +337,7 @@ func TestByocFirstRunWalkThrough(t *testing.T) {
 	// 6. Scale the Azure VM, the price difference shown; stop and start it.
 	p.navigate("/compute-capacity")
 	sizeID := "capacity-" + w.vmB + "-size"
-	p.waitForWithin(fmt.Sprintf(`!document.getElementById(%q).disabled`, sizeID), time.Minute)
+	p.waitForWithin(fmt.Sprintf(`document.getElementById(%q) !== null && !document.getElementById(%q).disabled`, sizeID, sizeID), time.Minute)
 	p.run(chromedp.Focus(chromedp.CSS("#"+sizeID)), chromedp.KeyEvent(kb.ArrowRight))
 	var value string
 	p.eval(fmt.Sprintf(`document.getElementById(%q).textContent`, sizeID+"-value"), &value)
