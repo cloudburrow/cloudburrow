@@ -12,8 +12,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
+
+// colabRuntimeKey is the notebook runtime manager's key of a Colab
+// Enterprise runtime, the one vertexai's NotebookService starts it under.
+func colabRuntimeKey(name string) string { return "colab/" + name }
 
 // notebookCellTimeout bounds one cell's run. Colab Enterprise sets no
 // limit on a cell; the console's request needs one, and a cell that
@@ -26,6 +31,13 @@ type studioRuntimeReq struct {
 	// Key is the notebook's: its saved asset's name, or its tab's id.
 	Key  string `json:"key"`
 	Code string `json:"code"`
+	// Runtime, when set, is a Colab Enterprise runtime of the project
+	// (projects/P/locations/L/notebookRuntimes/ID) the notebook is
+	// connected to, as Studio's Connect to a runtime does: its cells run on
+	// that runtime's kernel, which Colab Enterprise's NotebookService
+	// started (colabHost). Its lifecycle stays the runtime's: connect does
+	// not start it and disconnect leaves it running.
+	Runtime string `json:"runtime"`
 }
 
 func (p bigqueryProvider) studioRuntime(ctx context.Context, project string, body json.RawMessage) (any, error) {
@@ -45,6 +57,22 @@ func (p bigqueryProvider) studioRuntime(ctx context.Context, project string, bod
 	// One runtime per project and notebook: a notebook opened in another
 	// project is another runtime.
 	key := project + "/" + req.Key
+	if req.Runtime != "" {
+		if !strings.HasPrefix(req.Runtime, "projects/"+project+"/locations/") || !strings.Contains(req.Runtime, "/notebookRuntimes/") {
+			return nil, fmt.Errorf("%q is not a Colab Enterprise runtime of project %s", req.Runtime, project)
+		}
+		key = colabRuntimeKey(req.Runtime)
+		switch req.Op {
+		case "connect", "status":
+			st := p.notebooks.Status(key)
+			if st.State == "DISCONNECTED" {
+				return nil, fmt.Errorf("the runtime %s is not running: start it first", req.Runtime[strings.LastIndex(req.Runtime, "/")+1:])
+			}
+			return st, nil
+		case "disconnect":
+			return map[string]any{"state": "DISCONNECTED"}, nil
+		}
+	}
 	switch req.Op {
 	case "connect":
 		return p.notebooks.Connect(key, project), nil

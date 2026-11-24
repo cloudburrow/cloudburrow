@@ -125,14 +125,15 @@ func TestBigQueryStudioExplorerEditorAndHistory(t *testing.T) {
 		t.Errorf("the validator says %q", validator)
 	}
 
-	// Schedule is Google's, disabled with its reason.
-	for _, label := range []string{"Schedule"} {
-		var why string
-		p.eval(fmt.Sprintf(`(() => { const b = [...document.querySelectorAll(".bq-toolbar button")].find((n) => n.textContent === %q);
-			return b && b.disabled ? b.title : ""; })()`, label), &why)
-		if !strings.Contains(why, "Not available locally") {
-			t.Errorf("%s is not drawn disabled with a reason: %q", label, why)
-		}
+	// Schedule is in Google's File menu (#2094, 2026-11-23): File >
+	// Schedule on a query that is no scheduled query's, a plain item
+	// (TestBigQueryStudioScheduleThroughThePage saves it and its Update
+	// scheduled query).
+	var schedule string
+	p.eval(`(() => { const b = [...document.querySelectorAll(".bq-toolbar .bq-menu-button[aria-label=File]")].find((x) => x.offsetParent !== null);
+		return b && !b.disabled ? [...b.parentNode.querySelectorAll(".bq-menu-item")].map((i) => i.textContent).join("|") : ""; })()`, &schedule)
+	if schedule != "Schedule" {
+		t.Errorf("File's menu is %q, want Schedule", schedule)
 	}
 
 	// Run: Query results with Google's tabs, on Results.

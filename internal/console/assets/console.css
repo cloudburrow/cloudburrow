@@ -2294,6 +2294,27 @@ tr.log-entry.is-pinned { background: var(--state-hover); }
   font: inherit; color: var(--text); cursor: pointer; white-space: nowrap; }
 .bq-menu-item:hover { background: var(--state-hover); }
 .bq-menu-item.danger { color: var(--error); }
+/* A checkbox item's check mark sits in the gutter before its label. */
+.bq-menu-item.bq-menu-check { position: relative; padding-left: 36px; }
+.bq-menu-mark { position: absolute; left: 12px; }
+.bq-mode { font-weight: 500; }
+.bq-sql-completions { position: absolute; z-index: 25; min-width: 260px; max-width: 480px; }
+.bq-sql-completions li { display: flex; gap: 12px; justify-content: space-between; color: var(--text); }
+.completions.bq-sql-completions li.active, .completions.bq-sql-completions li:hover { background: var(--nav-selected); color: var(--nav-selected-text); }
+.bq-sql-completions .bq-completion-kind { color: var(--text-muted); font-family: var(--font); font-size: var(--text-caption-size); }
+.bq-sql-completions li.active .bq-completion-kind { color: inherit; }
+.bq-editor-wrap { position: relative; }
+.bq-submenu-wrap { position: relative; }
+.bq-connect-group { display: inline-flex; align-items: stretch; }
+.bq-nb-header { display: flex; align-items: center; gap: 8px; }
+.bq-nb-header .bq-nb-menubar { border: 0; padding: 0; }
+/* A menu bar's menus open under their button's left edge, as a menu bar's do. */
+.bq-nb-menubar .bq-menu { left: 0; right: auto; }
+/* On a narrow screen a submenu opens inside its menu, below its item. */
+@media (max-width: 640px) { .bq-menu.bq-submenu { position: static; box-shadow: none; padding-left: 12px; } }
+.bq-connect-group > .secondary { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.bq-connect-more { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; min-width: 32px; }
+.bq-menu.bq-submenu { left: 100%; right: auto; top: 0; }
 .bq-workspace { min-width: 0; display: grid; gap: 12px; }
 /* Split tabs (#2005): two panes side by side, each its own strip and
    panel; below 960px, where the Explorer stacks, the panes stack too. */
@@ -2848,6 +2869,35 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .bq-canvas-found li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 2px 0; }
 .bq-canvas-body { display: flex; gap: 16px; align-items: flex-start; }
 .bq-canvas-body > .bq-canvas-nodes { flex: 1 1 auto; min-width: 0; }
+/* The data canvas's board (#2094): nodes placed on a zoomable, scrolling
+   board, joined by their edges. */
+.bq-canvas-board { flex: 1 1 auto; min-width: 0; height: 70vh; min-height: 320px; overflow: auto; position: relative;
+  border: 1px solid var(--border); border-radius: 8px; background-color: var(--surface-2, var(--bg));
+  background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 16px 16px; }
+.bq-canvas-board:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bq-canvas-stage { position: relative; }
+.bq-canvas-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.bq-canvas-board .bq-canvas-nodes { display: block; position: relative; margin: 0; }
+.bq-canvas-board .bq-canvas-node { position: absolute; width: 520px; box-sizing: border-box; box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
+.bq-canvas-board .bq-canvas-empty { position: absolute; left: 24px; top: 24px; }
+.bq-canvas-node.is-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+.bq-canvas-edges { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.bq-canvas-edge { fill: none; stroke: var(--text-muted); stroke-width: 2; }
+.bq-canvas-bar { gap: 6px; }
+.bq-canvas-move { cursor: grab; touch-action: none; }
+.bq-canvas-move:active { cursor: grabbing; }
+.bq-canvas-debug { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 6px; }
+.bq-canvas-debug[hidden] { display: none; }
+.bq-canvas-debug pre { max-height: 200px; overflow: auto; }
+.bq-canvas-zoom { width: auto; }
+@media (max-width: 960px) { .bq-canvas-board { align-self: stretch; width: 100%; max-width: 100%; } }
+/* A time or date-time field's focus lands on its parts, which
+   :focus-visible does not draw around the field. */
+.bq-sq-form input[type="time"]:focus-within, .bq-sq-form input[type="datetime-local"]:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.bq-canvas.is-fullscreen { position: fixed; inset: 0; z-index: 1000; background: var(--bg); padding: 12px 16px; overflow: auto;
+  display: flex; flex-direction: column; }
+.bq-canvas.is-fullscreen .bq-canvas-body { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+.bq-canvas.is-fullscreen .bq-canvas-board { height: auto; align-self: stretch; }
 .bq-canvas-assistant { flex: 0 0 340px; max-width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
   background: var(--surface); margin-top: 12px; box-sizing: border-box; }
 .bq-canvas-assistant[hidden], .bq-canvas-settings[hidden] { display: none; }

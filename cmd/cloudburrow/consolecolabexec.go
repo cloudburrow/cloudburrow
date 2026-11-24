@@ -440,7 +440,7 @@ func (p colabNotebooksProvider) List(ctx context.Context, project string) (conso
 	}
 	schedule := p.scheduleAction(ctx, project)
 	for _, r := range resp.GetRepositories() {
-		if r.GetLabels()[dataformAssetLabel] != "notebook" {
+		if dataformAssetKind(r) != "notebook" {
 			continue
 		}
 		open := "/bigquery-studio?" + url.Values{"project": {project}, "savedQuery": {r.GetName()}}.Encode()

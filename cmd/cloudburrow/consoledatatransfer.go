@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -234,9 +235,9 @@ func dtEmails(api *datatransfer.Server, config string) []string {
 func dtActions(state string) []console.Action {
 	run := console.Action{ID: "run", Label: "Run transfer now"}
 	if state == "DISABLED" {
-		return []console.Action{run, {ID: "enable", Label: "Enable transfer"}}
+		return []console.Action{run, {ID: "enable", Label: "Enable"}}
 	}
-	return []console.Action{run, {ID: "disable", Label: "Disable transfer"}}
+	return []console.Action{run, {ID: "disable", Label: "Disable"}}
 }
 
 // dtDetailActions adds a transfer page's Schedule backfill and Delete run.
@@ -274,7 +275,11 @@ func (p dataTransferProvider) DetailActions(ctx context.Context, project string,
 		return nil
 	}
 	runs, _ := api.ListTransferRuns(ctx, &dtpb.ListTransferRunsRequest{Parent: c.GetName(), PageSize: 1000})
-	return dtDetailActions(dtState(c), runs.GetTransferRuns())
+	acts := dtDetailActions(dtState(c), runs.GetTransferRuns())
+	if p.only == datatransfer.ScheduledQuery {
+		acts = append([]console.Action{scheduledQueryEdit(c.GetName())}, acts...)
+	}
+	return acts
 }
 
 func (p dataTransferProvider) Act(ctx context.Context, project, name, action string) error {
@@ -354,7 +359,15 @@ func (p dataTransferProvider) Delete(ctx context.Context, project, name string) 
 }
 
 func (p dataTransferProvider) CreateForm() (string, []console.Field) {
-	src := []console.Field{{Name: "source", Label: "Source type", Type: "select", Required: true,
+	// The sections and labels are Google's create-transfer page's
+	// (https://docs.cloud.google.com/bigquery/docs/cloud-storage-transfer
+	// and copying-datasets, read 2026-11-23): "In the Source type section,
+	// for Source", "In the Transfer config name section, for Display name",
+	// "For Repeat frequency" (Hours, Days, Weeks, Months, Custom,
+	// On-demand; "If you select Hours, Days, Weeks, or Months, you must also
+	// specify a frequency"), "In the Destination settings section: For
+	// Dataset", "In the Data source details section".
+	src := []console.Field{{Name: "source", Label: "Source", Section: "Source type", Type: "select", Required: true,
 		Options:      []string{datatransfer.ScheduledQuery, datatransfer.CrossRegionCopy},
 		OptionLabels: map[string]string{datatransfer.ScheduledQuery: "Scheduled Query", datatransfer.CrossRegionCopy: "Dataset Copy"},
 		Default:      datatransfer.ScheduledQuery}}
@@ -369,22 +382,28 @@ func (p dataTransferProvider) CreateForm() (string, []console.Field) {
 		q, cp = "", "never=1"
 	}
 	fields := append(src,
-		console.Field{Name: "display_name", Label: "Transfer config name", Type: "text", Required: true},
-		console.Field{Name: "schedule", Label: "Repeat frequency (custom schedule)", Type: "text", Default: "every 24 hours",
+		console.Field{Name: "display_name", Label: "Display name", Section: "Transfer config name", Type: "text", Required: true},
+		console.Field{Name: "repeat", Label: "Repeat frequency", Section: "Schedule options", Type: "select", Default: "Custom",
+			Options: []string{"Hours", "Days", "Weeks", "Months", "Custom", "On-demand"}},
+		// UNVERIFIED (re-read 2026-11-23: https://docs.cloud.google.com/bigquery/docs/cloud-storage-transfer):
+		// the frequency's label is not in Google's docs.
+		console.Field{Name: "frequency", Label: "Frequency", Section: "Schedule options", Type: "text", Default: "1", Pattern: `^[1-9][0-9]{0,3}$`,
+			ShowWhen: "repeat=Hours|Days|Weeks|Months", Help: "Every this many hours, days, weeks or months; months divide the year (1, 2, 3, 4, 6 or 12)."},
+		console.Field{Name: "schedule", Label: "Custom schedule", Section: "Schedule options", Type: "text", Default: "every 24 hours", ShowWhen: "repeat=Custom",
 			Help: `UTC, in BigQuery's schedule syntax: "every 24 hours", "every mon 09:03", "1st sunday of month 00:00".`},
-		console.Field{Name: "dataset", Label: "Destination dataset", Type: "text", Required: true},
-		console.Field{Name: "query", Label: "Query", Type: "textarea", ShowWhen: q,
+		console.Field{Name: "dataset", Label: "Dataset", Section: "Destination settings", Type: "text", Required: true},
+		console.Field{Name: "query", Label: "Query", Section: "Data source details", Type: "textarea", ShowWhen: q,
 			Help: "GoogleSQL; @run_time (TIMESTAMP) and @run_date (DATE) are the run's."},
-		console.Field{Name: "table", Label: "Destination table", Type: "text", ShowWhen: q,
+		console.Field{Name: "table", Label: "Destination table", Section: "Data source details", Type: "text", ShowWhen: q,
 			Help: `{run_date} and {run_time|"%Y%m%d"} are templated.`},
-		console.Field{Name: "write_disposition", Label: "Destination table write preference", Type: "radio", ShowWhen: q,
+		console.Field{Name: "write_disposition", Label: "Destination table write preference", Section: "Data source details", Type: "radio", ShowWhen: q,
 			Options: []string{"WRITE_APPEND", "WRITE_TRUNCATE"}, OptionLabels: map[string]string{"WRITE_APPEND": "Append to table", "WRITE_TRUNCATE": "Overwrite table"},
 			Default: "WRITE_APPEND"},
-		console.Field{Name: "source_project", Label: "Source project", Type: "text", ShowWhen: cp},
-		console.Field{Name: "source_dataset", Label: "Source dataset", Type: "text", ShowWhen: cp},
-		console.Field{Name: "overwrite", Label: "Overwrite destination table", Type: "checkbox", ShowWhen: cp},
-		console.Field{Name: "topic", Label: "Pub/Sub topic", Type: "text", Help: "projects/PROJECT/topics/TOPIC; published to this instance's Pub/Sub."},
-		console.Field{Name: "email", Label: "Send email notifications", Type: "checkbox", Help: "Failure emails are recorded on the transfer's page, never sent."},
+		console.Field{Name: "source_project", Label: "Source project", Section: "Data source details", Type: "text", ShowWhen: cp},
+		console.Field{Name: "source_dataset", Label: "Source dataset", Section: "Data source details", Type: "text", ShowWhen: cp},
+		console.Field{Name: "overwrite", Label: "Overwrite destination table", Section: "Data source details", Type: "checkbox", ShowWhen: cp},
+		console.Field{Name: "topic", Label: "Pub/Sub topic", Section: "Data source details", Type: "text", Help: "projects/PROJECT/topics/TOPIC; published to this instance's Pub/Sub."},
+		console.Field{Name: "email", Label: "Send email notifications", Section: "Data source details", Type: "checkbox", Help: "Failure emails are recorded on the transfer's page, never sent."},
 	)
 	return title, fields
 }
@@ -421,15 +440,63 @@ func (p dataTransferProvider) Create(ctx context.Context, project string, v map[
 	if err != nil {
 		return "", err
 	}
-	c := &dtpb.TransferConfig{DisplayName: v["display_name"], DataSourceId: source, Schedule: v["schedule"], Params: ps,
+	schedule, onDemand, err := dtRepeat(v)
+	if err != nil {
+		return "", err
+	}
+	c := &dtpb.TransferConfig{DisplayName: v["display_name"], DataSourceId: source, Schedule: schedule, Params: ps,
 		NotificationPubsubTopic: v["topic"],
 		Destination:             &dtpb.TransferConfig_DestinationDatasetId{DestinationDatasetId: v["dataset"]}}
 	if v["email"] == "true" || v["email"] == "on" {
 		c.EmailPreferences = &dtpb.EmailPreferences{EnableFailureEmail: true}
+	}
+	if onDemand {
+		c.ScheduleOptions = &dtpb.ScheduleOptions{DisableAutoScheduling: true}
 	}
 	got, err := api.CreateTransferConfig(ctx, &dtpb.CreateTransferConfigRequest{Parent: "projects/" + project, TransferConfig: c})
 	if err != nil {
 		return "", err
 	}
 	return got.GetName(), nil
+}
+
+// dtRepeat turns Repeat frequency and its Frequency into a transfer's
+// schedule: Hours, Days and Weeks as an interval of hours, Months as the
+// first of every Nth month, Custom as the Custom schedule typed, and
+// On-demand as no automatic schedule. A form without Repeat frequency
+// (an older client) is Custom.
+func dtRepeat(v map[string]string) (schedule string, onDemand bool, err error) {
+	repeat := v["repeat"]
+	if repeat == "" || repeat == "Custom" {
+		return v["schedule"], false, nil
+	}
+	if repeat == "On-demand" {
+		return "", true, nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v["frequency"]))
+	if err != nil || n < 1 {
+		return "", false, fmt.Errorf("frequency must be a whole number of %s, 1 or more", strings.ToLower(repeat))
+	}
+	switch repeat {
+	case "Hours":
+		return fmt.Sprintf("every %d hours", n), false, nil
+	case "Days":
+		return fmt.Sprintf("every %d hours", 24*n), false, nil
+	case "Weeks":
+		return fmt.Sprintf("every %d hours", 168*n), false, nil
+	case "Months":
+		if 12%n != 0 {
+			return "", false, fmt.Errorf("every %d months does not divide the year: use 1, 2, 3, 4, 6 or 12, or a Custom schedule", n)
+		}
+		if n == 1 {
+			return "1 of month 00:00", false, nil
+		}
+		names := []string{"jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"}
+		var months []string
+		for m := 0; m < 12; m += n {
+			months = append(months, names[m])
+		}
+		return "1 of " + strings.Join(months, ",") + " 00:00", false, nil
+	}
+	return "", false, fmt.Errorf("repeat frequency %q is not one of Hours, Days, Weeks, Months, Custom or On-demand", repeat)
 }
