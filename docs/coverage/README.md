@@ -61,6 +61,7 @@ Do not edit these files by hand.
 | [Parameter Manager (v1)](parametermanager.md) | 22 | 22 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Dataform (v1)](dataform.md) | 74 | 74 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Dataform (v1beta1)](dataformv1beta1.md) | 81 | 79 | 0 | 0 | 2 | 0 | 0 | 0 |
+| [Dataproc: Serverless for Apache Spark (v1)](dataproc.md) | 14 | 14 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [App Hub (v1)](apphub.md) | 31 | 31 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Trace API (v1 and v2)](trace.md) | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Serverless VPC Access (v1)](vpcaccess.md) | 4 | 4 | 0 | 0 | 0 | 0 | 0 | 0 |

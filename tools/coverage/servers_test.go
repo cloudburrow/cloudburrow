@@ -19,6 +19,7 @@ import (
 	"cloud.google.com/go/certificatemanager/apiv1/certificatemanagerpb"
 	"cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	dfpb "cloud.google.com/go/dataform/apiv1/dataformpb"
+	dataprocpb "cloud.google.com/go/dataproc/v2/apiv1/dataprocpb"
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	iamv2pb "cloud.google.com/go/iam/apiv2/iampb"
 	iamv3pb "cloud.google.com/go/iam/apiv3/iampb"
@@ -51,6 +52,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/certificatemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
+	"github.com/cloudburrow/cloudburrow/internal/service/dataproc"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/iap"
@@ -124,6 +126,15 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	}
 	dfpb.RegisterDataformServer(srv, df)
 	df.RegisterBeta(srv)
+	// Serverless for Apache Spark (#2156): the three controllers; its
+	// Locations and Operations mixins are other services' rows.
+	dp, err := dataproc.NewServer(dataproc.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataprocpb.RegisterBatchControllerServer(srv, dp)
+	dataprocpb.RegisterSessionControllerServer(srv, dp)
+	dataprocpb.RegisterSessionTemplateControllerServer(srv, dp)
 	// App Hub alone (#2110): its mixins are other services' rows.
 	ah, err := apphub.NewServer("", apphub.Options{})
 	if err != nil {

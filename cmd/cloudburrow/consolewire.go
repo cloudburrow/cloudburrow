@@ -114,6 +114,9 @@ type consoleDeps struct {
 	parameterManager *parameterManagerService
 	// dataform is Dataform (#2105), nil unless enabled.
 	dataform *dataformService
+	// dataproc is the Dataproc API's serverless surface (#2156), nil
+	// unless enabled.
+	dataproc *dataprocService
 	// appHub is App Hub (#2110), nil unless enabled.
 	appHub *appHubService
 	// trace is Cloud Trace (#2118), nil unless enabled.
@@ -379,6 +382,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	// App Hub (#2110), in process: Applications, Services and workloads,
 	// Settings.
+	if enabled[config.ServiceDataproc] && d.dataproc != nil {
+		providers = append(providers, dataprocBatchesProvider{svc: d.dataproc}, dataprocSessionsProvider{svc: d.dataproc}, dataprocTemplatesProvider{svc: d.dataproc})
+	}
 	if enabled[config.ServiceAppHub] && d.appHub != nil {
 		providers = append(providers, appHubProvider{svc: d.appHub}, appHubDiscoveredProvider{svc: d.appHub}, appHubSettingsProvider{svc: d.appHub})
 	}
@@ -870,6 +876,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceWorkflows:        "Workflows",
 	config.ServiceParameterManager: "Parameter Manager",
 	config.ServiceDataform:         "Dataform",
+	config.ServiceDataproc:         "Serverless for Apache Spark",
 	config.ServiceAppHub:           "App Hub",
 	config.ServiceTrace:            "Cloud Trace",
 }

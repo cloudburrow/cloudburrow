@@ -218,6 +218,7 @@ type rawFlags struct {
 	workflows        int
 	parameterManager int
 	dataform         int
+	dataproc         int
 	appHub           int
 	onnx             int
 	tfconvert        int
@@ -316,6 +317,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.workflows, "port-workflows", 0, "Workflows and Workflow Executions API host port (0 = OS-assigned; default 9038)")
 	fs.IntVar(&r.parameterManager, "port-parametermanager", 0, "Parameter Manager API host port (0 = OS-assigned; default 9047)")
 	fs.IntVar(&r.dataform, "port-dataform", 0, "Dataform API host port (0 = OS-assigned; default 9058)")
+	fs.IntVar(&r.dataproc, "port-dataproc", 0, "Dataproc API (Serverless for Apache Spark) host port (0 = OS-assigned; default 9066)")
 	fs.IntVar(&r.appHub, "port-apphub", 0, "App Hub API host port (0 = OS-assigned; default 9048)")
 	fs.IntVar(&r.onnx, "port-onnx", 0, "ONNX runner host port, for BigQuery ML's imported ONNX models in the onnx build (0 = OS-assigned; default 9025)")
 	fs.IntVar(&r.spark, "port-spark", 0, "Spark procedure runner host port, for BigQuery's stored procedures for Apache Spark (0 = OS-assigned; default 9049)")
@@ -540,6 +542,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_WORKFLOWS", &cfg.Endpoints.Workflows},
 		{"PORT_PARAMETERMANAGER", &cfg.Endpoints.ParameterManager},
 		{"PORT_DATAFORM", &cfg.Endpoints.Dataform},
+		{"PORT_DATAPROC", &cfg.Endpoints.Dataproc},
 		{"PORT_APPHUB", &cfg.Endpoints.AppHub},
 		{"PORT_ONNX", &cfg.Endpoints.ONNX},
 		{"PORT_TFCONVERT", &cfg.Endpoints.TFConvert},
@@ -703,6 +706,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-workflows", raw.workflows, &cfg.Endpoints.Workflows},
 		{"port-parametermanager", raw.parameterManager, &cfg.Endpoints.ParameterManager},
 		{"port-dataform", raw.dataform, &cfg.Endpoints.Dataform},
+		{"port-dataproc", raw.dataproc, &cfg.Endpoints.Dataproc},
 		{"port-apphub", raw.appHub, &cfg.Endpoints.AppHub},
 		{"port-onnx", raw.onnx, &cfg.Endpoints.ONNX},
 		{"port-tfconvert", raw.tfconvert, &cfg.Endpoints.TFConvert},

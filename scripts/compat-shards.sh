@@ -613,11 +613,13 @@ compat_shard() {
       # files, Cloud Logging for their output, Cloud Run for the Artifact
       # Registry a container_image is read from, and Resource Manager and
       # the metadata server for the invoker's minted tokens, and Cloud KMS
-      # for a procedure's customer-managed key.
-      SERVICES=bigquery,storage,logging,run,kms
-      TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,KMS,GCLOUD
+      # for a procedure's customer-managed key. And Serverless for Apache
+      # Spark (#2156), the Dataproc API's batches and Spark Connect
+      # sessions, which run on the same Spark runner.
+      SERVICES=bigquery,storage,logging,run,kms,dataproc
+      TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,KMS,GCLOUD,DATAPROC
       export CLOUDBURROW_TEST_SPARK=1
-      COMPAT_RUN='^Test(BigQuerySpark|BqSpark)'
+      COMPAT_RUN='^Test(BigQuerySpark|BqSpark|DataprocServerless)'
       COMPAT_TIMEOUT=150m ;;
     localai|localaispeech)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI

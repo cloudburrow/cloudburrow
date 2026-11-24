@@ -278,6 +278,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"CLOUDBURROW_WORKFLOWS_ENDPOINT":              "127.0.0.1:9038",
 		"CLOUDBURROW_PARAMETERMANAGER_ENDPOINT":       "127.0.0.1:9047",
 		"CLOUDBURROW_DATAFORM_ENDPOINT":               "127.0.0.1:9058",
+		"CLOUDBURROW_DATAPROC_ENDPOINT":               "127.0.0.1:9066",
 		"CLOUDBURROW_APPHUB_ENDPOINT":                 "127.0.0.1:9048",
 		"CLOUDBURROW_TRACE_ENDPOINT":                  "127.0.0.1:9052",
 	}
@@ -406,6 +407,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"WORKFLOWS":                "127.0.0.1:9038",
 		"PARAMETERMANAGER":         "127.0.0.1:9047",
 		"DATAFORM":                 "127.0.0.1:9058",
+		"DATAPROC":                 "127.0.0.1:9066",
 		"APPHUB":                   "127.0.0.1:9048",
 		"TRACE":                    "127.0.0.1:9052",
 		"COMPUTE":                  "127.0.0.1:9031",

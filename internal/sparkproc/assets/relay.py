@@ -3,7 +3,10 @@
 # bigquerystorage.cloudburrow.internal (8443, TLS with the run's
 # certificate, ALPN h2), relaying to the instance's BigQuery REST port and
 # its Storage Read and Write API port, the two addresses given. It dials
-# nothing else.
+# nothing else. A third argument, NAME:PORT, is a Spark Connect session's
+# server on the internal network: the relay listens on PORT too, published
+# on the host's loopback, and relays to it (resolved at each connection,
+# as the server starts after the relay).
 import asyncio
 import socket
 import ssl
@@ -40,7 +43,10 @@ async def pipe(reader, writer):
 def relay(target):
     async def handle(reader, writer):
         try:
-            up_reader, up_writer = await asyncio.open_connection(*target)
+            if callable(target):
+                up_reader, up_writer = await asyncio.open_connection(*target())
+            else:
+                up_reader, up_writer = await asyncio.open_connection(*target)
         except Exception:
             writer.close()
             return
@@ -55,8 +61,13 @@ async def main():
     tls.set_alpn_protocols(["h2"])
     rest = await asyncio.start_server(relay(REST), "0.0.0.0", 8080)
     storage = await asyncio.start_server(relay(STORAGE), "0.0.0.0", 8443, ssl=tls)
+    servers = [rest.serve_forever(), storage.serve_forever()]
+    if len(sys.argv) > 3:
+        name, port = sys.argv[3].rsplit(":", 1)
+        inbound = await asyncio.start_server(relay(lambda: (name, int(port))), "0.0.0.0", int(port))
+        servers.append(inbound.serve_forever())
     print("ready", flush=True)
-    await asyncio.gather(rest.serve_forever(), storage.serve_forever())
+    await asyncio.gather(*servers)
 
 
 asyncio.run(main())
