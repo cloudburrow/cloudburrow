@@ -871,6 +871,9 @@ func (m *Manager) create(ctx context.Context, conn Connection, req CreateRequest
 	pending := Machine{Instance: req.Instance, Cloud: conn.Cloud, Connection: conn.ID, Region: req.Region, Size: size.Name,
 		Preset: size.Preset, DiskGiB: req.DiskGiB, AutoStopMinutes: req.AutoStopMinutes, State: Provisioning,
 		SSHUser: user, HostKey: host.Public, HourlyUSD: size.HourlyUSD, CreatedAt: m.now(), ConnectMode: mode, SourceCIDR: cidr}
+	if cidr != "" {
+		pending.SourceUpdatedAt = pending.CreatedAt
+	}
 	if err := m.putMachine(pending); err != nil {
 		return nil, err
 	}

@@ -461,7 +461,10 @@ user guide, with what it costs, what it creates, how to delete and the security 
 
 `cloud create` flags: `--connection` (when several are connected), `--region` (default: the
 closest), `--size small|medium|large|gpu` (default small), `--auto-stop 60m` (default 1 hour; `0`
-for never), `--disk-gib`, and `--yes` to skip the price confirmation. `cloud scale --size`,
+for never), `--disk-gib`, `--connect ssm|ssh` (AWS defaults to Session Manager, nothing inbound;
+`ssh` opens TCP 22 to your address only, Azure's only mode), and `--yes` to skip the price
+confirmation. `cloud scale --size`, `cloud set --auto-stop 30m` (after create; a stopped VM gets
+it at its next start), `cloud allow-my-ip` (move the SSH rule to your current address),
 `cloud delete` and `cloud status --format json` work on the instance's VM.
 
 ## Console

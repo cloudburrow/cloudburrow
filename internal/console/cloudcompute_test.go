@@ -143,6 +143,24 @@ func TestComputeConnectCreateAndDelete(t *testing.T) {
 	if op = waitComputeOp(t, srv, op.ID); op.Machine.State != byoc.Stopped {
 		t.Fatalf("stop op %+v", op)
 	}
+	// Editable after create: auto-stop on a stopped VM is recorded for its
+	// next start; the firewall's address moves on request.
+	if code := computeCall(t, srv, "POST", "/api/compute/machines/dev/settings", `{}`, true, nil); code != http.StatusBadRequest {
+		t.Fatalf("settings without a setting = %d", code)
+	}
+	computeCall(t, srv, "POST", "/api/compute/machines/dev/settings", `{"auto_stop_minutes":120}`, true, &op)
+	if op = waitComputeOp(t, srv, op.ID); op.Error != "" || op.Machine.AutoStopMinutes != 120 {
+		t.Fatalf("settings op %+v", op)
+	}
+	var got struct{ Machine byoc.Machine }
+	computeCall(t, srv, "GET", "/api/compute/machines/dev", "", true, &got)
+	if got.Machine.AutoStopMinutes != 120 || got.Machine.ConnectMode != byoc.ConnectSSH || got.Machine.SourceCIDR != "203.0.113.1/32" {
+		t.Fatalf("machine after settings %+v", got.Machine)
+	}
+	computeCall(t, srv, "POST", "/api/compute/machines/dev/allow-my-address", `{}`, true, &op)
+	if op = waitComputeOp(t, srv, op.ID); op.Error != "" || aws.Source("dev") != "203.0.113.1/32" {
+		t.Fatalf("allow-my-address op %+v, cloud %q", op, aws.Source("dev"))
+	}
 	var res struct{ Resources []byoc.Resource }
 	computeCall(t, srv, "GET", "/api/compute/machines/dev/resources", "", true, &res)
 	if len(res.Resources) != 3 {
