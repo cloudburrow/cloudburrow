@@ -23,9 +23,11 @@ const beamGCPExpansionJar = "org.apache.beam:beam-sdks-java-io-google-cloud-plat
 
 // beamExpansionService fetches beamGCPExpansionJar from Maven Central and
 // runs it on network, in the Beam Java 17 SDK image, as the Python SDK
-// runs it beside the submitting program; it answers the service's address
-// on network.
-func beamExpansionService(t *testing.T, ctx context.Context, network string) string {
+// runs it beside the submitting program; it answers the network the
+// submitting program runs on (the service's container's: the Python SDK
+// dials an expansion service with local credentials, which take a
+// loopback address only) and the service's address there.
+func beamExpansionService(t *testing.T, ctx context.Context, network string) (string, string) {
 	t.Helper()
 	work := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(work, "m2"), 0o777); err != nil {
@@ -46,7 +48,9 @@ func beamExpansionService(t *testing.T, ctx context.Context, network string) str
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", "-v", name).Run() })
 	for deadline := time.Now().Add(2 * time.Minute); ; {
 		logs, _ := exec.CommandContext(ctx, "docker", "logs", name).CombinedOutput()
-		if strings.Contains(string(logs), "Listening for expansion requests") {
+		// It prints its transforms as it starts serving.
+		if strings.Contains(string(logs), "Registered transforms:") {
+			time.Sleep(3 * time.Second)
 			break
 		}
 		if time.Now().After(deadline) {
@@ -54,7 +58,7 @@ func beamExpansionService(t *testing.T, ctx context.Context, network string) str
 		}
 		time.Sleep(time.Second)
 	}
-	return name + ":8097"
+	return "container:" + name, "localhost:8097"
 }
 
 // beamJava17Image is Beam 2.78.0's Java 17 SDK container
@@ -93,12 +97,12 @@ func TestPythonDataflowBigtableRead(t *testing.T) {
 		}
 	}
 	network := beamNetwork(t, ctx, map[int]string{9000: storageAddr, 80: dfAddr, 9004: btAddr})
-	expansion := beamExpansionService(t, ctx, network)
+	submit, expansion := beamExpansionService(t, ctx, network)
 	name := "py-bigtable-xlang-" + suffix
 	args := append([]string{"/flow/bigtable_xlang.py", "--bigtable_project=" + project, "--bigtable_instance=" + bigtableInstance,
 		"--bigtable_table=" + table, "--expansion_service=" + expansion, "--output=gs://" + bucket + "/out/rows.txt"},
 		dataflowRunnerArgs(project, bucket, name)...)
-	id := jobIDOf(t, runBeamPython(t, ctx, network, project, args...))
+	id := jobIDOf(t, runBeamPython(t, ctx, submit, project, args...))
 	if j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DONE, dataflowpb.JobState_JOB_STATE_FAILED); j.CurrentState != dataflowpb.JobState_JOB_STATE_DONE {
 		t.Fatalf("job %s is %s:\n%s", id, j.CurrentState, jobMessages(t, ctx, c, project, id))
 	}

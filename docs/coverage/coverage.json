@@ -24245,7 +24245,9 @@
         "tests": [
           "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount",
           "test/compat/dataflowbigtable2215_test.go:24 TestJavaDataflowBigtableRead",
-          "test/compat/dataflowjava2215_test.go:111 TestJavaDataflowWordCount"
+          "test/compat/dataflowjava2215_test.go:111 TestJavaDataflowWordCount",
+          "test/compat/dataflowjavapubsub2215_test.go:27 TestJavaDataflowPubsub",
+          "test/compat/dataflowxlang2215_test.go:75 TestPythonDataflowBigtableRead"
         ]
       },
       {
@@ -24275,7 +24277,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataflow2215_test.go:215 TestPythonDataflowWordCount",
-          "test/compat/dataflow2215_test.go:363 TestPythonDataflowStreamingDrain"
+          "test/compat/dataflow2215_test.go:363 TestPythonDataflowStreamingDrain",
+          "test/compat/dataflowjavapubsub2215_test.go:27 TestJavaDataflowPubsub"
         ]
       },
       {
@@ -24338,7 +24341,7 @@
         "method": "google.dataflow.v1beta3.TemplatesService/GetTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflowprovided2215_test.go:40 TestDataflowProvidedTemplates",
+          "test/compat/dataflowprovided2215_test.go:42 TestDataflowProvidedTemplates",
           "test/compat/dataflowtools_test.go:104 TestGcloudDataflow"
         ]
       },
@@ -24346,7 +24349,7 @@
         "method": "google.dataflow.v1beta3.TemplatesService/LaunchTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflowprovided2215_test.go:40 TestDataflowProvidedTemplates",
+          "test/compat/dataflowprovided2215_test.go:42 TestDataflowProvidedTemplates",
           "test/compat/dataflowtools_test.go:104 TestGcloudDataflow"
         ]
       }
