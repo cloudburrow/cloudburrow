@@ -1525,10 +1525,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// container on Docker, its artifacts in Cloud Storage.
 		localAISrv.SetPipelineRunner(colabPipelines{colabExecutor: colabExec, instance: cfg.Name, live: boundAddrs})
 		// Model Monitoring's alerts (#2214) go to Cloud Monitoring's
-		// notification channels and its recorded emails.
-		if monitoringSvc != nil {
-			localAISrv.SetAlertNotifier(monitoringAlertNotifier{srv: monitoringServerOf(monitoringSvc)})
-		}
+		// notification channels, and its emails to the local mail sink.
+		localAISrv.SetAlertNotifier(monitoringAlertNotifier{srv: monitoringServerOf(monitoringSvc), mail: mailSink})
 		// Their anomalies go to Cloud Logging too, when enable_logging asks
 		// (#2214), through its own WriteLogEntries.
 		if loggingSvc != nil && loggingSvc.api != nil {

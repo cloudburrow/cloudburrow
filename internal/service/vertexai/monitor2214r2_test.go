@@ -154,8 +154,9 @@ func TestAttributionScoresAreMeanAbsolute(t *testing.T) {
 		}
 		return out, nil
 	}
-	rows := []map[string]any{{"x": 1.0, "y": 0.0, "z": "ignored"}, {"x": 3.0, "y": 0.0}}
-	got, n, err := attributionScores(rows, []string{"x", "y"}, explain)
+	// x as a CSV file gives it, text, is sent as a number.
+	rows := []map[string]any{{"x": "1", "y": 0.0, "z": "ignored"}, {"x": 3.0, "y": 0.0}}
+	got, n, err := attributionScores(rows, []string{"x", "y"}, map[string]bool{"x": true}, explain)
 	if err != nil || n != 2 || got["x"] != 2 || got["y"] != 3 || calls != 1 {
 		t.Fatalf("scores = %v (%d rows, %d calls), %v", got, n, calls, err)
 	}

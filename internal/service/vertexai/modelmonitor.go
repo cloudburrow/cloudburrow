@@ -1252,7 +1252,8 @@ func (s *Server) logPrediction(project, location, endpoint, deployedModel string
 	if rate <= 0 {
 		return
 	}
-	now := time.Now()
+	// On the Agent Platform clock, as the runs' windows are (clock.go).
+	now := st.now()
 	modelName := ""
 	if model != nil {
 		modelName = model.GetName()

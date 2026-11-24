@@ -41,6 +41,7 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/mailsink"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
@@ -2037,8 +2038,13 @@ func (p monitoringSnoozesProvider) Act(ctx context.Context, project, name, actio
 }
 
 // monitoringAlertNotifier delivers Agent Platform Model Monitoring's
-// alerts (#2214) through Cloud Monitoring's notification channels.
-type monitoringAlertNotifier struct{ srv func() *monitoring.Server }
+// alerts (#2214) through Cloud Monitoring's notification channels, and its
+// emails through Cloud Monitoring (which records the delivery) or, on an
+// instance without it, straight to the local mail sink.
+type monitoringAlertNotifier struct {
+	srv  func() *monitoring.Server
+	mail *mailsink.Sink
+}
 
 func (n monitoringAlertNotifier) NotifyChannels(ctx context.Context, kind string, names []string, payload []byte, subject, text string) []vertexai.AlertDelivery {
 	srv := n.srv()
@@ -2055,5 +2061,9 @@ func (n monitoringAlertNotifier) NotifyChannels(ctx context.Context, kind string
 func (n monitoringAlertNotifier) SendEmail(ctx context.Context, project, kind, from string, to []string, subject, body string) {
 	if srv := n.srv(); srv != nil {
 		srv.SendEmail(ctx, project, kind, from, to, subject, body)
+		return
+	}
+	if n.mail != nil && n.mail.Addr() != "" {
+		_ = n.mail.Send(ctx, kind, from, to, subject, body)
 	}
 }

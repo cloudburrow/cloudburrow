@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,7 +55,10 @@ type explainer func(instances []*structpb.Value) (*aiplatformpb.ExplainResponse,
 // attributionScores is each feature's mean absolute attribution over rows
 // (the first explained output's), explained in batches small enough for
 // one Explain.
-func attributionScores(rows []map[string]any, features []string, explain explainer) (map[string]float64, int, error) {
+//
+// A numeric feature's value read as text (a CSV file's every value is) is
+// sent as the number it spells, as the model is served it.
+func attributionScores(rows []map[string]any, features []string, numeric map[string]bool, explain explainer) (map[string]float64, int, error) {
 	if len(rows) > maxAttributionRows {
 		rows = rows[:maxAttributionRows]
 	}
@@ -66,9 +70,15 @@ func attributionScores(rows []map[string]any, features []string, explain explain
 	for _, r := range rows {
 		m := map[string]any{}
 		for k, v := range r {
-			if want[k] {
-				m[k] = v
+			if !want[k] {
+				continue
 			}
+			if str, ok := v.(string); ok && numeric[k] {
+				if f, err := strconv.ParseFloat(strings.TrimSpace(str), 64); err == nil {
+					v = f
+				}
+			}
+			m[k] = v
 		}
 		v, err := structpb.NewValue(m)
 		if err != nil {
@@ -161,10 +171,12 @@ func (s *Server) mdmAttributionStats(ctx context.Context, job *aiplatformpb.Mode
 		return s.explain(ctx, t, &aiplatformpb.ExplainRequest{Endpoint: job.GetEndpoint(), Instances: insts, DeployedModelId: c.GetDeployedModelId()})
 	}
 	var names []string
+	numeric := map[string]bool{}
 	for _, f := range fields {
 		names = append(names, f.Name)
+		numeric[f.Name] = f.Numeric
 	}
-	curScores, _, err := attributionScores(cur, names, explain)
+	curScores, _, err := attributionScores(cur, names, numeric, explain)
 	if err != nil {
 		return nil, err
 	}
@@ -176,14 +188,14 @@ func (s *Server) mdmAttributionStats(ctx context.Context, job *aiplatformpb.Mode
 		}
 	}
 	if sk := oc.GetTrainingPredictionSkewDetectionConfig(); sk != nil && len(train) > 0 {
-		base, _, err := attributionScores(train, names, explain)
+		base, _, err := attributionScores(train, names, numeric, explain)
 		if err != nil {
 			return out, err
 		}
 		add(aiplatformpb.ModelDeploymentMonitoringObjectiveType_FEATURE_ATTRIBUTION_SKEW, base, sk.GetAttributionScoreSkewThresholds())
 	}
 	if dr := oc.GetPredictionDriftDetectionConfig(); dr != nil && len(prev) > 0 {
-		base, _, err := attributionScores(prev, names, explain)
+		base, _, err := attributionScores(prev, names, numeric, explain)
 		if err != nil {
 			return out, err
 		}
@@ -265,16 +277,20 @@ func (s *Server) monitorAttribution(ctx context.Context, m *betapb.ModelMonitor,
 	if len(features) == 0 {
 		return nil, nil, apierror.InvalidArgument("feature_attribution_spec.features is empty and the ModelMonitor's schema has no feature fields")
 	}
+	numeric := map[string]bool{}
+	for _, f := range m.GetModelMonitoringSchema().GetFeatureFields() {
+		numeric[f.GetName()], _ = fieldNumeric(f.GetDataType())
+	}
 	explain, stop, err := s.batchExplainer(ctx, m, job)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer stop()
-	bs, _, err := attributionScores(base, features, explain)
+	bs, _, err := attributionScores(base, features, numeric, explain)
 	if err != nil {
 		return nil, nil, err
 	}
-	ts, _, err := attributionScores(target, features, explain)
+	ts, _, err := attributionScores(target, features, numeric, explain)
 	if err != nil {
 		return nil, nil, err
 	}

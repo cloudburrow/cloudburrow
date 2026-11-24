@@ -357,7 +357,7 @@ func (s *Server) SendNotificationChannelVerificationCode(ctx context.Context, re
 			if err != nil {
 				d.State, d.Detail = DeliveryFailed, "the local mail sink refused the verification email: "+err.Error()
 			} else {
-				d.State, d.Detail = DeliverySent, "verification code sent to "+to+" through the local mail sink (the console's Mail page)"
+				d.State, d.Detail = DeliverySent, "verification code "+code.code+" sent to "+to+" through the local mail sink (the console's Mail page)"
 			}
 		}
 	}

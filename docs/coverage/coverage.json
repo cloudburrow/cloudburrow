@@ -6586,9 +6586,9 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Implemented": 6,
+      "Implemented": 5,
       "Unimplemented": 7,
-      "Verified": 207
+      "Verified": 208
     },
     "rows": [
       {
@@ -6929,7 +6929,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/mdm2214_test.go:38 TestAgentPlatformDeploymentMonitoringRuns",
-          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals",
+          "test/compat/monitoring2214r3_test.go:480 TestAgentPlatformDeploymentMonitoringAttributionAndAlerts"
         ]
       },
       {
@@ -6971,7 +6972,8 @@
         "method": "google.cloud.aiplatform.v1.JobService/DeleteModelDeploymentMonitoringJob",
         "status": "Verified",
         "tests": [
-          "test/compat/mdm2214_test.go:38 TestAgentPlatformDeploymentMonitoringRuns"
+          "test/compat/mdm2214_test.go:38 TestAgentPlatformDeploymentMonitoringRuns",
+          "test/compat/monitoring2214r3_test.go:480 TestAgentPlatformDeploymentMonitoringAttributionAndAlerts"
         ]
       },
       {
@@ -7015,7 +7017,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/mdm2214_test.go:38 TestAgentPlatformDeploymentMonitoringRuns",
-          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals",
+          "test/compat/monitoring2214r3_test.go:480 TestAgentPlatformDeploymentMonitoringAttributionAndAlerts"
         ]
       },
       {
@@ -7085,7 +7088,8 @@
         "method": "google.cloud.aiplatform.v1.JobService/PauseModelDeploymentMonitoringJob",
         "status": "Verified",
         "tests": [
-          "test/compat/mdm2214_test.go:38 TestAgentPlatformDeploymentMonitoringRuns"
+          "test/compat/mdm2214_test.go:38 TestAgentPlatformDeploymentMonitoringRuns",
+          "test/compat/monitoring2214r3_test.go:480 TestAgentPlatformDeploymentMonitoringAttributionAndAlerts"
         ]
       },
       {
@@ -7099,13 +7103,16 @@
         "method": "google.cloud.aiplatform.v1.JobService/SearchModelDeploymentMonitoringStatsAnomalies",
         "status": "Verified",
         "tests": [
-          "test/compat/mdm2214_test.go:38 TestAgentPlatformDeploymentMonitoringRuns"
+          "test/compat/mdm2214_test.go:38 TestAgentPlatformDeploymentMonitoringRuns",
+          "test/compat/monitoring2214r3_test.go:480 TestAgentPlatformDeploymentMonitoringAttributionAndAlerts"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/UpdateModelDeploymentMonitoringJob",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring2214r3_test.go:480 TestAgentPlatformDeploymentMonitoringAttributionAndAlerts"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.LlmUtilityService/ComputeTokens",
@@ -8571,7 +8578,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/mdm2214_test.go:248 TestPythonAIPlatformModelMonitoring",
-          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring",
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts"
         ]
       },
       {
@@ -8579,7 +8587,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/mdm2214_test.go:248 TestPythonAIPlatformModelMonitoring",
-          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring",
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts"
         ]
       },
       {
@@ -8587,7 +8596,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/mdm2214_test.go:248 TestPythonAIPlatformModelMonitoring",
-          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring",
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts"
         ]
       },
       {
@@ -8610,7 +8620,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/mdm2214_test.go:248 TestPythonAIPlatformModelMonitoring",
-          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring",
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts"
         ]
       },
       {
@@ -8641,7 +8652,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/mdm2214_test.go:248 TestPythonAIPlatformModelMonitoring",
-          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring",
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts"
         ]
       },
       {
@@ -27831,6 +27843,7 @@
         "method": "google.monitoring.v3.NotificationChannelService/CreateNotificationChannel",
         "status": "Verified",
         "tests": [
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts",
           "test/compat/monitoring_alerting_test.go:111 TestMonitoringAlertPoliciesAndChannels",
           "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting",
           "test/compat/monitoring_alerting_test.go:703 TestGcloudMonitoring",
@@ -27888,6 +27901,7 @@
         "method": "google.monitoring.v3.NotificationChannelService/SendNotificationChannelVerificationCode",
         "status": "Verified",
         "tests": [
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts",
           "test/compat/monitoring_alerting_test.go:111 TestMonitoringAlertPoliciesAndChannels",
           "test/compat/monitoring_query_test.go:365 TestMonitoringPubSubChannelAndVerification"
         ]
@@ -27903,6 +27917,7 @@
         "method": "google.monitoring.v3.NotificationChannelService/VerifyNotificationChannel",
         "status": "Verified",
         "tests": [
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts",
           "test/compat/monitoring_query_test.go:365 TestMonitoringPubSubChannelAndVerification"
         ]
       },

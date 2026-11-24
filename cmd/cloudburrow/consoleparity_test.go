@@ -2595,6 +2595,15 @@ var parityRows = []parityRow{
 		Screen:   "/instance", Offers: "Instance: Save state (download), Load state (upload, confirmed by the instance's name), " +
 			"Reset (every service or those chosen, optionally one project, with Reseed, confirmed by the scope), Seed (upload, If not exists)",
 		Tests: []string{"TestConsoleInstanceActsThroughTheAdminAPI", "TestConsoleStateSaveResetLoadRestores", "TestInstanceResetConfirmedByTypingTheScope"}},
+	{Resource: "Local mail sink",
+		Screen: "/mail", Offers: "Mail (#2214, Management tools and Settings and utilities): the local mail sink's SMTP address, its messages newest first " +
+			"(Subject, From, To, Sent by, Received), a message's headers, text and original, Delete and Delete all; Cloud Monitoring's email channels " +
+			"(incidents, test notifications, verification codes) and Model Monitoring's email alerts arrive here",
+		Tests: []string{"TestMailPageAPI", "TestMailPageAndTheAgentPlatformClock", "TestAgentPlatformModelMonitoringInputsAndAlerts"}},
+	{Resource: "Agent Platform clock (POST /cloudburrow/v1/clock:advance)",
+		Screen: "/instance", Offers: "Instance > Clocks (#2214), with or without the admin token: Advance the Agent Platform clock by days, hours, " +
+			"minutes and seconds, which starts the model deployment monitoring runs and schedules it passes, and says where the clock now is",
+		Tests: []string{"TestClocksAPI", "TestMailPageAndTheAgentPlatformClock"}},
 	{Resource: "Connect, About and diagnose",
 		Commands: []string{"env", "gcloud-setup", "terraform", "version", "diagnose"},
 		Screen:   "/connect", Offers: "Connect: what `env` exports in each of its formats with Copy, client snippets, the gcloud-setup, gcloud-teardown and terraform commands to copy; About, as `version` prints it; Download bundle, the `diagnose` bundle (#802)",

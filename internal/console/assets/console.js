@@ -12728,7 +12728,7 @@ async function renderMail(view, selected) {
           el("dt", { text: "Sent by" }), el("dd", { text: body.source })),
         el("pre", { class: "mail-text", id: "mail-message-text", tabindex: "0", "aria-label": "Message text", text: body.text || "" }),
         el("details", {}, el("summary", { text: "Show original" }),
-          el("pre", { class: "mail-text", id: "mail-message-raw", tabindex: "0", "aria-label": "Original message", text: body.raw || "" })),
+          el("pre", { class: "mail-text", id: "mail-message-raw", "aria-label": "Original message", text: body.raw || "" })),
         el("div", { class: "form-actions" }, del));
     } catch (err) {
       setChildren(reader, el("p", { class: "form-error", role: "alert", text: `The message could not be read: ${err.message}` }));
@@ -12760,10 +12760,10 @@ async function renderMail(view, selected) {
         el("dt", { text: "Kept" }), el("dd", { text: `The newest ${data.limit} messages, in memory: they do not survive cloudburrow up's restart.` }))),
     el("div", { class: "form-actions", id: "mail-actions" }, refresh, clear),
     msgs.length
-      ? el("table", { class: "table", id: "mail-list" },
+      ? el("div", { class: "table-wrap" }, el("table", { class: "table", id: "mail-list" },
           el("caption", { class: "sr-only", text: "Messages, newest first" }),
           el("thead", {}, el("tr", {}, ...["Subject", "From", "To", "Sent by", "Received"].map((h) => el("th", { scope: "col", text: h })))),
-          el("tbody", {}, ...rows))
+          el("tbody", {}, ...rows)))
       : el("p", { class: "muted", id: "mail-empty", text: "No mail yet. Cloud Monitoring's email channels and Model Monitoring's email alerts arrive here." }),
     reader);
   const want = selected || decodeURIComponent(location.hash.slice(1));
@@ -13065,6 +13065,14 @@ function renderInstanceToken(view, err) {
       el("div", { class: "form-actions" }, el("button", { type: "submit", class: "primary", text: "Use token" }))));
   input.focus();
   announce("Admin token required");
+  // The clocks need no token (#2214): they are offered below the form.
+  instanceClocksCard().then((card) => {
+    if (location.pathname === "/instance" && document.getElementById("instance-token-form") &&
+      !document.getElementById("instance-clocks-card")) {
+      view.append(card);
+      if (location.hash === "#clocks") card.scrollIntoView();
+    }
+  });
 }
 
 // syncStickyOffsets measures the pinned blocks so the ones below them know
