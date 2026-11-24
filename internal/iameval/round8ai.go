@@ -194,6 +194,22 @@ func colabMethods() map[string]Method {
 			"ListPipelineJobs": {"aiplatform.pipelineJobs.list", "parent"}, "DeletePipelineJob": {"aiplatform.pipelineJobs.delete", "name"},
 			"CancelPipelineJob": {"aiplatform.pipelineJobs.cancel", "name"}, "BatchDeletePipelineJobs": {"aiplatform.pipelineJobs.delete", "parent"},
 			"BatchCancelPipelineJobs": {"aiplatform.pipelineJobs.cancel", "parent"},
+			// TrainingPipelines (#2210): each trainingPipelines method's
+			// page names aiplatform.trainingPipelines.P (read 2026-11-24).
+			"CreateTrainingPipeline": {"aiplatform.trainingPipelines.create", "parent"}, "GetTrainingPipeline": {"aiplatform.trainingPipelines.get", "name"},
+			"ListTrainingPipelines": {"aiplatform.trainingPipelines.list", "parent"}, "DeleteTrainingPipeline": {"aiplatform.trainingPipelines.delete", "name"},
+			"CancelTrainingPipeline": {"aiplatform.trainingPipelines.cancel", "name"},
+		},
+		// CustomJobs and BatchPredictionJobs (#2210): each method's REST
+		// page names aiplatform.customJobs.P and
+		// aiplatform.batchPredictionJobs.P (read 2026-11-24).
+		p + "JobService/": {
+			"CreateCustomJob": {"aiplatform.customJobs.create", "parent"}, "GetCustomJob": {"aiplatform.customJobs.get", "name"},
+			"ListCustomJobs": {"aiplatform.customJobs.list", "parent"}, "DeleteCustomJob": {"aiplatform.customJobs.delete", "name"},
+			"CancelCustomJob":          {"aiplatform.customJobs.cancel", "name"},
+			"CreateBatchPredictionJob": {"aiplatform.batchPredictionJobs.create", "parent"}, "GetBatchPredictionJob": {"aiplatform.batchPredictionJobs.get", "name"},
+			"ListBatchPredictionJobs": {"aiplatform.batchPredictionJobs.list", "parent"}, "DeleteBatchPredictionJob": {"aiplatform.batchPredictionJobs.delete", "name"},
+			"CancelBatchPredictionJob": {"aiplatform.batchPredictionJobs.cancel", "name"},
 		},
 		// Vertex ML Metadata (#2205): each method's REST reference page
 		// (read 2026-11-24): metadataStores, artifacts, contexts, executions
@@ -249,6 +265,12 @@ func colabMethods() map[string]Method {
 	pj := m[p+"PipelineService/CreatePipelineJob"]
 	pj.ActAs = []string{"pipeline_job.service_account"}
 	m[p+"PipelineService/CreatePipelineJob"] = pj
+	cj := m[p+"JobService/CreateCustomJob"]
+	cj.ActAs = []string{"custom_job.job_spec.service_account"}
+	m[p+"JobService/CreateCustomJob"] = cj
+	bp := m[p+"JobService/CreateBatchPredictionJob"]
+	bp.ActAs = []string{"batch_prediction_job.service_account"}
+	m[p+"JobService/CreateBatchPredictionJob"] = bp
 	return m
 }
 

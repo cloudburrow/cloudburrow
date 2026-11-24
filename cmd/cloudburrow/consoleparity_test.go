@@ -2548,6 +2548,30 @@ var parityRows = []parityRow{
 	{Resource: "Vertex AI Pipelines: batch delete and cancel", Service: "vertexai",
 		Methods:  []string{"PipelineService/BatchDeletePipelineJobs", "PipelineService/BatchCancelPipelineJobs"},
 		Excluded: "Google's Pipelines docs describe no bulk action (https://docs.cloud.google.com/vertex-ai/docs/pipelines/run-pipeline); the API's batch methods are served"},
+	// Vertex AI Training and batch inference (#2210).
+	{Resource: "Vertex AI Training: training pipelines", Service: "vertexai",
+		Methods: []string{"PipelineService/CreateTrainingPipeline", "PipelineService/GetTrainingPipeline", "PipelineService/ListTrainingPipelines",
+			"PipelineService/CancelTrainingPipeline", "PipelineService/DeleteTrainingPipeline"},
+		Provider: "vertex-training-pipelines", Offers: "Training's Training pipelines: a Region menu, Create (Train new model: Training method, Model details' " +
+			"Train new model or Train new version, Training container's Prebuilt container (Model framework, Model framework version, Package location, " +
+			"Python module) or Custom container (Container image), Model output directory, Arguments, Compute and pricing's Worker pool 0, Prediction " +
+			"container's No prediction container, Prebuilt container or Custom container; Start training), a pipeline's page (its details, worker pools, " +
+			"custom job and model), Cancel and Delete",
+		Tests: []string{"TestVertexAITrainingThroughThePages"}},
+	{Resource: "Vertex AI Training: custom jobs", Service: "vertexai",
+		Methods:  []string{"JobService/GetCustomJob", "JobService/ListCustomJobs", "JobService/CancelCustomJob", "JobService/DeleteCustomJob"},
+		Provider: "vertex-custom-jobs", Offers: "Training's Custom jobs tab: a Region menu, a job's page (its details and worker pools), Cancel and Delete",
+		Tests: []string{"TestVertexAITrainingThroughThePages"}},
+	{Resource: "Vertex AI Training: create a custom job", Service: "vertexai", Methods: []string{"JobService/CreateCustomJob"},
+		Excluded: "Google's console creates a CustomJob only through a training pipeline (https://docs.cloud.google.com/vertex-ai/docs/training/create-custom-job: " +
+			"\"you can't create a CustomJob directly\" in the console); Train new model does"},
+	{Resource: "Vertex AI batch inference", Service: "vertexai",
+		Methods: []string{"JobService/CreateBatchPredictionJob", "JobService/GetBatchPredictionJob", "JobService/ListBatchPredictionJobs",
+			"JobService/CancelBatchPredictionJob", "JobService/DeleteBatchPredictionJob"},
+		Provider: "vertex-batch-predictions", Offers: "Batch inference: a Region menu, Create (New batch prediction: name, Model name, Select source " +
+			"(File on Cloud Storage, Files on Cloud Storage (other), BigQuery path), Destination path, Enable feature attributions, Number of compute nodes, " +
+			"Machine type, Accelerator type and count; Create), a job's page (source, destination, output location, completion stats), Cancel and Delete",
+		Tests: []string{"TestVertexAITrainingThroughThePages"}},
 	// Vertex ML Metadata (#2205).
 	{Resource: "Vertex ML Metadata: artifacts", Service: "vertexai",
 		Methods:  []string{"MetadataService/ListArtifacts", "MetadataService/GetArtifact", "MetadataService/QueryArtifactLineageSubgraph", "MetadataService/DeleteArtifact"},

@@ -154,7 +154,8 @@ func (s *Server) Handler() http.Handler {
 	// (notebookjobs.go, schedules.go, notebookiam.go) too.
 	// Vertex AI pipeline jobs (pipelines.go, #2173) and ML Metadata
 	// (metadata.go, #2205) too.
-	for _, c := range []string{"notebookRuntimeTemplates", "notebookRuntimes", "notebookExecutionJobs", "schedules", "pipelineJobs", "metadataStores"} {
+	for _, c := range []string{"notebookRuntimeTemplates", "notebookRuntimes", "notebookExecutionJobs", "schedules", "pipelineJobs", "metadataStores",
+		"customJobs", "batchPredictionJobs", "trainingPipelines"} {
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c, s.serveNotebookREST)
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
 	}

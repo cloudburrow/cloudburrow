@@ -158,7 +158,7 @@ func TestPipelineJobs(t *testing.T) {
 		"no root":           {PipelineSpec: spec},
 		"required missing":  {PipelineSpec: spec, RuntimeConfig: rc(nil)},
 		"unknown parameter": {PipelineSpec: spec, RuntimeConfig: rc(map[string]*structpb.Value{"greeting": structpb.NewStringValue("hi"), "x": structpb.NewStringValue("y")})},
-		"template uri":      {TemplateUri: "https://us-central1-kfp.pkg.dev/p/r/t/v1", RuntimeConfig: rc(nil)},
+		"template uri":      {TemplateUri: "gs://bucket/t.yaml", RuntimeConfig: rc(nil)},
 		"loop": {PipelineSpec: testSpec(t, strings.Replace(testPipelineSpec, `"taskInfo": {"name": "produce"},`, `"taskInfo": {"name": "produce"}, "parameterIterator": {"items": {"raw": "[1]"}},`, 1)),
 			RuntimeConfig: rc(map[string]*structpb.Value{"greeting": structpb.NewStringValue("hi")})},
 	} {

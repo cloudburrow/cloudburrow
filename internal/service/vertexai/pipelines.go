@@ -345,7 +345,7 @@ const (
 // INVALID_ARGUMENT naming what is wrong.
 func parseKFP(prefix string, spec *structpb.Struct) (*kfpSpec, error) {
 	if spec == nil || len(spec.GetFields()) == 0 {
-		return nil, apierror.InvalidArgument("%spipeline_spec is required (a compiled Kubeflow Pipelines definition); template_uri is not run on this instance", prefix)
+		return nil, apierror.InvalidArgument("%spipeline_spec is required (a compiled Kubeflow Pipelines definition), or a template_uri", prefix)
 	}
 	b, err := protojson.Marshal(spec)
 	if err != nil {
@@ -674,9 +674,6 @@ func checkPipelineJob(prefix string, j *aiplatformpb.PipelineJob) (*kfpSpec, err
 	if j == nil {
 		return nil, apierror.InvalidArgument("%spipeline_job is required", strings.TrimSuffix(prefix, "pipeline_job."))
 	}
-	if j.GetTemplateUri() != "" {
-		return nil, apierror.InvalidArgument("%stemplate_uri: running a pipeline template from Artifact Registry or a URL is not served on this instance; send the compiled definition as pipeline_spec", prefix)
-	}
 	k, err := parseKFP(prefix, j.GetPipelineSpec())
 	if err != nil {
 		return nil, err
@@ -725,6 +722,9 @@ func (s *Server) createPipelineJob(parent, id string, in *aiplatformpb.PipelineJ
 		return nil, apierror.InvalidArgument("pipeline_job is required")
 	}
 	j := proto.Clone(in).(*aiplatformpb.PipelineJob)
+	if err := s.loadTemplate(j); err != nil {
+		return nil, err
+	}
 	k, err := checkPipelineJob("pipeline_job.", j)
 	if err != nil {
 		return nil, err
@@ -831,9 +831,9 @@ func parseParam(kind, text string) (*structpb.Value, error) {
 // mounts it.
 func gcsPath(uri string) string { return "/gcs/" + strings.TrimPrefix(uri, "gs://") }
 
-// kfpPlaceholders matches {{$}}, {{$.inputs|outputs.parameters|artifacts['K'][.attr]}}
+// kfpPlaceholders matches {{$}}, {{$.inputs|outputs.parameters|artifacts['K'][.attr][['KEY']]}}
 // and {{$.pipeline_*}}.
-var kfpPlaceholders = regexp.MustCompile(`\{\{\$(?:\.(inputs|outputs)\.(parameters|artifacts)\['([^']+)'\](?:\.([a-z_]+))?|\.(pipeline_[a-z_]+))?\}\}`)
+var kfpPlaceholders = regexp.MustCompile(`\{\{\$(?:\.(inputs|outputs)\.(parameters|artifacts)\['([^']+)'\](?:\.([a-z_]+)(?:\['([^']+)'\])?)?|\.(pipeline_[a-z_]+))?\}\}`)
 
 var errNoSuchObject = errors.New("no such object")
 

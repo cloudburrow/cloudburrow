@@ -18,10 +18,20 @@ package main
 //   - a run's page is its runtime graph with the Pipeline run analysis
 //     pane (consolepipelinegraph.go, #2205).
 //
-// UNVERIFIED (re-read 2026-11-22): the Runs list's columns (Google's docs
-// do not show them); "Select from existing pipelines" and "Select a
-// Template Gallery pipeline" are not offered (templates are not served);
-// the pipeline parameters are entered as one JSON object.
+//   - Select from existing pipelines (#2210): "Select the Repository
+//     containing the pipeline or component definition file", then "the
+//     Pipeline or component and Version"; the run's template_uri is the
+//     Artifact Registry KFP repository's
+//     https://REGION-kfp.pkg.dev/PROJECT/REPOSITORY/PACKAGE/VERSION
+//     (https://docs.cloud.google.com/vertex-ai/docs/pipelines/run-pipeline,
+//     .../pipelines/create-pipeline-template, read 2026-11-24).
+//
+// UNVERIFIED (re-read 2026-11-24): the Runs list's columns (Google's docs
+// do not show them); "Select a Template Gallery pipeline" is not offered
+// (Google's gallery holds Google-authored templates, which a local
+// instance does not have); the pipeline parameters are entered as one JSON
+// object; Caching configuration applies to an uploaded or imported file,
+// a template running as it was compiled.
 
 import (
 	"context"
@@ -215,9 +225,14 @@ func (p pipelineRunsProvider) Detail(ctx context.Context, project string, path [
 
 func (pipelineRunsProvider) CreateForm() (string, []console.Field) {
 	return "Create run", []console.Field{
-		{Name: "source", Label: "Run source", Type: "select", Section: "Run details", Options: []string{"upload", "gcs"}, Default: "upload",
-			OptionLabels: map[string]string{"upload": "Upload file", "gcs": "Import from Cloud Storage"},
-			Help:         "The compiled pipeline definition (the JSON or YAML file the Kubeflow Pipelines compiler writes)."},
+		{Name: "source", Label: "Run source", Type: "select", Section: "Run details", Options: []string{"existing", "upload", "gcs"}, Default: "upload",
+			OptionLabels: map[string]string{"existing": "Select from existing pipelines", "upload": "Upload file", "gcs": "Import from Cloud Storage"},
+			Help:         "The compiled pipeline definition (the JSON or YAML file the Kubeflow Pipelines compiler writes), or a template in an Artifact Registry Kubeflow Pipelines repository."},
+		{Name: "repository", Label: "Repository", Type: "text", Section: "Run details", ShowWhen: "source=existing", Pattern: `^([a-z]([a-z0-9-]*[a-z0-9])?)?$`,
+			Help: "The Artifact Registry Kubeflow Pipelines repository, in this region, containing the pipeline or component definition file."},
+		{Name: "template", Label: "Pipeline or component", Type: "text", Section: "Run details", ShowWhen: "source=existing", Pattern: `^([a-z0-9][a-z0-9-]{3,127})?$`},
+		{Name: "version", Label: "Version", Type: "text", Section: "Run details", ShowWhen: "source=existing", Default: "latest",
+			Help: "A tag (latest, v1) or a version (sha256:...)."},
 		{Name: "spec", Label: "Pipeline file contents", Type: "textarea", Section: "Run details", ShowWhen: "source=upload",
 			Help: "Paste the compiled pipeline (pipeline.json or pipeline.yaml)."},
 		{Name: "specUri", Label: "Cloud Storage URL", Type: "text", Section: "Run details", ShowWhen: "source=gcs", Pattern: `^(gs://[a-z0-9][\-a-z0-9._]+/.+)?$`,
@@ -291,6 +306,13 @@ func (p pipelineRunsProvider) Create(ctx context.Context, project string, values
 	if project == "" {
 		return "", errors.New("choose a project before creating a run")
 	}
+	if values["source"] == "existing" {
+		uri, err := pipelineTemplateURI(colabRegion(ctx), project, values)
+		if err != nil {
+			return "", err
+		}
+		return p.createRun(ctx, project, values, &aiplatformpb.PipelineJob{TemplateUri: uri})
+	}
 	text := values["spec"]
 	if values["source"] == "gcs" {
 		var err error
@@ -308,6 +330,26 @@ func (p pipelineRunsProvider) Create(ctx context.Context, project string, values
 	if c := values["caching"]; c == "enabled" || c == "disabled" {
 		setPipelineCaching(spec, c == "enabled")
 	}
+	return p.createRun(ctx, project, values, &aiplatformpb.PipelineJob{PipelineSpec: spec})
+}
+
+// pipelineTemplateURI is Select from existing pipelines' template_uri.
+func pipelineTemplateURI(region, project string, values map[string]string) (string, error) {
+	repo, pkg := strings.TrimSpace(values["repository"]), strings.TrimSpace(values["template"])
+	version := strings.TrimSpace(values["version"])
+	if repo == "" || pkg == "" {
+		return "", errors.New("Select from existing pipelines needs the Repository and the Pipeline or component")
+	}
+	if version == "" {
+		version = "latest"
+	}
+	return "https://" + region + "-kfp.pkg.dev/" + project + "/" + repo + "/" + pkg + "/" + version, nil
+}
+
+// createRun sets the form's run details and runtime configuration on job
+// (its pipeline_spec or template_uri already set) and creates the run, or
+// its schedule.
+func (p pipelineRunsProvider) createRun(ctx context.Context, project string, values map[string]string, job *aiplatformpb.PipelineJob) (string, error) {
 	out := strings.TrimSpace(values["output"])
 	if !strings.HasPrefix(out, "gs://") {
 		out = "gs://" + out
@@ -330,7 +372,7 @@ func (p pipelineRunsProvider) Create(ctx context.Context, project string, values
 			rc.ParameterValues[k] = sv
 		}
 	}
-	job := &aiplatformpb.PipelineJob{DisplayName: values["displayName"], PipelineSpec: spec, RuntimeConfig: rc, ServiceAccount: strings.TrimSpace(values["serviceAccount"])}
+	job.DisplayName, job.RuntimeConfig, job.ServiceAccount = values["displayName"], rc, strings.TrimSpace(values["serviceAccount"])
 	parent := colabParent(ctx, project)
 	if values["runSchedule"] == "recurring" {
 		sc := &aiplatformpb.Schedule{DisplayName: values["displayName"], TimeSpecification: &aiplatformpb.Schedule_Cron{Cron: values["cron"]},

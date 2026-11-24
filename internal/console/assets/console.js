@@ -86,8 +86,14 @@ function agentPlatformRoutes() {
     // Every endpoint (#1940): the registry's and Model Garden's, whose
     // own page (?endpoint=) keeps its deploy progress and test.
     page(AP_PATHS.endpoints, "Endpoints", "Models", { service: "vertex-endpoints", screen: "ap-endpoints", listedWhenOff: true }),
-    absent(`${AP}/batch-predictions`, "Batch inference", "Models", "projects.locations.batchPredictionJobs",
-      "Batch prediction jobs over Cloud Storage or BigQuery input", AP_DOCS + "models"),
+    // Batch inference (#2210): "go to the Batch predictions page", whose
+    // Create opens New batch prediction
+    // (https://docs.cloud.google.com/vertex-ai/docs/predictions/get-batch-predictions,
+    // read 2026-11-24).
+    page(`${AP}/batch-predictions`, "Batch inference", "Models", { service: "vertex-batch-predictions", listedWhenOff: true, kind: "Batch prediction",
+      api: "projects.locations.batchPredictionJobs", about: "Batch prediction jobs over Cloud Storage or BigQuery input",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/predictions/get-batch-predictions",
+      instead: "Start CloudBurrow with --services including run and storage: a batch prediction runs its model's container and reads and writes Cloud Storage." }),
     // Colab Enterprise (#2105): its runtimes and runtime templates, whose
     // runtimes are the instance's notebook runtimes; the off state is the
     // not-served page.
@@ -124,8 +130,20 @@ function agentPlatformRoutes() {
       "Managed datasets for training", AP_DOCS + "machine-learning"),
     absent(`${AP}/feature-store`, "Feature Store", "Model development", "projects.locations.featureOnlineStores",
       "Feature groups and online stores", AP_DOCS + "machine-learning"),
-    absent(`${AP}/training`, "Training", "Model development", "projects.locations.customJobs and trainingPipelines",
-      "Managed Training jobs and pipelines", AP_DOCS + "machine-learning"),
+    // Training (#2210): "go to the Training pipelines page", whose Create
+    // opens Train new model, and its Custom jobs tab
+    // (https://docs.cloud.google.com/vertex-ai/docs/training/create-training-pipeline,
+    // read 2026-11-24).
+    page(`${AP}/training`, "Training", "Model development", { service: "vertex-training-pipelines", listedWhenOff: true, tabTitle: "Training pipelines",
+      pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`], kind: "Training pipeline",
+      api: "projects.locations.trainingPipelines", about: "Training pipelines, each a custom job that trains a model and uploads it to the Model Registry",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/training/create-training-pipeline",
+      instead: "Start CloudBurrow with --services including run and storage: a job's workers run on Docker and write to Cloud Storage." }),
+    page(`${AP}/training/custom-jobs`, "Training", "Model development", { service: "vertex-custom-jobs", listedWhenOff: true, tabTitle: "Custom jobs",
+      navHidden: true, navAs: `${AP}/training`, pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`], kind: "Custom job",
+      api: "projects.locations.customJobs", about: "Custom training jobs, each worker a container of its image",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/training/create-custom-job",
+      instead: "Start CloudBurrow with --services including run and storage." }),
     // Vertex AI Pipelines (#2173): the Pipelines page's Runs and Schedules
     // tabs ("Go to the Schedules tab on the Pipelines page":
     // https://docs.cloud.google.com/vertex-ai/docs/pipelines/schedule-pipeline-run,

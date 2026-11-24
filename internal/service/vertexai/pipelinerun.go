@@ -1165,7 +1165,7 @@ func (r *pipelineRun) runContainer(name string, c kfpComponent, ex *kfpContainer
 					substErr = fmt.Errorf("the placeholder %s names no input parameter", m)
 					return ""
 				}
-				return paramText(v)
+				return r.resolveRunPlaceholders(paramText(v))
 			case g[1] == "outputs" && g[2] == "parameters" && g[4] == "output_file":
 				return outFile(g[3])
 			case g[2] == "artifacts":
@@ -1182,21 +1182,35 @@ func (r *pipelineRun) runContainer(name string, c kfpComponent, ex *kfpContainer
 				case "uri":
 					return a.URI
 				case "metadata":
+					if g[5] != "" {
+						// {{$.inputs.artifacts['K'].metadata['KEY']}}, as
+						// GCPC's payloads read a VertexModel's resourceName.
+						if v, ok := a.Metadata[g[5]]; ok {
+							if s, ok := v.(string); ok {
+								return s
+							}
+							b, _ := json.Marshal(v)
+							return string(b)
+						}
+						return ""
+					}
 					b, _ := json.Marshal(a.Metadata)
 					return string(b)
 				}
 				return gcsPath(a.URI)
-			case g[5] == "pipeline_job_name":
+			case g[6] == "pipeline_job_name":
 				return r.jobID
-			case g[5] == "pipeline_job_resource_name":
+			case g[6] == "pipeline_job_resource_name":
 				return r.jobName
-			case g[5] == "pipeline_job_uuid":
+			case g[6] == "pipeline_job_uuid":
 				return r.jobUUID
-			case g[5] == "pipeline_task_name":
+			case g[6] == "pipeline_task_name":
 				return name
-			case g[5] == "pipeline_task_uuid":
+			case g[6] == "pipeline_task_uuid":
 				return taskUUID
-			case g[5] == "pipeline_root":
+			case g[6] == "pipeline_google_cloud_project_id", g[6] == "pipeline_google_cloud_location", g[6] == "pipeline_persistent_resource_id":
+				return r.resolveRunPlaceholders(m)
+			case g[6] == "pipeline_root":
 				return r.root
 			}
 			return m
@@ -1239,8 +1253,13 @@ func (r *pipelineRun) runContainer(name string, c kfpComponent, ex *kfpContainer
 		return nil, r.ctx.Err()
 	}
 	runCtx, cancel := context.WithTimeout(r.ctx, maxTaskRunTime)
-	err = r.runner.RunContainer(runCtx, PipelineContainer{Key: r.jobID + "-" + name + "-" + taskUUID[:8], Image: ex.Image, Command: cmd, Args: args,
-		Env: envVars, Mounts: map[string]string{"/gcs": gcsDir, "/cb-outputs": outDir}, Labels: labels})
+	if mod := gcpcLauncher(ex.Image, cmd); mod != "" {
+		// Google Cloud Pipeline Components' launchers run here (gcpc.go).
+		err = r.runGCPC(runCtx, mod, args, outDir, execInput, ins)
+	} else {
+		err = r.runner.RunContainer(runCtx, PipelineContainer{Key: r.jobID + "-" + name + "-" + taskUUID[:8], Image: ex.Image, Command: cmd, Args: args,
+			Env: envVars, Mounts: map[string]string{"/gcs": gcsDir, "/cb-outputs": outDir}, Labels: labels})
+	}
 	timedOut := runCtx.Err() == context.DeadlineExceeded
 	cancel()
 	<-r.slots
@@ -1283,6 +1302,11 @@ func (r *pipelineRun) runContainer(name string, c kfpComponent, ex *kfpContainer
 			for mk, mv := range l.Artifacts[0].Metadata {
 				a.Metadata[mk] = mv
 			}
+			// An executor may name the artifact's URI (GCPC's BigQuery
+			// tables and Vertex AI resources, KFP's update of uri).
+			if u := l.Artifacts[0].URI; u != "" {
+				a.URI = u
+			}
 			outArts[key] = a
 		}
 	}
@@ -1307,6 +1331,10 @@ func (r *pipelineRun) runContainer(name string, c kfpComponent, ex *kfpContainer
 	for _, key := range sortedNames(outArts) {
 		a := outArts[key]
 		local := filepath.Join(gcsDir, strings.TrimPrefix(a.URI, "gs://"))
+		if !strings.HasPrefix(a.URI, "gs://") {
+			o.arts[key] = []artRef{a}
+			continue
+		}
 		if err := uploadArtifact(r.ctx, r.runner, local, a.URI); err != nil {
 			return nil, fmt.Errorf("output artifact %q (%s): %v", key, a.URI, err)
 		}
