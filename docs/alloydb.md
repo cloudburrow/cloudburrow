@@ -84,8 +84,9 @@ An explicit Omni request for `POSTGRES_14`, an engine other than `OMNI` or `POST
 other than `Y`, or both `Y` and `POSTGRES`, is `INVALID_ARGUMENT`. AlloyDB's engine flags are not
 taken as a request for Omni: clusters and Terraform configurations made before #2207 carry them, and
 on PostgreSQL they are still accepted and stored, as before. With the Go client, set a header with
-`callctx.SetHeaders(ctx, "X-CloudBurrow-AlloyDB-Engine", "OMNI")`
-(`github.com/googleapis/gax-go/v2/callctx`), which sends it over gRPC and REST.
+`callctx.SetHeaders(ctx, "x-cloudburrow-alloydb-engine", "OMNI")`
+(`github.com/googleapis/gax-go/v2/callctx`), which sends it over gRPC and REST; the name must be in
+lower case there, as gRPC metadata keys are.
 
 ### Running the Omni test yourself
 

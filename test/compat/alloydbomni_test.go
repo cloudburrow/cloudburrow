@@ -32,10 +32,11 @@ const EnvAcceptOmniTerms = "CLOUDBURROW_ACCEPT_ALLOYDB_OMNI_TERMS"
 
 func omniOptedIn() bool { return os.Getenv(EnvAcceptOmniTerms) == "Y" }
 
-// The opt-in's headers, CloudBurrow's own (internal/service/alloydb).
+// The opt-in's headers, CloudBurrow's own (internal/service/alloydb), in
+// lower case: gRPC metadata keys must be, and HTTP's are case-insensitive.
 const (
-	omniEngineHeader = "X-CloudBurrow-AlloyDB-Engine"
-	omniTermsHeader  = "X-CloudBurrow-Accept-AlloyDB-Omni-Terms"
+	omniEngineHeader = "x-cloudburrow-alloydb-engine"
+	omniTermsHeader  = "x-cloudburrow-accept-alloydb-omni-terms"
 )
 
 // alloyDBSQL runs stmt on instance as postgres through ExecuteSql and

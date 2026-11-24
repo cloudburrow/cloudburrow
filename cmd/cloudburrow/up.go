@@ -2257,10 +2257,8 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stdout, l)
 	}
 	// Google's AlloyDB Omni terms (#2207): who accepted them, when, how.
-	if serviceEnabled(cfg, config.ServiceAlloyDB) {
-		for _, l := range omniTermsLines(readOmniTermsStatus(cfg)) {
-			fmt.Fprintln(stdout, l)
-		}
+	for _, l := range omniTermsLines(readOmniTermsStatus(cfg)) {
+		fmt.Fprintln(stdout, l)
 	}
 	fmt.Fprintln(stdout, "\nservice persistence:")
 	for _, s := range cfg.EnabledServices() {
