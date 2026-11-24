@@ -30,7 +30,7 @@ func TestTagAndTar(t *testing.T) {
 		}
 		names = append(names, h.Name)
 	}
-	if strings.Join(names, ",") != "Dockerfile,kernel.py,relay.py,requirements.txt,spark.txt,build-requirements.txt,cloudburrow_endpoints.py,jupyter_server_config.py,ipython_kernel_config.py,overrides.json" {
+	if strings.Join(names, ",") != "Dockerfile,cloudburrow_colab.py,relay.py,requirements.txt,spark.txt,build-requirements.txt,cloudburrow_endpoints.py,jupyter_server_config.py,ipython_kernel_config.py,overrides.json" {
 		t.Fatalf("tar holds %v", names)
 	}
 }

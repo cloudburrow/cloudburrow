@@ -27,6 +27,14 @@ func (f fakeLabs) ProxyURI(_ context.Context, name string) (string, error) {
 	return f.label + "." + JupyterProxyDomain + ":9091", nil
 }
 
+// Authorize lets the bearer token "user-may" use the instance.
+func (f fakeLabs) Authorize(_ context.Context, label, bearer string) error {
+	if label != f.label || bearer != "user-may" {
+		return errors.New("Permission 'notebooks.instances.use' denied on resource")
+	}
+	return nil
+}
+
 func (f fakeLabs) Endpoint(label string) (string, string, string, error) {
 	if label != f.label {
 		return "", "", "", errors.New("no such instance")
@@ -130,6 +138,17 @@ func TestJupyterLabProxy(t *testing.T) {
 	}
 	if seen["path"] != "/api/contents" || seen["auth"] != "token server-token" || seen["host"] != host || seen["cookie"] != "_xsrf=abc" {
 		t.Errorf("the server was sent %v", seen)
+	}
+	// A bearer token the instance's IAM allows is proxied without a
+	// session, with the server's token in its place; one it does not is
+	// refused.
+	resp, body = do(http.MethodGet, "/api/contents?type=directory", host, map[string]string{"Authorization": "Bearer user-may"})
+	seen = nil
+	if resp.StatusCode != http.StatusOK || json.Unmarshal([]byte(body), &seen) != nil || seen["auth"] != "token server-token" {
+		t.Errorf("an allowed bearer token = %d %s", resp.StatusCode, body)
+	}
+	if resp, body := do(http.MethodGet, "/lab", host, map[string]string{"Authorization": "Bearer user-may-not"}); resp.StatusCode != http.StatusForbidden || !strings.Contains(body, "notebooks.instances.use") {
+		t.Errorf("a refused bearer token = %d %s", resp.StatusCode, body)
 	}
 	// Another proxy host's session, another site's request and another
 	// origin are refused.

@@ -38,8 +38,11 @@ import (
 	notebooks "cloud.google.com/go/notebooks/apiv2"
 	nbpb "cloud.google.com/go/notebooks/apiv2/notebookspb"
 	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
@@ -378,11 +381,29 @@ func (p workbenchProvider) ActAt(ctx context.Context, project string, path []str
 }
 
 // workbenchLabs is console.JupyterLabs over the local Vertex AI endpoint
-// (#2198): an instance's proxy_uri, and the JupyterLab behind a proxy
-// host.
-type workbenchLabs struct{ srv *vertexai.Server }
+// (#2198): a Workbench instance's or a Colab Enterprise runtime's
+// proxy_uri, and the JupyterLab behind a proxy host. A bearer token is
+// let in when its caller holds notebooks.instances.use on the instance
+// (IAM enforcement on; with it off the instance takes every caller to be
+// its own). A runtime's proxy host takes the console's session alone:
+// Google documents no access to it but its owner's (a runtime "can't be
+// shared").
+type workbenchLabs struct {
+	srv *vertexai.Server
+	iam *iameval.Enforcer
+}
 
 func (l workbenchLabs) ProxyURI(ctx context.Context, name string) (string, error) {
+	if strings.Contains(name, "/notebookRuntimes/") {
+		rt, err := l.srv.NotebookRuntime(name)
+		if err != nil {
+			return "", err
+		}
+		if rt.GetProxyUri() == "" {
+			return "", fmt.Errorf("runtime %s is %s: JupyterLab is available once it is running", vertexLast(name), strings.ToLower(rt.GetRuntimeState().String()))
+		}
+		return rt.GetProxyUri(), nil
+	}
 	in, err := l.srv.WorkbenchInstance(name)
 	if err != nil {
 		return "", err
@@ -397,5 +418,26 @@ func (l workbenchLabs) ProxyURI(ctx context.Context, name string) (string, error
 }
 
 func (l workbenchLabs) Endpoint(label string) (string, string, string, error) {
-	return l.srv.WorkbenchJupyterLab(label)
+	addr, token, name, err := l.srv.WorkbenchJupyterLab(label)
+	if status.Code(err) == codes.NotFound {
+		return l.srv.ColabJupyterLab(label)
+	}
+	return addr, token, name, err
+}
+
+func (l workbenchLabs) Authorize(ctx context.Context, label, bearer string) error {
+	_, _, name, err := l.srv.WorkbenchJupyterLab(label)
+	if name == "" {
+		if err != nil {
+			return err
+		}
+		return errors.New("no Workbench instance has this proxy host")
+	}
+	if err := l.iam.Authorize(ctx, iameval.Workbench, bearer, "notebooks.instances.use", name); err != nil {
+		if s, ok := status.FromError(err); ok {
+			return errors.New(s.Message())
+		}
+		return err
+	}
+	return nil
 }

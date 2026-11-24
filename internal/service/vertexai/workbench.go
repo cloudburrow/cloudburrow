@@ -123,9 +123,14 @@ type WorkbenchJupyter struct {
 	Account string
 	// Mint mints an access token for the account, nil for none.
 	Mint func(account string) (string, error)
-	// Name, Zone and ID are the instance's; Attributes its metadata.
+	// MintID mints an identity token for the account with claims, nil for
+	// none.
+	MintID func(account string, claims map[string]any) (string, error)
+	// Name, Zone and ID are the instance's; Attributes its metadata;
+	// Created its creation time (Unix seconds).
 	Name, Zone, ID string
 	Attributes     map[string]string
+	Created        int64
 }
 
 type workbenchEntry struct {
@@ -402,8 +407,9 @@ func (s *Server) startLocked(st *workbenchStore, e *workbenchEntry, project stri
 		account = sa[0].GetEmail()
 	}
 	o := NotebookRuntimeOptions{IdleTimeout: idle, IdleDisabled: idle == 0, Jupyter: &WorkbenchJupyter{
-		Volume: workbenchVolume(e.I), Account: account, Mint: s.runAsToken,
+		Volume: workbenchVolume(e.I), Account: account, Mint: s.runAsToken, MintID: s.ident().MintID,
 		Name: lastSegment(e.I.GetName()), Zone: workbenchZone(e.I.GetName()), ID: e.I.GetId(), Attributes: g.GetMetadata(),
+		Created: e.I.GetCreateTime().GetSeconds(),
 	}}
 	st.host.Start(workbenchKey(e.I.GetName()), project, o)
 }

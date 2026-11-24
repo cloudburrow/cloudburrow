@@ -1,9 +1,8 @@
 package nbruntime
 
-// A Vertex AI Workbench instance's JupyterLab (#2198). Where a Colab
-// runtime's container runs kernel.py, an instance's runs the real,
-// unmodified Jupyter Server and JupyterLab of the same image, as
-// Workbench's VM does: its file browser, launcher, notebooks, consoles,
+// A Vertex AI Workbench instance's JupyterLab (#2198). An instance's
+// container runs the real, unmodified Jupyter Server and JupyterLab of the
+// runtime image, as Workbench's VM does (and as a Colab runtime's does): its file browser, launcher, notebooks, consoles,
 // text editor and Terminal (a shell in the instance's container), and
 // real ipykernel kernels (Python 3), with Google's client libraries and
 // %%bigquery loaded.
@@ -46,10 +45,12 @@ package nbruntime
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -73,9 +74,13 @@ type Jupyter struct {
 	Account string
 	// Mint is a fresh access token for an account, nil for none.
 	Mint func(account string) (string, error)
+	// MintID is an identity token for an account with the given claims,
+	// signed by the instance's IAM keys; nil for none.
+	MintID func(account string, claims map[string]any) (string, error)
 	// Name, Zone and ID are the instance's, as its metadata server
-	// answers them.
+	// answers them; Created its creation time (Unix seconds).
 	Name, Zone, ID string
+	Created        int64
 	// Attributes are the instance's metadata (gce_setup.metadata).
 	Attributes map[string]string
 }
@@ -125,6 +130,14 @@ func (m *Manager) DeleteDisk(volume string) error {
 	return nil
 }
 
+// accountID is a service account's numeric unique ID, as the identity
+// token's sub and azp name it: stable for its email.
+func accountID(email string) string {
+	sum := sha256.Sum256([]byte(email))
+	n := new(big.Int).SetBytes(sum[:9])
+	return "1" + fmt.Sprintf("%020s", n.String())[:20]
+}
+
 func randomHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
@@ -132,13 +145,26 @@ func randomHex(n int) string {
 }
 
 // launchJupyter is launch for a Workbench instance.
+//
+// A Colab Enterprise runtime or a BigQuery Studio notebook (Options.Jupyter
+// nil) runs the same Jupyter Server, as colab, in /home/colab, with no data
+// disk or metadata server (its clients' credentials are cloudburrow_colab's),
+// and the manager starts one Python 3 kernel on it, whose channels carry
+// the console's cells (kernel.go).
 func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 	j := s.opts.Jupyter
+	colab := j == nil
+	if colab {
+		j = &Jupyter{}
+	}
 	rest := ""
 	if m.BigQuery != nil {
 		rest = m.BigQuery()
 	}
 	if rest == "" {
+		if colab {
+			return errors.New("BigQuery is not served by this instance, so a notebook runtime has nothing to query")
+		}
 		return errors.New("BigQuery is not served by this instance, so a Workbench instance has nothing to query")
 	}
 	var stops []func()
@@ -160,17 +186,21 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 		return port + "=" + t, nil
 	}
 	// The instance's metadata server, on the host's loopback.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return err
+	metaAddr := ""
+	if !colab {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return err
+		}
+		meta := &http.Server{Handler: hostguard.Wrap(m.metadataHandler(s), "metadata.google.internal"), ReadHeaderTimeout: 10 * time.Second}
+		go func() { _ = meta.Serve(ln) }()
+		stops = append(stops, func() { _ = meta.Close() })
+		metaAddr = ln.Addr().String()
 	}
-	meta := &http.Server{Handler: hostguard.Wrap(m.metadataHandler(s), "metadata.google.internal"), ReadHeaderTimeout: 10 * time.Second}
-	go func() { _ = meta.Serve(ln) }()
-	stops = append(stops, func() { _ = meta.Close() })
 
 	var relays []string
 	for _, r := range []struct{ port, addr string }{
-		{relayPort, rest}, {"8081", call(m.Dataproc)}, {metadataPort, ln.Addr().String()}, {storagePort, call(m.Storage)},
+		{relayPort, rest}, {"8081", call(m.Dataproc)}, {metadataPort, metaAddr}, {storagePort, call(m.Storage)},
 	} {
 		a, err := relayTo(r.port, r.addr)
 		if err != nil {
@@ -209,8 +239,10 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 	if out, err := m.docker(ctx, "network", "connect", "--alias", relayAlias, network, relay); err != nil {
 		return errors.New("connect the instance's relay: " + out)
 	}
-	if out, err := m.docker(ctx, "volume", "create", "--label", label, "--label", "cloudburrow.workbench-disk=1", j.Volume); err != nil {
-		return errors.New("create the instance's data disk: " + out)
+	if !colab {
+		if out, err := m.docker(ctx, "volume", "create", "--label", label, "--label", "cloudburrow.workbench-disk=1", j.Volume); err != nil {
+			return errors.New("create the instance's data disk: " + out)
+		}
 	}
 
 	token := randomHex(24)
@@ -219,13 +251,28 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 		host = "workbench"
 	}
 	ep := "http://" + relayAlias + ":"
-	runArgs := []string{"run", "-d", "--init", "--name", kernel, "--label", label, "--network", network,
-		"--hostname", host, "--user", "1001:1001", "-w", "/home/jupyter", "-v", j.Volume + ":/home/jupyter",
-		"-e", "HOME=/home/jupyter", "-e", "USER=jupyter", "-e", "SHELL=/bin/bash", "-e", "JUPYTER_TOKEN",
-		"-e", "GOOGLE_CLOUD_PROJECT=" + s.project, "-e", "CB_WORKBENCH=1",
-		"-e", "CB_BIGQUERY_ENDPOINT=" + ep + relayPort,
-		"-e", "GCE_METADATA_HOST=" + relayAlias + ":" + metadataPort, "-e", "GCE_METADATA_IP=" + relayAlias + ":" + metadataPort}
-	if call(m.Storage) != "" {
+	cmdEnv := []string{"JUPYTER_TOKEN=" + token}
+	var runArgs []string
+	if colab {
+		runArgs = []string{"run", "-d", "--init", "--name", kernel, "--label", label, "--network", network,
+			"--hostname", "colab", "--user", "1000:1000", "-w", "/home/colab",
+			"-e", "HOME=/home/colab", "-e", "USER=colab", "-e", "SHELL=/bin/bash", "-e", "JUPYTER_TOKEN",
+			"-e", "GOOGLE_CLOUD_PROJECT=" + s.project, "-e", "CB_COLAB=1", "-e", "NO_GCE_CHECK=True",
+			"-e", "CB_BIGQUERY_ENDPOINT=" + endpoint}
+		if s.opts.Token != "" {
+			// Passed by name, so the token is not on docker's command line.
+			runArgs = append(runArgs, "-e", "CB_ACCESS_TOKEN")
+			cmdEnv = append(cmdEnv, "CB_ACCESS_TOKEN="+s.opts.Token)
+		}
+	} else {
+		runArgs = []string{"run", "-d", "--init", "--name", kernel, "--label", label, "--network", network,
+			"--hostname", host, "--user", "1001:1001", "-w", "/home/jupyter", "-v", j.Volume + ":/home/jupyter",
+			"-e", "HOME=/home/jupyter", "-e", "USER=jupyter", "-e", "SHELL=/bin/bash", "-e", "JUPYTER_TOKEN",
+			"-e", "GOOGLE_CLOUD_PROJECT=" + s.project, "-e", "CB_WORKBENCH=1",
+			"-e", "CB_BIGQUERY_ENDPOINT=" + ep + relayPort,
+			"-e", "GCE_METADATA_HOST=" + relayAlias + ":" + metadataPort, "-e", "GCE_METADATA_IP=" + relayAlias + ":" + metadataPort}
+	}
+	if call(m.Storage) != "" && !colab {
 		runArgs = append(runArgs, "-e", "CB_STORAGE_ENDPOINT="+ep+storagePort)
 	}
 	if call(m.Dataproc) != "" {
@@ -240,13 +287,16 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 		runArgs = append(runArgs, "-e", k+"="+s.opts.Env[k])
 	}
 	runArgs = append(runArgs, "--entrypoint", "jupyter", image, "lab")
+	if colab {
+		runArgs = append(runArgs, "--ServerApp.root_dir=/home/colab")
+	}
 	bin := m.Docker
 	if bin == "" {
 		bin = "docker"
 	}
 	cmd := exec.CommandContext(ctx, bin, runArgs...)
 	// Passed by name, so the token is not on docker's command line.
-	cmd.Env = append(os.Environ(), "JUPYTER_TOKEN="+token)
+	cmd.Env = append(os.Environ(), cmdEnv...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return errors.New("start the instance's JupyterLab: " + strings.TrimSpace(string(out)))
 	}
@@ -275,10 +325,23 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 		logs, _ := m.docker(ctx, "logs", "--tail", "40", kernel)
 		return fmt.Errorf("%v: %s", err, strings.ReplaceAll(logs, token, "<token>"))
 	}
+	python, notes := "3.12", []string(nil)
+	if colab {
+		k, err := startKernel(ctx, addr, token)
+		if err != nil {
+			logs, _ := m.docker(ctx, "logs", "--tail", "40", kernel)
+			return fmt.Errorf("%v: %s", err, strings.ReplaceAll(logs, token, "<token>"))
+		}
+		stops = append(stops, k.close)
+		python, notes = k.python, k.notes
+		m.mu.Lock()
+		s.kernel = k
+		m.mu.Unlock()
+	}
 	m.mu.Lock()
 	idle := s.idleTimeout()
 	s.jupyterAddr, s.jupyterToken = addr, token
-	s.status = Status{State: StateConnected, Python: "3.12", Project: s.project, Image: image, Started: time.Now().UTC()}
+	s.status = Status{State: StateConnected, Python: python, Project: s.project, Image: image, Started: time.Now().UTC(), Notes: notes}
 	if idle > 0 {
 		s.status.Idle = idle.String()
 	}
@@ -289,7 +352,11 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 		stops = append(stops, func() { close(done) })
 		go m.watchActivity(s, done)
 	}
-	m.logf("workbench instance %s: JupyterLab up (%s)", s.key, kernel)
+	if colab {
+		m.logf("notebook runtime %s: connected (%s)", s.key, kernel)
+	} else {
+		m.logf("workbench instance %s: JupyterLab up (%s)", s.key, kernel)
+	}
 	return nil
 }
 
@@ -531,6 +598,47 @@ func (m *Manager) metadataHandler(s *session) http.Handler {
 			text(w, "default")
 		case "scopes":
 			text(w, strings.Join(scopes, "\n")+"\n")
+		case "identity":
+			// https://docs.cloud.google.com/compute/docs/instances/verifying-instance-identity
+			// (read 2026-11-24): audience is required; format standard
+			// (the default) or full, full adding the instance's
+			// google.compute_engine claim and email (licenses=TRUE its
+			// license codes, of which a local instance has none).
+			q := r.URL.Query()
+			audience := q.Get("audience")
+			if audience == "" {
+				http.Error(w, "non-empty audience parameter required", http.StatusBadRequest)
+				return
+			}
+			format := q.Get("format")
+			if format == "" {
+				format = "standard"
+			}
+			if format != "standard" && format != "full" {
+				http.Error(w, "format must be standard or full", http.StatusBadRequest)
+				return
+			}
+			if j.MintID == nil {
+				http.Error(w, "this instance mints no identity tokens", http.StatusNotFound)
+				return
+			}
+			sub := accountID(email)
+			claims := map[string]any{"aud": audience, "azp": sub, "sub": sub}
+			if format == "full" {
+				claims["email"], claims["email_verified"] = email, true
+				ce := map[string]any{"instance_creation_timestamp": j.Created, "instance_id": j.ID, "instance_name": j.Name,
+					"project_id": project, "project_number": resource.ProjectNumber(project), "zone": zone}
+				if strings.EqualFold(q.Get("licenses"), "TRUE") {
+					ce["license_id"] = []string{}
+				}
+				claims["google"] = map[string]any{"compute_engine": ce}
+			}
+			tok, err := j.MintID(email, claims)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusForbidden)
+				return
+			}
+			text(w, tok)
 		case "token":
 			tok := "cloudburrow-local"
 			if j.Mint != nil {

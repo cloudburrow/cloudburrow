@@ -33,8 +33,8 @@ type colabHost struct{ m *nbruntime.Manager }
 func nbOptions(o vertexai.NotebookRuntimeOptions) nbruntime.Options {
 	n := nbruntime.Options{IdleTimeout: o.IdleTimeout, IdleDisabled: o.IdleDisabled, Env: o.Env, Token: o.Token}
 	if j := o.Jupyter; j != nil {
-		n.Jupyter = &nbruntime.Jupyter{Volume: j.Volume, Account: j.Account, Mint: j.Mint,
-			Name: j.Name, Zone: j.Zone, ID: j.ID, Attributes: j.Attributes}
+		n.Jupyter = &nbruntime.Jupyter{Volume: j.Volume, Account: j.Account, Mint: j.Mint, MintID: j.MintID,
+			Name: j.Name, Zone: j.Zone, ID: j.ID, Attributes: j.Attributes, Created: j.Created}
 	}
 	return n
 }

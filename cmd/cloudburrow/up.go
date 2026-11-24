@@ -1462,7 +1462,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// proxy_uri hosts at the console's port.
 		if localAISrv != nil {
 			localAISrv.SetWorkbenchConsole(consoleSrv.Addr)
-			consoleSrv.SetJupyterLabs(workbenchLabs{srv: localAISrv})
+			consoleSrv.SetJupyterLabs(workbenchLabs{srv: localAISrv, iam: iamEnforcer})
 		}
 		coord.Register(consoleSrv)
 		// The metric sampler runs on the instance's own clock, so the history

@@ -1,6 +1,6 @@
 # The notebook runtime (internal/nbruntime): BigQuery Studio's notebooks'
-# (#2094) and Colab Enterprise runtimes' kernel (kernel.py), and Vertex AI
-# Workbench instances' JupyterLab (#2198). The console builds it on the
+# (#2094) and Colab Enterprise runtimes' Jupyter Server and kernels, and
+# Vertex AI Workbench instances' JupyterLab (#2198): the same JupyterLab. The console builds it on the
 # host the first time a runtime or instance starts, and runs it on a
 # `docker network create --internal` network whose one peer (relay.py, in
 # the same image) relays the instance's served APIs, so the code in it
@@ -35,7 +35,9 @@ RUN pip install --no-cache-dir --require-hashes --no-deps --only-binary :all: -r
 # runtime 3.0 sessions' Spark.
 RUN pip install --no-cache-dir --no-deps --require-hashes --only-binary :all: -r /opt/cloudburrow/spark.txt
 
-COPY kernel.py relay.py /opt/cloudburrow/
+COPY relay.py /opt/cloudburrow/
+# A Colab runtime's kernels load cloudburrow_colab (ipython_kernel_config.py).
+COPY cloudburrow_colab.py /usr/local/lib/python3.12/site-packages/
 # A Workbench instance's Python points Google's clients at the instance's
 # APIs (cloudburrow_endpoints, loaded by a .pth file in every Python of the
 # instance), and its Jupyter Server and kernels are configured as
@@ -54,4 +56,4 @@ RUN useradd --create-home --uid 1000 colab && useradd --create-home --uid 1001 -
 USER 1000:1000
 WORKDIR /home/colab
 ENV MPLBACKEND=module://matplotlib_inline.backend_inline PYTHONUNBUFFERED=1
-ENTRYPOINT ["python3", "-I", "/opt/cloudburrow/kernel.py"]
+ENTRYPOINT ["jupyter", "lab"]

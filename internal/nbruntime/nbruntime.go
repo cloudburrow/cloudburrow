@@ -5,10 +5,15 @@
 //
 // Each connected notebook has a runtime of its own: a container of the
 // image built from image/ (the Docker official python image, pinned, with
-// Google's google-cloud-bigquery and bigquery-magics and IPython), running
-// kernel.py, an IPython shell that keeps the notebook's state between
-// cells. Cells are sent one per line on the container's stdin and their
-// outputs (nbformat 4 output objects) read back from its stdout.
+// Google's google-cloud-bigquery and bigquery-magics, and JupyterLab, all
+// hash-locked), running the real Jupyter Server and JupyterLab, as a Colab
+// Enterprise runtime runs a Jupyter kernel (#2198). The manager starts one
+// ipykernel Python 3 kernel on it and sends the notebook's cells on that
+// kernel's channels with Jupyter's messaging protocol (kernel.go), reading
+// back their outputs as nbformat 4 output objects; the kernel keeps the
+// notebook's state between cells, and %%bigquery and the last
+// expression's value behave as in a Colab Enterprise notebook. The same
+// server's JupyterLab is the runtime's proxy_uri (jupyter.go).
 //
 // Egress: the runtime is on a Docker network created --internal, which has
 // no route out. Its one peer is a relay container (the same image, running
@@ -21,7 +26,6 @@ package nbruntime
 
 import (
 	"archive/tar"
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -32,7 +36,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"os/exec"
 	"regexp"
 	"sort"
@@ -43,10 +46,10 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed image/Dockerfile image/kernel.py image/relay.py image/requirements.txt image/spark.txt image/build-requirements.txt image/cloudburrow_endpoints.py image/jupyter_server_config.py image/ipython_kernel_config.py image/overrides.json
+//go:embed image/Dockerfile image/cloudburrow_colab.py image/relay.py image/requirements.txt image/spark.txt image/build-requirements.txt image/cloudburrow_endpoints.py image/jupyter_server_config.py image/ipython_kernel_config.py image/overrides.json
 var context_ embed.FS
 
-var contextFiles = []string{"Dockerfile", "kernel.py", "relay.py", "requirements.txt", "spark.txt", "build-requirements.txt",
+var contextFiles = []string{"Dockerfile", "cloudburrow_colab.py", "relay.py", "requirements.txt", "spark.txt", "build-requirements.txt",
 	"cloudburrow_endpoints.py", "jupyter_server_config.py", "ipython_kernel_config.py", "overrides.json"}
 
 // Tag is the runtime image's tag: its build context's hash, so a changed
@@ -162,12 +165,10 @@ type session struct {
 	status       Status
 	names        []string // network last
 	stop         func()
-	cmd          *exec.Cmd
-	stdin        io.WriteCloser
-	out          *bufio.Reader
 	run          sync.Mutex // one cell at a time, as a kernel runs them
 	last         time.Time
-	timer        *time.Timer
+	// A Colab runtime's kernel (kernel.go).
+	kernel *kernelConn
 	// A Workbench instance's JupyterLab (jupyter.go): its address on the
 	// host's loopback and its server's token.
 	jupyterAddr, jupyterToken string
@@ -222,7 +223,7 @@ type Options struct {
 	// instead of the anonymous credentials the instance takes as its own.
 	Token string
 	// Jupyter, when set, runs the image's JupyterLab for a Vertex AI
-	// Workbench instance (jupyter.go) instead of kernel.py.
+	// Workbench instance (jupyter.go) instead of a Colab runtime's.
 	Jupyter *Jupyter
 }
 
@@ -273,11 +274,7 @@ func (m *Manager) start(s *session) {
 		return
 	}
 	m.set(s, func(st *Status) { st.State = StateStarting })
-	launch := m.launch
-	if s.opts.Jupyter != nil {
-		launch = m.launchJupyter
-	}
-	if err := launch(ctx, s); err != nil {
+	if err := m.launchJupyter(ctx, s); err != nil {
 		m.fail(s, err)
 		return
 	}
@@ -356,145 +353,6 @@ func (m *Manager) target(ctx context.Context, rest string) (string, func(), erro
 	return r.Addr(), func() { _ = r.Close() }, nil
 }
 
-func (m *Manager) launch(ctx context.Context, s *session) error {
-	rest := ""
-	if m.BigQuery != nil {
-		rest = m.BigQuery()
-	}
-	if rest == "" {
-		return errors.New("BigQuery is not served by this instance, so a notebook runtime has nothing to query")
-	}
-	target, stop, err := m.target(ctx, rest)
-	if err != nil {
-		return err
-	}
-	s.stop = stop
-	// The Dataproc API's port (#2156), on the relay's 8081.
-	dpTarget := ""
-	if m.Dataproc != nil {
-		if dp := m.Dataproc(); dp != "" {
-			t, stopDP, err := m.target(ctx, dp)
-			if err != nil {
-				stop()
-				return err
-			}
-			dpTarget, s.stop = t, func() { stop(); stopDP() }
-		}
-	}
-	suffix := nameSafe.ReplaceAllString(strings.ToLower(s.key), "-")
-	if len(suffix) > 30 {
-		suffix = suffix[len(suffix)-30:]
-	}
-	suffix = strings.Trim(suffix, "-") + fmt.Sprintf("-%d", time.Now().UnixNano()%1e6)
-	network, relay, kernel := "cb-nb-net-"+suffix, "cb-nb-relay-"+suffix, "cb-nb-"+suffix
-	label := "io.cloudburrow.instance=" + m.Instance // sparkproc.InstanceLabel: swept by stop
-	image := Tag()
-
-	if out, err := m.docker(ctx, "network", "create", "--internal", "--label", label, network); err != nil {
-		return errors.New("create the runtime's internal network: " + out)
-	}
-	m.mu.Lock()
-	s.names = []string{network}
-	m.mu.Unlock()
-	relayArgs := []string{"run", "-d", "--name", relay, "--label", label, "--entrypoint", "python3"}
-	if !m.desktop {
-		relayArgs = append(relayArgs, "--add-host", "host.docker.internal:host-gateway")
-	}
-	relayArgs = append(relayArgs, image, "-I", "/opt/cloudburrow/relay.py", target, dpTarget)
-	if out, err := m.docker(ctx, relayArgs...); err != nil {
-		return errors.New("start the runtime's relay: " + out)
-	}
-	m.mu.Lock()
-	s.names = []string{relay, network}
-	m.mu.Unlock()
-	if err := m.waitReady(ctx, relay); err != nil {
-		return err
-	}
-	if out, err := m.docker(ctx, "network", "connect", "--alias", relayAlias, network, relay); err != nil {
-		return errors.New("connect the runtime's relay: " + out)
-	}
-	bin := m.Docker
-	if bin == "" {
-		bin = "docker"
-	}
-	var cmdEnv []string
-	runArgs := []string{"run", "-i", "--rm", "--init", "--name", kernel, "--label", label, "--network", network,
-		"-e", "GOOGLE_CLOUD_PROJECT=" + s.project, "-e", "CB_BIGQUERY_ENDPOINT=" + endpoint, "-e", "NO_GCE_CHECK=True"}
-	for _, k := range sortedKeys(s.opts.Env) {
-		runArgs = append(runArgs, "-e", k+"="+s.opts.Env[k])
-	}
-	if s.opts.Token != "" {
-		// Passed by name, so the token is not on docker's command line.
-		runArgs = append(runArgs, "-e", "CB_ACCESS_TOKEN")
-		cmdEnv = append(cmdEnv, "CB_ACCESS_TOKEN="+s.opts.Token)
-	}
-	if dpTarget != "" {
-		region := m.Region
-		if region == "" {
-			region = "us-central1"
-		}
-		// Google's DataprocSparkSession reads its API endpoint and region
-		// from these; kernel.py points its clients at the relay.
-		runArgs = append(runArgs, "-e", "CB_DATAPROC_ENDPOINT="+dataprocEndpoint,
-			"-e", "GOOGLE_CLOUD_DATAPROC_API_ENDPOINT="+dataprocEndpoint, "-e", "GOOGLE_CLOUD_REGION="+region)
-	}
-	cmd := exec.Command(bin, append(runArgs, image)...)
-	if len(cmdEnv) > 0 {
-		cmd.Env = append(os.Environ(), cmdEnv...)
-	}
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &limited{w: &stderr, n: 64 << 10}
-	if err := cmd.Start(); err != nil {
-		return errors.New("start the runtime: " + err.Error())
-	}
-	m.mu.Lock()
-	s.names = []string{kernel, relay, network}
-	s.cmd, s.stdin, s.out = cmd, stdin, bufio.NewReaderSize(stdout, 1<<20)
-	m.mu.Unlock()
-	type ready struct {
-		Ready  bool     `json:"ready"`
-		Python string   `json:"python"`
-		Notes  []string `json:"notes"`
-	}
-	got := make(chan ready, 1)
-	go func() {
-		line, err := s.out.ReadBytes('\n')
-		var r ready
-		if err == nil {
-			_ = json.Unmarshal(line, &r)
-		}
-		got <- r
-	}()
-	select {
-	case r := <-got:
-		if !r.Ready {
-			return fmt.Errorf("the runtime did not start: %s", strings.TrimSpace(stderr.String()))
-		}
-		m.mu.Lock()
-		idle := s.idleTimeout()
-		s.status = Status{State: StateConnected, Python: r.Python, Project: s.project, Image: image,
-			Started: time.Now().UTC(), Notes: r.Notes}
-		if idle > 0 {
-			s.status.Idle = idle.String()
-			s.timer = time.AfterFunc(idle, func() { m.idle(s) })
-		}
-		s.last = time.Now()
-		m.mu.Unlock()
-		m.logf("notebook runtime %s: connected (%s)", s.key, kernel)
-		return nil
-	case <-time.After(3 * time.Minute):
-		return errors.New("the runtime did not start in 3 minutes: " + strings.TrimSpace(stderr.String()))
-	}
-}
-
 func (m *Manager) waitReady(ctx context.Context, name string) error {
 	deadline := time.Now().Add(time.Minute)
 	for {
@@ -518,24 +376,6 @@ func sortedKeys(m map[string]string) []string {
 	return out
 }
 
-// idle shuts a runtime down after its idle timeout without a cell run.
-func (m *Manager) idle(s *session) {
-	m.mu.Lock()
-	idle := s.idleTimeout()
-	quiet := time.Since(s.last) >= idle
-	m.mu.Unlock()
-	if !quiet {
-		m.mu.Lock()
-		if s.timer != nil {
-			s.timer.Reset(idle - time.Since(s.last))
-		}
-		m.mu.Unlock()
-		return
-	}
-	m.logf("notebook runtime %s: idle shutdown", s.key)
-	_ = m.Disconnect(s.key)
-}
-
 // ErrNotConnected is a cell sent to a notebook with no runtime.
 var ErrNotConnected = errors.New("the notebook is not connected to a runtime: click Connect first")
 
@@ -557,41 +397,33 @@ func (m *Manager) Execute(ctx context.Context, key, code string) (Result, error)
 	defer s.run.Unlock()
 	m.mu.Lock()
 	s.last = time.Now()
-	stdin, out := s.stdin, s.out
+	k := s.kernel
 	m.mu.Unlock()
-	line, _ := json.Marshal(map[string]string{"code": code})
-	if _, err := stdin.Write(append(line, '\n')); err != nil {
-		m.fail(s, errors.New("the runtime stopped"))
-		return Result{}, errors.New("the runtime stopped: connect again")
+	if k == nil {
+		return Result{}, ErrNotConnected
 	}
-	type answer struct {
-		b   []byte
-		err error
-	}
-	got := make(chan answer, 1)
-	go func() {
-		b, err := out.ReadBytes('\n')
-		got <- answer{b, err}
-	}()
-	var a answer
-	select {
-	case a = <-got:
-	case <-ctx.Done():
-		_ = m.Interrupt(key)
-		select {
-		case a = <-got:
-		case <-time.After(15 * time.Second):
+	r, err := k.execute(ctx, code, false)
+	if err != nil && ctx.Err() != nil && !errors.Is(err, errKernelGone) && !errors.Is(err, errKernelDied) {
+		// Interrupt execution: a KeyboardInterrupt in the cell, whose
+		// reply ends it.
+		ictx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if k.interrupt(ictx) == nil {
+			r, err = k.execute(ictx, "", true)
+		}
+		if err != nil {
 			m.fail(s, errors.New("the runtime did not answer an interrupt"))
 			return Result{}, errors.New("the cell did not stop when interrupted, so the runtime was shut down")
 		}
+		return Result{Status: "error", ExecutionCount: r.ExecutionCount, Outputs: []json.RawMessage{
+			json.RawMessage(`{"output_type":"error","ename":"KeyboardInterrupt","evalue":"","traceback":["KeyboardInterrupt"]}`)}}, nil
 	}
-	if a.err != nil {
+	if errors.Is(err, errKernelGone) {
 		m.fail(s, errors.New("the runtime stopped"))
 		return Result{}, errors.New("the runtime stopped while the cell ran: connect again")
 	}
-	var r Result
-	if err := json.Unmarshal(a.b, &r); err != nil {
-		return Result{}, fmt.Errorf("the runtime's answer cannot be read: %w", err)
+	if err != nil {
+		return Result{}, err
 	}
 	m.mu.Lock()
 	s.last = time.Now()
@@ -604,14 +436,18 @@ func (m *Manager) Execute(ctx context.Context, key, code string) (Result, error)
 func (m *Manager) Interrupt(key string) error {
 	m.mu.Lock()
 	s := m.sessions[key]
+	var k *kernelConn
+	if s != nil {
+		k = s.kernel
+	}
 	m.mu.Unlock()
-	if s == nil || len(s.names) < 3 {
+	if k == nil {
 		return ErrNotConnected
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if out, err := m.docker(ctx, "kill", "--signal", "INT", s.names[0]); err != nil {
-		return errors.New("interrupt: " + out)
+	if err := k.interrupt(ctx); err != nil {
+		return errors.New("interrupt: " + err.Error())
 	}
 	return nil
 }
@@ -646,15 +482,9 @@ func (m *Manager) Disconnect(key string) error {
 
 func (m *Manager) teardown(s *session) {
 	m.mu.Lock()
-	names, stdin, cmd, stop, timer := s.names, s.stdin, s.cmd, s.stop, s.timer
-	s.names, s.stdin, s.cmd, s.stop, s.timer = nil, nil, nil, nil, nil
+	names, stop := s.names, s.stop
+	s.names, s.stop, s.kernel = nil, nil, nil
 	m.mu.Unlock()
-	if timer != nil {
-		timer.Stop()
-	}
-	if stdin != nil {
-		_ = stdin.Close()
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	for i, n := range names {
@@ -663,9 +493,6 @@ func (m *Manager) teardown(s *session) {
 			continue
 		}
 		_, _ = m.docker(ctx, "rm", "-f", "-v", n)
-	}
-	if cmd != nil {
-		_ = cmd.Wait()
 	}
 	if stop != nil {
 		stop()

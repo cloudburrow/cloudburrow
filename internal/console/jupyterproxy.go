@@ -47,6 +47,10 @@ type JupyterLabs interface {
 	// Endpoint is the loopback address and token of the JupyterLab whose
 	// proxy host's first label is label, and the instance's name.
 	Endpoint(label string) (addr, token, name string, err error)
+	// Authorize checks a bearer token's caller may use the JupyterLab
+	// whose proxy host's first label is label (a Workbench instance's
+	// notebooks.instances.use), nil when it may.
+	Authorize(ctx context.Context, label, bearer string) error
 }
 
 // JupyterProxyDomain is the domain the instances' proxy hosts are under.
@@ -227,6 +231,15 @@ func (s *Server) serveJupyter(w http.ResponseWriter, r *http.Request, label stri
 		ok = found && g.label == label && now.Before(g.expires)
 	}
 	s.jupyter.mu.Unlock()
+	if !ok && labs != nil {
+		if tok, found := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); found && strings.TrimSpace(tok) != "" {
+			if err := labs.Authorize(r.Context(), label, strings.TrimSpace(tok)); err != nil {
+				jupyterRefuse(w, http.StatusForbidden, "Forbidden", err.Error())
+				return
+			}
+			ok = true
+		}
+	}
 	if !ok {
 		jupyterRefuse(w, http.StatusUnauthorized, "Open JupyterLab from the console",
 			"This instance's JupyterLab is opened from the console: click Open JupyterLab in the instance's row on the Workbench Instances page.")

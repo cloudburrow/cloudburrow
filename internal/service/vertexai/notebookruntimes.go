@@ -44,8 +44,8 @@ package vertexai
 // (the runtime's network is --internal, as every CloudBurrow container
 // that runs user code is); a post-startup script from a Cloud Storage URL
 // is not fetched (FAILED_PRECONDITION at start), an inline one runs with
-// bash in the runtime; proxy_uri is empty (the console's notebooks reach
-// the kernel through the instance).
+// bash in the runtime. A runtime runs the real Jupyter Server (#2198), and
+// a RUNNING one's proxy_uri is its JupyterLab on the console (colabproxy.go).
 //
 // UNVERIFIED (re-read 2026-11-22: https://docs.cloud.google.com/colab/docs/manage-runtimes):
 // starting a running runtime and stopping a stopped one succeed without a
@@ -900,7 +900,7 @@ func (n *notebookService) AssignNotebookRuntime(_ context.Context, req *aiplatfo
 			}
 			return nil, grpcError(apierror.AlreadyExists("NotebookRuntime %s already exists, assigned from another template or to another user", k))
 		}
-		v := st.view(e)
+		v := n.s.runtimeView(st, e)
 		st.mu.Unlock()
 		return n.s.finished(k, &aiplatformpb.AssignNotebookRuntimeOperationMetadata{GenericMetadata: generic()}, v, nil)
 	}
@@ -1049,7 +1049,7 @@ func (s *Server) awaitRunning(op string, e *runtimeEntry, resp func(*aiplatformp
 	st.mu.Lock()
 	e.Ready, e.Ran = true, e.Ran || run
 	e.RT.UpdateTime = timestamppb.New(st.now())
-	v := st.view(e)
+	v := s.runtimeView(st, e)
 	st.save()
 	st.mu.Unlock()
 	_ = s.ops.Succeed(op, resp(v))
@@ -1064,7 +1064,7 @@ func (n *notebookService) GetNotebookRuntime(_ context.Context, req *aiplatformp
 	if err != nil {
 		return nil, grpcError(err)
 	}
-	return st.view(e), nil
+	return n.s.runtimeView(st, e), nil
 }
 
 func (n *notebookService) ListNotebookRuntimes(_ context.Context, req *aiplatformpb.ListNotebookRuntimesRequest) (*aiplatformpb.ListNotebookRuntimesResponse, error) {
@@ -1077,7 +1077,7 @@ func (n *notebookService) ListNotebookRuntimes(_ context.Context, req *aiplatfor
 	var all []*aiplatformpb.NotebookRuntime
 	for _, k := range sortedNames(st.runtimes) {
 		if strings.HasPrefix(k, req.GetParent()+"/") {
-			all = append(all, st.view(st.runtimes[k]))
+			all = append(all, n.s.runtimeView(st, st.runtimes[k]))
 		}
 	}
 	st.mu.Unlock()
