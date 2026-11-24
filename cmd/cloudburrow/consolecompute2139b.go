@@ -642,23 +642,41 @@ func (p computeGroupsProvider) Detail(ctx context.Context, project string, path 
 	}
 	scope := groupScope(path[0])
 	vms := console.Listing{Columns: []string{"Zone", "Status", "Template", "Internal IP"}, Noun: "VM instances"}
-	versions := map[string]string{}
+	var errorsSection *console.Section
 	if mgr != nil {
+		// A managed group's VMs are its managed instances, those it is
+		// still making (or failing to make, and retrying) included, with
+		// Google's current action and last error (#2220).
+		vms.Columns = []string{"Zone", "Status", "Current action", "Template", "Internal IP", "Last error"}
 		vms.SelectActions = groupVMSelectActions()
 		if l, err := p.call("POST", project, scope+"/instanceGroupManagers/"+path[1]+"/listManagedInstances", nil, map[string]any{}); err == nil {
 			for _, it := range vmMaps(l, "managedInstances") {
-				versions[relInProject(vpcStr(it, "instance"))] = vpcLast(vpcStr(vmMap(it, "version"), "instanceTemplate"))
+				ir := relInProject(vpcStr(it, "instance"))
+				zone := zoneOf(ir)
+				ip := ""
+				if vpcStr(it, "instanceStatus") != "" {
+					vm, _ := p.call("GET", project, "zones/"+zone+"/instances/"+vpcLast(ir), nil, nil)
+					ip = vmInternalIP(vm)
+				}
+				var lastErr []string
+				for _, e := range vmMaps(vmMap(vmMap(it, "lastAttempt"), "errors"), "errors") {
+					lastErr = append(lastErr, vpcStr(e, "code")+": "+vpcStr(e, "message"))
+				}
+				vms.Items = append(vms.Items, console.Resource{Name: vpcLast(ir), Selectable: true,
+					Fields: map[string]string{"Zone": zone, "Status": vpcDash(vpcStr(it, "instanceStatus")),
+						"Current action": migActionLabel(vpcStr(it, "currentAction")),
+						"Template":       vpcDash(vpcLast(vpcStr(vmMap(it, "version"), "instanceTemplate"))),
+						"Internal IP":    vpcDash(ip), "Last error": vpcDash(strings.Join(lastErr, "; "))}})
 			}
 		}
-	}
-	l, err := p.call("POST", project, scope+"/instanceGroups/"+path[1]+"/listInstances", nil, map[string]any{})
-	if err == nil {
+		errorsSection = p.groupErrorsSection(project, scope+"/instanceGroupManagers/"+path[1])
+	} else if l, err := p.call("POST", project, scope+"/instanceGroups/"+path[1]+"/listInstances", nil, map[string]any{}); err == nil {
 		for _, it := range vmMaps(l, "items") {
 			ir := relInProject(vpcStr(it, "instance"))
 			zone := zoneOf(ir)
 			vm, _ := p.call("GET", project, "zones/"+zone+"/instances/"+vpcLast(ir), nil, nil)
-			vms.Items = append(vms.Items, console.Resource{Name: vpcLast(ir), Selectable: mgr != nil,
-				Fields: map[string]string{"Zone": zone, "Status": vpcStr(it, "status"), "Template": vpcDash(versions[ir]), "Internal IP": vpcDash(vmInternalIP(vm))}})
+			vms.Items = append(vms.Items, console.Resource{Name: vpcLast(ir),
+				Fields: map[string]string{"Zone": zone, "Status": vpcStr(it, "status"), "Template": "—", "Internal IP": vpcDash(vmInternalIP(vm))}})
 		}
 	}
 	vms.Total = len(vms.Items)
@@ -684,16 +702,75 @@ func (p computeGroupsProvider) Detail(ctx context.Context, project string, path 
 		props = append(props,
 			console.Property{Label: "Instance template", Value: vpcLast(vpcStr(mgr, "instanceTemplate"))},
 			console.Property{Label: "Target size", Value: strconv.Itoa(int(vpcNum(mgr, "targetSize")))},
-			console.Property{Label: "Base instance name", Value: vpcStr(mgr, "baseInstanceName")})
+			console.Property{Label: "Base instance name", Value: vpcStr(mgr, "baseInstanceName")},
+			console.Property{Label: "Status", Value: migStatusLabel(mgr)})
 		groups = append(groups, console.PropertyGroup{Heading: "Autoscaling", Properties: p.autoscalingProps(p.autoscalerOf(project, mgr))})
 	}
 	props = append(props, console.Property{Label: "Named ports", Value: vpcDash(strings.Join(ports, ", "))},
 		console.Property{Label: "Description", Value: vpcDash(vpcStr(g, "description"))},
 		console.Property{Label: "Creation time", Value: vpcStr(g, "creationTimestamp")})
 	groups = append([]console.PropertyGroup{{Properties: props}}, groups...)
-	return console.Detail{Title: path[1], Heading: "Instance group details", Sections: []console.Section{
+	sections := []console.Section{
 		{ID: "overview", Label: "Overview", Listing: vms},
-		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: groups}}}, nil
+		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: groups}}
+	if errorsSection != nil {
+		sections = append(sections, *errorsSection)
+	}
+	return console.Detail{Title: path[1], Heading: "Instance group details", Sections: sections}, nil
+}
+
+// migActionLabel is a managed instance's currentAction as Google's
+// console words it.
+func migActionLabel(a string) string {
+	if a == "" || a == "NONE" {
+		return "None"
+	}
+	w := strings.ReplaceAll(strings.ToLower(a), "_", " ")
+	return strings.ToUpper(w[:1]) + w[1:]
+}
+
+// migStatusLabel is a managed group's status: stable, or what it is
+// doing (the VMs it is making included, #2220).
+func migStatusLabel(mgr map[string]any) string {
+	if vmMap(mgr, "status")["isStable"] == true {
+		return "Stable"
+	}
+	ca := vmMap(mgr, "currentActions")
+	var parts []string
+	for _, k := range []string{"creating", "recreating", "deleting", "restarting", "refreshing", "starting", "stopping", "suspending", "resuming", "verifying", "abandoning"} {
+		if n := int(vpcNum(ca, k)); n > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d", migActionLabel(strings.ToUpper(k)), n))
+		}
+	}
+	if len(parts) == 0 {
+		return "Not stable"
+	}
+	return "Not stable (" + strings.Join(parts, ", ") + ")"
+}
+
+// groupErrorsSection is a managed group's Errors tab: listErrors, the
+// errors of the last 8 days, newest first, as Google's console lists
+// them (compute/docs/instance-groups/getting-info-about-migs).
+func (p computeGroupsProvider) groupErrorsSection(project, mg string) *console.Section {
+	errs := console.Listing{NameColumn: "Time", Columns: []string{"Instance", "Action", "Error code", "Error message"}, Noun: "errors"}
+	l, err := p.call("GET", project, mg+"/listErrors", nil, nil)
+	if err != nil {
+		errs.Unavailable = err.Error()
+	}
+	seen := map[string]int{}
+	for _, it := range vmMaps(l, "items") {
+		d := vmMap(it, "instanceActionDetails")
+		e := vmMap(it, "error")
+		name := vpcStr(it, "timestamp")
+		if seen[name]++; seen[name] > 1 {
+			name = fmt.Sprintf("%s (%d)", name, seen[name])
+		}
+		errs.Items = append(errs.Items, console.Resource{Name: name,
+			Fields: map[string]string{"Instance": vpcDash(vpcLast(vpcStr(d, "instance"))),
+				"Action": migActionLabel(vpcStr(d, "action")), "Error code": vpcStr(e, "code"), "Error message": vpcStr(e, "message")}})
+	}
+	errs.Total = len(errs.Items)
+	return &console.Section{ID: "errors", Label: "Errors", Listing: errs}
 }
 
 // autoscalingProps are the group page's Autoscaling: its mode, minimum
