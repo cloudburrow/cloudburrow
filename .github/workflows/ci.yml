@@ -671,6 +671,18 @@ jobs:
         run: |
           echo "CLOUDBURROW_TEST_CLOUD_SQL_PROXY=$(make -s cloud-sql-proxy)" >> "$GITHUB_ENV"
 
+      # The Vertex AI Pipelines tasks' image (#2173): CloudBurrow never pulls
+      # a task's image, so TestVertexAIPipelinesThroughThePages and the
+      # TestVertexAIPipeline* compat tests skip without one on the host. The
+      # crossservice shard runs them, with python:3.15.2-alpine3.24 pulled by
+      # its multi-platform index digest (realTools.pipelineTaskImage).
+      - name: Pull the pipeline task image
+        if: matrix.shard == 'crossservice'
+        run: |
+          image="python@$(jq -er '.components.realTools.pipelineTaskImage.digest' dependencies.json)"
+          docker pull -q "$image"
+          echo "CLOUDBURROW_TEST_PIPELINE_IMAGE=$image" >> "$GITHUB_ENV"
+
       - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
         with:
           install_only: true

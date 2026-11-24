@@ -4120,6 +4120,24 @@
         "updateFeed": "docker-hub-tags",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest (the multi-platform index's) with `docker buildx imagetools inspect docker:<version>-dind`."
       },
+      "pipelineTaskImage": {
+        "image": "python:3.15.2-alpine3.24",
+        "version": "3.15.2",
+        "digest": "sha256:0f9552bb28711333da16915ec146f5e6bb44a7fdac9ced15dc17c2e0206346dd",
+        "source": "https://hub.docker.com/_/python",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "PSF-2.0 (CPython); the image also carries Alpine and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest in CI's crossservice shard, or by a developer; never by cloudburrow, which never pulls a pipeline task's image.",
+        "scope": "test-only",
+        "usedBy": ".github/workflows/ci.yml, compat job, crossservice shard: CLOUDBURROW_TEST_PIPELINE_IMAGE for TestVertexAIPipelinesThroughThePages and the TestVertexAIPipeline* compat tests (#2173): the image their pipeline tasks run in",
+        "verification": "image-digest",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest (the multi-platform index's) with `docker buildx imagetools inspect python:<version>-alpine<alpine version>`."
+      },
       "googleCloudCli": {
         "version": "593.0.0",
         "source": "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-593.0.0-linux-x86_64.tar.gz",
