@@ -132,8 +132,12 @@ func TestNASJobValidation(t *testing.T) {
 		"no spec":         func(n *aiplatformpb.NasJob) { n.NasJobSpec = nil },
 		"no search space": func(n *aiplatformpb.NasJob) { n.NasJobSpec.SearchSpaceSpec = "" },
 		"no metric":       func(n *aiplatformpb.NasJob) { n.NasJobSpec.GetMultiTrialAlgorithmSpec().Metric.MetricId = "" },
-		"no trials":       func(n *aiplatformpb.NasJob) { n.NasJobSpec.GetMultiTrialAlgorithmSpec().SearchTrialSpec.MaxTrialCount = 0 },
-		"no trial spec":   func(n *aiplatformpb.NasJob) { n.NasJobSpec.GetMultiTrialAlgorithmSpec().SearchTrialSpec.SearchTrialJobSpec = nil },
+		"no trials": func(n *aiplatformpb.NasJob) {
+			n.NasJobSpec.GetMultiTrialAlgorithmSpec().SearchTrialSpec.MaxTrialCount = 0
+		},
+		"no trial spec": func(n *aiplatformpb.NasJob) {
+			n.NasJobSpec.GetMultiTrialAlgorithmSpec().SearchTrialSpec.SearchTrialJobSpec = nil
+		},
 		"failed above max": func(n *aiplatformpb.NasJob) {
 			n.NasJobSpec.GetMultiTrialAlgorithmSpec().SearchTrialSpec.MaxFailedTrialCount = 99
 		},
