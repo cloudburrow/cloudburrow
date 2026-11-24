@@ -215,7 +215,9 @@ e30640662213b0afe5d82a79c0fa55570984cf8840e1c97bfe2f5a9716bf3e37  ./com/github/e
 809c7fdb9dd810c1f6bb4a6a5890d11656cb7cb7e0b7afef8fdbc35de9471bd2  ./com/github/eirslett/frontend-plugin-core/1.12.1/frontend-plugin-core-1.12.1.pom
 0231d0f2f99bd33391937340729bed51f0ef72c16e6b392b01448b6a35fa1825  ./com/github/eirslett/frontend-plugins/1.12.1/frontend-plugins-1.12.1.pom
 a08b513de673853ca16395ec461a104a99bf0e941ebb7baedb98b30cd221d8cc  ./com/github/eirslett/node/20.19.5/node-20.19.5-linux-arm64.tar.gz
+4eba5fbe1fb10753bc06e42f001a91c5cec16798b7764a3e9257adc59af47fe1  ./com/github/eirslett/node/20.19.5/node-20.19.5-linux-x64.tar.gz
 781ecf1ecb14b4c671ef0732988636282d6fb7071c4bd52567f663b008796bc9  ./com/github/eirslett/node/8.12.0/node-8.12.0-linux-arm64.tar.gz
+3df19b748ee2b6dfe3a03448ebc6186a3a86aeab557018d77a0f7f3314594ef6  ./com/github/eirslett/node/8.12.0/node-8.12.0-linux-x64.tar.gz
 c8c61ba0fa0ab3b5120efd5ba97fdaf0e0b495eef647a97c4413919eda0a878b  ./com/github/eirslett/npm/10.8.2/npm-10.8.2.tar.gz
 a48e0b4471d72936afb598ebde0e07076598ac8647c2e9ebe891db5d6fbf2952  ./com/github/eirslett/npm/6.4.1/npm-6.4.1.tar.gz
 1be000f6fa4317954a99d879d0786d76779952ad87fc6d9c1810fca2f634ff6d  ./com/github/ekryd/sortpom/sortpom-maven-plugin/3.0.1/sortpom-maven-plugin-3.0.1.jar

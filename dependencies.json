@@ -509,10 +509,10 @@
         "skipDiscovery": "Apache distribution site; depcheck only discovers GitHub-sourced components."
       },
       "dataprocRangerMavenLock": {
-        "$comment": "The RANGER component's Maven dependencies (internal/sparkproc/ranger/m2.sha256): the SHA-256 of every jar, pom, war, zip and tarball the Ranger 2.8.0 build resolves from Maven Central (the build's plugins, Ranger's dependencies, and the Node release frontend-maven-plugin fetches), 3418 files. The Dockerfile fails the build when its Maven repository holds a file not in the lock with that SHA-256; no Ranger artifact is in it, so every Ranger module is built from the source release. The sha256 field is the lock file's own. Regenerate by running the build with an empty cache and hashing its repository (org/apache/ranger left out).",
+        "$comment": "The RANGER component's Maven dependencies (internal/sparkproc/ranger/m2.sha256): the SHA-256 of every jar, pom, war, zip and tarball the Ranger 2.8.0 build resolves from Maven Central (the build's plugins, Ranger's dependencies, and the Node releases frontend-maven-plugin fetches, linux-arm64's and linux-x64's: nodejs.org's SHASUMS256.txt), 3420 files. The Dockerfile fails the build when its Maven repository holds a file not in the lock with that SHA-256; no Ranger artifact is in it, so every Ranger module is built from the source release. The sha256 field is the lock file's own. Regenerate by running the build with an empty cache and hashing its repository (org/apache/ranger left out).",
         "version": "2.8.0",
         "source": "https://repo1.maven.org/maven2/",
-        "sha256": "43766356874004d0121e49f6bb2caa27e3450e30cd354b77ec658c73784fe830",
+        "sha256": "6b5e4bcac7d68a5366f2de64a3a6b1cfc5533ab28c9cae5e3807332808734dc9",
         "license": "Apache-2.0 and the licences of Ranger's declared Maven dependencies (Ranger's LICENSE.txt)",
         "redistribution": "not published: resolved into the local build's Maven cache only; nothing of it is in the CLI or the repository",
         "updateFeed": "maven-central",
