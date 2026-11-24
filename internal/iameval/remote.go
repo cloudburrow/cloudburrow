@@ -66,6 +66,10 @@ func (e *Enforcer) CheckRemote(in iamcheck.Request) iamcheck.Decision {
 	case c.Invalid:
 		out.Unauthenticated = true
 		return out
+	case in.Service != "" && len(in.Permissions) > 0 && !scopesAllowAll(in.Service, in.Permissions, c.Scopes):
+		// A token whose scopes do not cover the call (#2179).
+		out.ScopeInsufficient = true
+		return out
 	case c.Owner:
 		out.Owner, out.Email = true, c.Email
 	}
@@ -108,4 +112,13 @@ func (e *Enforcer) CheckRemote(in iamcheck.Request) iamcheck.Decision {
 		}
 	}
 	return out
+}
+
+func scopesAllowAll(service string, permissions, scopes []string) bool {
+	for _, p := range permissions {
+		if !ScopesAllow(service, p, scopes) {
+			return false
+		}
+	}
+	return true
 }

@@ -6,7 +6,9 @@ set -u
 # The metadata server's addresses (#2177): 169.254.169.254 and, where the
 # guest has IPv6, fd20:ce::254, on lo, and their port 80 carried to
 # metadata-server on 127.0.0.1:8169 and [::1]:8169 (a DNAT of the guest's own
-# connections), so the guest's port 80 stays its own, as on Compute Engine.
+# connections), so the guest's port 80 stays its own, as on Compute Engine;
+# their port 443, the HTTPS metadata server of a Shielded VM (#2179), to
+# metadata-server's 127.0.0.1:8170 and [::1]:8170.
 ip addr replace 169.254.169.254/32 dev lo
 v6=""
 if [ -e /proc/sys/net/ipv6/conf/lo/disable_ipv6 ]; then
@@ -20,7 +22,9 @@ fi
   echo "  chain output {"
   echo "    type nat hook output priority -100; policy accept;"
   echo "    ip daddr 169.254.169.254 tcp dport 80 dnat ip to 127.0.0.1:8169"
+  echo "    ip daddr 169.254.169.254 tcp dport 443 dnat ip to 127.0.0.1:8170"
   [ -n "$v6" ] && echo "    ip6 daddr fd20:ce::254 tcp dport 80 dnat ip6 to [::1]:8169"
+  [ -n "$v6" ] && echo "    ip6 daddr fd20:ce::254 tcp dport 443 dnat ip6 to [::1]:8170"
   echo "  }"
   echo "}"
 } > /run/cloudburrow-metadata.nft

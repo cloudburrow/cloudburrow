@@ -11,7 +11,15 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
-type fakeGuestTokens struct{ minted []string }
+type fakeGuestTokens struct {
+	minted []string
+	scopes [][]string
+}
+
+func (f *fakeGuestTokens) MintAccessTokenScoped(email string, scopes []string, ttl time.Duration) string {
+	f.scopes = append(f.scopes, scopes)
+	return f.MintAccessTokenFor(email, ttl)
+}
 
 func (f *fakeGuestTokens) MintAccessTokenFor(email string, ttl time.Duration) string {
 	f.minted = append(f.minted, email)

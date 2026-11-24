@@ -12,6 +12,11 @@
 # which answers the whole tree as Google's metadata server does: the
 # Metadata-Flavor rules, ETags and wait_for_change, guest attributes and
 # the service account's tokens (internal/service/compute/guestmetadata.go).
+# Port 443 (127.0.0.1:8170 and [::1]:8170, #2179), a Shielded VM's HTTPS
+# metadata server, is carried as it is, TLS and all, to the same Compute
+# port after one line naming the instance ("\0CBMDS TOKEN\n"): the
+# Compute port completes the handshake with the instance's own server
+# certificate and requires a client certificate of its root.
 # Nothing else is ever dialled. Only core Perl modules are used.
 use strict;
 use warnings;
@@ -94,14 +99,46 @@ sub serve {
   close $u;
 }
 
-my @want = (['127.0.0.1', 8169, 4], ['::1', 8169, 6]);
+# pipe carries a port 443 connection to the Compute port, after the line
+# that names the instance.
+sub pipe443 {
+  my ($c) = @_;
+  my ($token) = $gprefix =~ m{/([^/]+)$};
+  my $u = IO::Socket::INET->new(PeerAddr => $gh, PeerPort => $gp, Proto => 'tcp', Timeout => 10) or return;
+  syswrite($u, "\0CBMDS $token\n");
+  my ($cf, $uf) = (fileno($c), fileno($u));
+  while (1) {
+    my $rin = '';
+    vec($rin, $cf, 1) = 1;
+    vec($rin, $uf, 1) = 1;
+    my $n = select(my $rout = $rin, undef, undef, 300);
+    last unless $n && $n > 0;
+    for ([$c, $u, $cf], [$u, $c, $uf]) {
+      my ($from, $to, $ff) = @$_;
+      next unless vec($rout, $ff, 1);
+      my $r = sysread($from, my $buf, 65536);
+      return unless $r;
+      my $off = 0;
+      while ($off < length $buf) {
+        my $w = syswrite($to, $buf, length($buf) - $off, $off);
+        return unless $w;
+        $off += $w;
+      }
+    }
+  }
+}
+
+my @want = (['127.0.0.1', 8169, 4], ['::1', 8169, 6], ['127.0.0.1', 8170, 4], ['::1', 8170, 6]);
+my %tls;    # fileno of a port 443 listener
 while (1) {
   # Bind what is not bound yet: ::1 only where the guest has IPv6 on lo.
   for my $w (@want) {
     my ($ip, $port, $fam) = @$w;
     next if $ls{"$ip $port"};
     my $s = $fam == 6 ? listen6($ip, $port) : listen4($ip, $port);
-    $ls{"$ip $port"} = $s if $s;
+    next unless $s;
+    $ls{"$ip $port"} = $s;
+    $tls{fileno($s)} = 1 if $port == 8170;
   }
   my $rin = '';
   vec($rin, fileno($_), 1) = 1 for values %ls;
@@ -119,7 +156,13 @@ while (1) {
       close $c;
       next;
     }
+    my $is443 = $tls{fileno($l)};
     close $_ for values %ls;
+    if ($is443) {
+      pipe443($c);
+      close $c;
+      exit 0;
+    }
     serve($c);
     close $c;
     exit 0;

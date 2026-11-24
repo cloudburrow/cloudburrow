@@ -140,6 +140,9 @@ func (g *Gate) Authorize(ctx context.Context, bearer, full string, m protoreflec
 		if d.Unauthenticated {
 			return Unauthenticated()
 		}
+		if d.ScopeInsufficient {
+			return iamcheck.InsufficientScopes(svc.Name, strings.TrimPrefix(full, "/"))
+		}
 		for _, p := range byRes[res] {
 			if !d.Holds(p) {
 				return svc.Deny(p, res)

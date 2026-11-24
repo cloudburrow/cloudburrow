@@ -1,0 +1,55 @@
+#!/bin/sh
+# Google's guest agent in the guest (#2179), kept to this instance. The
+# agent (google-guest-agent, from Google's package repository; Ubuntu's
+# own archive on Ubuntu) is Google's, unchanged, run for the HTTPS
+# metadata server's credentials (its MDS mTLS job writes
+# /run/google-mds-mtls/root.crt and client.key); /etc/default/
+# instance_configs.cfg turns off everything else it would do to the guest
+# (accounts, network, host keys, scripts, Cloud Logging, the agent
+# communication service). CloudBurrow's drop-ins run it in the group
+# cloudburrow-guestagent, and this fence (cloudburrow-guest-agent-fence.
+# service, before it) drops every packet a process of the group sends but
+# to the loopback interface: the metadata server's addresses reach the
+# instance's relay there (DNAT, usr/lib/cloudburrow/network), and nothing
+# else, not even DNS, leaves the agent.
+#
+#   fence      installs the nftables table inet cloudburrow_guestagent
+#   condition  lets the agent start only while the fence is in force
+set -u
+RUN=/run/cloudburrow-guest-agent
+GROUP=cloudburrow-guestagent
+TABLE=cloudburrow_guestagent
+log() { echo "$*" | /usr/lib/cloudburrow/console cloudburrow-guest-agent; }
+
+case "${1:-}" in
+  fence)
+    mkdir -p "$RUN"
+    rm -f "$RUN/fenced"
+    gid=$(getent group "$GROUP" | cut -d: -f3)
+    [ -n "$gid" ] || { log "no group $GROUP: Google's guest agent is not started"; exit 1; }
+    {
+      echo "table inet $TABLE"
+      echo "delete table inet $TABLE"
+      echo "table inet $TABLE {"
+      echo "  chain output {"
+      echo "    type filter hook output priority -10; policy accept;"
+      echo "    meta skgid $gid th dport 53 counter drop comment \"no DNS for the guest agent\""
+      echo "    meta skgid $gid oif \"lo\" accept"
+      echo "    meta skgid $gid counter drop comment \"Google's guest agent reaches only this instance's metadata server\""
+      echo "  }"
+      echo "}"
+    } > "$RUN/fence.nft"
+    if ! nft -f "$RUN/fence.nft" || ! nft list table inet "$TABLE" | grep -q "meta skgid $gid counter"; then
+      log "cannot install the guest agent's egress fence: the agent is not started"
+      exit 1
+    fi
+    touch "$RUN/fenced"
+    ;;
+  condition)
+    if [ ! -f "$RUN/fenced" ] || ! nft list table inet "$TABLE" > /dev/null 2>&1; then
+      log "no egress fence: Google's guest agent is not started"
+      exit 1
+    fi
+    ;;
+  *) echo "usage: guest-agent-fence fence|condition" >&2; exit 2 ;;
+esac

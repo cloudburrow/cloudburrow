@@ -263,6 +263,10 @@ func (b *computeVMs) podManifest(vm compute.VMSpec, ref string) string {
 				"resources": map[string]any{"limits": map[string]string{"cpu": strconv.Itoa(cpu), "memory": strconv.Itoa(mem) + "Mi"},
 					"requests": map[string]string{"cpu": "50m", "memory": "64Mi"}}}},
 			"volumes": volumes}}
+	// A Shielded VM's vTPM (#2179, computevtpm.go).
+	spec := pod["spec"].(map[string]any)
+	vmc := spec["containers"].([]any)[0].(map[string]any)
+	vmc["volumeMounts"] = vtpmPod(vm, ref, spec, mounts)
 	// metadata.google.internal (and metadata, under the google.internal
 	// search domain) is the metadata server, as on Compute Engine (#2177).
 	pod["spec"].(map[string]any)["hostAliases"] = []any{map[string]any{"ip": "169.254.169.254",
@@ -285,6 +289,9 @@ func (b *computeVMs) Start(ctx context.Context, vm compute.VMSpec) error {
 		return err
 	}
 	if err := b.installer.Apply(ctx, pvcManifest(b.ns(), vm.BootDisk.Key, vm.BootDisk.SizeGb, "disk")); err != nil {
+		return err
+	}
+	if err := b.ensureVTPMClaim(ctx, vm); err != nil {
 		return err
 	}
 	if err := b.installer.Apply(ctx, b.podManifest(vm, ref)); err != nil {

@@ -281,3 +281,10 @@ License, Version 2.0. GoBGP is not part of this repository, of the binary or
 of a release archive: the CLI builds gobgpd and gobgp from the module at that
 version (checked against sum.golang.org) into a local image the first time a
 router needs a BGP speaker (dependencies.json, cloudRouterBGP).
+
+The binary is linked with Google's go-tpm (github.com/google/go-tpm v0.9.8),
+Copyright Google LLC, under the Apache License, Version 2.0, and includes
+code ported from Google's go-tpm-tools (github.com/google/go-tpm-tools
+v0.4.11: server.CreateImportBlob and the client package's EK and AK
+templates), Copyright Google LLC, under the Apache License, Version 2.0
+(internal/service/compute/mdsmtls.go and vtpm.go, #2179).

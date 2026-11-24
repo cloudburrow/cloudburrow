@@ -180,6 +180,14 @@ var parityRows = []parityRow{
 	{Resource: "Compute Engine guest attributes", Service: "compute",
 		Methods:  []string{"compute.instances.getGuestAttributes"},
 		Excluded: "Google's console has no guest attributes view: Google documents reading them from outside the VM only with gcloud compute instances get-guest-attributes and the API (https://docs.cloud.google.com/compute/docs/metadata/manage-guest-attributes, read 2026-11-22); they are written from inside the VM, through its metadata server"},
+	// Shielded VM (#2179): the instance's vTPM identity and integrity
+	// policy, which Google's console does not offer, and its settings,
+	// which it does (#2181).
+	{Resource: "Compute Engine Shielded VM identity", Service: "compute",
+		Methods:  []string{"compute.instances.getShieldedInstanceIdentity", "compute.instances.setShieldedInstanceIntegrityPolicy"},
+		Excluded: "Google's console has no view of a VM's vTPM endorsement and signing keys and no Update auto-learn policy action: Google documents them only through gcloud compute instances get-shielded-identity and gcloud compute instances update --shielded-learn-integrity-policy, and the API (https://docs.cloud.google.com/compute/shielded-vm/docs/modifying-shielded-vm, read 2026-11-23)"},
+	{Resource: "Compute Engine Shielded VM settings", Service: "compute",
+		Methods: []string{"compute.instances.updateShieldedInstanceConfig"}, Issue: 2181},
 	{Resource: "Compute Engine disks and snapshots", Service: "compute",
 		Methods: []string{"compute.diskTypes.get", "compute.diskTypes.list", "compute.disks.aggregatedList", "compute.disks.createSnapshot", "compute.disks.delete", "compute.disks.get", "compute.disks.insert", "compute.disks.list", "compute.disks.resize", "compute.snapshots.delete", "compute.snapshots.get", "compute.snapshots.list", "compute.disks.setLabels", "compute.snapshots.setLabels", "compute.snapshots.insert", "compute.disks.addResourcePolicies", "compute.disks.removeResourcePolicies",
 			"compute.regionDisks.insert", "compute.regionDisks.get", "compute.regionDisks.list", "compute.regionDisks.delete", "compute.regionDisks.resize",

@@ -44,6 +44,8 @@ import (
 // service account; *metadata.Credentials is one.
 type GuestTokens interface {
 	MintAccessTokenFor(email string, ttl time.Duration) string
+	// MintAccessTokenScoped mints a token limited to scopes (#2179).
+	MintAccessTokenScoped(email string, scopes []string, ttl time.Duration) string
 	MintIDTokenWithClaims(email, audience string, extra map[string]any, now time.Time, ttl time.Duration) (string, error)
 }
 
@@ -592,6 +594,11 @@ func (s *Server) serveInstanceMetadata(w http.ResponseWriter, r *http.Request, r
 		guestErr(w, http.StatusMethodNotAllowed, "Method Not Allowed")
 		return
 	}
+	// The HTTPS metadata server's client credentials (#2179).
+	if key == "instance/credentials/mds-client-certificate" {
+		s.serveMDSCredentials(w, r, rel)
+		return
+	}
 	// A service account's token and identity.
 	if rest, ok := strings.CutPrefix(key, "instance/service-accounts/"); ok {
 		if acct, field, _ := strings.Cut(rest, "/"); field == "token" || field == "identity" {
@@ -636,7 +643,9 @@ func (s *Server) serveInstanceMetadata(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	if isTrue(first(q, "wait_for_change")) {
-		if strings.HasSuffix(key, "/") && !isTrue(first(q, "recursive")) || key == "" {
+		// The whole tree may be watched recursively, as Google's guest
+		// agent watches it (computeMetadata/v1/?recursive=true).
+		if (strings.HasSuffix(key, "/") || key == "") && !isTrue(first(q, "recursive")) {
 			guestErr(w, http.StatusBadRequest, "Invalid request: wait_for_change is not supported on directory listings; use recursive=true.")
 			return
 		}
@@ -694,11 +703,39 @@ func (s *Server) guestAttributesOnFor(rel string) bool {
 	return guestAttributesOn(metadataItems(inst["metadata"]), pmeta)
 }
 
-// Guest attribute limits (manage-guest-attributes).
+// Guest attribute limits (manage-guest-attributes): a value of at most
+// 256 KiB, a key of at most 128 bytes, and at most 10 writes a minute per
+// instance, in bursts of at most 3 a second (#2179).
 const (
-	guestAttrMaxValue = 256 << 10
-	guestAttrMaxKey   = 128
+	guestAttrMaxValue  = 256 << 10
+	guestAttrMaxKey    = 128
+	guestAttrPerMinute = 10
+	guestAttrPerSecond = 3
 )
+
+// guestAttrAllowLocked records a guest attribute write of rel at now and
+// reports whether it is within the instance's rate limits.
+func (s *Server) guestAttrAllowLocked(rel string, now time.Time) bool {
+	if s.gaRate == nil {
+		s.gaRate = map[string][]time.Time{}
+	}
+	var keep []time.Time
+	sec := 0
+	for _, t := range s.gaRate[rel] {
+		if now.Sub(t) < time.Minute {
+			keep = append(keep, t)
+			if now.Sub(t) < time.Second {
+				sec++
+			}
+		}
+	}
+	if len(keep) >= guestAttrPerMinute || sec >= guestAttrPerSecond {
+		s.gaRate[rel] = keep
+		return false
+	}
+	s.gaRate[rel] = append(keep, now)
+	return true
+}
 
 // writeGuestAttribute is a PUT or DELETE of instance/guest-attributes/NS/KEY.
 func (s *Server) writeGuestAttribute(w http.ResponseWriter, r *http.Request, rel, rest string) {
@@ -741,6 +778,11 @@ func (s *Server) writeGuestAttribute(w http.ResponseWriter, r *http.Request, rel
 	if !ok {
 		s.mu.Unlock()
 		guestErr(w, http.StatusNotFound, "Not Found")
+		return
+	}
+	if !s.guestAttrAllowLocked(rel, s.opts.Now()) {
+		s.mu.Unlock()
+		guestErr(w, http.StatusTooManyRequests, "Too Many Requests: guest attributes are limited to 10 queries a minute per instance, in bursts of at most 3 a second.")
 		return
 	}
 	ga := objOf(inst["_guestAttributes"])
@@ -822,7 +864,18 @@ func (s *Server) serveGuestToken(w http.ResponseWriter, r *http.Request, rel, ac
 				}
 			}
 		}
-		tok := s.opts.Tokens.MintAccessTokenFor(email, guestTokenTTL)
+		// The token carries the instance's access scopes, or those asked
+		// for (#2179): with IAM enforcement on, they limit what it may do.
+		tokScopes := scopes
+		if want := first(q, "scopes"); want != "" {
+			tokScopes = nil
+			for _, sc := range strings.Split(want, ",") {
+				if sc = strings.TrimSpace(sc); sc != "" {
+					tokScopes = append(tokScopes, sc)
+				}
+			}
+		}
+		tok := s.opts.Tokens.MintAccessTokenScoped(email, tokScopes, guestTokenTTL)
 		w.Header().Set("Content-Type", "application/json")
 		b, _ := json.Marshal(map[string]any{"access_token": tok, "expires_in": int(guestTokenTTL.Seconds()), "token_type": "Bearer"})
 		_, _ = w.Write(b)

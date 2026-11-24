@@ -259,7 +259,7 @@ func (s *computeService) Start(ctx context.Context) error {
 				return ""
 			}
 			return s.guestReach(loopback)
-		}, Tokens: s.tokens})
+		}, Tokens: s.tokens, IntegrityEvents: s.integrityEvent})
 	if err != nil {
 		return err
 	}

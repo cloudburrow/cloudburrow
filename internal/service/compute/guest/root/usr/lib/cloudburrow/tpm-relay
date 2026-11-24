@@ -1,0 +1,37 @@
+#!/usr/bin/perl
+# The vTPM's command relay (#2179), run by Compute Engine's provisioning
+# and measurements (kubectl exec in the vTPM container): each TPM 2.0
+# command read from stdin (its size in its header) is sent on a connection
+# of its own to swtpm's command socket (ARGV[0]), and its response written
+# to stdout. Only core Perl modules are used.
+use strict;
+use warnings;
+use IO::Socket::UNIX;
+
+my $path = shift // '/run/vtpm/tpm.sock';
+binmode STDIN;
+binmode STDOUT;
+$| = 1;
+
+sub readn {
+  my ($fh, $n) = @_;
+  my $buf = '';
+  while (length($buf) < $n) {
+    my $r = sysread($fh, $buf, $n - length($buf), length($buf));
+    return undef unless $r;
+  }
+  return $buf;
+}
+
+while (defined(my $hdr = readn(\*STDIN, 10))) {
+  my (undef, $size) = unpack('n N', $hdr);
+  last if $size < 10 || $size > 65536;
+  my $body = readn(\*STDIN, $size - 10) // last;
+  my $s = IO::Socket::UNIX->new(Peer => $path, Type => SOCK_STREAM) or die "vTPM socket $path: $!\n";
+  syswrite($s, $hdr . $body);
+  my $rh = readn($s, 10) // die "vTPM: no response\n";
+  my (undef, $rsize) = unpack('n N', $rh);
+  my $rb = $rsize > 10 ? (readn($s, $rsize - 10) // die "vTPM: short response\n") : '';
+  close $s;
+  syswrite(STDOUT, $rh . $rb);
+}

@@ -33,6 +33,9 @@ type Caller struct {
 	Owner bool
 	// Invalid is a bearer token this instance did not mint.
 	Invalid bool
+	// Scopes are the OAuth scopes its token carries (#2179, scopes.go),
+	// nil for a token whose scopes are not limited.
+	Scopes []string
 }
 
 // PolicyGetter reads a service resource's own policy, nil for none (or
@@ -218,6 +221,9 @@ func (e *Enforcer) Authorize(ctx context.Context, svc *Service, bearer, permissi
 	}
 	if c.Invalid {
 		return Unauthenticated()
+	}
+	if !ScopesAllow(svc.Name, permission, c.Scopes) {
+		return InsufficientScopes(svc.Name, "")
 	}
 	if e.holds(ctx, svc, c, permission, resource) {
 		return nil
