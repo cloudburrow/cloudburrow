@@ -34,7 +34,12 @@ func TestConnectionPoolConfig(t *testing.T) {
 		{spec("POSTGRES_17", "ENTERPRISE_PLUS", "db-perf-optimized-N-2", "auth_type", "trust"), http.StatusBadRequest},
 		{spec("POSTGRES_17", "ENTERPRISE_PLUS", "db-perf-optimized-N-2", "ignore_startup_parameters", "a\nauth_type = trust"), http.StatusBadRequest},
 		{spec("POSTGRES_17", "ENTERPRISE_PLUS", "db-perf-optimized-N-2", "max_pool_size", "5", "max_pool_size", "6"), http.StatusBadRequest},
-		{spec("MYSQL_8_4", "ENTERPRISE_PLUS", "db-perf-optimized-N-2"), http.StatusNotImplemented},
+		{spec("MYSQL_8_4", "ENTERPRISE_PLUS", "db-perf-optimized-N-2"), 0},
+		{spec("MYSQL_8_0_41", "ENTERPRISE_PLUS", "db-perf-optimized-N-2", "max_pool_size", "10"), 0},
+		{spec("MYSQL_8_0_41", "ENTERPRISE", "db-custom-2-7680"), http.StatusBadRequest},
+		{spec("MYSQL_8_4", "ENTERPRISE_PLUS", "db-perf-optimized-N-2", "max_pool_size", "0"), http.StatusBadRequest},
+		{spec("MYSQL_8_4", "ENTERPRISE_PLUS", "db-perf-optimized-N-2", "pool_mode", "session"), http.StatusBadRequest},
+		{spec("SQLSERVER_2022_STANDARD", "ENTERPRISE", "db-custom-2-7680"), http.StatusBadRequest},
 	} {
 		err := checkConnectionPool(c.s)
 		code := 0
@@ -63,6 +68,32 @@ func TestConnectionPoolConfig(t *testing.T) {
 		if !strings.Contains(m, want) {
 			t.Errorf("the manifest has no %q:\n%s", want, m)
 		}
+	}
+	// MySQL's thread pool (#2141): max_pool_size, else a thread a vCPU,
+	// on 3306 itself, no poolerCount.
+	my := spec("MYSQL_8_4", "ENTERPRISE_PLUS", "db-perf-optimized-N-8")
+	if !my.MySQLThreadPool() || my.PGPooling() || my.MySQLPoolSize() != 8 {
+		t.Errorf("MySQL thread pool %v %v %d", my.MySQLThreadPool(), my.PGPooling(), my.MySQLPoolSize())
+	}
+	my10 := spec("MYSQL_8_4", "ENTERPRISE_PLUS", "db-perf-optimized-N-8", "max_pool_size", "10")
+	if my10.MySQLPoolSize() != 10 || my10.poolingKey() == my.poolingKey() {
+		t.Errorf("max_pool_size 10: %d, %q", my10.MySQLPoolSize(), my10.poolingKey())
+	}
+	st := map[string]any{"connectionPoolConfig": map[string]any{"connectionPoolingEnabled": true}}
+	withPoolerCount(st, my)
+	if _, ok := st["connectionPoolConfig"].(map[string]any)["poolerCount"]; ok {
+		t.Error("a MySQL thread pool answers poolerCount")
+	}
+	mb := components.CloudSQLMySQLThreadPool(components.Backend{Name: "sqlinst-m", Image: "mysql", Port: 3306}, "dev.local/cloudburrow-storage:x", 3)
+	mm := mb.Manifest("ns", "i")
+	for _, want := range []string{"- name: thread-pool\n", "image: dev.local/cloudburrow-storage:x", "imagePullPolicy: Never",
+		`"mysql-thread-pool"`, `"--max-pool-size", "3"`, "port: 3306\n      targetPort: 13306"} {
+		if !strings.Contains(mm, want) {
+			t.Errorf("the MySQL manifest has no %q:\n%s", want, mm)
+		}
+	}
+	if strings.Contains(mm, "port: 13306\n      targetPort") {
+		t.Errorf("the Service publishes the thread pool's own port:\n%s", mm)
 	}
 	off := s
 	off.Settings = map[string]any{"connectionPoolConfig": map[string]any{"connectionPoolingEnabled": false}}

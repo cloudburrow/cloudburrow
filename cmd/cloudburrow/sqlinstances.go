@@ -39,6 +39,9 @@ type sqlProvisioner struct {
 	// pools are the managed connection poolers' tunnels (#2141), by
 	// instance name, while their instance pools connections.
 	pools map[string]*netfwd.Forwarder
+	// poolImage is the storage image MySQL's thread pool runs from,
+	// "" until an instance needs it (#2141).
+	poolImage string
 
 	// legacyOnce asks the node once whether it runs linux/amd64
 	// binaries; legacyWhy is why not, or "" (sqllegacy.go, #1524).
@@ -119,7 +122,7 @@ func (p *sqlProvisioner) syncPooler(ctx context.Context, spec sqladmin.Spec) err
 	p.mu.Lock()
 	f := p.pools[srv]
 	p.mu.Unlock()
-	if !spec.PoolingEnabled() {
+	if !spec.PGPooling() {
 		if f != nil {
 			p.mu.Lock()
 			delete(p.pools, srv)
@@ -142,6 +145,45 @@ func (p *sqlProvisioner) syncPooler(ctx context.Context, spec sqladmin.Spec) err
 	p.mu.Unlock()
 	p.logf("Cloud SQL instance %s pools connections: its pooler (port %d) is at %s", spec.Name, sqladmin.PoolerPort, f.HostAddr())
 	return nil
+}
+
+// sqlThreadPoolImage is the cloudburrow-storage image's reference, built
+// when first asked for, which runs Cloud SQL for MySQL's thread pool
+// (#2141); up sets it, nil where it cannot build the image.
+var sqlThreadPoolImage func(context.Context) (string, error)
+
+// ensureThreadPoolImage builds the storage image before a server of
+// spec's that pools connections starts with its thread pool.
+func (p *sqlProvisioner) ensureThreadPoolImage(ctx context.Context, spec sqladmin.Spec) error {
+	if !spec.MySQLThreadPool() || p.threadPoolImage() != "" {
+		return nil
+	}
+	if sqlThreadPoolImage == nil {
+		return fmt.Errorf("instance %s pools connections, and this instance cannot build the cloudburrow-storage image its thread pool runs from", spec.Name)
+	}
+	img, err := sqlThreadPoolImage(ctx)
+	if err != nil {
+		return fmt.Errorf("the thread pool of instance %s: %w", spec.Name, err)
+	}
+	p.mu.Lock()
+	p.poolImage = img
+	p.mu.Unlock()
+	return nil
+}
+
+func (p *sqlProvisioner) threadPoolImage() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.poolImage
+}
+
+func hasFlag(flags []components.SQLInstanceFlag, name string) bool {
+	for _, f := range flags {
+		if f.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // stopPooler stops name's pooler tunnel, if it has one.
@@ -229,11 +271,24 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 		}
 		flags = append(flags, components.SQLInstanceFlag{Name: f.Name, Value: f.Value})
 	}
+	if spec.MySQLThreadPool() && !hasFlag(flags, "thread_cache_size") {
+		// "When Managed Connection Pooling is enabled for your instance,
+		// the value of the thread_cache_size metric is defaulted to 0."
+		flags = append(flags, components.SQLInstanceFlag{Name: "thread_cache_size", Value: "0"})
+	}
 	b := components.CloudSQLInstanceBackend(spec.ServerName(), spec.DatabaseVersion, true, spec.RootPassword, flags)
-	if spec.PoolingEnabled() {
+	if spec.PGPooling() {
 		// Managed connection pooling (#2141): PgBouncer beside the
 		// server, on Google's 6432.
 		b.Sidecars = append(b.Sidecars, components.CloudSQLPooler(sqladmin.PoolerPort, spec.PoolerSettings()))
+	}
+	if spec.MySQLThreadPool() {
+		// Cloud SQL for MySQL's managed connection pooling (#2141): the
+		// thread pool in front of mysqld, from the storage image, which
+		// Start made sure of.
+		if img := p.threadPoolImage(); img != "" {
+			b = components.CloudSQLMySQLThreadPool(b, img, spec.MySQLPoolSize())
+		}
 	}
 	if spec.PITREnabled() && !spec.MySQL() {
 		if len(b.Args) == 0 {
@@ -387,6 +442,9 @@ func (p *sqlProvisioner) serves(ctx context.Context, spec sqladmin.Spec) error {
 }
 
 func (p *sqlProvisioner) Start(ctx context.Context, spec sqladmin.Spec) error {
+	if err := p.ensureThreadPoolImage(ctx, spec); err != nil {
+		return err
+	}
 	primary := spec.PrimaryNode()
 	b := p.nodeBackend(spec, primary)
 	if primary != 0 {

@@ -482,6 +482,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	dataTransfer.register(coord)
 	// The Memorystore admin API (#1302), over the Valkey server's tunnel.
+	// The storage image, built when first asked for by a service that
+	// runs a front from it.
+	storageImg := lazyStorageImage(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), cfg.Name, comps, stdout), comps)
 	memorystoreAdminSvc := newMemorystoreAdminService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "memorystore") })
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
@@ -496,7 +499,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		// A Redis before 6.0 with in-transit encryption is served TLS by
 		// a front from the storage image (#1768).
-		memorystoreAdminSvc.storageImage = lazyStorageImage(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), cfg.Name, comps, stdout), comps)
+		memorystoreAdminSvc.storageImage = storageImg
 		// IAM auth (#1614) checks a token against the tokens these
 		// credentials minted and the project's IAM policy.
 		memorystoreAdminSvc.creds = creds
@@ -1215,6 +1218,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
+	// Cloud SQL for MySQL's managed connection pooling runs its thread
+	// pool from the storage image (#2141), built once an instance asks.
+	sqlThreadPoolImage = storageImg
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
 		sqlAdminRef = sqlAdminSrv

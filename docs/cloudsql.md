@@ -1716,11 +1716,22 @@ skips, and `TestCloudSQLServerRefusedWithoutEULA` checks the refusal instead; th
 
 An Enterprise instance is refused 400. SQL Server is refused 400.
 
-Cloud SQL for MySQL's managed connection pooling is a thread pool inside the server (<https://docs.cloud.google.com/sql/docs/mysql/managed-connection-pooling>). The community MySQL server has no thread pool, so it is refused 501.
+A VM reaches the pooler on 6432 at the instance's private IP and at its Private Service Connect endpoints, beside the server's 5432: both ports are in the VM's `private-services` NAT chain.
 
-A VM does not reach the pooler at a private IP or a Private Service Connect endpoint. Only the server's port is in their NAT chains.
+### Cloud SQL for MySQL
 
-The console has Connections' Enable Managed Connection Pool, with Advanced pooling options, on the create page and in Edit. The Overview's Connect to this instance shows whether the instance pools connections.
+Cloud SQL for MySQL's managed connection pooling is, as Google documents it (<https://docs.cloud.google.com/sql/docs/mysql/managed-connection-pooling> and <https://docs.cloud.google.com/sql/docs/mysql/configure-mcp>, read 2026-11-22), "a server-side thread pool rather than an external connection multiplexer": "each open client connection still maintains a dedicated server session and counts toward the `max_connections` limit". The community MySQL server has no thread pool, so CloudBurrow runs one in front of it, in the instance's pod (`internal/mysqlpool`, run from the cloudburrow-storage image as `mysql-thread-pool`):
 
-`TestCloudSQLManagedConnectionPooling` (compat, the official `sqladmin/v1` client and Cloud SQL Go connector) shows it pools. Eight clients signed in through the connector share at most `max_pool_size` 2 server connections. With pooling off, each client has a server connection of its own.
+- The instance's Service's 3306 targets the thread pool, so every path a client takes goes through it: the host tunnel, the connectors and the Auth Proxy (3307), the private IP and the Private Service Connect endpoints. Clients keep connecting on 3306.
+- Each client connection signs in to mysqld with a session of its own (the authentication exchange is relayed untouched, TLS included: the pool terminates the client's TLS with a certificate it makes at start, as mysqld does, and signs in to mysqld over TLS too).
+- A statement runs only while it holds one of `max_pool_size` threads, from the command's first byte to the last packet of its answer, read by the MySQL client/server protocol (result sets, multiple results, prepared statements, cursors' fetches, `LOAD DATA LOCAL INFILE`). Between statements a connection holds no thread. A connection inside a transaction is given the next thread first. Replication sessions (`COM_BINLOG_DUMP`, `COM_REGISTER_SLAVE`) hold none.
+- `max_pool_size` is the only flag, as Google documents. Its default "depends on the number of vCPU cores" (CloudBurrow's: one thread a vCPU, UNVERIFIED, re-read 2026-11-22); it takes a whole number from 1 (the page gives no range). Any other flag, PostgreSQL's included, is 400.
+- Enterprise Plus only: an Enterprise instance is 400. Enabling it restarts the instance, as Google documents, and so does changing `max_pool_size` here. `thread_cache_size` defaults to 0 while it is on, unless a database flag sets it. `poolerCount` is not answered.
+- Not built: the pool's metrics in Cloud Monitoring (`threads`, `pending_connection`, `avg_wait_time`); the pool serves its figures on a pod-local page only.
+
+`TestCloudSQLMySQLManagedConnectionPooling` (compat, the official `sqladmin/v1` client and Cloud SQL Go connector for MySQL) shows it pools: with `max_pool_size` 2, eight clients at once have eight sessions (connection IDs), and the server, by its own clock (`SYSDATE(6)` at each statement's start and end), runs at most two of their half-second statements at a time; turned off, more than two run together.
+
+The console has Connections' Enable Managed Connection Pool, with Advanced pooling options (MySQL's: `max_pool_size` alone), on the create page and in Edit. The Overview's Connect to this instance shows whether the instance pools connections.
+
+`TestCloudSQLManagedConnectionPooling` (compat, the official `sqladmin/v1` client and Cloud SQL Go connector) shows it pools. Eight clients signed in through the connector share at most `max_pool_size` 2 server connections. With pooling off, each client has a server connection of its own. `TestCloudSQLPrivateIPAndPSCReachableFromAVM` (compat) shows a VM reaching the pooler of one instance at its private IP and of another at a Private Service Connect endpoint, each answering PostgreSQL's SSLRequest on 6432.
 
