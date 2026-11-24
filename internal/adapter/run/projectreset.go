@@ -107,6 +107,7 @@ func (s *Server) ResetProject(ctx context.Context, project string, fns *Function
 		}
 	}
 	resetCloudBuildProject(prefixes)
+	resetCB2Project(project) // its Cloud Build connections and repositories (#2197)
 	return errors.Join(errs...)
 }
 

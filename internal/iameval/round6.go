@@ -323,7 +323,8 @@ var ArtifactRegistry = &Service{
 var CloudBuild = &Service{
 	Name: "cloudbuild.googleapis.com",
 	Types: map[string]string{"builds": "cloudbuild.googleapis.com/Build", "triggers": "cloudbuild.googleapis.com/BuildTrigger",
-		"workerPools": "cloudbuild.googleapis.com/WorkerPool"},
+		"workerPools": "cloudbuild.googleapis.com/WorkerPool", "connections": "cloudbuild.googleapis.com/Connection",
+		"repositories": "cloudbuild.googleapis.com/Repository"},
 	Methods: rows(map[string]map[string][2]string{
 		"/google.devtools.cloudbuild.v1.CloudBuild/": {
 			"CreateBuild":              {"cloudbuild.builds.create", "parent|project_id"},
@@ -344,6 +345,25 @@ var CloudBuild = &Service{
 			"UpdateWorkerPool":         {"cloudbuild.workerpools.update", "worker_pool.name"},
 			"ListWorkerPools":          {"cloudbuild.workerpools.list", "parent"},
 			"GetDefaultServiceAccount": {"cloudbuild.builds.get", "name"},
+		},
+		// Cloud Build repositories, 2nd gen (#2197): the permissions
+		// https://docs.cloud.google.com/iam/docs/roles-permissions/cloudbuild
+		// lists (read 2026-11-23), on the resource each method names.
+		"/google.devtools.cloudbuild.v2.RepositoryManager/": {
+			"CreateConnection":          {"cloudbuild.connections.create", "parent"},
+			"GetConnection":             {"cloudbuild.connections.get", "name"},
+			"ListConnections":           {"cloudbuild.connections.list", "parent"},
+			"UpdateConnection":          {"cloudbuild.connections.update", "connection.name"},
+			"DeleteConnection":          {"cloudbuild.connections.delete", "name"},
+			"FetchLinkableRepositories": {"cloudbuild.connections.fetchLinkableRepositories", "connection"},
+			"CreateRepository":          {"cloudbuild.repositories.create", "parent"},
+			"BatchCreateRepositories":   {"cloudbuild.repositories.create", "parent"},
+			"GetRepository":             {"cloudbuild.repositories.get", "name"},
+			"ListRepositories":          {"cloudbuild.repositories.list", "parent"},
+			"DeleteRepository":          {"cloudbuild.repositories.delete", "name"},
+			"FetchReadToken":            {"cloudbuild.repositories.accessReadToken", "repository"},
+			"FetchReadWriteToken":       {"cloudbuild.repositories.accessReadWriteToken", "repository"},
+			"FetchGitRefs":              {"cloudbuild.repositories.fetchGitRefs", "repository"},
 		},
 	}),
 	Deny: newerDenyOf,

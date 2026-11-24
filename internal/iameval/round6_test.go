@@ -10,6 +10,7 @@ import (
 
 	_ "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	"cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	_ "cloud.google.com/go/cloudbuild/apiv2/cloudbuildpb"
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"cloud.google.com/go/run/apiv2/runpb"
 	"google.golang.org/grpc"

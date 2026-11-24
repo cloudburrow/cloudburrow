@@ -67,6 +67,13 @@ func (d *DeveloperConnectServer) mintLinkToken(ctx context.Context, link string,
 	if err != nil {
 		return "", time.Time{}, apierror.FailedPrecondition("%v", err)
 	}
+	return mintGitToken(ctx, link, repo, write)
+}
+
+// mintGitToken makes a token for repo, the Secure Source Manager repository
+// that link (a Developer Connect link or a Cloud Build repository, #2197)
+// names: it stops working once link no longer names repo.
+func mintGitToken(ctx context.Context, link, repo string, write bool) (string, time.Time, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", time.Time{}, apierror.Internal(err, "a token")

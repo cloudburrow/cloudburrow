@@ -196,6 +196,9 @@ func (c *CloudBuildServer) CreateBuildTrigger(ctx context.Context, req *cbpb.Cre
 	if err := unsupportedTrigger(t); err != nil {
 		return nil, err
 	}
+	if err := checkRepositoryTrigger(t, location); err != nil {
+		return nil, err
+	}
 	t.Id = uuid.NewString()
 	t.ResourceName = "projects/" + project + "/locations/" + location + "/triggers/" + t.Id
 	t.CreateTime = timestamppb.Now()
@@ -414,6 +417,10 @@ func (c *CloudBuildServer) UpdateBuildTrigger(ctx context.Context, req *cbpb.Upd
 		return nil, err
 	}
 	if err := unsupportedTrigger(next); err != nil {
+		return nil, err
+	}
+	_, nextLocation, _ := resource.ParseLocation(strings.SplitN(next.GetResourceName(), "/triggers/", 2)[0])
+	if err := checkRepositoryTrigger(next, nextLocation); err != nil {
 		return nil, err
 	}
 	if wc := next.GetWebhookConfig(); wc != nil {

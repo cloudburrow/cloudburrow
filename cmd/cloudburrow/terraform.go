@@ -82,6 +82,11 @@ var terraformEndpoints = []terraformEndpoint{
 	// TestTerraformCloudBuildTriggerAndWorkerPool (#1422).
 	{config.ServiceRun, "artifact_registry_custom_endpoint", "GOOGLE_ARTIFACT_REGISTRY_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	{config.ServiceRun, "cloud_build_custom_endpoint", "GOOGLE_CLOUD_BUILD_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Cloud Build repositories, 2nd gen (#2197), at Google's /v2/ paths on
+	// the Run port: google_cloudbuildv2_connection (a GitLab host at the
+	// instance's git server) and google_cloudbuildv2_repository apply, plan
+	// clean and destroy in TestTerraformCloudBuildV2.
+	{config.ServiceRun, "cloudbuildv2_custom_endpoint", "GOOGLE_CLOUDBUILDV2_CUSTOM_ENDPOINT", "/v2/", true, ""},
 	// Secure Source Manager (#1521, #1527), on the Run port under its
 	// prefix: google_secure_source_manager_instance, _repository and their
 	// *_iam_member (stored, never enforced) apply, plan clean, update and
@@ -582,14 +587,13 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 			unpointedPrefix{"google_cloud_run_", "this instance does not serve Cloud Run"},
 			unpointedPrefix{"google_artifact_registry_", "this instance does not serve Artifact Registry (it is on the Run port)"},
 			unpointedPrefix{"google_cloudbuild_", "this instance does not serve Cloud Build (it is on the Run port)"},
+			unpointedPrefix{"google_cloudbuildv2_", "this instance does not serve Cloud Build repositories (they are on the Run port)"},
 			unpointedPrefix{"google_secure_source_manager_", "this instance does not serve Secure Source Manager (it is on the Run port)"},
 			unpointedPrefix{"google_developer_connect_", "this instance does not serve Developer Connect (it is on the Run port)"},
 			unpointedPrefix{"google_cloudfunctions2_", "this instance does not serve Cloud Functions (it is on the Run port)"},
 			unpointedPrefix{"google_cloudfunctions_", "this instance does not serve Cloud Functions (it is on the Run port)"})
 	}
-	// Whatever is enabled: no instance serves Cloud Build v2's repository
-	// connections, so the provider has no local endpoint for them (#1304).
-	// Cloud Functions v2 (#1377) and v1 (#1428) are served on the Run port.
+	// Whatever is enabled: Cloud Functions v2 (#1377) and v1 (#1428) are served on the Run port.
 	// Three list data sources call a fixed Google URL whatever the
 	// provider's custom endpoints say (measured with hashicorp/google 8.4.0,
 	// #1304): google_storage_buckets lists at
@@ -607,7 +611,6 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 	// Before #1578 the wrapper let them through, to real Google, whenever the
 	// Run port or Resource Manager was served.
 	out = append(out,
-		unpointedPrefix{"google_cloudbuildv2_", "CloudBurrow does not serve Cloud Build v2 connections"},
 		unpointedPrefix{"google_storage_buckets", "the provider lists buckets at storage.googleapis.com, ignoring storage_custom_endpoint"},
 		unpointedPrefix{"google_projects", "the provider lists projects at cloudresourcemanager.googleapis.com, ignoring resource_manager_custom_endpoint"},
 		unpointedPrefix{"google_folders", "the provider lists folders at cloudresourcemanager.googleapis.com, ignoring resource_manager_v3_custom_endpoint"},
