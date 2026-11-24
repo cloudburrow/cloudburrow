@@ -12541,6 +12541,8 @@
         "tests": [
           "test/compat/bigqueryasyncjobs_test.go:60 TestBigQueryAsyncJobs",
           "test/compat/bigquerycontinuous2193_test.go:392 TestBigQueryContinuousQueryPubSub",
+          "test/compat/bigquerycontinuousstateful2193_test.go:226 TestBigQueryContinuousQueryJoin",
+          "test/compat/bigquerycontinuousstateful2193_test.go:60 TestBigQueryContinuousQueryTumblePubSub",
           "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
         ]
@@ -12688,6 +12690,8 @@
           "test/compat/bigquerycontinuous2193_test.go:392 TestBigQueryContinuousQueryPubSub",
           "test/compat/bigquerycontinuous2193_test.go:523 TestBigQueryContinuousQueryInsert",
           "test/compat/bigquerycontinuous2193_test.go:587 TestBigQueryContinuousQueryBigtableAndSpanner",
+          "test/compat/bigquerycontinuousstateful2193_test.go:226 TestBigQueryContinuousQueryJoin",
+          "test/compat/bigquerycontinuousstateful2193_test.go:60 TestBigQueryContinuousQueryTumblePubSub",
           "test/compat/bigquerycopykey1762_test.go:33 TestBigQueryCopyKey1762",
           "test/compat/bigquerycopykey1822_test.go:35 TestBigQueryCopyKeyPartition1822",
           "test/compat/bigquerycopylayout1759_test.go:43 TestBigQueryCopyLayout1759",

@@ -60,7 +60,8 @@ import (
 //     run that reads the later of its rows: the run reads its sources back
 //     by the JOIN's interval, and keeps the pairs whose later row is new.
 //
-// UNVERIFIED: the refusals' messages and codes (Google gives none); the
+// UNVERIFIED (docs re-read 2026-11-23: the three pages above): the
+// refusals' messages and codes (Google gives none); the
 // watermark as the latest row read rather than a lower bound of the
 // sources' progress (Google documents only the closing rule above).
 
