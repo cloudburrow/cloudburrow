@@ -709,7 +709,7 @@
           "test/compat/run_test.go:149 TestRunRevisions",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runsettings_test.go:37 TestRunServiceStoredSettingsAndSubPath",
-          "test/compat/vpcaccess2140_test.go:234 TestRunVPCEgressThroughTheGoClient2140"
+          "test/compat/vpcaccess2140_test.go:244 TestRunVPCEgressThroughTheGoClient2140"
         ]
       },
       {
@@ -748,7 +748,7 @@
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount",
-          "test/compat/vpcaccess2140_test.go:234 TestRunVPCEgressThroughTheGoClient2140",
+          "test/compat/vpcaccess2140_test.go:244 TestRunVPCEgressThroughTheGoClient2140",
           "test/compat/vpctraffic2140_test.go:320 TestRunReachesVMsThroughConnectorsAndDirectVPCEgress2140"
         ]
       },
@@ -801,7 +801,7 @@
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount",
-          "test/compat/vpcaccess2140_test.go:234 TestRunVPCEgressThroughTheGoClient2140"
+          "test/compat/vpcaccess2140_test.go:244 TestRunVPCEgressThroughTheGoClient2140"
         ]
       },
       {
@@ -4541,7 +4541,7 @@
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations",
           "test/compat/terraform_hardcoded_test.go:217 TestTerraformLocationsIntercepted",
-          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       },
       {
@@ -5975,7 +5975,7 @@
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations",
           "test/compat/terraform_hardcoded_test.go:217 TestTerraformLocationsIntercepted",
-          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       },
       {
@@ -17204,7 +17204,7 @@
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/vpcaccess2140_test.go:318 TestServerlessVPCAccessUpdateConnectorThroughTheGoClient2140"
+          "test/compat/vpcaccess2140_test.go:328 TestServerlessVPCAccessUpdateConnectorThroughTheGoClient2140"
         ]
       },
       {
@@ -24921,7 +24921,7 @@
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/CreateConnector",
         "status": "Verified",
         "tests": [
-          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient",
+          "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient",
           "test/compat/vpctraffic2140_test.go:320 TestRunReachesVMsThroughConnectorsAndDirectVPCEgress2140"
         ]
       },
@@ -24929,7 +24929,7 @@
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/DeleteConnector",
         "status": "Verified",
         "tests": [
-          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient",
+          "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient",
           "test/compat/vpctraffic2140_test.go:320 TestRunReachesVMsThroughConnectorsAndDirectVPCEgress2140"
         ]
       },
@@ -24937,14 +24937,14 @@
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/GetConnector",
         "status": "Verified",
         "tests": [
-          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       },
       {
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/ListConnectors",
         "status": "Verified",
         "tests": [
-          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       }
     ]
