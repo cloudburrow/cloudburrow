@@ -1,6 +1,7 @@
 package filestoreserver
 
 import (
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -119,5 +120,21 @@ func TestEncryptedBackupsOpenOnlyWithTheirKeyAndWhole(t *testing.T) {
 	}
 	if _, err := read(sealed[:len(sealed)-chunkSize/2], dek); err == nil {
 		t.Fatal("a cut backup opened")
+	}
+}
+
+// A node killed while a process waits on an NFS server, which an exec can
+// no longer join, may still mount the address, so its tombstone stays; a
+// node Docker reports stopped or gone mounts nothing.
+func TestAStuckNodeStillMountsItsShares(t *testing.T) {
+	for msg, want := range map[string]bool{
+		"docker exec -i: exit status 127: ":                                          true,
+		"OCI runtime exec failed: error executing setns process: exit status 1":      true,
+		"Error response from daemon: container 5c4e4d391bae is not running":          false,
+		"Error response from daemon: No such container: cloudburrow-ci-gke-1-5044-1": false,
+	} {
+		if got := stuckNode(errors.New(msg)); got != want {
+			t.Errorf("stuckNode(%q) = %v, want %v", msg, got, want)
+		}
 	}
 }

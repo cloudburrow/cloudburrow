@@ -258,6 +258,12 @@ func (d *Docker) mounted(ctx context.Context, address, ip string) (bool, error) 
 	for _, n := range nodes {
 		out, err := d.docker(ctx, "exec", n, "sh", "-c", mountedScript, "sh", address, ip)
 		if err != nil {
+			if stuckNode(err) {
+				// A node killed while its processes wait on an NFS
+				// server cannot be read, and goes only once the server
+				// answers them: so it may still mount address.
+				return true, nil
+			}
 			// A node going away mounts nothing any more.
 			continue
 		}
@@ -266,6 +272,17 @@ func (d *Docker) mounted(ctx context.Context, address, ip string) (bool, error) 
 		}
 	}
 	return false, nil
+}
+
+// stuckNode is whether err, a docker exec's into a node Docker lists as
+// running, says the node's processes are gone but the node is not: its
+// init was killed, and a process blocked in NFS I/O keeps it, so the exec
+// cannot join it ("exit status 127", runc's setns failure). Docker cannot
+// remove such a node ("did not receive an exit event") until its NFS
+// server answers.
+func stuckNode(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "exit status 127") || strings.Contains(msg, "error executing setns process")
 }
 
 func (d *Docker) tombstone(key string) string { return d.container(key) + "-deleted" }
