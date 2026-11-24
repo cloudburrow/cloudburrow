@@ -771,15 +771,24 @@ docs.cloud.google.com/sql/docs/postgres/use-advanced-disaster-recovery):
 gives the replica a Percona XtraBackup backup of the source instead of a dump, and then
 replicates by GTID auto-positioning from the backup's GTID set (`xtrabackup_binlog_info`).
 
+- **Versions**, as [Google's guide](https://docs.cloud.google.com/sql/docs/mysql/migrate-xtrabackup-physical-file)
+  has them (re-read 2026-11-23): "Cloud SQL supports physical file-based migration for MySQL 5.7
+  and 8.0. MySQL 5.6 and 8.4 are not supported." A `MYSQL_8_0` replica restores with XtraBackup
+  8.0, a `MYSQL_5_7` one with XtraBackup 2.4 (#1524), as the guide names them. A `MYSQL_5_6` or
+  `MYSQL_8_4` replica's verification answers `UNSUPPORTED_MIGRATION_TYPE`, and its
+  `startExternalSync` is 400 (UNVERIFIED, re-read 2026-11-23: the guide gives the limit, not Cloud
+  SQL's error; the wording is CloudBurrow's). Until #1524 a `MYSQL_8_4` replica was synced physically here too.
+
 - **The backup** is the folder `xtrabackup --backup --target-dir` writes, uploaded to Cloud
   Storage, and the source representation instance's `dumpFilePath` names the folder
   (`gs://BUCKET/FOLDER`). A replica created with a folder that holds `xtrabackup_checkpoints` is
   not seeded from it as from a dump: it waits for the physical sync. With no `dumpFilePath`, and a
   source that is a CloudBurrow instance's server (`sqlinst-NAME:3306`, or `cloudsql-mysql:3306`),
   the sync takes the backup itself, with the source's volume mounted and the replication user.
-- **How it runs** on a persistent instance: a Kubernetes Job of the official multi-arch `percona/percona-xtrabackup` image
-  of the replica's major version (`8.0`, XtraBackup 8.0.35, or `8.4`, 8.4.0; pinned by digest, and
-  pulled by the node the first time), on the replica's volume while its server is stopped: the
+- **How it runs** on a persistent instance: a Kubernetes Job of the official `percona/percona-xtrabackup` image
+  of the replica's major version (`8.0`, XtraBackup 8.0.35, multi-arch; or `2.4`, XtraBackup 2.4.29,
+  linux/amd64 only like `mysql:5.7`, so it runs wherever a `MYSQL_5_7` instance does; pinned by
+  digest, and pulled by the node the first time), on the replica's volume while its server is stopped: the
   backup's files are first written onto that volume, then `xtrabackup --prepare` and
   `--copy-back` replace the data directory, without the source's `auto.cnf` (its server UUID)
   and `mysqld-auto.cnf`. The server starts on the copy with an `--init-file` that sets `root`'s
@@ -813,7 +822,9 @@ replicates by GTID auto-positioning from the backup's GTID set (`xtrabackup_binl
   `INSUFFICIENT_PRIVILEGE` and `REPLICA_ALREADY_SETUP`. The replication user needs
   `REPLICATION SLAVE`, `REPLICATION CLIENT` and `SELECT` (so every table's engine can be seen),
   and, when the sync takes the backup, XtraBackup's `RELOAD`, `PROCESS`, `BACKUP_ADMIN` and
-  `SELECT` on `performance_schema.log_status`. A zstd-compressed backup is decompressed first.
+  `SELECT` on `performance_schema.log_status`; for a MySQL 5.7 source, XtraBackup 2.4's `RELOAD`,
+`LOCK TABLES` and `PROCESS` (5.7 has neither `BACKUP_ADMIN` nor `log_status`). A zstd-compressed
+backup is decompressed first.
 - In the console, a MySQL replica's **Verify external sync settings** and **Start external sync**
   have a **Migration type**, `LOGICAL` or `PHYSICAL`.
 
@@ -899,18 +910,19 @@ enforced, as on Cloud SQL; its binary log starts afresh after its initialisation
 with `SET PERSIST` is `SET GLOBAL` there: a REGIONAL instance's semi-synchronous replication is set
 again when its server restarts. A point-in-time recovery stops at the first transaction committed
 after the target by the binary log event's time, in seconds, as 5.7's and 5.6's GTID events carry no
-commit timestamp (8.0.1 added it). A physical (XtraBackup) external sync stays 501: CloudBurrow's
-XtraBackup images are 8.0's and 8.4's. `flags.list` answers no flags for it. The console's version
+commit timestamp (8.0.1 added it). A physical (XtraBackup) external sync is served too (#1524), with
+XtraBackup 2.4 ([A physical sync](#external-primaries-1501-1524)). `flags.list` answers no flags for it. The console's version
 picker offers it, and its instance page has the same Create read replica, high availability, point-in-
 time clone, Demote and Create blue-green deployment actions as 8.0's.
 
 **MySQL 5.6 (#1524)** is served the same way. Its official image, `mysql:5.6`, was last built in
 2021-12 (5.6.51), only for linux/amd64, and is pinned by that manifest's digest
 (`docker buildx imagetools inspect mysql:5.6`, 2026-11-18). It starts under the same open-files
-limit, and serves and refuses what a MySQL 5.7 instance does; its upgrade is to `MYSQL_5_7`. Two
+limit, and serves and refuses what a MySQL 5.7 instance does; its upgrade is to `MYSQL_5_7`. Three
 more are 400, as Cloud SQL documents them: a blue-green deployment ("your instance must run Cloud SQL
-for MySQL version 5.7, 8.0, or 8.4"), and a replica of a 5.6 read replica, as Cloud SQL logs a
-replica's binary log on "MySQL 5.7 and later only"; the console offers neither. MySQL 5.6 has no
+for MySQL version 5.7, 8.0, or 8.4"), a replica of a 5.6 read replica, as Cloud SQL logs a
+replica's binary log on "MySQL 5.7 and later only", and a physical (XtraBackup) external sync
+("MySQL 5.6 and 8.4 are not supported", #1524); the console offers neither of the first two. MySQL 5.6 has no
 `super_read_only`, so a 5.6 replica is `read_only`; no `WAIT_FOR_EXECUTED_GTID_SET`, so a failover
 waits with `WAIT_UNTIL_SQL_THREAD_AFTER_GTIDS`; no lossless (`AFTER_SYNC`) semi-synchronous
 replication, so a REGIONAL 5.6 instance's standby acknowledges after the commit; no TLS certificate
