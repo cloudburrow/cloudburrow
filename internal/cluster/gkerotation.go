@@ -26,8 +26,9 @@ import (
 //     both. The admin credentials are made again from the new CA.
 //   - Complete stops trusting the old CA: the serving certificate loses
 //     its old-CA intermediate, the control plane's and every node's
-//     credentials are re-issued from the new CA, the bundles hold only the
-//     new CA, and the pods are re-created (GKE re-creates the nodes), so
+//     credentials are re-issued from the new CA (and the scheduler, whose
+//     manifest is unchanged, started again to read its own), the bundles
+//     hold only the new CA, and the pods are re-created (GKE re-creates the nodes), so
 //     every in-cluster client reads the new CA.
 //
 // The key files never leave the control plane except a node's kubelet key,
@@ -177,6 +178,16 @@ func (g *GKE) CompleteCredentialRotation(ctx context.Context, kind string) (GKEA
 	if err := g.setClusterInfoCA(ctx, kind, ca); err != nil {
 		return GKEAccess{}, err
 	}
+	// The scheduler's manifest is unchanged, so the kubelet leaves it
+	// running with the kubeconfig it read at start: a client certificate
+	// of the old CA, which trusts only the old CA, so that it could
+	// schedule none of the pods re-created below (main run 45382531465:
+	// CoreDNS Pending, the scheduler "x509: certificate signed by unknown
+	// authority"). GKE's control plane comes back whole with the new
+	// credentials: the scheduler starts again with its re-issued one.
+	if err := g.restartControlPlaneContainer(ctx, kind, "kube-scheduler"); err != nil {
+		return GKEAccess{}, err
+	}
 	// GKE re-creates the nodes, so every pod starts again with the new
 	// CA; locally the pods are re-created on the nodes they ran on.
 	if _, err := r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "delete", "pods", "--all", "--all-namespaces", "--wait=false"); err != nil {
@@ -190,6 +201,38 @@ func (g *GKE) CompleteCredentialRotation(ctx context.Context, kind string) (GKEA
 		return GKEAccess{}, err
 	}
 	return a, nil
+}
+
+// restartControlPlaneContainer stops the control plane's running
+// container of static pod component, which the kubelet starts again with
+// the files its manifest mounts, and waits for the new container to run.
+func (g *GKE) restartControlPlaneContainer(ctx context.Context, kind, component string) error {
+	r := g.runner()
+	cp := kind + "-control-plane"
+	running := func() string {
+		out, _ := r.Run(ctx, "docker", "exec", cp, "crictl", "ps", "-q", "--state", "running", "--name", "^"+component+"$")
+		return strings.TrimSpace(out)
+	}
+	old := running()
+	if old != "" {
+		if _, err := r.Run(ctx, "docker", "exec", cp, "crictl", "stop", "--timeout", "10", old); err != nil {
+			return fmt.Errorf("restart %s: %w", component, err)
+		}
+	}
+	deadline := time.Now().Add(3 * time.Minute)
+	for {
+		if id := running(); id != "" && id != old {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s did not start again with the rotated credentials", component)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 // trustOnNodes writes bundle as every node's cluster CA; with reissue the

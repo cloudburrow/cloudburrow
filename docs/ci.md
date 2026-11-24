@@ -213,6 +213,17 @@ The compat job's `gke` shard runs on the `served` shard's instance again. It run
 client, gcloud and Terraform), which make kind clusters beside the instance's; the `served` shard
 skips them. Together they passed the served suite's 60-minute deadline in main runs 45023269046
 and 45047408927: no test hung, and the Kubernetes Engine tests took 2,828 s of it.
+It skips `COMPAT_GKE_UPGRADE_TESTS`, which the `gkeupgrade` shard runs.
+
+### The gkeupgrade shard
+
+The compat job's `gkeupgrade` shard runs on the `served` shard's instance again too. It runs only
+`COMPAT_GKE_UPGRADE_TESTS` from `scripts/compat-shards.sh` (named in `COMPAT_GKE_UPGRADE_TEST_NAMES`):
+Kubernetes Engine's upgrades, rollbacks and IP and credential rotations, through the client and
+gcloud. The `gke` shard reached go test's 60-minute deadline in main run 45382531465 once Landing
+168 (#2100) added them: its tests had run 3,558 s, 2,080 s of them these. `test/repo`'s
+`TestCompatGKEShardsSplitTheKubernetesEngineTests` fails unless each Kubernetes Engine test runs in
+exactly one of the two shards.
 
 ### The localaispeech shard
 

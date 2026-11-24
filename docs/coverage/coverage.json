@@ -26326,15 +26326,15 @@
         "method": "google.container.v1.ClusterManager/CompleteControlPlaneUpgrade",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:305 TestGKERollbackSafeUpgrade",
-          "test/compat/gkemethods_test.go:475 TestGcloudContainerRotationLocationsAndUpgradeInfo"
+          "test/compat/gkemethods_test.go:307 TestGKERollbackSafeUpgrade",
+          "test/compat/gkemethods_test.go:477 TestGcloudContainerRotationLocationsAndUpgradeInfo"
         ]
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteIPRotation",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:475 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:477 TestGcloudContainerRotationLocationsAndUpgradeInfo",
           "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo"
         ]
       },
@@ -26386,7 +26386,7 @@
         "method": "google.container.v1.ClusterManager/FetchClusterUpgradeInfo",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:475 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:477 TestGcloudContainerRotationLocationsAndUpgradeInfo",
           "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo"
         ]
       },
@@ -26394,7 +26394,7 @@
         "method": "google.container.v1.ClusterManager/FetchNodePoolUpgradeInfo",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:475 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:477 TestGcloudContainerRotationLocationsAndUpgradeInfo",
           "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo"
         ]
       },
@@ -26503,7 +26503,7 @@
         "method": "google.container.v1.ClusterManager/SetLocations",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:475 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:477 TestGcloudContainerRotationLocationsAndUpgradeInfo",
           "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo",
           "test/compat/gkezones_test.go:59 TestGKENodeZones"
         ]
@@ -26575,7 +26575,7 @@
         "method": "google.container.v1.ClusterManager/StartIPRotation",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:475 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:477 TestGcloudContainerRotationLocationsAndUpgradeInfo",
           "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo"
         ]
       },
