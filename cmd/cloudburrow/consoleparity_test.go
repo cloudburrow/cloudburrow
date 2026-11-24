@@ -2349,7 +2349,7 @@ var parityRows = []parityRow{
 		Methods: []string{"InstanceAdmin/CreateInstance", "InstanceAdmin/GetInstance", "DatabaseAdmin/CreateDatabase", "DatabaseAdmin/GetDatabase", "DatabaseAdmin/GetDatabaseDdl",
 			"InstanceAdmin/ListInstances", "InstanceAdmin/DeleteInstance", "DatabaseAdmin/ListDatabases", "DatabaseAdmin/DropDatabase",
 			"Spanner/ExecuteStreamingSql"},
-		Provider: "spanner", Offers: "Instances, databases, tables, columns and indexes, DDL, read-only query editor, Create database, Drop database, Delete instance; Create instance on the list screen (instance ID, name, configuration, processing units) through CreateInstance (#1491); the query editor's Explanation of SQL and graph queries, drawn from PLAN and PROFILE (#2029)",
+		Provider: "spanner", Offers: "Instances, databases, tables, columns and indexes, DDL, read-only query editor, Create database, Drop database, Delete instance; Create instance on the list screen (instance ID, name, configuration, processing units) through CreateInstance (#1491); the query editor's Explanation of SQL and graph queries, drawn from PLAN and PROFILE, with Run's Results only and Explanation only and the Query execution timeline (#2029)",
 		Tests: []string{"TestConsoleSpannerCreateAndDropDatabase", "TestConsoleSpannerCreateInstance", "TestSpannerCreateInstanceThroughTheListScreen", "TestSpannerQueryPlanView", "TestSpannerStudioGraphQueryPlans"}},
 	{Resource: "Spanner split points", Service: "spanner",
 		Methods:  []string{"DatabaseAdmin/AddSplitPoints"},

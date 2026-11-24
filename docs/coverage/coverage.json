@@ -12540,6 +12540,7 @@
         "method": "google.spanner.v1.Spanner/ExecuteSql",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudspannerplans2029_test.go:24 TestGcloudSpannerExecuteSQLQueryModes",
           "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK",
           "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback",
           "test/compat/spannergraph2029c_test.go:140 TestSpannerGraphQueryPlansOfEveryStatement",
