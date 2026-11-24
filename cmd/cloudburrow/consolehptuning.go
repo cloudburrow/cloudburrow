@@ -15,7 +15,8 @@ package main
 //     Console tab, read 2026-11-24); the pane then creates a training
 //     pipeline with the hyperparameter tuning task.
 //
-// UNVERIFIED (the page above shows no screenshots): the list's columns, the
+// UNVERIFIED (the page above shows no screenshots; re-read 2026-11-24,
+// https://cloud.google.com/vertex-ai/docs/training/using-hyperparameter-tuning): the list's columns, the
 // job page's fields, the Trials table's columns (Trial ID, State, each
 // metric, each parameter, Elapsed time); and the hyperparameters' entry, one
 // per line ("NAME TYPE ..."), where Google's pane adds them one at a time.

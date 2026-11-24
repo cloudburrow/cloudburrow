@@ -16,6 +16,7 @@ import (
 
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -142,9 +143,9 @@ func TestHyperparameterTuningValidation(t *testing.T) {
 			h.StudySpec.Parameters[0].ScaleType = aiplatformpb.StudySpec_ParameterSpec_UNIT_LOG_SCALE
 		}, codes.InvalidArgument},
 		"scaled categorical": {func(h *aiplatformpb.HyperparameterTuningJob) {
-			c := *cat
+			c := proto.Clone(cat).(*aiplatformpb.StudySpec_ParameterSpec)
 			c.ScaleType = aiplatformpb.StudySpec_ParameterSpec_UNIT_LINEAR_SCALE
-			h.StudySpec.Parameters = append(h.StudySpec.Parameters, &c)
+			h.StudySpec.Parameters = append(h.StudySpec.Parameters, c)
 		}, codes.InvalidArgument},
 		"no trial job spec": {func(h *aiplatformpb.HyperparameterTuningJob) { h.TrialJobSpec = nil }, codes.InvalidArgument},
 		"early stopping": {func(h *aiplatformpb.HyperparameterTuningJob) {

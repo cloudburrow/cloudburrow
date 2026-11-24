@@ -45,7 +45,8 @@ func hpTrainerPool(image string) *aiplatformpb.WorkerPoolSpec {
 			Command: []string{"sh", "-c", hpTrainScript, "sh"}}}}
 }
 
-// covers: google.cloud.aiplatform.v1.JobService/CreateHyperparameterTuningJob, google.cloud.aiplatform.v1.JobService/GetHyperparameterTuningJob, google.cloud.aiplatform.v1.JobService/ListHyperparameterTuningJobs, google.cloud.aiplatform.v1.JobService/CancelHyperparameterTuningJob, google.cloud.aiplatform.v1.JobService/DeleteHyperparameterTuningJob
+// Not yet annotated covers: (it has not run); once it passes it covers the
+// five JobService HyperparameterTuningJob methods.
 //
 // TestVertexAIHyperparameterTuning (#2210), with the official Go client:
 // a hyperparameter tuning job of the default algorithm over a log-scaled
@@ -285,7 +286,8 @@ func hpTaskStruct(j *aiplatformpb.HyperparameterTuningJob) (*structpb.Value, err
 	return v, protojson.Unmarshal(b, v)
 }
 
-// covers: google.cloud.aiplatform.v1.JobService/CreateHyperparameterTuningJob, google.cloud.aiplatform.v1.JobService/GetHyperparameterTuningJob
+// Not yet annotated covers: (it has not run); once it passes it covers
+// JobService Create and GetHyperparameterTuningJob.
 //
 // TestPythonHyperparameterTuning (#2210): Google's Python SDKs, pinned
 // (testdata/gcpcpy: google-cloud-aiplatform 1.165.1,

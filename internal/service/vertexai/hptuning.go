@@ -46,7 +46,8 @@ package vertexai
 // /tmp/hypertune is a folder of the trial's, read when its job ends, and
 // every replica gets CLOUD_ML_TRIAL_ID.
 //
-// UNVERIFIED (Google does not document them): the default algorithm's
+// UNVERIFIED (Google does not document them; re-read 2026-11-24,
+// https://cloud.google.com/vertex-ai/docs/training/hyperparameter-tuning-overview): the default algorithm's
 // method beyond "Bayesian optimization" (here a Gaussian process with
 // expected improvement over the scaled space, after random first trials,
 // seeded by the job's name); a grid's order (the parameters' cartesian
@@ -1369,7 +1370,8 @@ func (st *notebookStore) loadHPJobs(raw []json.RawMessage) {
 // HyperparameterTuningJobMetadata (backingHyperparameterTuningJob,
 // bestTrialBackingCustomJob), as the HyperparameterTuningTask reference
 // page documents them (read 2026-11-24).
-// UNVERIFIED: the schema URI, which no page names: the custom task's,
+// UNVERIFIED (re-read 2026-11-24, https://cloud.google.com/vertex-ai/docs/reference/rest/v1/projects.locations.trainingPipelines):
+// the schema URI, which no page names: the custom task's,
 // custom_task_1.0.0.yaml, with this task's name.
 const hpTaskDefinition = "gs://google-cloud-aiplatform/schema/trainingjob/definition/hyperparameter_tuning_task_1.0.0.yaml"
 
