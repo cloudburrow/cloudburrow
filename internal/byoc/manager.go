@@ -652,7 +652,7 @@ func (m *Manager) Operation(id string) (Operation, error) {
 		return Operation{}, fmt.Errorf("operation %q: %w", id, ErrNotFound)
 	}
 	cp := *op
-	cp.Events = append([]Event(nil), op.Events...)
+	cp.Events = append([]Event{}, op.Events...)
 	return cp, nil
 }
 
@@ -677,7 +677,7 @@ func (m *Manager) startOp(kind, instance string) (*Operation, error) {
 	if id, ok := m.busy[instance]; ok {
 		return nil, fmt.Errorf("%s is busy with operation %s; wait for it to finish", instance, id)
 	}
-	op := &Operation{ID: newID("op"), Kind: kind, Instance: instance, Started: m.now()}
+	op := &Operation{ID: newID("op"), Kind: kind, Instance: instance, Started: m.now(), Events: []Event{}}
 	m.ops[op.ID] = op
 	m.opOrder = append(m.opOrder, op.ID)
 	m.busy[instance] = op.ID

@@ -11944,7 +11944,9 @@ async function computeJSON(path, { method = "GET", body } = {}) {
 
 function closeSettingsPanel() {
   const settings = document.getElementById("settings-panel");
-  if (settings && overlayOpen(settings)) {
+  const button = document.getElementById("settings");
+  // Open is read from the button too: is-open lands a frame after it.
+  if (settings && (overlayOpen(settings) || (button && button.getAttribute("aria-expanded") === "true"))) {
     hideOverlay(settings);
     document.getElementById("settings").setAttribute("aria-expanded", "false");
   }
@@ -12129,7 +12131,16 @@ function computeAccessKeyForm(showError, redraw) {
     el("div", { class: "form-row" }, el("label", { for: "compute-aws-key-token", text: "Session token (optional)" }), token,
       el("p", { class: "form-help", text: "For accounts without IAM Identity Center. The key goes to this machine's keychain, never to a file." })),
     el("div", { class: "form-actions" }, button));
-  return el("details", { id: "compute-aws-key" }, el("summary", { text: "Use an access key instead" }), form);
+  // A disclosure button rather than <details>: a closed form's fields are
+  // out of the Tab order until it is opened.
+  form.hidden = true;
+  const toggle = el("button", { type: "button", class: "link-button", id: "compute-aws-key-toggle", "aria-expanded": "false",
+    "aria-controls": "compute-aws-key-form", text: "Use an access key instead", onclick: () => {
+      form.hidden = !form.hidden;
+      toggle.setAttribute("aria-expanded", String(!form.hidden));
+      if (!form.hidden) id.focus();
+    } });
+  return el("div", { id: "compute-aws-key" }, toggle, form);
 }
 
 async function computeSignIn(cloud, body, status, showError, redraw, button) {
