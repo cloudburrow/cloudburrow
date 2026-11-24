@@ -361,6 +361,11 @@ func mergePatch(dst, patch obj) {
 func (s *Server) lbUsersLocked(rel string) []string {
 	var out []string
 	for k, o := range s.res {
+		if strings.Contains(k, "/serviceAttachments/") && str(o, "targetService") == rel {
+			// A service attachment publishing the rule (#2140).
+			out = append(out, k)
+			continue
+		}
 		if k == rel || !isLBRecord(o) {
 			continue
 		}

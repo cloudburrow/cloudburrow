@@ -42,6 +42,9 @@ type computeVMs struct {
 	// in-cluster host:port (GCE_METADATA_HOST).
 	guestBase    func() string
 	metadataHost func() string
+	// opsAgentHosts are the Ops Agent's Logging and Monitoring addresses
+	// (#2139, computeopsagent.go); nil or "" when not served.
+	opsAgentHosts func() (logging, monitoring string)
 
 	mu     sync.Mutex
 	built  map[string]bool
@@ -239,6 +242,7 @@ func (b *computeVMs) podManifest(vm compute.VMSpec, ref string) string {
 		map[string]string{"name": "GCE_METADATA_HOST", "value": meta},
 		map[string]string{"name": "GOOGLE_CLOUD_PROJECT", "value": vm.Project},
 	}
+	env = append(env, b.opsAgentEnv()...)
 	host := vm.Hostname
 	if i := strings.Index(host, "."); i > 0 {
 		host = host[:i]

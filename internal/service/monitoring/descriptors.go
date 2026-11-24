@@ -238,7 +238,8 @@ func mergeLabels(old, add []*labelpb.LabelDescriptor) []*labelpb.LabelDescriptor
 func (s *Server) countDescriptors(project string) int {
 	n := 0
 	for k := range s.descriptors {
-		if strings.HasPrefix(k, "projects/"+project+"/") {
+		// Agent metrics' descriptors are Google's, not the project's quota.
+		if strings.HasPrefix(k, "projects/"+project+"/") && !isAgentMetric(s.descriptors[k].GetType()) {
 			n++
 		}
 	}
@@ -254,6 +255,9 @@ func (s *Server) DeleteMetricDescriptor(_ context.Context, req *monitoringpb.Del
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if isAgentMetric(t) {
+		return nil, apierror.InvalidArgument("Built-in metric descriptor %s cannot be deleted; only user-defined metrics can be", t)
+	}
 	if _, ok := s.descriptors[descriptorName(project, t)]; !ok {
 		if md, builtin := s.lookup(project, t); md != nil && builtin {
 			return nil, apierror.InvalidArgument("Built-in metric descriptor %s cannot be deleted; only user-defined metrics can be", t)

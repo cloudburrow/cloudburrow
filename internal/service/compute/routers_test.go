@@ -219,6 +219,14 @@ func TestNATGatesVMEgress(t *testing.T) {
 		"nats": []any{map[string]any{"name": "n", "sourceSubnetworkIpRangesToNat": natAllPrimary, "natIpAllocateOption": natAutoOnly}}}); err != nil {
 		t.Fatal(err)
 	}
+	// Until the gateway's pod runs (natgateways.go) the VM has no route.
+	if !strings.Contains(cfg(internal), drop) {
+		t.Errorf("a NAT'd VM reaches the internet before its gateway's pod runs:\n%s", cfg(internal))
+	}
+	for _, g := range s.natGatewaysLocked() {
+		s.vpcConfigLocked(obj{"selfLink": natRel(g.Key), "zone": "us-central1-a", "status": stRunning, "_natGateway": g.Key,
+			"networkInterfaces": []any{obj{"network": g.Network, "networkIP": g.IP}}}, "10.244.0.30")
+	}
 	if strings.Contains(cfg(internal), drop) {
 		t.Errorf("a NAT'd VM still has no internet:\n%s", cfg(internal))
 	}

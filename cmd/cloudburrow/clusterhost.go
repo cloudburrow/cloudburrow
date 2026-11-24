@@ -67,6 +67,8 @@ type clusterHost struct {
 	mode    string
 	ports   map[string]int
 	relays  []*hostrelay.Relay
+	// reached are the loopback listeners Reach relays (clusterhostreach.go).
+	reached map[string]bool
 	// clusterIP is the Service's, which a Cloud SQL Auth Proxy dials (#1346).
 	clusterIP string
 }
@@ -289,7 +291,7 @@ func (h *clusterHost) Start(ctx context.Context) error {
 func (h *clusterHost) Stop(context.Context) error {
 	h.mu.Lock()
 	relays := h.relays
-	h.relays = nil
+	h.relays, h.reached = nil, nil
 	h.mu.Unlock()
 	for _, r := range relays {
 		_ = r.Close()

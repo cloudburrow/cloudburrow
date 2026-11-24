@@ -28,9 +28,13 @@ import (
 //     subnetwork interface is checked against the router's network and
 //     region. A BGP peer names an existing interface, a peer ASN, and on a
 //     subnetwork interface the router appliance VM it peers with.
-//   - BGP sessions never come up: no peer router exists locally, so
-//     getRouterStatus answers every peer DOWN, with the routes the router
-//     would advertise to it.
+//   - a router appliance peer's BGP session is real (bgpspeakers.go):
+//     GoBGP speaks for each subnetwork interface at its privateIpAddress
+//     on the network's VXLAN segment, getRouterStatus reports each
+//     session's state, uptime and learned routes, and the network's VMs
+//     route what the peers advertise to the appliance. A peer whose
+//     speaker has not reported is DOWN, with the routes the router would
+//     advertise to it.
 //   - a NAT gateway (nats[]) translates the subnets it names, in the
 //     router's region and network; a subnet is NAT'd by one gateway only,
 //     and a gateway of ALL_SUBNETWORKS_* is a region and network's only one.
@@ -49,6 +53,7 @@ const (
 	bgpDefaultKeep    = 20
 	bgpDefaultPrio    = 100
 	natTypePublic     = "PUBLIC"
+	natTypePrivate    = "PRIVATE"
 	natAllAll         = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 	natAllPrimary     = "ALL_SUBNETWORKS_ALL_PRIMARY_IP_RANGES"
 	natList           = "LIST_OF_SUBNETWORKS"
@@ -88,6 +93,8 @@ func (s *Server) routers(c call, region string) (obj, error) {
 		return s.natMappingInfo(c, region, p[3])
 	case n == 5 && get && p[4] == "getNatIpInfo":
 		return s.natIPInfo(c, region, p[3])
+	case n == 5 && routePolicyMethods[p[4]] != "":
+		return s.routePolicies(c, region, p[3], p[4])
 	case n == 5 && post && p[4] == "preview":
 		r, err := s.checkRouter(c.project, region, c.body, nil)
 		if err != nil {
@@ -95,7 +102,7 @@ func (s *Server) routers(c call, region string) (obj, error) {
 		}
 		return obj{"resource": r}, nil
 	}
-	return nil, unimplemented("%s %s/%s: CloudBurrow serves routers' insert, get, list, patch, update, delete, preview, getRouterStatus, getNatMappingInfo and getNatIpInfo; route policies, named sets and listBgpRoutes are not served",
+	return nil, unimplemented("%s %s/%s: CloudBurrow serves routers' insert, get, list, patch, update, delete, preview, getRouterStatus, getNatMappingInfo, getNatIpInfo, route policies and named sets; listBgpRoutes is not served",
 		c.method, coll, strings.Join(p[3:], "/"))
 }
 
@@ -195,6 +202,11 @@ func (s *Server) checkRouter(project, region string, b, old obj) (obj, error) {
 	}
 	r := obj{"kind": routerKind, "name": name, "selfLink": rel, "network": nwRel,
 		"region": "projects/" + project + "/regions/" + region}
+	for _, k := range []string{"_routePolicies", "_namedSets"} {
+		if old != nil && old[k] != nil {
+			r[k] = old[k] // kept across patch and update (routepolicies.go)
+		}
+	}
 	if d := str(b, "description"); d != "" {
 		r["description"] = d
 	}
@@ -576,6 +588,9 @@ func (s *Server) checkPeers(project, region, network string, asn float64, ifaces
 			}
 			o["customLearnedRoutePriority"] = clp
 		}
+		if err := peerPolicies(f, m, o, r); err != nil {
+			return nil, err
+		}
 		out = append(out, o)
 	}
 	return out, nil
@@ -584,8 +599,8 @@ func (s *Server) checkPeers(project, region, network string, asn float64, ifaces
 // natSubnetsLocked are the subnets (and how) the router's region and
 // network's NAT gateways translate, other than those of skip/skipNat.
 type natClaim struct {
-	router, nat, mode string
-	subnets           map[string]bool
+	router, nat, mode, typ string
+	subnets                map[string]bool
 }
 
 func (s *Server) natClaimsLocked(network, region, skipRouter string) []natClaim {
@@ -596,7 +611,7 @@ func (s *Server) natClaimsLocked(network, region, skipRouter string) []natClaim 
 		}
 		for _, e := range sliceOf(r["nats"]) {
 			m, _ := e.(map[string]any)
-			c := natClaim{router: k, nat: str(m, "name"), mode: str(m, "sourceSubnetworkIpRangesToNat"), subnets: map[string]bool{}}
+			c := natClaim{router: k, nat: str(m, "name"), mode: str(m, "sourceSubnetworkIpRangesToNat"), typ: natTypeOf(m), subnets: map[string]bool{}}
 			for _, se := range sliceOf(m["subnetworks"]) {
 				sm, _ := se.(map[string]any)
 				c.subnets[str(sm, "name")] = true
@@ -629,8 +644,7 @@ func (s *Server) checkNats(project, region, network, router string, old obj, l [
 		switch typ {
 		case "", natTypePublic:
 			typ = natTypePublic
-		case "PRIVATE":
-			return nil, unimplemented("%s.type PRIVATE: Private NAT translates between Network Connectivity Center spokes and hybrid networks, which are not served", f)
+		case natTypePrivate:
 		default:
 			return nil, invalid("Invalid value for field '%s.type': '%s'. Must be one of [PRIVATE, PUBLIC]", f, typ)
 		}
@@ -641,7 +655,7 @@ func (s *Server) checkNats(project, region, network, router string, old obj, l [
 			}
 		}
 		mode := str(m, "sourceSubnetworkIpRangesToNat")
-		cl := natClaim{router: router, nat: name, mode: mode, subnets: map[string]bool{}}
+		cl := natClaim{router: router, nat: name, mode: mode, typ: typ, subnets: map[string]bool{}}
 		switch mode {
 		case "":
 			return nil, required(f + ".sourceSubnetworkIpRangesToNat")
@@ -718,6 +732,11 @@ func (s *Server) checkNats(project, region, network, router string, old obj, l [
 		// region and network's only one (nat/docs/overview, "Cloud NAT
 		// rules and limits").
 		for _, c := range claims {
+			if c.typ != typ {
+				// A subnet can use a Public NAT and a Private NAT gateway
+				// at once (nat/docs/private-nat).
+				continue
+			}
 			switch {
 			case c.mode != natList || cl.mode != natList:
 				return nil, invalid("Invalid value for field '%s.sourceSubnetworkIpRangesToNat': '%s'. NAT gateway '%s' of router '%s' already translates subnetworks of network '%s' in region '%s'; a gateway that translates all subnetworks must be the only one.",
@@ -731,7 +750,11 @@ func (s *Server) checkNats(project, region, network, router string, old obj, l [
 			}
 		}
 		claims = append(claims, cl)
-		if err := s.checkNatIPs(project, region, router, f, m, o); err != nil {
+		if typ == natTypePrivate {
+			if err := checkPrivateNat(f, m); err != nil {
+				return nil, err
+			}
+		} else if err := s.checkNatIPs(project, region, router, f, m, o); err != nil {
 			return nil, err
 		}
 		if err := checkNatPorts(f, m, o); err != nil {
@@ -759,7 +782,7 @@ func (s *Server) checkNats(project, region, network, router string, old obj, l [
 			}
 		}
 		o["logConfig"] = lc
-		rules, err := s.checkNatRules(project, region, f, sliceOf(m["rules"]), o)
+		rules, err := s.checkNatRules(project, region, network, f, sliceOf(m["rules"]), o)
 		if err != nil {
 			return nil, err
 		}
@@ -889,7 +912,10 @@ func checkNatPorts(f string, m, o obj) error {
 	return nil
 }
 
-func (s *Server) checkNatRules(project, region, f string, l []any, nat obj) ([]any, error) {
+func (s *Server) checkNatRules(project, region, network, f string, l []any, nat obj) ([]any, error) {
+	if str(nat, "type") == natTypePrivate {
+		return s.checkPrivateNatRules(project, region, network, f, l)
+	}
 	var out []any
 	seen := map[int]bool{}
 	for i, e := range l {
@@ -1055,7 +1081,7 @@ func (s *Server) natAutoIPsLocked() map[string]bool {
 
 // natVM is a VM a gateway translates.
 type natVM struct {
-	rel, name, ip string
+	rel, name, ip, zone, subnet string
 }
 
 // natCovers reports whether the gateway m of a router in network and
@@ -1095,7 +1121,7 @@ func (s *Server) natVMsLocked(r obj, m map[string]any) []natVM {
 			continue
 		}
 		if natCovers(m, str(nic, "subnetwork")) {
-			out = append(out, natVM{rel: k, name: str(o, "name"), ip: str(nic, "networkIP")})
+			out = append(out, natVM{rel: k, name: str(o, "name"), ip: str(nic, "networkIP"), zone: lastSeg(str(o, "zone")), subnet: str(nic, "subnetwork")})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].rel < out[j].rel })
@@ -1118,7 +1144,7 @@ func (s *Server) natInternetLocked(inst obj) bool {
 			continue
 		}
 		for _, e := range sliceOf(r["nats"]) {
-			if m, _ := e.(map[string]any); natCovers(m, sub) {
+			if m, _ := e.(map[string]any); natTypeOf(m) == natTypePublic && natCovers(m, sub) {
 				return true
 			}
 		}
@@ -1160,11 +1186,12 @@ func (s *Server) routerOf(project, region, name string) (obj, string, error) {
 	return r, rel, nil
 }
 
-// routerStatus is getRouterStatus: no BGP session ever comes up locally,
-// so every peer is DOWN, with what it would be advertised; each NAT
-// gateway's addresses and the VMs it translates.
+// routerStatus is getRouterStatus: each peer's session as its speaker
+// reported it (bgpspeakers.go), DOWN until it has, with what it is
+// advertised; the routes the router learned; each NAT gateway's
+// addresses and the VMs it translates.
 func (s *Server) routerStatus(project, region, name string) (obj, error) {
-	r, _, err := s.routerOf(project, region, name)
+	r, rel, err := s.routerOf(project, region, name)
 	if err != nil {
 		return nil, err
 	}
@@ -1180,7 +1207,8 @@ func (s *Server) routerStatus(project, region, name string) (obj, error) {
 			}
 		}
 		if str(m, "enable") != "FALSE" {
-			// The routers it would advertise once the session is up.
+			s.peerStatusLocked(rel, r, m, ps)
+			// The routes it is advertised (once the session is up).
 			var routes []any
 			for _, c := range advertisedFor(m, r, adv) {
 				routes = append(routes, obj{"kind": "compute#route", "destRange": c, "nextHopIp": str(m, "ipAddress"),
@@ -1195,8 +1223,9 @@ func (s *Server) routerStatus(project, region, name string) (obj, error) {
 	var nats []any
 	for _, e := range sliceOf(r["nats"]) {
 		m, _ := e.(map[string]any)
-		ips, resources := s.natIPsOf(m)
-		vms := s.natVMsLocked(r, m)
+		_, resources := s.natIPsOf(m)
+		ips, slots := s.natAllocLocked(r, m)
+		vms := slots
 		ns := obj{"name": str(m, "name"), "numVmEndpointsWithNatMappings": float64(len(vms)), "minExtraNatIpsNeeded": 0.0}
 		if str(m, "natIpAllocateOption") == natAutoOnly {
 			ns["autoAllocatedNatIps"] = toAny(ips)
@@ -1210,8 +1239,7 @@ func (s *Server) routerStatus(project, region, name string) (obj, error) {
 			if len(drain) > 0 {
 				ns["drainUserAllocatedNatIps"] = drain
 			}
-			need := (len(vms)*natMinPorts(m) + natPortsPerIP - 1) / natPortsPerIP
-			if need > len(ips) {
+			if need := natNeed(m, len(vms)); need > len(ips) {
 				ns["minExtraNatIpsNeeded"] = float64(need - len(ips))
 			}
 		}
@@ -1230,7 +1258,8 @@ func (s *Server) routerStatus(project, region, name string) (obj, error) {
 		}
 		nats = append(nats, ns)
 	}
-	res := obj{"network": str(r, "network"), "bestRoutes": []any{}, "bestRoutesForRouter": []any{}}
+	best, mine := s.routerBestRoutesLocked(rel, r)
+	res := obj{"network": str(r, "network"), "bestRoutes": best, "bestRoutesForRouter": mine}
 	if len(peers) > 0 {
 		res["bgpPeerStatus"] = peers
 	}
@@ -1292,21 +1321,18 @@ func (s *Server) natMappingInfo(c call, region, name string) (obj, error) {
 	var all []obj
 	for _, e := range sliceOf(r["nats"]) {
 		m, _ := e.(map[string]any)
-		if only != "" && str(m, "name") != only {
+		if (only != "" && str(m, "name") != only) || natTypeOf(m) == natTypePrivate {
 			continue
 		}
-		ips, _ := s.natIPsOf(m)
-		ports := natMinPorts(m)
-		slots := natPortsPerIP / ports
-		for i, vm := range s.natVMsLocked(r, m) {
-			mp := obj{"sourceVirtualIp": vm.ip, "numTotalNatPorts": float64(ports), "numTotalDrainNatPorts": 0.0, "natIpPortRanges": []any{}}
-			if slots > 0 && i/slots < len(ips) {
-				lo := 1024 + (i%slots)*ports
-				mp["natIpPortRanges"] = []any{fmt.Sprintf("%s:%d-%d", ips[i/slots], lo, lo+ports-1)}
+		_, slots := s.natAllocLocked(r, m)
+		for _, sl := range slots {
+			mp := obj{"sourceVirtualIp": sl.vm.ip, "numTotalNatPorts": float64(sl.hi - sl.lo + 1), "numTotalDrainNatPorts": 0.0, "natIpPortRanges": []any{}}
+			if sl.ip != "" {
+				mp["natIpPortRanges"] = []any{fmt.Sprintf("%s:%d-%d", sl.ip, sl.lo, sl.hi)}
 			} else {
 				mp["numTotalNatPorts"] = 0.0
 			}
-			all = append(all, obj{"instanceName": vm.name, "interfaceNatMappings": []any{mp}})
+			all = append(all, obj{"instanceName": sl.vm.name, "interfaceNatMappings": []any{mp}})
 		}
 	}
 	items, next, err := page(all, c.query)
@@ -1336,16 +1362,16 @@ func (s *Server) natIPInfo(c call, region, name string) (obj, error) {
 		if only != "" && str(m, "name") != only {
 			continue
 		}
-		used := len(s.natVMsLocked(r, m)) > 0
 		var mappings []any
-		ips, _ := s.natIPsOf(m)
+		ips, slots := s.natAllocLocked(r, m)
+		used := natUsage(slots)
 		origin := "MANUAL"
 		if str(m, "natIpAllocateOption") == natAutoOnly {
 			origin = "AUTO"
 		}
 		for _, ip := range ips {
 			usage := "UNUSED"
-			if used {
+			if used[ip] {
 				usage = "IN_USE"
 			}
 			mappings = append(mappings, obj{"natIp": ip, "mode": "ACTIVE", "usage": usage, "origin": origin})

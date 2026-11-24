@@ -142,12 +142,12 @@ func TestConsoleComputeInstanceGroups2139b(t *testing.T) {
 		}
 	}
 	vms := d.Sections[0].Listing
-	if vms.Total != 2 || !vms.Items[0].Selectable || vpcActionIDs(vms.SelectActions) != "startvms,stopvms,suspendvms,resumevms,deletevms" ||
+	if vms.Total != 2 || !vms.Items[0].Selectable || vpcActionIDs(vms.SelectActions) != "startvms,stopvms,suspendvms,resumevms,deletevms,applyupdates" ||
 		vms.Items[0].Fields["Template"] != "tpl" {
 		t.Fatalf("web's VMs = %+v", vms)
 	}
 	acts := groups.DetailActions(ctx, project, path)
-	if got := vpcActionIDs(acts); got != "resize,restart,updatevms,editautoscaling,editports,delete,startvms,stopvms,suspendvms,resumevms,deletevms" {
+	if got := vpcActionIDs(acts); got != "resize,restart,updatevms,editautoscaling,editports,delete,startvms,stopvms,suspendvms,resumevms,deletevms,applyupdates" {
 		t.Fatalf("web's actions = %s", got)
 	}
 	if f := vpcField(c2139bAction(acts, "editautoscaling").Fields, "cpuTarget"); f.Default != "70" {

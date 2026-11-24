@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -70,6 +71,10 @@ type Options struct {
 	// project outside any) and whether the project is known, for Shared
 	// VPC's organization rule (xpn.go); nil allows every project.
 	ProjectOrganization func(project string) (org string, known bool)
+	// ReadObject opens a Cloud Storage object of this instance and says its
+	// size, for image import (rawDisk.source, #2139); a missing bucket or
+	// object wraps ErrObjectNotFound. nil answers rawDisk with 501.
+	ReadObject func(ctx context.Context, bucket, object string) (io.ReadCloser, int64, error)
 	// MinFreeBytes is DefaultMinFreeBytes when zero.
 	MinFreeBytes uint64
 	// PrivateServices are the producer endpoints private services access
@@ -87,6 +92,9 @@ type Options struct {
 	// AutoscaleEvery is how often the VMs' CPU is read and the autoscalers
 	// run; 15 seconds when zero.
 	AutoscaleEvery time.Duration
+	// UpdateEvery is how often a managed instance group's PROACTIVE update
+	// takes its next step (#2139); 2s when zero.
+	UpdateEvery time.Duration
 	// LB reaches load balancers' backends (#2153, lbplane.go); nil
 	// reaches only those this package can itself.
 	LB LBBackends
@@ -126,6 +134,12 @@ type Options struct {
 	// FirewallLog writes a Firewall Rules Logging record to Cloud Logging
 	// (#2180, relayfirewall.go); nil logs nothing.
 	FirewallLog func(FirewallLogEntry)
+	// GuestReach is the address (IP:port) at which a VM's pod reaches the
+	// listener at loopback (127.0.0.1:port) on this machine, "" when it
+	// cannot: internal load balancers and Private Service Connect
+	// endpoints are carried from VMs to their listeners through it
+	// (vpcservices.go). nil carries neither.
+	GuestReach func(loopback string) string
 }
 
 // PrivateService is one private services access endpoint: its address and
@@ -161,6 +175,12 @@ type Server struct {
 	// automated are the forwarding rules service connectivity automation
 	// made (#2141), which are not deleted directly.
 	automated map[string]bool
+	// gateways are Cloud Run's ways onto VPC networks, by key
+	// (gateways.go).
+	gateways map[string]*runGateway
+	// bgpStates are what Cloud Router's speakers reported, by speaker key
+	// (bgpspeakers.go).
+	bgpStates map[string]BGPState
 	// waiters are the running operations, closed when each is done.
 	waiters map[string]chan struct{}
 	// queue is, by resource, the last operation started on it, closed when
@@ -219,9 +239,10 @@ func (s *Server) Start(context.Context) error {
 	if s.opts.VMs != nil && s.stopLoop == nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		s.stopLoop = cancel
-		s.loops.Add(2)
+		s.loops.Add(3)
 		go func() { defer s.loops.Done(); s.scheduleLoop(ctx) }()
 		go func() { defer s.loops.Done(); s.autoscaleLoop(ctx) }()
+		go func() { defer s.loops.Done(); s.rollLoop(ctx) }()
 	}
 	s.lbStart()
 	s.startRelay()
@@ -439,7 +460,7 @@ var linkKeys = map[string]bool{"selfLink": true, "network": true, "subnetwork": 
 	"subnetworks": true, "users": true, "zones": true, "machineType": true, "source": true, "sourceImage": true,
 	"sourceSnapshot": true, "sourceDisk": true, "type": true, "resourcePolicies": true, "sourceInstance": true,
 	"sourceInstanceTemplate": true, "sourceMachineImage": true, "instanceTemplate": true, "instanceGroup": true,
-	"sourceSnapshotSchedulePolicy": true, "instance": true, "replacement": true,
+	"sourceSnapshotSchedulePolicy": true, "instance": true, "replacement": true, "replicaZones": true,
 	// Private Service Connect (#2140, psc.go).
 	"target": true, "targetService": true, "natSubnets": true, "endpoint": true, "consumerNetwork": true}
 

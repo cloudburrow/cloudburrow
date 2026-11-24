@@ -72,7 +72,7 @@ func TestGcloudComputeInstances(t *testing.T) {
 	gc("compute", "instances", "create", vm, "--zone", zone, "--machine-type", "e2-small",
 		"--image-family", "debian-12", "--image-project", "debian-cloud", "--labels", "env=test",
 		"--metadata", "startup-script=#!/bin/bash\necho GCLOUD-MARK-$(hostname)")
-	if got := gc("compute", "instances", "list", "--format=value(name,status,networkInterfaces[0].accessConfigs[0].natIP)"); !strings.Contains(got, vm) || !strings.Contains(got, "RUNNING") || !strings.Contains(got, "127.0.0.1") {
+	if got := gc("compute", "instances", "list", "--format=value(name,status,networkInterfaces[0].accessConfigs[0].natIP)"); !strings.Contains(got, vm) || !strings.Contains(got, "RUNNING") || !strings.Contains(got, "192.0.2.") {
 		t.Fatalf("instances list:\n%s", got)
 	}
 	if got := gc("compute", "instances", "describe", vm, "--zone", zone, "--format=value(status,machineType.basename(),labels.env)"); !strings.Contains(got, "RUNNING") || !strings.Contains(got, "e2-small") || !strings.Contains(got, "test") {
@@ -98,16 +98,18 @@ func TestGcloudComputeInstances(t *testing.T) {
 
 	// gcloud compute ssh: its key, made by gcloud in this test's
 	// directory, goes into the project's ssh-keys; the port is the one
-	// CloudBurrow forwards to the guest's 22, to the instance's natIP.
+	// CloudBurrow forwards to the guest's 22 on 127.0.0.1, which HostName
+	// puts in place of the instance's natIP (an unrouted 192.0.2.0/24
+	// address of its own, #2140).
 	sshAddr := vmSSHAddress(t, addr, h.Project(), zone, vm)
 	host, port, _ := net.SplitHostPort(sshAddr)
 	if host != "127.0.0.1" {
-		t.Fatalf("cloudburrowSshAddress is %s, want the natIP 127.0.0.1", sshAddr)
+		t.Fatalf("cloudburrowSshAddress is %s, want 127.0.0.1:PORT", sshAddr)
 	}
 	key := filepath.Join(home, "gce-key")
 	ssh := func(cmd string) (string, error) {
 		return run("compute", "ssh", vm, "--zone", zone, "--ssh-key-file", key, "--strict-host-key-checking=no",
-			"--ssh-flag=-p "+port, "--ssh-flag=-o ConnectTimeout=10", "--command", cmd)
+			"--ssh-flag=-p "+port, "--ssh-flag=-o HostName="+host, "--ssh-flag=-o ConnectTimeout=10", "--command", cmd)
 	}
 	var out string
 	var err error

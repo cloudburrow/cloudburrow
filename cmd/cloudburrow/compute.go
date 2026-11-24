@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"google.golang.org/grpc"
 
 	"github.com/cloudburrow/cloudburrow/internal/authplatform"
@@ -96,7 +97,19 @@ type computeService struct {
 	// firewallLog writes Firewall Rules Logging records to this
 	// instance's Cloud Logging (#2180), set by up when it is served.
 	firewallLog func(compute.FirewallLogEntry)
-	cancel      context.CancelFunc
+	// opsAgentHosts are the in-cluster Cloud Logging and Cloud Monitoring
+	// addresses a VM's Ops Agent writes to (#2139, computeopsagent.go).
+	opsAgentHosts func() (logging, monitoring string)
+	// guestReach is where a VM's pod reaches a loopback listener of this
+	// machine (clusterHost.Reach, #2140).
+	guestReach func(loopback string) string
+	// natLogs writes Cloud NAT's nat_flows entries to Cloud Logging
+	// (computenat.go); set by up while Logging is served.
+	natLogs func(context.Context, *loggingpb.WriteLogEntriesRequest) error
+	// storage is the Cloud Storage port's host address, for image import
+	// (#2139); set by up, "" or nil when Storage is not served.
+	storage func() string
+	cancel  context.CancelFunc
 	// sql is the Cloud SQL Admin API, whose private IPs the VPC networks
 	// reach (#2141); nil without Cloud SQL.
 	sql    func() *sqladmin.Server
@@ -231,14 +244,26 @@ func (s *computeService) Start(ctx context.Context) error {
 		return err
 	}
 	s.netSvc = nsv
+	s.vms.opsAgentHosts = s.telemetryHosts
 	api, err := compute.New(compute.Options{State: state, Extra: s.instanceGroupManagers, ExtraGroups: s.gkeGroups, NetworkUsers: s.networkUsers, VMs: s.vms,
 		PrivateServices: s.privateServices, ServiceAttachment: s.serviceAttachment,
-		ProjectOrganization: s.projectOrganization, LB: &computeLB{cfg: s.cfg, vms: s.vms},
+		ProjectOrganization: s.projectOrganization, ReadObject: imageObjectReader(func() string {
+			if s.storage == nil {
+				return ""
+			}
+			return s.storage()
+		}), LB: &computeLB{cfg: s.cfg, vms: s.vms},
 		CertMaps: cm, IAP: computeIAPGate{svc: s}, NetSec: computeNetSec{ns: ns, cm: cm, endpoints: xdsEndpointPolicies(nsv)}, XDSCredentialDir: xdsCredDir, SourceTags: s.sourceTags,
 		RelayBind: s.cfg.BindAddress, FirewallLog: func(e compute.FirewallLogEntry) {
 			if s.firewallLog != nil {
 				s.firewallLog(e)
 			}
+		},
+		GuestReach: func(loopback string) string {
+			if s.guestReach == nil {
+				return ""
+			}
+			return s.guestReach(loopback)
 		}})
 	if err != nil {
 		return err
@@ -272,6 +297,13 @@ func (s *computeService) Start(ctx context.Context) error {
 		return err
 	}
 	s.vpcAccess = va
+	// Cloud Run's pods onto VPC networks through connectors and Direct
+	// VPC egress (#2140, computerunegress.go).
+	s.startRunEgress(bg)
+	s.startNAT(bg)
+	// Cloud Router's BGP sessions with router appliances (#2140,
+	// computebgp.go).
+	s.startRouterBGP(bg)
 	ln, err := net.Listen("tcp", net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Compute)))
 	if err != nil {
 		return fmt.Errorf("compute: %w", err)
@@ -428,6 +460,11 @@ func (s *computeService) networkUsers(rel string) []string {
 	out := s.sqlNetworkUsers(rel)
 	if api := s.gke.API(); api != nil {
 		out = append(out, api.NetworkUsers(rel)...)
+	}
+	// Serverless VPC Access connectors keep their network and subnet
+	// (#2140).
+	if s.vpcAccess != nil {
+		out = append(out, s.vpcAccess.NetworkUsers(rel)...)
 	}
 	return out
 }

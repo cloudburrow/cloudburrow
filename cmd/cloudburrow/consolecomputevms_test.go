@@ -86,7 +86,7 @@ func TestConsoleComputeVMs(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := vpcRow(l, "web-1")
-	if r == nil || r.Status != "RUNNING" || r.Fields["Zone"] != "us-central1-a" || r.Fields["External IP"] != "127.0.0.1" ||
+	if r == nil || r.Status != "RUNNING" || r.Fields["Zone"] != "us-central1-a" || !strings.HasPrefix(r.Fields["External IP"], "192.0.2.") ||
 		r.Fields["Connect"] != "SSH (port 2222)" || !strings.HasPrefix(r.Fields["Internal IP"], "10.128.") {
 		t.Fatalf("the instance's row: %+v", r)
 	}

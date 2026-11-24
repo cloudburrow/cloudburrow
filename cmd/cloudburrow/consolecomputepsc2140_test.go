@@ -18,7 +18,7 @@ func TestConsolePrivateServiceConnect2140(t *testing.T) {
 	const project = "psc-console"
 	eps := computePSCEndpointsProvider{screen}
 	pub := computePSCPublishedProvider{screen}
-	if got := vpcFieldNames(eps.CreateFormFor(ctx, project)); got != "target,targetService,name,network,region,subnetwork,ipAddress,globalAccess,serviceDirectoryRegion" {
+	if got := vpcFieldNames(eps.CreateFormFor(ctx, project)); got != "target,targetService,name,network,region,subnetwork,allowPscGlobalAccess,ipAddress,serviceDirectoryRegion" {
 		t.Fatalf("Connect endpoint fields = %s", got)
 	}
 	if _, err := eps.Create(ctx, project, map[string]string{"target": "all-apis", "name": "googleapis1", "network": "default", "ipAddress": "10.255.255.254"}); err != nil {
@@ -48,7 +48,31 @@ func TestConsolePrivateServiceConnect2140(t *testing.T) {
 	if got := pub.pscSubnets(project); strings.Join(got, ",") != "us-central1/psc-nat" {
 		t.Fatalf("PSC subnets = %v", got)
 	}
-	if got := vpcFieldNames(pub.CreateFormFor(ctx, project)); got != "targetService,name,natSubnets,connectionPreference,acceptedProjects,rejectedProjects,enableProxyProtocol,domainName" {
+	// The internal load balancer the service publishes (#2153).
+	const rg = "regions/us-central1/"
+	for _, c := range []struct {
+		coll string
+		body map[string]any
+	}{
+		{rg + "healthChecks", map[string]any{"name": "ilb-hc", "type": "TCP", "tcpHealthCheck": map[string]any{"port": 80}}},
+		{rg + "backendServices", map[string]any{"name": "ilb", "protocol": "TCP", "loadBalancingScheme": "INTERNAL",
+			"healthChecks": []any{"projects/" + project + "/" + rg + "healthChecks/ilb-hc"}}},
+		{rg + "forwardingRules", map[string]any{"name": "ilb", "loadBalancingScheme": "INTERNAL", "IPProtocol": "TCP", "ports": []any{"80"},
+			"network": "global/networks/default", "backendService": "projects/" + project + "/" + rg + "backendServices/ilb"}},
+	} {
+		if _, err := screen.call("POST", project, c.coll, nil, c.body); err != nil {
+			t.Fatalf("%s: %v", c.coll, err)
+		}
+	}
+	form := pub.CreateFormFor(ctx, project)
+	for _, f := range form {
+		if f.Name == "targetService" && (f.Type != "select" || len(f.OptionsWhen) != 1 || f.OptionsWhen[0].When != "lbType=INTERNAL" ||
+			strings.Join(f.OptionsWhen[0].Options, ",") != "projects/"+project+"/regions/us-central1/forwardingRules/ilb" ||
+			f.OptionLabels["projects/"+project+"/regions/us-central1/forwardingRules/ilb"] != "ilb (us-central1)") {
+			t.Errorf("Internal load balancer field = %+v", f)
+		}
+	}
+	if got := vpcFieldNames(form); got != "lbType,targetService,name,natSubnets,connectionPreference,acceptedProjects,rejectedProjects,enableProxyProtocol,domainName" {
 		t.Fatalf("Publish service fields = %s", got)
 	}
 	if _, err := pub.Create(ctx, project, map[string]string{"targetService": "projects/" + project + "/regions/us-central1/forwardingRules/ilb",
@@ -58,6 +82,34 @@ func TestConsolePrivateServiceConnect2140(t *testing.T) {
 	if _, err := eps.Create(ctx, project, map[string]string{"target": "published", "name": "to-svc", "network": "default", "region": "us-central1",
 		"subnetwork": "default", "targetService": "projects/" + project + "/regions/us-central1/serviceAttachments/svc"}); err != nil {
 		t.Fatal(err)
+	}
+	// Edit: Enable global access, then Save, and back (#2140); an
+	// endpoint for Google APIs has no Edit.
+	ep := []string{"us-central1", "to-svc"}
+	if d, _ := eps.Detail(ctx, project, ep); d.Edit == nil || d.Edit.Fields[0].Name != "allowPscGlobalAccess" || d.Edit.Fields[0].Default != "false" {
+		t.Fatalf("endpoint Edit = %+v", d.Edit)
+	}
+	if d, _ := eps.Detail(ctx, project, []string{"global", "googleapis1"}); d.Edit != nil {
+		t.Errorf("an endpoint for Google APIs has an Edit: %+v", d.Edit)
+	}
+	for _, on := range []string{"true", "false"} {
+		if err := eps.Edit(ctx, project, ep, map[string]string{"allowPscGlobalAccess": on}); err != nil {
+			t.Fatal(err)
+		}
+		d, _ := eps.Detail(ctx, project, ep)
+		want := map[string]string{"true": "Enabled", "false": "Disabled"}[on]
+		var got string
+		for _, pr := range d.Sections[0].Groups[0].Properties {
+			if pr.Label == "Global access" {
+				got = pr.Value
+			}
+		}
+		if got != want || d.Edit.Fields[0].Default != on {
+			t.Errorf("after Save with %s: Global access %q, Edit default %q", on, got, d.Edit.Fields[0].Default)
+		}
+	}
+	if err := eps.Edit(ctx, project, []string{"global", "googleapis1"}, map[string]string{"allowPscGlobalAccess": "true"}); err == nil {
+		t.Error("an endpoint for Google APIs took a global access edit")
 	}
 	l, _ = eps.List(ctx, project)
 	if r := vpcRow(l, "to-svc"); r == nil || r.Status != "Pending" || r.Fields["Scope"] != "us-central1" {

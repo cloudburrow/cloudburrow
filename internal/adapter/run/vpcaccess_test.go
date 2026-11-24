@@ -74,3 +74,18 @@ func TestCheckVPC(t *testing.T) {
 		t.Errorf("without a VPC: %v", err)
 	}
 }
+
+// TestVPCEgressAnnotation (#2140): a template with a connector or Direct
+// VPC egress puts its resource's name and vpcAccess on its pods; one
+// without puts nothing.
+func TestVPCEgressAnnotation(t *testing.T) {
+	if got := vpcEgressAnnotation("projects/p/locations/r/services/s", nil); got != "" {
+		t.Fatalf("no vpcAccess: %q", got)
+	}
+	got := vpcEgressAnnotation("projects/p/locations/r/services/s", &runpb.VpcAccess{Connector: "projects/p/locations/r/connectors/c",
+		Egress: runpb.VpcAccess_ALL_TRAFFIC})
+	if !strings.Contains(got, `"name":"projects/p/locations/r/services/s"`) || !strings.Contains(got, `"connector":"projects/p/locations/r/connectors/c"`) ||
+		!strings.Contains(got, `"egress":"ALL_TRAFFIC"`) {
+		t.Fatalf("annotation = %s", got)
+	}
+}

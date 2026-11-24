@@ -273,3 +273,11 @@ libwebgpu_dawn.dylib, Dawn (https://dawn.googlesource.com/dawn, Copyright
 2017-2026 The Dawn & Tint Authors, BSD 3-Clause License). Their licence
 texts ship beside them as LICENSE-LiteRT-LM, LICENSE-llguidance and
 LICENSE-Dawn.
+
+Cloud Router's BGP sessions with router appliances (#2140) run GoBGP
+(https://github.com/osrg/gobgp, v3.37.0), Copyright (C) 2014-2021 Nippon
+Telegraph and Telephone Corporation, under the Apache
+License, Version 2.0. GoBGP is not part of this repository, of the binary or
+of a release archive: the CLI builds gobgpd and gobgp from the module at that
+version (checked against sum.golang.org) into a local image the first time a
+router needs a BGP speaker (dependencies.json, cloudRouterBGP).

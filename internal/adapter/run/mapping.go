@@ -236,6 +236,9 @@ metadata:
 	if pc := podConfigAnnotation(tmpl); pc != "" {
 		fmt.Fprintf(&b, "        %s: %q\n", annPodConfig, pc)
 	}
+	if ve := vpcEgressAnnotation(svc.GetName(), tmpl.GetVpcAccess()); ve != "" {
+		fmt.Fprintf(&b, "        %s: %q\n", annVPCEgress, ve)
+	}
 
 	// Scaling. Cloud Run's min/max instances and concurrency target map
 	// onto Knative's KPA annotations; service-level scaling is applied to

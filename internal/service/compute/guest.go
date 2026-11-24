@@ -1,9 +1,14 @@
 package compute
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // GuestPrefix begins the path a VM's guest reads its own metadata under
@@ -32,13 +37,40 @@ func (s *Server) serveGuest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if inst == nil {
+		g := s.gatewayByTokenLocked(token)
+		sp, isSpeaker := s.speakerByTokenLocked(token)
+		ng, isNAT := s.natGatewayByTokenLocked(token)
 		s.mu.Unlock()
+		if isNAT && path == vpcSuffix {
+			s.serveNATVPC(w, r, ng)
+			return
+		}
+		if g != nil && path == vpcSuffix {
+			s.serveGatewayVPC(w, r, g)
+			return
+		}
+		if isSpeaker && path == vpcSuffix {
+			s.serveSpeakerVPC(w, r, sp)
+			return
+		}
 		http.NotFound(w, r)
 		return
 	}
 	if path == vpcSuffix {
 		s.mu.Unlock()
 		s.serveVPC(w, r, inst)
+		return
+	}
+	if guestDir(path) {
+		// A directory named without its slash: Google's metadata server
+		// answers 301 to the directory (#2139).
+		s.mu.Unlock()
+		loc := r.URL.Path + "/"
+		if r.URL.RawQuery != "" {
+			loc += "?" + r.URL.RawQuery
+		}
+		w.Header().Set("Metadata-Flavor", "Google")
+		http.Redirect(w, r, loc, http.StatusMovedPermanently)
 		return
 	}
 	project := strings.Split(str(inst, "selfLink"), "/")[1]
@@ -93,6 +125,16 @@ func guestValue(inst obj, project, path string, imeta, pmeta map[string]string) 
 		return "projects/" + project + "/machineTypes/" + lastSeg(str(inst, "machineType")), true
 	case path == "instance/network-interfaces/0/ip":
 		return ip, true
+	case path == "instance/tags":
+		// A JSON list, as Google's metadata server writes it (#2139).
+		tags := []string{}
+		if t, ok := inst["tags"].(map[string]any); ok {
+			tags = append(tags, strsAny(t["items"])...)
+		}
+		b, _ := json.Marshal(tags)
+		return string(b), true
+	case strings.HasPrefix(path, "instance/network-interfaces/"):
+		return nicValue(inst, strings.TrimPrefix(path, "instance/network-interfaces/"))
 	case path == "instance/attributes/":
 		return keyList(imeta), true
 	case strings.HasPrefix(path, "instance/attributes/"):
@@ -105,6 +147,119 @@ func guestValue(inst obj, project, path string, imeta, pmeta map[string]string) 
 	case strings.HasPrefix(path, "project/attributes/"):
 		v, ok := pmeta[strings.TrimPrefix(path, "project/attributes/")]
 		return v, ok
+	}
+	return "", false
+}
+
+// guestDir is whether path names one of the metadata directories served,
+// without its trailing slash.
+func guestDir(path string) bool {
+	switch path {
+	case "instance/attributes", "project/attributes", "instance/network-interfaces":
+		return true
+	}
+	rest, ok := strings.CutPrefix(path, "instance/network-interfaces/")
+	if !ok {
+		return false
+	}
+	p := strings.Split(rest, "/")
+	switch {
+	case len(p) == 1, len(p) == 2 && p[1] == "access-configs", len(p) == 3 && p[1] == "access-configs":
+		return isIndex(p[0]) && (len(p) < 3 || isIndex(p[2]))
+	}
+	return false
+}
+
+func isIndex(s string) bool {
+	n, err := strconv.Atoi(s)
+	return err == nil && n >= 0 && strconv.Itoa(n) == s
+}
+
+// nicValue answers instance/network-interfaces/REST from the instance's
+// networkInterfaces, as Google's metadata server lists and reads them
+// (https://docs.cloud.google.com/compute/docs/metadata/predefined-metadata-keys,
+// #2139): the directory lists each interface as "N/"; an interface's
+// directory its keys; ip its internal IPv4 address, mac its MAC, network
+// projects/PROJECT_NUMBER/networks/NAME, and access-configs/ its access
+// configs, each with external-ip (its natIP) and type (ONE_TO_ONE_NAT).
+// An interface without an access config lists none, and its external-ip
+// is not found.
+func nicValue(inst obj, rest string) (string, bool) {
+	nics := listOf(inst["networkInterfaces"])
+	if rest == "" {
+		var b strings.Builder
+		for i := range nics {
+			fmt.Fprintf(&b, "%d/\n", i)
+		}
+		return b.String(), true
+	}
+	p := strings.Split(rest, "/")
+	if !isIndex(p[0]) {
+		return "", false
+	}
+	i, _ := strconv.Atoi(p[0])
+	if i >= len(nics) {
+		return "", false
+	}
+	nic := objOf(nics[i])
+	acs := listOf(nic["accessConfigs"])
+	// An interface without an external IP still shows access config 0 with an
+	// empty external-ip, as on Compute Engine: the Ops Agent's resource
+	// detector (metadata.ExternalIP) treats a missing key as fatal.
+	if len(acs) == 0 {
+		acs = []any{obj{}}
+	}
+	v6 := str(nic, "ipv6Address")
+	for _, a := range listOf(nic["ipv6AccessConfigs"]) {
+		if v6 == "" {
+			v6 = str(objOf(a), "externalIpv6")
+		}
+	}
+	key := strings.Join(p[1:], "/")
+	switch {
+	case key == "":
+		keys := "ip\nmac\nnetwork\n"
+		if v6 != "" {
+			keys = "ip\nipv6s\nmac\nnetwork\n"
+		}
+		return "access-configs/\n" + keys, true
+	case key == "ip":
+		return str(nic, "networkIP"), true
+	case key == "ipv6s" && v6 != "":
+		// The interface's IPv6 address (dual-stack or IPv6-only, ipv6.go).
+		return v6 + "\n", true
+	case key == "mac":
+		return vmNet{ip: str(nic, "networkIP"), ip6: v6}.mac(), true
+	case key == "network":
+		parts := strings.Split(Rel(str(nic, "network"), ""), "/")
+		if len(parts) < 5 || parts[0] != "projects" {
+			return "", false
+		}
+		return "projects/" + strconv.FormatInt(resource.ProjectNumber(parts[1]), 10) + "/networks/" + parts[len(parts)-1], true
+	case key == "access-configs/":
+		var b strings.Builder
+		for j := range acs {
+			fmt.Fprintf(&b, "%d/\n", j)
+		}
+		return b.String(), true
+	case len(p) >= 3 && p[1] == "access-configs" && isIndex(p[2]):
+		j, _ := strconv.Atoi(p[2])
+		if j >= len(acs) {
+			return "", false
+		}
+		ac := objOf(acs[j])
+		switch strings.Join(p[3:], "/") {
+		case "":
+			return "external-ip\ntype\n", true
+		case "external-ip":
+			return str(ac, "natIP"), true
+		case "type":
+			t := str(ac, "type")
+			if t == "" {
+				t = "ONE_TO_ONE_NAT"
+			}
+			return t, true
+		}
 	}
 	return "", false
 }

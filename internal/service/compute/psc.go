@@ -34,10 +34,10 @@ import (
 //     connectionPreference ACCEPT_AUTOMATIC or ACCEPT_MANUAL, and lists the
 //     endpoints connected to it (connectedEndpoints).
 //
-// What is recorded and what is carried: no internal load balancer is
-// served, so an attachment's targetService is recorded as given, and no
-// packet travels from an endpoint to it; VMs reach the local Google API
-// endpoints over the host whatever endpoint exists (docs/gaps.md).
+// What is carried: an endpoint for a published service takes a consumer
+// VM's TCP connections at its IP address to the attachment's producer
+// load balancer (vpcservices.go); VMs reach the local Google API endpoints
+// over the host whatever endpoint for Google APIs exists (docs/gaps.md).
 
 // pscGoogleName is the name rule of an endpoint for Google APIs.
 var pscGoogleName = regexp.MustCompile(`^[a-z][a-z0-9]{0,19}$`)
@@ -101,10 +101,14 @@ func (s *Server) forwardingRules(c call, region string) (obj, error) {
 					"decommission the service instance that uses it.", rel+"/"+p[base])
 		}
 		return s.deleteForwardingRule(c.project, scope, rel+"/"+p[base])
+	case n == base+1 && c.method == http.MethodPatch:
+		return s.patchForwardingRule(c.project, scope, rel+"/"+p[base], c.body)
 	case n == base+2 && post && p[base+1] == "setLabels":
 		return s.setLabels(c.project, scope, rel+"/"+p[base], c.body)
+	case n == base+2 && post && p[base+1] == "setTarget":
+		return s.setForwardingRuleTarget(c.project, scope, rel+"/"+p[base], c.body)
 	}
-	return nil, unimplemented("%s %s/%s is not served: forwarding rules are Private Service Connect endpoints here (insert, get, list, delete, setLabels)",
+	return nil, unimplemented("%s %s/%s is not served: forwarding rules are Private Service Connect endpoints here (insert, get, list, patch, delete, setLabels, setTarget)",
 		c.method, rel, strings.Join(p[base:], "/"))
 }
 
@@ -158,6 +162,9 @@ func (s *Server) insertForwardingRule(project, region string, b obj) (obj, error
 		}
 		if str(addr, "purpose") != "PRIVATE_SERVICE_CONNECT" {
 			return nil, invalid("Invalid value for field 'resource.IPAddress': '%s'. The address of an endpoint for Google APIs must be a global internal address of purpose PRIVATE_SERVICE_CONNECT.", str(b, "IPAddress"))
+		}
+		if b["allowPscGlobalAccess"] == true {
+			return nil, invalid("Invalid value for field 'resource.allowPscGlobalAccess': true. Global access applies to endpoints for published services only.")
 		}
 		o["target"], o["IPAddress"], o["pscConnectionStatus"] = target, str(addr, "address"), "ACCEPTED"
 		o["_address"] = str(addr, "selfLink")
@@ -374,6 +381,25 @@ func (s *Server) insertServiceAttachment(project, region string, b obj) (obj, er
 	ts := str(b, "targetService")
 	if ts == "" {
 		return nil, required("resource.targetService")
+	}
+	// Google's targetService is the producer's forwarding rule, of the
+	// attachment's own region (vpc/docs/configure-private-service-connect-producer):
+	// an internal passthrough Network Load Balancer's, a regional internal
+	// proxy load balancer's or internal protocol forwarding's, all served
+	// since #2153, so it must exist and be one of those.
+	tparts := strings.Split(Rel(ts, project), "/")
+	if len(tparts) != 6 || tparts[0] != "projects" || tparts[2] != "regions" || tparts[4] != "forwardingRules" {
+		return nil, invalid("Invalid value for field 'resource.targetService': '%s'. Must be the URL of a forwarding rule.", ts)
+	}
+	if tparts[3] != region {
+		return nil, invalid("Invalid value for field 'resource.targetService': '%s'. The forwarding rule must be in the service attachment's region '%s'.", ts, region)
+	}
+	fr, ok := s.res[Rel(ts, project)]
+	if !ok {
+		return nil, notFound(Rel(ts, project))
+	}
+	if sch := str(fr, "loadBalancingScheme"); fr["_lb"] != true || (sch != "INTERNAL" && sch != "INTERNAL_MANAGED") {
+		return nil, invalid("Invalid value for field 'resource.targetService': '%s'. The producer forwarding rule must be the forwarding rule of an internal passthrough Network Load Balancer, a regional internal proxy load balancer or internal protocol forwarding.", ts)
 	}
 	id := newID()
 	o := obj{"kind": "compute#serviceAttachment", "name": name, "selfLink": rel, "region": "projects/" + project + "/" + scope,

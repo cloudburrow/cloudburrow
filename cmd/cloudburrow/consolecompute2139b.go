@@ -211,11 +211,7 @@ func (p computeGroupsProvider) groupActions(project string, g, mgr map[string]an
 					Help: "Restart stops and starts each VM; Replace re-creates each VM's boot disk from the template."}}})
 		if onPage {
 			acts = append(acts,
-				console.Action{ID: "updatevms", Label: "Update VMs", Submit: "Update VMs", Fields: []console.Field{
-					selectOrText(console.Field{Name: "template", Label: "Instance template", Required: true, Default: groupTemplateTarget(mgr),
-						Help: "The template the group makes VMs from. Update type: Opportunistic: the group's existing VMs keep their template " +
-							"until they are replaced (Restart/replace VMs, Replace); the VMs it adds from now on use this one."},
-						p.templateOptions(project), "LOCATION/NAME of an instance template.")}},
+				p.updateVMsAction(project, mgr),
 				p.autoscalingAction(a))
 		}
 	} else {
@@ -629,6 +625,7 @@ func groupVMSelectActions() []console.Action {
 		act("suspendvms", "Suspend", "Suspend VMs?", "The checked VMs are suspended, their memory kept."),
 		act("resumevms", "Resume", "Resume VMs?", "The checked suspended VMs resume."),
 		act("deletevms", "Delete instance", "Delete instances?", "The checked VMs are deleted, and the group's target size goes down by as many."),
+		updateSelectedAction(),
 	}
 }
 
@@ -845,11 +842,31 @@ func (p computeGroupsProvider) ActAt(ctx context.Context, project string, path [
 		_, err = p.call("POST", project, mg+"/"+verb, nil, map[string]any{"instances": toAnyStrings(insts)})
 		return err
 	case "updatevms":
-		loc, tpl, ok := strings.Cut(strings.TrimSpace(values["template"]), "/")
-		if !ok {
-			return fmt.Errorf("instance template: %q is not LOCATION/NAME", values["template"])
+		// Versions and updatePolicy (consolecomputeupdate2139.go).
+		body, err := updateVMsBody(values)
+		if err != nil {
+			return err
 		}
-		_, err := p.call("POST", project, mg+"/setInstanceTemplate", nil, map[string]any{"instanceTemplate": templateBase([]string{loc, tpl})})
+		_, err = p.call("PATCH", project, mg, nil, body)
+		return err
+	case "applyupdates":
+		byName, _, err := p.managedVMs(project, mg)
+		if err != nil {
+			return err
+		}
+		var insts []string
+		for _, n := range vpcList(values[groupVMsField]) {
+			rel, ok := byName[n.(string)]
+			if !ok {
+				return fmt.Errorf("%s is not a VM of %s", n, path[1])
+			}
+			insts = append(insts, rel)
+		}
+		if len(insts) == 0 {
+			return errors.New("check one or more VMs first")
+		}
+		_, err = p.call("POST", project, mg+"/applyUpdatesToInstances", nil, map[string]any{"instances": toAnyStrings(insts),
+			"minimalAction": vpcOr(values["minimalAction"], "NONE"), "mostDisruptiveAllowedAction": vpcOr(values["mostDisruptiveAllowedAction"], "REPLACE")})
 		return err
 	case "editautoscaling":
 		_, mgr, err := p.group(project, path)

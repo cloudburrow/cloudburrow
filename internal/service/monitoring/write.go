@@ -149,7 +149,8 @@ func (s *Server) writeOne(project string, i int, in *monitoringpb.TimeSeries, au
 	if t == "" || !metricTypeRE.MatchString(t) {
 		return apierror.InvalidArgument("The metric type must be a URL-formatted string with a domain and non-empty path")
 	}
-	if !isUserDefined(t) {
+	agent := isAgentMetric(t)
+	if !isUserDefined(t) && !agent {
 		if md, _ := s.lookup(project, t); md != nil {
 			return status.Errorf(codes.PermissionDenied, "User does not have permission to write to metric %s: only user-defined metrics can be written", t)
 		}
@@ -171,6 +172,9 @@ func (s *Server) writeOne(project string, i int, in *monitoringpb.TimeSeries, au
 	}
 	if !writableResources[r.GetType()] {
 		return apierror.InvalidArgument("Field timeSeries[%d].resource.type had an invalid value of %q: unrecognized resource type %q", i, r.GetType(), r.GetType())
+	}
+	if agent && !agentResources[r.GetType()] {
+		return apierror.InvalidArgument("Field timeSeries[%d].resource.type had an invalid value of %q: the metric %s is not defined for the resource type %q", i, r.GetType(), t, r.GetType())
 	}
 	for k := range r.GetLabels() {
 		if !hasResourceLabel(r.GetType(), k) {
@@ -207,11 +211,15 @@ func (s *Server) writeOne(project string, i int, in *monitoringpb.TimeSeries, au
 		if vt == metricpb.MetricDescriptor_BOOL && kind != metricpb.MetricDescriptor_GAUGE {
 			return apierror.InvalidArgument("metric kind for metric %s must be GAUGE, but is %s", t, kind)
 		}
-		if s.countDescriptors(project) >= MaxDescriptors {
+		if !agent && s.countDescriptors(project) >= MaxDescriptors {
 			return &apierror.Error{Code: codes.ResourceExhausted, Message: "Your Metric Descriptors quota has been exhausted"}
 		}
+		desc := "Auto created custom metric."
+		if agent {
+			desc = "An Ops Agent metric (agent.googleapis.com), as the agent writes it."
+		}
 		md = &metricpb.MetricDescriptor{Name: name, Type: t, MetricKind: kind, ValueType: vt,
-			Description: "Auto created custom metric."}
+			Description: desc}
 		s.descriptors[name] = md
 	}
 	if md.GetValueType() != vt {

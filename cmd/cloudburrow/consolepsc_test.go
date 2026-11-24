@@ -35,7 +35,7 @@ func TestConsolePSCEndpoints(t *testing.T) {
 	}
 	for _, proj := range []string{"psc-ok", "psc-other"} {
 		if _, err := p.Create(ctx, proj, map[string]string{"target": "published", "name": "sql", "targetService": attach, "network": "default", "region": "us-central1",
-			"subnetwork": "default", "ipAddress": "10.128.0.40", "globalAccess": "true"}); err != nil {
+			"subnetwork": "default", "ipAddress": "10.128.0.40", "allowPscGlobalAccess": "true"}); err != nil {
 			t.Fatalf("Add endpoint in %s: %v", proj, err)
 		}
 	}

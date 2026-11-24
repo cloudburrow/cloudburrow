@@ -38,7 +38,7 @@ func (c computeScreen) diskNames(project string) []string {
 	}
 	var out []string
 	for _, d := range aggregatedItems(m, "disks") {
-		out = append(out, zoneOf(vpcStr(d, "zone"))+"/"+vpcStr(d, "name"))
+		out = append(out, diskLoc(d)+"/"+vpcStr(d, "name"))
 	}
 	sort.Strings(out)
 	return out
@@ -771,7 +771,7 @@ func (p computeMachineImagesProvider) List(ctx context.Context, project string) 
 }
 
 func machineImageActions(o map[string]any) []console.Action {
-	return []console.Action{{ID: "createvm", Label: "Create instance", Submit: "Create", Fields: []console.Field{
+	return []console.Action{labelsAction(o), {ID: "createvm", Label: "Create instance", Submit: "Create", Fields: []console.Field{
 		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp}, vmZoneField("zone")}}}
 }
 
@@ -834,6 +834,9 @@ func (p computeMachineImagesProvider) DetailActions(ctx context.Context, project
 }
 
 func (p computeMachineImagesProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if len(path) == 1 && action == "labels" {
+		return p.setLabels(project, "global/machineImages/"+path[0], values)
+	}
 	if len(path) != 1 || action != "createvm" {
 		return fmt.Errorf("%s is not available here", action)
 	}

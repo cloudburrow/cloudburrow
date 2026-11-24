@@ -57,6 +57,8 @@ func (s iamEnforced8) use(e *iameval.Enforcer) {
 			}
 			return h
 		}
+		// A subnet's own policy and its answers (#2140, iamenforcexpn.go).
+		useComputeSubnetIAM(e, s.compute)
 	}
 	if s.apiKeys != nil {
 		prev := s.apiKeys.Wrap

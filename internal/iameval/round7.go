@@ -145,7 +145,8 @@ func computeDeny(permission, resource string) error {
 // compute.addresses.use and an INTERNAL address's createInternal are the
 // thirteenth round's (cmd/cloudburrow/iamenforce13.go).
 // VM instances, disks, snapshots and subnetworks keep their own allow
-// policies (#2112, internal/service/compute/iam.go), which apply beside
+// policies (#2112; a subnet's is Shared VPC's Individual subnets, #2140;
+// internal/service/compute/iam.go), which apply beside
 // the project's and its ancestors'; nothing else served keeps one. Their
 // getIamPolicy and setIamPolicy are compute.<collection>.getIamPolicy and
 // setIamPolicy on the resource, and testIamPermissions answers what the
@@ -198,6 +199,12 @@ var ComputeJSON = func() []JSONMethod {
 	coll(global, "networks", "networks", false, map[string]string{"PATCH": "compute.networks.update", "switchToCustomMode": "compute.networks.switchToCustomMode"})
 	coll(region, "subnetworks", "subnetworks", true, map[string]string{"PATCH": "compute.subnetworks.update",
 		"expandIpCidrRange": "compute.subnetworks.expandIpCidrRange", "setPrivateIpGoogleAccess": "compute.subnetworks.setPrivateIpGoogleAccess"})
+	// A subnet's policy (#2140): testIamPermissions needs
+	// compute.subnetworks.list, as its reference page says.
+	subnet := `(` + p + region + `/subnetworks/[^/]+)`
+	add("GET", subnet+`/getIamPolicy`, "compute.subnetworks.getIamPolicy")
+	add("POST", subnet+`/setIamPolicy`, "compute.subnetworks.setIamPolicy")
+	add("POST", subnet+`/testIamPermissions`, "compute.subnetworks.list")
 	coll(global, "firewalls", "firewalls", false, map[string]string{"PATCH": "compute.firewalls.update", "PUT": "compute.firewalls.update"})
 	coll(global, "routes", "routes", false, nil)
 	coll(region, "addresses", "addresses", true, map[string]string{"setLabels": "compute.addresses.setLabels"})

@@ -99,6 +99,11 @@ func (s *Server) iamCall(c call, rel string) (obj, error) {
 		// Every requested permission: with enforcement on, the enforcer
 		// keeps only those the caller holds.
 		perms := strs(c.body, "permissions")
+		for _, p := range perms {
+			if strings.Contains(p, "*") {
+				return nil, invalid("Invalid value for field 'permissions': '%s'. Permissions with wildcards (such as '*' or 'storage.*') are not allowed.", p)
+			}
+		}
 		out := obj{}
 		if len(perms) > 0 {
 			l := make([]any, len(perms))

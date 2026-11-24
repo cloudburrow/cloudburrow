@@ -163,12 +163,6 @@ func (s *Server) insertImage(c call) (obj, error) {
 	if _, ok := s.res[rel]; ok {
 		return nil, errf(http.StatusConflict, "alreadyExists", "The resource '%s' already exists", rel)
 	}
-	if str(b, "rawDisk") != "" || b["rawDisk"] != nil {
-		return nil, unimplemented("images imported from a Cloud Storage tarball (rawDisk) are not served: make the image from a disk, a snapshot or an image")
-	}
-	if err := s.checkDiskBudget(); err != nil {
-		return nil, err
-	}
 	o := obj{"kind": "compute#image", "id": newID(), "name": name, "selfLink": rel, "status": "PENDING", "sourceType": "RAW",
 		"creationTimestamp": s.stamp(), "architecture": arch(), "archiveSizeBytes": "0", "labelFingerprint": labelFingerprint(nil),
 		"guestOsFeatures": []any{obj{"type": "UEFI_COMPATIBLE"}, obj{"type": "VIRTIO_SCSI_MULTIQUEUE"}, obj{"type": "GVNIC"}}}
@@ -179,6 +173,21 @@ func (s *Server) insertImage(c call) (obj, error) {
 	}
 	if l, ok := b["labels"].(map[string]any); ok && len(l) > 0 {
 		o["labels"], o["labelFingerprint"] = l, labelFingerprint(l)
+	}
+	if b["rawDisk"] != nil {
+		n := 0
+		for _, k := range []string{"sourceDisk", "sourceSnapshot", "sourceImage"} {
+			if str(b, k) != "" {
+				n++
+			}
+		}
+		if n > 0 {
+			return nil, invalid("Invalid value for field 'resource': ''. Exactly one of sourceDisk, sourceSnapshot, sourceImage or rawDisk must be specified.")
+		}
+		return s.insertRawImageLocked(c, rel, o)
+	}
+	if err := s.checkDiskBudget(); err != nil {
+		return nil, err
 	}
 	locs := strsAny(b["storageLocations"])
 	var src DiskSpec

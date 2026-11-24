@@ -35,7 +35,7 @@ func TestConsoleCloudRouterAndNAT2140(t *testing.T) {
 		t.Fatalf("router row = %+v", r)
 	}
 	d, _ := routers.Detail(ctx, project, []string{"us-central1", "r1"})
-	if d.Unavailable != "" || d.Heading != "Router details" || len(d.Sections) != 4 || d.Edit == nil ||
+	if d.Unavailable != "" || d.Heading != "Router details" || len(d.Sections) != 6 || d.Edit == nil ||
 		!strings.Contains(d.Sections[0].Groups[0].Properties[7].Value, "192.168.0.0/24") || d.Sections[0].Groups[0].Properties[5].Value != "30 seconds" {
 		t.Fatalf("router details = %+v", d)
 	}

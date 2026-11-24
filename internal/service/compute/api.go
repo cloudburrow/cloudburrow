@@ -374,6 +374,10 @@ func (s *Server) doLocked(c call) (obj, error) {
 			return s.serviceAttachments(c, region)
 		case "resourcePolicies":
 			return s.resourcePolicies(c, region)
+		case "disks":
+			return s.regionDisks(c, region)
+		case "diskTypes":
+			return s.regionDiskTypes(c, region)
 		case "instanceTemplates":
 			return s.instanceTemplates(c, "regions/"+region)
 		case "instanceGroupManagers", "instanceGroups", "autoscalers":
@@ -414,6 +418,8 @@ func (s *Server) doLocked(c call) (obj, error) {
 		if n >= 3 {
 			return s.zonal(c, zone)
 		}
+	case n == 3 && p[0] == "aggregated" && p[1] == "subnetworks" && p[2] == "listUsable" && get:
+		return s.listUsable(c)
 	case n == 2 && p[0] == "aggregated" && get:
 		return s.aggregated(c, p[1])
 	}

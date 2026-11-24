@@ -72,8 +72,51 @@ func TestConsoleServerlessVPCAccess2140(t *testing.T) {
 	if got := strings.Join(props, ";"); !strings.Contains(got, "Minimum throughput=200 Mbps") || !strings.Contains(got, "Maximum throughput=1000 Mbps") {
 		t.Errorf("detail = %s", got)
 	}
-	if a := p.DetailActions(ctx, project, []string{"us-central1", "web"}); len(a) != 1 || a[0].ID != "delete" {
-		t.Fatalf("actions = %+v", a)
+	acts := p.DetailActions(ctx, project, []string{"us-central1", "web"})
+	if vpcActionIDs(acts) != "edit,delete" {
+		t.Fatalf("actions = %+v", acts)
+	}
+	// Edit: the counts only from their current values up.
+	if got := vpcFieldNames(acts[0].Fields); got != "minInstances,maxInstances,machineType" {
+		t.Fatalf("Edit fields = %s", got)
+	}
+	if o := acts[0].Fields[1].Options; o[0] != "10" || len(o) != 1 {
+		t.Fatalf("Edit maximum options = %v", o)
+	}
+	if err := p.ActAt(ctx, project, []string{"us-central1", "sub"}, "edit", map[string]string{"minInstances": "2", "maxInstances": "4", "machineType": "f1-micro"}); err == nil ||
+		!strings.Contains(err.Error(), "Decreasing") {
+		t.Fatalf("a decrease: %v", err)
+	}
+	if err := p.ActAt(ctx, project, []string{"us-central1", "sub"}, "edit", map[string]string{"minInstances": "4", "maxInstances": "6", "machineType": "e2-standard-4"}); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := p.List(ctx, project); vpcRow(l, "sub").Fields["Min instances"] != "4" || vpcRow(l, "sub").Fields["Max instances"] != "6" ||
+		vpcRow(l, "sub").Fields["Instance type"] != "e2-standard-4" {
+		t.Fatalf("after edit: %+v", vpcRow(l, "sub"))
+	}
+	// The network and the /28 subnet are kept while connectors use them.
+	if _, err := screen.call("DELETE", project, "regions/us-central1/subnetworks/conn-sub", nil, nil); err == nil ||
+		!strings.Contains(err.Error(), "connectors/sub") {
+		t.Fatalf("deleting the connector's subnet: %v", err)
+	}
+	if _, err := screen.call("POST", project, "global/networks", nil, map[string]any{"name": "lone", "autoCreateSubnetworks": false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Create(ctx, project, map[string]string{"name": "lone-conn", "region": "us-east1", "network": "lone",
+		"subnet": "custom", "ipCidrRange": "10.20.0.0/28"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := screen.call("DELETE", project, "global/networks/lone", nil, nil); err == nil ||
+		(!strings.Contains(err.Error(), "connectors/lone-conn") && !strings.Contains(err.Error(), "firewalls/aet-us-east1-lone-conn-")) {
+		// The connector, or one of the firewall rules it made in the
+		// network (connectorfw.go), keeps the network.
+		t.Fatalf("deleting the connector's network: %v", err)
+	}
+	if err := p.ActAt(ctx, project, []string{"us-east1", "lone-conn"}, "delete", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := screen.call("DELETE", project, "global/networks/lone", nil, nil); err != nil {
+		t.Fatalf("deleting the network once its connector is gone: %v", err)
 	}
 	if err := p.ActAt(ctx, project, []string{"us-central1", "web"}, "delete", nil); err != nil {
 		t.Fatal(err)

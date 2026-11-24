@@ -22,9 +22,11 @@ import (
 // project's page has the Attached projects tab with Attach projects, and
 // its subnets beside it (the tab's name, "Subnets in host project", is
 // UNVERIFIED, re-read 2026-11-22: the docs name only Attached projects); a service project
-// sees the host's subnets it can use, as `gcloud compute networks subnets
-// list-usable` lists them (project, region, network, subnet, range,
-// secondary ranges).
+// sees the host's subnets it can use, from subnetworks.listUsable, as
+// `gcloud compute networks subnets list-usable` lists them (project,
+// region, network, subnet, range, secondary ranges). Individual subnets
+// grants roles/compute.networkUser on each chosen subnet through its
+// IAM policy (subnetworks.setIamPolicy).
 type computeSharedVPCProvider struct{ computeScreen }
 
 func (computeSharedVPCProvider) ID() string    { return "vpc-sharedvpc" }
@@ -96,8 +98,8 @@ func (p computeSharedVPCProvider) List(ctx context.Context, project string) (con
 		l := console.Listing{Columns: sharedSubnetColumns(), NameColumn: "Name", Noun: "shared subnets",
 			TableTitle: "Subnets shared with this project",
 			Note:       "This project is a service project of the Shared VPC host project " + host + ". Its VMs choose one of these subnets under Networks shared with me."}
-		for _, s := range p.hostSubnets(host) {
-			l.Items = append(l.Items, sharedSubnetRow(host, s))
+		for _, s := range p.usableSubnets(project, host) {
+			l.Items = append(l.Items, s)
 		}
 		l.Total = len(l.Items)
 		return l, nil
@@ -119,11 +121,13 @@ func (p computeSharedVPCProvider) List(ctx context.Context, project string) (con
 			groups = append(groups, console.PropertyGroup{Heading: vpcLast(vpcStr(s, "network")) + " / " + vpcStr(s, "name"),
 				Properties: []console.Property{{Label: "Region", Value: vpcLast(vpcStr(s, "region"))},
 					{Label: "IP address range", Value: vpcStr(s, "ipCidrRange")},
-					{Label: "Secondary IP ranges", Value: vpcDash(secondaryText(s))}}})
+					{Label: "Secondary IP ranges", Value: vpcDash(secondaryText(s))},
+					{Label: "Compute Network Users on this subnet", Value: vpcDash(strings.Join(p.subnetUsers(project, s), ", "))}}})
 		}
 		listing.Tabs = []console.Section{
 			{ID: "subnets", Label: "Subnets in host project", Groups: groups,
-				Note: "Every subnet of this host project is shared with its attached projects (Share all subnets)."},
+				Note: "Share all subnets: principals with Compute Network User (roles/compute.networkUser) on this host project use every subnet. " +
+					"Individual subnets: principals granted it on a subnet use only that subnet (its IAM policy, subnetworks.setIamPolicy). Share subnets grants it on the subnets you choose."},
 			{ID: "attached", Label: "Attached projects"},
 		}
 		listing.ListTab = "attached"
@@ -153,8 +157,152 @@ func (p computeSharedVPCProvider) sharedUsers(service, host string) int {
 
 func sharingModeField() console.Field {
 	return console.Field{Name: "sharing", Label: "Select subnets", Type: "radio", Default: "all", Options: []string{"all", "individual"},
-		OptionLabels:       map[string]string{"all": "Share all subnets (project-level permissions)", "individual": "Individual subnets (subnet-level permissions)"},
-		UnavailableOptions: map[string]string{"individual": "Subnet-level IAM policies (subnetworks.setIamPolicy) are not served: share all subnets, with compute.networkUser on the host project."}}
+		OptionLabels: map[string]string{"all": "Share all subnets (project-level permissions)", "individual": "Individual subnets (subnet-level permissions)"}}
+}
+
+// subnetFieldPrefix names a "Subnets to share" checkbox: subnet:REGION/NAME.
+const subnetFieldPrefix = "subnet:"
+
+// subnetFields are the host's subnets to share, one checkbox each, and
+// the principals granted Compute Network User on those chosen, shown for
+// Individual subnets (when is the ShowWhen condition, "" for always).
+func (p computeSharedVPCProvider) subnetFields(host, when string) []console.Field {
+	var out []console.Field
+	for _, s := range p.hostSubnets(host) {
+		region := vpcLast(vpcStr(s, "region"))
+		out = append(out, console.Field{Name: subnetFieldPrefix + region + "/" + vpcStr(s, "name"), Type: "checkbox", Section: "Subnets to share", ShowWhen: when,
+			Label: vpcStr(s, "name") + " (" + region + ", " + vpcLast(vpcStr(s, "network")) + ", " + vpcStr(s, "ipCidrRange") + ")"})
+	}
+	return append(out, console.Field{Name: "members", Label: "Compute Network Users", Type: "text", ShowWhen: when, Section: "Subnets to share",
+		Help: "The service projects' principals granted Compute Network User (roles/compute.networkUser) on each subnet chosen, separated by commas: user:EMAIL, group:EMAIL, serviceAccount:EMAIL or domain:DOMAIN."})
+}
+
+// shareSubnets grants roles/compute.networkUser to values' members on
+// the host subnets values chooses, through each subnet's IAM policy.
+func (p computeSharedVPCProvider) shareSubnets(host string, values map[string]string) error {
+	chosen, members, err := shareChoice(values)
+	if err != nil {
+		return err
+	}
+	for _, name := range chosen {
+		if err := p.grantSubnet(host, name, members); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// shareChoice is the subnets (REGION/NAME, sorted) and principals the
+// form chose, or why it cannot be saved.
+func shareChoice(values map[string]string) ([]string, []any, error) {
+	var members []any
+	for _, m := range strings.Split(values["members"], ",") {
+		if m = strings.TrimSpace(m); m != "" {
+			members = append(members, m)
+		}
+	}
+	var chosen []string
+	for k, v := range values {
+		if name, ok := strings.CutPrefix(k, subnetFieldPrefix); ok && (v == "true" || v == "on") {
+			chosen = append(chosen, name)
+		}
+	}
+	sort.Strings(chosen)
+	if len(chosen) == 0 {
+		return nil, nil, errors.New("Subnets to share: choose at least one subnet")
+	}
+	if len(members) == 0 {
+		return nil, nil, errors.New("Compute Network Users: name at least one principal to grant the chosen subnets")
+	}
+	return chosen, members, nil
+}
+
+// grantSubnet adds members to roles/compute.networkUser on host's subnet
+// name (REGION/NAME).
+func (p computeSharedVPCProvider) grantSubnet(host, name string, members []any) error {
+	region, sub, _ := strings.Cut(name, "/")
+	base := "regions/" + region + "/subnetworks/" + sub
+	pol, err := p.call("GET", host, base+"/getIamPolicy", nil, nil)
+	if err != nil {
+		return err
+	}
+	bindings, _ := pol["bindings"].([]any)
+	found := false
+	for _, b := range bindings {
+		bm, _ := b.(map[string]any)
+		if vpcStr(bm, "role") != "roles/compute.networkUser" || bm["condition"] != nil {
+			continue
+		}
+		found = true
+		have, _ := bm["members"].([]any)
+		for _, m := range members {
+			dup := false
+			for _, h := range have {
+				dup = dup || h == m
+			}
+			if !dup {
+				have = append(have, m)
+			}
+		}
+		bm["members"] = have
+	}
+	if !found {
+		bindings = append(bindings, map[string]any{"role": "roles/compute.networkUser", "members": members})
+	}
+	pol["bindings"] = bindings
+	_, err = p.call("POST", host, base+"/setIamPolicy", nil, map[string]any{"policy": pol})
+	return err
+}
+
+// subnetUsers are the principals granted Compute Network User on the
+// subnet s of host.
+func (p computeSharedVPCProvider) subnetUsers(host string, s map[string]any) []string {
+	pol, err := p.call("GET", host, "regions/"+vpcLast(vpcStr(s, "region"))+"/subnetworks/"+vpcStr(s, "name")+"/getIamPolicy", nil, nil)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, b := range vmMaps(pol, "bindings") {
+		if vpcStr(b, "role") == "roles/compute.networkUser" {
+			ms, _ := b["members"].([]any)
+			for _, m := range ms {
+				if ms, ok := m.(string); ok {
+					out = append(out, ms)
+				}
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// usableSubnets are the host's subnets a service project can use, as
+// subnetworks.listUsable lists them (the project's own left out).
+func (p computeSharedVPCProvider) usableSubnets(project, host string) []console.Resource {
+	m, err := p.call("GET", project, "aggregated/subnetworks/listUsable", nil, nil)
+	if err != nil {
+		return nil
+	}
+	var out []console.Resource
+	for _, u := range computeItems(m) {
+		link := vpcStr(u, "subnetwork")
+		i := strings.Index(link, "projects/")
+		if i < 0 {
+			continue
+		}
+		parts := strings.Split(link[i:], "/")
+		if len(parts) != 6 || parts[1] != host {
+			continue
+		}
+		row := sharedSubnetRow(host, map[string]any{"name": parts[5], "region": parts[3], "network": u["network"],
+			"ipCidrRange": u["ipCidrRange"], "secondaryIpRanges": u["secondaryIpRanges"]})
+		out = append(out, row)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i].Fields, out[j].Fields
+		return a["Network"]+"/"+a["Region"]+"/"+a["Subnet"] < b["Network"]+"/"+b["Region"]+"/"+b["Subnet"]
+	})
+	return out
 }
 
 func projectNamesField() console.Field {
@@ -173,17 +321,18 @@ func (p computeSharedVPCProvider) ListActions(ctx context.Context, project strin
 	switch role {
 	case "host":
 		return []console.Action{
-			{ID: "attach", Label: "Attach projects", Submit: "Save", Fields: []console.Field{projectNamesField(), sharingModeField()}},
+			{ID: "attach", Label: "Attach projects", Submit: "Save", Fields: append([]console.Field{projectNamesField(), sharingModeField()}, p.subnetFields(project, "sharing=individual")...)},
+			{ID: "share", Label: "Share subnets", Submit: "Save", Title: "Share subnets", Fields: p.subnetFields(project, "")},
 			{ID: "disable", Label: "Disable Shared VPC", Destructive: true, ConfirmStyle: console.DeleteConfirmClick, Confirm: "Disable Shared VPC for host project " + project + "? Detach every service project first."},
 		}
 	case "service":
 		return nil
 	}
 	return []console.Action{{ID: "setup", Label: "Set up Shared VPC", Submit: "Save", Title: "Set up Shared VPC",
-		Fields: []console.Field{
+		Fields: append([]console.Field{
 			{Name: "enable", Label: "Enable host project", Type: "checkbox", Default: "true", Help: "Makes " + project + " a Shared VPC host project."},
 			sharingModeField(), {Name: "projects", Label: "Project names", Type: "text",
-				Help: "The service projects to attach, by project ID, separated by commas (optional: attach them later)."}}}}
+				Help: "The service projects to attach, by project ID, separated by commas (optional: attach them later)."}}, p.subnetFields(project, "sharing=individual")...)}}
 }
 
 func (p computeSharedVPCProvider) attach(project, list string) error {
@@ -198,21 +347,47 @@ func (p computeSharedVPCProvider) attach(project, list string) error {
 	return nil
 }
 
+// DetailActions: the page has no resource of its own to act on; its
+// actions are on the list (ListActions). Without it the provider is no
+// console.PathActor, and the console drops its list actions.
+func (p computeSharedVPCProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	return nil
+}
+
+var _ console.ListActor = computeSharedVPCProvider{}
+
 func (p computeSharedVPCProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
-	if values["sharing"] == "individual" {
-		return errors.New("Individual subnets (subnet-level permissions) are not served: share all subnets")
+	individual := values["sharing"] == "individual"
+	if individual {
+		if _, _, err := shareChoice(values); err != nil {
+			return err
+		}
 	}
 	switch {
 	case len(path) == 0 && action == "setup":
 		if _, err := p.call("POST", project, "enableXpnHost", nil, nil); err != nil {
 			return err
 		}
-		return p.attach(project, values["projects"])
+		if err := p.attach(project, values["projects"]); err != nil {
+			return err
+		}
+		if individual {
+			return p.shareSubnets(project, values)
+		}
+		return nil
 	case len(path) == 0 && action == "attach":
 		if strings.TrimSpace(values["projects"]) == "" {
 			return errors.New("Project names: name at least one project to attach")
 		}
-		return p.attach(project, values["projects"])
+		if err := p.attach(project, values["projects"]); err != nil {
+			return err
+		}
+		if individual {
+			return p.shareSubnets(project, values)
+		}
+		return nil
+	case len(path) == 0 && action == "share":
+		return p.shareSubnets(project, values)
 	case len(path) == 0 && action == "disable":
 		_, err := p.call("POST", project, "disableXpnHost", nil, nil)
 		return err

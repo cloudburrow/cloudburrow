@@ -8,7 +8,13 @@
 #   - the segment: vpc0, a VXLAN device whose VNI is the network's, holding
 #     the instance's internal IP, an on-link route per subnet range of the
 #     network, and a static neighbour and forwarding entry per peer VM
-#     (its internal IP, its MAC, its pod IP);
+#     (its internal IP, its MAC, its pod IP), and a route through the router
+#     appliance per prefix Cloud Router learned over BGP (routevia);
+#   - IPv6 (dual-stack interfaces, #2140): the instance's IPv6 address on
+#     vpc0, an on-link route per dual-stack /64 of the network and a
+#     permanent neighbour and forwarding entry per peer's IPv6 address, so
+#     IPv6 crosses the same VXLAN segment; an IPv6-only interface gets no
+#     addr and no IPv4 routes;
 #   - internal DNS: INSTANCE.ZONE.c.PROJECT.internal of every instance on
 #     the network, in a block of /etc/hosts;
 #   - the relays (#2160): each VPC address and port of a load balancer or
@@ -35,6 +41,14 @@ apply() {
     log "cannot apply the firewall rules"
     return 1
   fi
+  # A Cloud Run gateway (gateways.go) forwards between eth0 and vpc0.
+  if grep -qx forward "$RUN/conf"; then
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+  fi
+  # A Cloud NAT gateway's pod (natgateways.go): its conntrack timeouts.
+  sed -n 's/^sysctl //p' "$RUN/conf" | while read -r k v; do
+    echo "$v" > "/proc/sys/net/netfilter/$k" 2>/dev/null
+  done
   vni=$(val vni); mtu=$(val mtu); addr=$(val addr); mac=$(val mac)
   if [ "$(cat "$RUN/vni" 2>/dev/null)" != "$vni" ] || ! ip link show vpc0 >/dev/null 2>&1; then
     ip link del vpc0 2>/dev/null
@@ -46,17 +60,76 @@ apply() {
   fi
   max=$(( $(cat /sys/class/net/eth0/mtu) - 50 ))
   [ "$mtu" -gt "$max" ] && mtu=$max
-  echo 1 > /proc/sys/net/ipv6/conf/vpc0/disable_ipv6 2>/dev/null
+  addr6=$(val addr6)
+  if [ -n "$addr6" ]; then
+    echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null
+    echo 0 > /proc/sys/net/ipv6/conf/vpc0/disable_ipv6 2>/dev/null
+  else
+    echo 1 > /proc/sys/net/ipv6/conf/vpc0/disable_ipv6 2>/dev/null
+  fi
   ip link set vpc0 address "$mac" mtu "$mtu" up
-  ip addr replace "$addr/32" dev vpc0
+  # An IPv6-only interface (stackType IPV6_ONLY) has no IPv4 address and
+  # no IPv4 route.
+  if [ -n "$addr" ]; then
+    ip addr replace "$addr/32" dev vpc0
+  else
+    ip -4 addr flush dev vpc0
+  fi
   # Routes: one per subnet range; stale ones removed.
   sed -n 's/^route //p' "$RUN/conf" > "$RUN/routes"
   while read -r cidr; do
     ip route replace "$cidr" dev vpc0 scope link src "$addr"
   done < "$RUN/routes"
+  # Dynamic routes Cloud Router learned over BGP (bgpspeakers.go): PREFIX
+  # through the router appliance at NEXTHOP, on the segment.
+  sed -n 's/^routevia //p' "$RUN/conf" > "$RUN/routesvia"
+  while read -r cidr hop; do
+    ip route replace "$cidr" via "$hop" dev vpc0 onlink src "$addr"
+  done < "$RUN/routesvia"
+  # Cloud NAT (natgateways.go): the internet through the NAT gateway's
+  # pod at the subnet's gateway address; private ranges, the cluster's and
+  # the metadata server's stay on eth0.
+  nat=$(val nat)
+  sed -n 's/^natkeep //p' "$RUN/conf" > "$RUN/natkeep.new"
+  if [ -f "$RUN/natkeep" ]; then
+    while read -r cidr; do
+      grep -qx "$cidr" "$RUN/natkeep.new" || ip route del "$cidr" dev eth0 2>/dev/null
+    done < "$RUN/natkeep"
+  fi
+  mv "$RUN/natkeep.new" "$RUN/natkeep"
+  if [ -n "$nat" ] && [ -n "$addr" ]; then
+    gw=$(ip -4 route show default dev eth0 | sed -n 's/^default via \([0-9.]*\).*/\1/p' | head -n 1)
+    while read -r cidr; do
+      ip route replace "$cidr" via "$gw" dev eth0
+    done < "$RUN/natkeep"
+    for cidr in 0.0.0.0/1 128.0.0.0/1; do
+      ip route replace "$cidr" via "$nat" dev vpc0 onlink src "$addr"
+      echo "$cidr" >> "$RUN/routes"
+    done
+  fi
   ip -4 route show dev vpc0 | while read -r cidr _; do
-    grep -qx "$cidr" "$RUN/routes" || ip route del "$cidr" dev vpc0
+    grep -qx "$cidr" "$RUN/routes" || grep -q "^$cidr " "$RUN/routesvia" || ip route del "$cidr" dev vpc0
   done
+  # IPv6: the address, its routes and its peers' neighbour entries.
+  sed -n 's/^route6 //p' "$RUN/conf" > "$RUN/routes6"
+  sed -n 's/^peer6 //p' "$RUN/conf" > "$RUN/peers6"
+  if [ -n "$addr6" ]; then
+    ip -6 addr replace "$addr6/128" dev vpc0 nodad
+    ip -6 addr show dev vpc0 scope global | sed -n 's/.* inet6 \([0-9a-f:]*\)\/.*/\1/p' | while read -r a; do
+      [ "$a" = "$addr6" ] || ip -6 addr del "$a/128" dev vpc0
+    done
+    while read -r cidr; do
+      ip -6 route replace "$cidr" dev vpc0 src "$addr6"
+    done < "$RUN/routes6"
+    ip -6 route show dev vpc0 | while read -r cidr _; do
+      case "$cidr" in fe80:*) continue ;; esac
+      grep -qx "$cidr" "$RUN/routes6" || ip -6 route del "$cidr" dev vpc0
+    done
+    while read -r ip pmac pod; do
+      ip -6 neigh replace "$ip" lladdr "$pmac" dev vpc0 nud permanent
+      [ -n "$pod" ] && bridge fdb replace "$pmac" dev vpc0 dst "$pod" self permanent
+    done < "$RUN/peers6"
+  fi
   # Peers: a permanent neighbour and forwarding entry each.
   sed -n 's/^peer //p' "$RUN/conf" > "$RUN/peers"
   while read -r ip pmac pod; do
@@ -64,11 +137,11 @@ apply() {
     bridge fdb replace "$pmac" dev vpc0 dst "$pod" self permanent
   done < "$RUN/peers"
   ip neigh show dev vpc0 | while read -r ip _ pmac _; do
-    grep -q "^$ip " "$RUN/peers" || ip neigh del "$ip" dev vpc0
+    grep -q "^$ip " "$RUN/peers" "$RUN/peers6" || ip neigh del "$ip" dev vpc0
   done
   bridge fdb show dev vpc0 | while read -r pmac kw dst _; do
     [ "$kw" = dst ] || continue
-    case "$pmac" in 42:01:*) grep -q " $pmac " "$RUN/peers" || bridge fdb del "$pmac" dev vpc0 dst "$dst" self ;; esac
+    case "$pmac" in 42:01:*|42:02:*) grep -q " $pmac " "$RUN/peers" "$RUN/peers6" || bridge fdb del "$pmac" dev vpc0 dst "$dst" self ;; esac
   done
   # Internal DNS.
   pod=$1
@@ -79,7 +152,7 @@ apply() {
     echo "# cloudburrow-vpc end"
   } > "$RUN/hosts"
   cat "$RUN/hosts" > /etc/hosts
-  log "vpc0 $addr (VNI $vni), $(wc -l < "$RUN/peers") peers, $(grep -c ' comment ' "$RUN/ruleset") firewall entries"
+  log "vpc0 $addr ${addr6:+$addr6 }(VNI $vni), $(wc -l < "$RUN/peers") peers, $(grep -c ' comment ' "$RUN/ruleset") firewall entries"
   relays
 }
 

@@ -23,8 +23,9 @@ import (
 //     PRIVATE_SERVICE_CONNECT, one address in its network;
 //   - an EXTERNAL address is chosen from documentation ranges
 //     (203.0.113.0/24 regional, 198.51.100.0/24 global), since no address
-//     here is reachable from the internet; a given external address (BYOIP)
-//     is not served.
+//     here is reachable from the internet; a given external address is a
+//     VM's ephemeral one promoted (natip.go), any other (BYOIP) is not
+//     served.
 
 var (
 	regionalPool = cidrs("203.0.113.0/24")[0]
@@ -52,8 +53,13 @@ func (s *Server) insertAddress(project, region string, b obj) (obj, error) {
 	default:
 		return nil, invalid("Invalid value for field 'resource.addressType': '%s'. Must be one of [EXTERNAL, INTERNAL]", typ)
 	}
-	if v := str(b, "ipVersion"); v != "" && v != "IPV4" {
-		return nil, unimplemented("ipVersion %s: IPv6 addresses are not served", v)
+	v6 := false
+	switch v := str(b, "ipVersion"); v {
+	case "", "IPV4":
+	case "IPV6":
+		v6 = true
+	default:
+		return nil, invalid("Invalid value for field 'resource.ipVersion': '%s'. Must be one of [IPV4, IPV6]", v)
 	}
 	tier := str(b, "networkTier")
 	o := obj{"kind": "compute#address", "name": name, "selfLink": rel, "addressType": typ, "status": "RESERVED"}
@@ -62,7 +68,7 @@ func (s *Server) insertAddress(project, region string, b obj) (obj, error) {
 	}
 	if region != "" {
 		o["region"] = "projects/" + project + "/regions/" + region
-	} else {
+	} else if !v6 {
 		o["ipVersion"] = "IPV4"
 	}
 	if l, ok := b["labels"].(map[string]any); ok && len(l) > 0 {
@@ -71,6 +77,17 @@ func (s *Server) insertAddress(project, region string, b obj) (obj, error) {
 	o["labelFingerprint"] = labelFingerprint(o["labels"])
 	purpose := str(b, "purpose")
 	addr := str(b, "address")
+	if v6 && region == "" {
+		if err := s.globalIPv6Locked(typ, b, o); err != nil {
+			return nil, err
+		}
+		typ = "IPV6"
+	} else if v6 {
+		if err := s.regionalIPv6Locked(project, region, typ, b, o); err != nil {
+			return nil, err
+		}
+		typ = "IPV6" // filled: neither IPv4 case below applies
+	}
 	switch typ {
 	case "EXTERNAL":
 		switch tier {
@@ -89,7 +106,15 @@ func (s *Server) insertAddress(project, region string, b obj) (obj, error) {
 			return nil, invalid("Invalid value for field 'resource.purpose': '%s'. Purpose is set only for internal addresses.", purpose)
 		}
 		if addr != "" {
-			return nil, unimplemented("a given external address (bring your own IP) is not served: leave address unset to have one chosen")
+			// Promoting an instance's ephemeral external address (natip.go).
+			ok, err := s.promoteExternalLocked(project, region, addr, str(b, "networkTier"), o)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, unimplemented("a given external address (bring your own IP) is not served: leave address unset to have one chosen, or give a VM's ephemeral external address to promote it")
+			}
+			break
 		}
 		pool := regionalPool
 		if region == "" {
@@ -149,6 +174,9 @@ func (s *Server) regionalInternal(project, region string, b, o obj, purpose, add
 	}
 	if lastSeg(str(so, "region")) != region {
 		return invalid("Invalid value for field 'resource.subnetwork': '%s'. The subnetwork must be in region '%s'.", sub, region)
+	}
+	if str(so, "stackType") == "IPV6_ONLY" {
+		return invalid("Invalid value for field 'resource.subnetwork': '%s'. The subnetwork is IPv6-only: it has no IPv4 addresses (use stackType IPV6_ONLY for an interface, ipVersion IPV6 for an address).", sub)
 	}
 	o["subnetwork"], o["network"] = sub, str(so, "network")
 	n, _ := ParseCIDR(str(so, "ipCidrRange"))
@@ -213,6 +241,15 @@ func (s *Server) usedInSubnetLocked(sub string) map[string]string {
 			for _, e := range nics {
 				if nic, ok := e.(map[string]any); ok && str(nic, "subnetwork") == sub {
 					used[str(nic, "networkIP")] = k
+				}
+			}
+		}
+		if strings.Contains(k, "/routers/") {
+			// A Cloud Router interface's address, where its BGP speaker is
+			// (bgpspeakers.go).
+			for _, e := range sliceOf(a["interfaces"]) {
+				if i := objOf(e); str(i, "subnetwork") == sub && str(i, "privateIpAddress") != "" {
+					used[str(i, "privateIpAddress")] = k
 				}
 			}
 		}
@@ -336,6 +373,9 @@ func (s *Server) setLabels(project, scope, rel string, b obj) (obj, error) {
 			"Labels fingerprint either invalid or resource labels have changed")
 	}
 	l, _ := b["labels"].(map[string]any)
+	if err := checkLabels("labels", l); err != nil {
+		return nil, err
+	}
 	if len(l) == 0 {
 		delete(o, "labels")
 	} else {

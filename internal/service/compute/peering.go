@@ -124,8 +124,14 @@ func (s *Server) addPeering(project, name string, b obj) (obj, error) {
 		"exportSubnetRoutesWithPublicIp": np["exportSubnetRoutesWithPublicIp"] != false,
 		"importSubnetRoutesWithPublicIp": np["importSubnetRoutesWithPublicIp"] == true,
 		"stackType":                      "IPV4_ONLY", "updateStrategy": "INDEPENDENT"}
-	if st := str(np, "stackType"); st != "" && st != "IPV4_ONLY" {
-		return nil, unimplemented("networkPeering.stackType %s: IPv6 is not served", st)
+	switch st := str(np, "stackType"); st {
+	case "", "IPV4_ONLY":
+	case "IPV4_IPV6":
+		// IPv6 subnet routes are exchanged too (ipv6.go), on the peering
+		// group's one segment.
+		p["stackType"] = st
+	default:
+		return nil, invalid("Invalid value for field 'networkPeering.stackType': '%s'. Must be IPV4_ONLY or IPV4_IPV6.", st)
 	}
 	if us := str(np, "updateStrategy"); us != "" {
 		if us != "INDEPENDENT" && us != "CONSENSUS" {

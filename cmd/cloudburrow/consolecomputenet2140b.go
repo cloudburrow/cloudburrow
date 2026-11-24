@@ -325,11 +325,23 @@ func (p computeRoutersProvider) Detail(ctx context.Context, project string, path
 				Unavailable: "Add BGP session needs a Cloud VPN tunnel or a Cloud Interconnect VLAN attachment, which are not served; a router appliance session (an interface on a subnetwork and a VM as peer) is made through the API."},
 			{ID: "nat", Label: "Cloud NAT gateways", Listing: nats},
 			{ID: "interfaces", Label: "Interfaces", Listing: ifaces},
+			p.routePoliciesSection(project, path),
+			p.namedSetsSection(project, path),
 		},
 		Edit: &console.EditForm{Label: "Edit", Note: "A router's name, network and region are fixed.", Fields: routerFields(nil, r)}}, nil
 }
 
 func (p computeRoutersProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	if p.api() != nil && len(path) == 4 && path[2] == namedSetsTab {
+		// A named set's row: its Edit elements and Delete, which the
+		// console checks a row action against.
+		for _, ns := range p.namedSetsOrNil(project, path[:2]) {
+			if vpcStr(ns, "name") == path[3] {
+				return namedSetRowActions(path[3], ns)
+			}
+		}
+		return nil
+	}
 	if p.api() == nil || len(path) != 2 {
 		return nil
 	}
@@ -338,10 +350,16 @@ func (p computeRoutersProvider) DetailActions(ctx context.Context, project strin
 	}
 	a := routerDelete(path)
 	a.Leaves = true
-	return []console.Action{a}
+	return append(append(routePolicyActions(p.routePolicyNames(project, path)), namedSetCreate()), a)
 }
 
 func (p computeRoutersProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if len(path) == 2 && (action == "createRoutePolicy" || action == "deleteRoutePolicy") {
+		return p.actRoutePolicy(project, path, action, values)
+	}
+	if isNamedSetAction(path, action) {
+		return p.actNamedSet(project, path, action, values)
+	}
 	if len(path) != 2 || action != "delete" {
 		return fmt.Errorf("%s is not available here", action)
 	}
@@ -441,12 +459,16 @@ type natChoices struct {
 	subnets map[string][]string
 	// addresses are the reserved regional external addresses by "region=R".
 	addresses map[string][]string
+	// natSubnets are the PRIVATE_NAT subnets (Private NAT's ranges) by
+	// "network=N&region=R".
+	natSubnets map[string][]string
 }
 
 const natNewRouter = "__new__"
 
 func (p computeNATProvider) choices(ctx context.Context, project string) natChoices {
-	c := natChoices{networks: p.networkNames(ctx, project), routers: map[string][]string{}, subnets: map[string][]string{}, addresses: map[string][]string{}}
+	c := natChoices{networks: p.networkNames(ctx, project), routers: map[string][]string{}, subnets: map[string][]string{}, addresses: map[string][]string{},
+		natSubnets: map[string][]string{}}
 	if rs, err := p.routers().routers(project); err == nil {
 		for _, r := range rs {
 			k := "network=" + vpcLast(vpcStr(r, "network")) + "&region=" + vpcLast(vpcStr(r, "region"))
@@ -456,6 +478,10 @@ func (p computeNATProvider) choices(ctx context.Context, project string) natChoi
 	if m, err := p.call("GET", project, "aggregated/subnetworks", nil, nil); err == nil {
 		for _, s := range aggregatedItems(m, "subnetworks") {
 			k := "network=" + vpcLast(vpcStr(s, "network")) + "&region=" + vpcLast(vpcStr(s, "region"))
+			if vpcStr(s, "purpose") == "PRIVATE_NAT" {
+				c.natSubnets[k] = append(c.natSubnets[k], vpcStr(s, "name"))
+				continue
+			}
 			c.subnets[k] = append(c.subnets[k], vpcStr(s, "name"))
 		}
 	}
@@ -588,6 +614,7 @@ func natFields(c natChoices, cur map[string]any) []console.Field {
 		fields = append(fields, console.Field{Name: t.name, Label: t.label, Type: "text", Section: adv, Pattern: `^[0-9]+$`,
 			Default: def(t.name, strconv.Itoa(compute.NATTimeoutDefaults[t.name])), Help: "Seconds."})
 	}
+	fields = natTypeFields(c, cur, fields)
 	if cur != nil {
 		return fields
 	}
@@ -602,8 +629,8 @@ func natFields(c natChoices, cur map[string]any) []console.Field {
 	return append([]console.Field{
 		{Name: "name", Label: "Gateway name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp},
 		{Name: "type", Label: "NAT type", Type: "radio", Default: "PUBLIC", Options: []string{"PUBLIC", "PRIVATE"},
-			OptionLabels:       map[string]string{"PUBLIC": "Public", "PRIVATE": "Private"},
-			UnavailableOptions: map[string]string{"PRIVATE": "Private NAT translates between Network Connectivity Center spokes and hybrid networks, which are not served."}},
+			OptionLabels: map[string]string{"PUBLIC": "Public", "PRIVATE": "Private"},
+			Help:         "Private NAT translates between Network Connectivity Center spokes and hybrid networks through PRIVATE_NAT subnets; it gives no internet access."},
 		netField, region, routerField,
 		{Name: "routerName", Label: "Name of the new router", Type: "text", Required: true, Section: sel, Pattern: computeNamePattern,
 			VisibleWhen: map[string]string{"router": natNewRouter}, Help: "A Cloud Router made in the network and region for this gateway."},
@@ -612,6 +639,9 @@ func natFields(c natChoices, cur map[string]any) []console.Field {
 
 // natBody is the gateway the form's values make, named name.
 func natBody(project, region, name string, values map[string]string) (map[string]any, error) {
+	if values["type"] == "PRIVATE" {
+		return privateNatBody(project, region, name, values)
+	}
 	n := map[string]any{"name": name, "type": "PUBLIC", "sourceSubnetworkIpRangesToNat": vpcOr(values["source"], "ALL_SUBNETWORKS_ALL_IP_RANGES"),
 		"natIpAllocateOption":              vpcOr(values["natIpAllocateOption"], "AUTO_ONLY"),
 		"enableEndpointIndependentMapping": values["enableEndpointIndependentMapping"] == "true",
@@ -865,6 +895,13 @@ func (p computeNATProvider) ActAt(ctx context.Context, project string, path []st
 func (p computeNATProvider) Edit(ctx context.Context, project string, path []string, values map[string]string) error {
 	if len(path) != 3 {
 		return errors.New("no Cloud NAT gateway")
+	}
+	if r, err := p.call("GET", project, "regions/"+path[0]+"/routers/"+path[1], nil, nil); err == nil {
+		for _, e := range vmMaps(r, "nats") {
+			if vpcStr(e, "name") == path[2] && vpcStr(e, "type") == "PRIVATE" {
+				values["type"] = "PRIVATE"
+			}
+		}
 	}
 	n, err := natBody(project, path[0], path[2], values)
 	if err != nil {

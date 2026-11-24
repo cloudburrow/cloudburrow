@@ -92,7 +92,7 @@ func TestComputeEngineThroughTheBrowser(t *testing.T) {
 		"startupScript": "#!/bin/bash\necho BROWSER-MARK-$(hostname)"}, "name")
 	p.waitFor(`location.pathname === "/compute/instances" && ` + rowWith(vm))
 	r := waitStatus("compute-instances", vm, "RUNNING", 10*time.Minute)
-	if r.Fields["External IP"] != "127.0.0.1" || !strings.HasPrefix(r.Fields["Internal IP"], "10.128.") || !strings.HasPrefix(r.Fields["Connect"], "SSH (port ") {
+	if !strings.HasPrefix(r.Fields["External IP"], "192.0.2.") || !strings.HasPrefix(r.Fields["Internal IP"], "10.128.") || !strings.HasPrefix(r.Fields["Connect"], "SSH (port ") {
 		t.Fatalf("the running instance's row: %+v", r)
 	}
 
