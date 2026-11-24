@@ -66,19 +66,19 @@ type Snapshot struct {
 }
 
 // SnapshotDate is when the pinned generations were published.
-const SnapshotDate = "2026-11-19"
+const SnapshotDate = "2026-11-24"
 
 // Snapshots are the ecosystems Artifact Analysis scans that the pin
 // covers: the OS packages of Alpine, Debian and Ubuntu images, and Go,
 // Java (Maven), Node.js (npm) and Python (PyPI) packages.
 var Snapshots = []Snapshot{
-	{"Alpine", "1795080781716943", "82c1e6b3a170cdc7e663061fc3a766a6c90ec73ac071aa34403bebaed0cca457", 9276935},
-	{"Debian", "1795096995130005", "6005ba6323158727283dac884ff01b5693fc57861afb046c85ce2bffe79bc576", 82263485},
-	{"Go", "1795050195126703", "525f77fa536859d59215442f6ba98caf100ca7f1bef2dd9a242d9f3fb0f89757", 12956844},
-	{"Maven", "1795051974553992", "fd1c96321a41c535c3f4cab7fc4db24f46c659e143eb62493c1a634a917f1c97", 10547334},
-	{"PyPI", "1795082587433272", "51d4295bbe14768b99f0b8b91b01b708d8230ac296c8722cc5e29e66d28e8ee4", 38075455},
-	{"npm", "1795095210470062", "0601339e91c58525433117f107327a55c96a060534c5614ee6375f6f7bf366f9", 221817800},
-	{"Ubuntu", "1795077206037621", "7490ea001180541e8bb10acae93aff85ca368842986cd4d22e68b9ce82d7fb6a", 819766997},
+	{"Alpine", "1795512820714665", "6858c782e555fa4e89d1fde40a26e17338d5ffd3c12aec848c6a47c42c042973", 9358767},
+	{"Debian", "1795536219202983", "b93ecc6e21d07456f4bdead547f0c0c5110c80e2828de22bbe5c0da35c0d2db5", 84730155},
+	{"Go", "1795469632669004", "448083cdeb0d8128bc2bc1b8957fd54a0dbe1afe82115304b8656e745b0c7d07", 13105046},
+	{"Maven", "1795469632573186", "ea7e02c8b9cef22362b54befc797a8fbf175d7bf615f0bc3edbfb82168a05130", 10568619},
+	{"PyPI", "1795530814869811", "c9e28cc71f6a0ebded203c68cc0351defe92b1d0b3b1df850d72011bc60abe25", 38307382},
+	{"npm", "1795534423292416", "77455169b93082a45a12c60cb2169d9f7b4bd896d1cd8c1025a2e96a2e5c6406", 222271998},
+	{"Ubuntu", "1795533549986908", "c2037e749e73c43df154cc45221f5dc0b088856431c04f3c1a5f54ae300e2fcb", 837827112},
 }
 
 // SnapshotURL is the OSV data dump's archive of one ecosystem at the pinned
