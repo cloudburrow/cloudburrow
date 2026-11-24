@@ -14,7 +14,7 @@ import (
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 )
 
-// covers: google.dataflow.v1beta3.JobsV1Beta3/CreateJob, google.dataflow.v1beta3.JobsV1Beta3/UpdateJob
+// covers: google.dataflow.v1beta3.JobsV1Beta3/CreateJob, google.dataflow.v1beta3.JobsV1Beta3/UpdateJob, google.dataflow.v1beta3.MetricsV1Beta3/GetJobMetrics
 //
 // TestJavaDataflowPubsub (#2215): a streaming Java pipeline
 // (testdata/dataflowjava PubsubCopy) reads a subscription's messages with
@@ -23,7 +23,10 @@ import (
 // DataflowRunner, on the Beam Java 11, 17 and 21 SDK harnesses (the
 // job's sdkContainerImage, as a custom container names one). Each job's
 // output messages are its input's, upper-cased, with their attributes
-// and the Java version they ran on; drained, the job is DRAINED.
+// and the Java version they ran on. While the job runs, GetJobMetrics
+// answers its Java workers' user counter of messages (2, with its step
+// and namespace, committed and tentative), as Dataflow reports a running
+// job's metrics; drained, the job is DRAINED.
 func TestJavaDataflowPubsub(t *testing.T) {
 	h, _, c := dataflowEnv(t)
 	storageAddr := h.Endpoint(EnvStorage)
@@ -98,6 +101,7 @@ func TestJavaDataflowPubsub(t *testing.T) {
 			if s := strings.Join(got, ","); s != want {
 				t.Errorf("the job published %s; want %s", s, want)
 			}
+			runningJavaMetrics(t, ctx, c, project, id)
 			if _, err := c.jobs.UpdateJob(ctx, &dataflowpb.UpdateJobRequest{ProjectId: project, Location: "us-central1", JobId: id,
 				Job: &dataflowpb.Job{RequestedState: dataflowpb.JobState_JOB_STATE_DRAINED}}); err != nil {
 				t.Fatalf("drain: %v", err)
@@ -107,5 +111,48 @@ func TestJavaDataflowPubsub(t *testing.T) {
 				t.Fatalf("job %s ended %s:\n%s", id, j.CurrentState, jobMessages(t, ctx, c, project, id))
 			}
 		})
+	}
+}
+
+// runningJavaMetrics: while the PubsubCopy job id runs, GetJobMetrics
+// answers its Java workers' user counter messages = 2 (the Upper step's,
+// namespace dev.cloudburrow.dataflow.PubsubCopy), committed and tentative,
+// and the job is still RUNNING after it.
+func runningJavaMetrics(t *testing.T, ctx context.Context, c dataflowClients, project, id string) {
+	t.Helper()
+	const ns = "dev.cloudburrow.dataflow.PubsubCopy"
+	var last []*dataflowpb.MetricUpdate
+	for deadline := time.Now().Add(2 * time.Minute); ; {
+		m, err := c.metrics.GetJobMetrics(ctx, &dataflowpb.GetJobMetricsRequest{ProjectId: project, Location: "us-central1", JobId: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		last = m.Metrics
+		committed, tentative := -1.0, -1.0
+		for _, u := range m.Metrics {
+			n := u.GetName()
+			if n.GetName() != "messages" || n.GetOrigin() != "user" || n.GetContext()["namespace"] != ns || !strings.Contains(n.GetContext()["step"], "Upper") {
+				continue
+			}
+			if n.GetContext()["tentative"] == "true" {
+				tentative = u.GetScalar().GetNumberValue()
+			} else {
+				committed = u.GetScalar().GetNumberValue()
+			}
+		}
+		if committed == 2 && tentative == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("GetJobMetrics of the running job = %v; want the user counter messages = 2 of step Upper, namespace %s, committed and tentative", last, ns)
+		}
+		time.Sleep(3 * time.Second)
+	}
+	j, err := c.jobs.GetJob(ctx, &dataflowpb.GetJobRequest{ProjectId: project, Location: "us-central1", JobId: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.CurrentState != dataflowpb.JobState_JOB_STATE_RUNNING {
+		t.Errorf("job %s is %s after its metrics; want them while it is JOB_STATE_RUNNING", id, j.CurrentState)
 	}
 }

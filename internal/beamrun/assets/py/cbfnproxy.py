@@ -15,6 +15,13 @@ writes them, as sitecustomize does, to a file of --metrics, which the
 launcher sums. A bundle's metrics that are reported by short ID are
 resolved by asking the worker for their metadata (an instruction of the
 proxy's own, whose response the runner never sees).
+
+The Java SDK's pool takes a worker's control endpoint from the runner's
+ProvisionInfo whenever the request names a provision endpoint, not from
+the request (ExternalWorkerService.startWorker: "if
+(provisionInfo.hasControlEndpoint()) controlEndpoint = ..."), so this
+proxy answers the worker's provisioning too: the runner's ProvisionInfo,
+its control endpoint made the proxy's.
 """
 import argparse
 import itertools
@@ -28,6 +35,7 @@ import grpc
 from apache_beam.metrics import monitoring_infos as mi
 from apache_beam.portability.api import beam_fn_api_pb2
 from apache_beam.portability.api import beam_fn_api_pb2_grpc
+from apache_beam.portability.api import beam_provision_api_pb2_grpc
 from apache_beam.portability.api import metrics_pb2
 
 OPTS = [("grpc.max_receive_message_length", -1), ("grpc.max_send_message_length", -1)]
@@ -166,6 +174,23 @@ class ControlProxy(beam_fn_api_pb2_grpc.BeamFnControlServicer):
         return self.stub.GetProcessBundleDescriptor(request)
 
 
+class ProvisionProxy(beam_provision_api_pb2_grpc.ProvisionServiceServicer):
+    """The runner's provision service, as one worker sees it: its
+    ProvisionInfo with the control endpoint made control's (the proxy's)."""
+
+    def __init__(self, upstream, control):
+        self.channel = grpc.insecure_channel(upstream, options=OPTS)
+        self.stub = beam_provision_api_pb2_grpc.ProvisionServiceStub(self.channel)
+        self.control = control
+
+    def GetProvisionInfo(self, request, context):
+        md = [(k, v) for k, v in context.invocation_metadata() if not k.startswith(":") and k not in ("user-agent",)]
+        resp = self.stub.GetProvisionInfo(request, metadata=md)
+        if resp.info.HasField("control_endpoint"):
+            resp.info.control_endpoint.url = self.control
+        return resp
+
+
 class Pool(beam_fn_api_pb2_grpc.BeamFnExternalWorkerPoolServicer):
     def __init__(self, target, metrics):
         self.channel = grpc.insecure_channel(target, options=OPTS)
@@ -180,11 +205,15 @@ class Pool(beam_fn_api_pb2_grpc.BeamFnExternalWorkerPoolServicer):
         server = grpc.server(futures.ThreadPoolExecutor(max_workers=16), options=OPTS)
         beam_fn_api_pb2_grpc.add_BeamFnControlServicer_to_server(ControlProxy(request.control_endpoint.url, totals), server)
         port = server.add_insecure_port("localhost:0")
-        server.start()
-        self.servers[request.worker_id] = server
         fwd = beam_fn_api_pb2.StartWorkerRequest()
         fwd.CopyFrom(request)
         fwd.control_endpoint.url = "localhost:%d" % port
+        if request.HasField("provision_endpoint") and request.provision_endpoint.url:
+            beam_provision_api_pb2_grpc.add_ProvisionServiceServicer_to_server(
+                ProvisionProxy(request.provision_endpoint.url, fwd.control_endpoint.url), server)
+            fwd.provision_endpoint.url = fwd.control_endpoint.url
+        server.start()
+        self.servers[request.worker_id] = server
         return self.stub.StartWorker(fwd)
 
     def StopWorker(self, request, context):

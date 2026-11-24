@@ -9,6 +9,8 @@ import org.apache.beam.sdk.io.gcp.pubsub.PubsubMessage;
 import org.apache.beam.sdk.options.Description;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.options.StreamingOptions;
+import org.apache.beam.sdk.metrics.Counter;
+import org.apache.beam.sdk.metrics.Metrics;
 import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.SimpleFunction;
 
@@ -32,8 +34,11 @@ public class PubsubCopy {
   }
 
   static class Upper extends SimpleFunction<PubsubMessage, PubsubMessage> {
+    private final Counter messages = Metrics.counter(PubsubCopy.class, "messages");
+
     @Override
     public PubsubMessage apply(PubsubMessage m) {
+      messages.inc();
       Map<String, String> attrs = new HashMap<>();
       if (m.getAttributeMap() != null) {
         attrs.putAll(m.getAttributeMap());
