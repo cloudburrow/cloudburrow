@@ -27,7 +27,7 @@ const computeNotStarted = "the Compute Engine API has not started"
 
 const computeNote = "Memorystore, Kubernetes Engine and Cloud SQL check their network fields against these networks, as Google does. " +
 	"Between VM instances a network carries traffic, its subnet routes and an ACTIVE peering's exchanged, with its firewall rules enforced on each VM; " +
-	"static routes and firewall logs are records only. Operations complete at once."
+	"firewall logs are written for VMs' connections to load balancers, Secure Web Proxy and Private Service Connect endpoints; static routes are records only. Operations complete at once."
 
 const computeNamePattern = `^[a-z]([a-z0-9\-]{0,61}[a-z0-9])?$`
 
@@ -974,6 +974,10 @@ func firewallFields(networks []string, cur map[string]any) []console.Field {
 		return strings.Join(vpcStrs(cur, k), ", ")
 	}
 	dir, action, logs := "Ingress", "Allow", "Off"
+	metadata := fwIncludeMetadata
+	if lc, _ := cur["logConfig"].(map[string]any); vpcStr(lc, "metadata") == "EXCLUDE_ALL_METADATA" {
+		metadata = fwExcludeMetadata
+	}
 	targets, source, second, dest := fwAllTargets, fwIPv4, fwNone, fwIPv4
 	var entries any
 	if cur != nil {
@@ -1038,7 +1042,11 @@ func firewallFields(networks []string, cur map[string]any) []console.Field {
 		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp, Immutable: cur != nil, Default: def("name", "")},
 		{Name: "description", Label: "Description", Type: "text", Default: def("description", "")},
 		{Name: "logs", Label: "Logs", Type: "radio", Default: logs, Options: []string{"On", "Off"},
-			Help: "Kept as the rule's logConfig; firewall logs are not written locally."},
+			Help: "Turning on firewall logs can generate a large number of logs, which can increase costs in Cloud Logging. " +
+				"Connections a VM makes to load balancers, Secure Web Proxy and Private Service Connect endpoints are logged here (#2180)."},
+		// Firewall Rules Logging's metadata (#2180): logConfig.metadata.
+		{Name: "logsMetadata", Label: "Metadata", Type: "radio", Default: metadata, Options: []string{fwIncludeMetadata, fwExcludeMetadata},
+			VisibleWhen: map[string]string{"logs": "On"}},
 		netField,
 		{Name: "priority", Label: "Priority", Type: "text", Required: true, Default: def("priority", "1000"), Pattern: `^[0-9]{1,5}$`,
 			Help: "Priority can be 0 - 65535."},
@@ -1132,12 +1140,30 @@ func firewallEntries(values map[string]string) ([]any, error) {
 	return out, nil
 }
 
+// The Metadata choice of a firewall rule's logs.
+const (
+	fwIncludeMetadata = "Include metadata"
+	fwExcludeMetadata = "Exclude metadata"
+)
+
+// firewallLogConfig is the form's Logs and Metadata as logConfig.
+func firewallLogConfig(values map[string]string) map[string]any {
+	if values["logs"] != "On" {
+		return map[string]any{"enable": false}
+	}
+	m := "INCLUDE_ALL_METADATA"
+	if values["logsMetadata"] == fwExcludeMetadata {
+		m = "EXCLUDE_ALL_METADATA"
+	}
+	return map[string]any{"enable": true, "metadata": m}
+}
+
 func firewallBody(values map[string]string) (map[string]any, error) {
 	disabled := values["enforcement"] == "Disabled" || values["disabled"] == "true"
 	b := map[string]any{"name": strings.TrimSpace(values["name"]), "description": strings.TrimSpace(values["description"]),
 		"network":   "global/networks/" + strings.TrimSpace(vpcOr(values["network"], "default")),
 		"direction": strings.ToUpper(vpcOr(values["direction"], "Ingress")), "disabled": disabled,
-		"logConfig": map[string]any{"enable": values["logs"] == "On"}}
+		"logConfig": firewallLogConfig(values)}
 	if pr := strings.TrimSpace(values["priority"]); pr != "" {
 		n, err := strconv.Atoi(pr)
 		if err != nil {

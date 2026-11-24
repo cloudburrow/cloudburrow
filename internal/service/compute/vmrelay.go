@@ -71,10 +71,82 @@ const relayLocalBase = 47000
 // maxRelays bounds how many VPC addresses and ports one guest relays.
 const maxRelays = 256
 
-// relayVIP is one VPC address and port a guest relays.
+// relayVIP is one VPC address, port and protocol a guest relays.
 type relayVIP struct {
 	dst   netip.AddrPort
+	udp   bool
 	local int
+}
+
+// relayVIPsLocked are the VPC addresses and ports self's guest relays,
+// sorted, each with its local port: the load-balancing forwarding rules
+// it reaches (TCP and, #2180, UDP), the Private Service Connect endpoints
+// of its own network whose service attachment publishes a load balancer
+// (endpoints are not reachable over peering), and the Secure Web Proxy
+// gateways of its networks.
+func (s *Server) relayVIPsLocked(self vmNet, reach map[string]bool) []relayVIP {
+	type key struct {
+		dst netip.AddrPort
+		udp bool
+	}
+	seen := map[key]bool{}
+	var vips []relayVIP
+	add := func(a netip.AddrPort, udp bool) {
+		k := key{a, udp}
+		if !a.Addr().Is4() || a.Addr().IsLoopback() || a.Addr().IsUnspecified() || seen[k] {
+			return
+		}
+		seen[k] = true
+		vips = append(vips, relayVIP{dst: a, udp: udp})
+	}
+	for k, o := range s.res {
+		if !strings.Contains(k, "/forwardingRules/") {
+			continue
+		}
+		rule := o
+		if o["_lb"] != true {
+			if str(o, "network") != self.network {
+				continue
+			}
+			var ok bool
+			if rule, ok = s.pscProducerRuleLocked(o); !ok {
+				continue
+			}
+		} else if !s.ruleReachableLocked(o, reach) {
+			continue
+		}
+		kind := s.ruleKindLocked(rule)
+		if kind == "" {
+			continue
+		}
+		ip, err := netip.ParseAddr(str(o, "IPAddress"))
+		if err != nil {
+			continue
+		}
+		for _, p := range rulePorts(rule) {
+			add(netip.AddrPortFrom(ip, uint16(p)), kind == "udp")
+		}
+	}
+	if g := s.opts.Gateways; g != nil {
+		for n := range reach {
+			for _, a := range g.RelayAddresses(n) {
+				add(a, false)
+			}
+		}
+	}
+	sort.Slice(vips, func(i, j int) bool {
+		if c := vips[i].dst.Compare(vips[j].dst); c != 0 {
+			return c < 0
+		}
+		return !vips[i].udp && vips[j].udp
+	})
+	if len(vips) > maxRelays {
+		vips = vips[:maxRelays]
+	}
+	for i := range vips {
+		vips[i].local = relayLocalBase + i
+	}
+	return vips
 }
 
 // startRelay opens the relay's listener beside the API's, on a port this
@@ -108,50 +180,24 @@ func (s *Server) stopRelay() {
 	}
 }
 
-// relayVIPsLocked are the VPC addresses and ports self's guest relays,
-// sorted, each with its local port.
-func (s *Server) relayVIPsLocked(self vmNet, reach map[string]bool) []relayVIP {
-	seen := map[netip.AddrPort]bool{}
-	var dsts []netip.AddrPort
-	add := func(a netip.AddrPort) {
-		if !a.Addr().Is4() || a.Addr().IsLoopback() || a.Addr().IsUnspecified() || seen[a] {
-			return
-		}
-		seen[a] = true
-		dsts = append(dsts, a)
+// pscProducerRuleLocked is the load balancer's forwarding rule a Private
+// Service Connect endpoint (a forwarding rule whose target is a service
+// attachment) reaches: its attachment's targetService, while the
+// endpoint's connection is ACCEPTED.
+func (s *Server) pscProducerRuleLocked(endpoint obj) (obj, bool) {
+	att := str(endpoint, "target")
+	if !strings.Contains(att, "/serviceAttachments/") || str(endpoint, "pscConnectionStatus") != "ACCEPTED" {
+		return nil, false
 	}
-	for k, o := range s.res {
-		if o["_lb"] != true || !strings.Contains(k, "/forwardingRules/") || !s.ruleReachableLocked(o, reach) {
-			continue
-		}
-		kind := s.ruleKindLocked(o)
-		if kind == "" || kind == "udp" {
-			continue
-		}
-		ip, err := netip.ParseAddr(str(o, "IPAddress"))
-		if err != nil {
-			continue
-		}
-		for _, p := range rulePorts(o) {
-			add(netip.AddrPortFrom(ip, uint16(p)))
-		}
+	a, ok := s.res[att]
+	if !ok {
+		return nil, false
 	}
-	if g := s.opts.Gateways; g != nil {
-		for n := range reach {
-			for _, a := range g.RelayAddresses(n) {
-				add(a)
-			}
-		}
+	r, ok := s.res[str(a, "targetService")]
+	if !ok || r["_lb"] != true {
+		return nil, false
 	}
-	sort.Slice(dsts, func(i, j int) bool { return dsts[i].Compare(dsts[j]) < 0 })
-	if len(dsts) > maxRelays {
-		dsts = dsts[:maxRelays]
-	}
-	out := make([]relayVIP, len(dsts))
-	for i, d := range dsts {
-		out[i] = relayVIP{dst: d, local: relayLocalBase + i}
-	}
-	return out
+	return r, true
 }
 
 // ruleReachableLocked is whether a VM on one of the reach networks reaches
@@ -172,8 +218,8 @@ func (s *Server) ruleReachableLocked(o obj, reach map[string]bool) bool {
 
 // relayConfigLocked is the relay's part of a guest's configuration: the
 // relay's port, a "relay LOCAL ADDRESS PORT HEADER" line per VPC address
-// and port (HEADER the PROXY header, base64), and the nftables chain that
-// redirects each to its local relay.
+// and TCP port ("relayudp ..." per UDP port; HEADER the PROXY header,
+// base64), and the nftables chain that redirects each to its local relay.
 func (s *Server) relayConfigLocked(self vmNet, token string, reach map[string]bool) (text, nft string) {
 	if s.relay == nil || token == "" {
 		return "", ""
@@ -195,12 +241,20 @@ func (s *Server) relayConfigLocked(self vmNet, token string, reach map[string]bo
 		fmt.Fprintf(&b, "relayhost %s\n", host)
 	}
 	for _, v := range vips {
-		hdr := vmrelay.Encode(vmrelay.Header{Src: netip.AddrPortFrom(src, 0), Dst: v.dst, Token: token})
-		fmt.Fprintf(&b, "relay %d %s %d %s\n", v.local, v.dst.Addr(), v.dst.Port(), base64.StdEncoding.EncodeToString(hdr))
+		hdr := vmrelay.Encode(vmrelay.Header{Src: netip.AddrPortFrom(src, 0), Dst: v.dst, Token: token, UDP: v.udp})
+		word := "relay"
+		if v.udp {
+			word = "relayudp"
+		}
+		fmt.Fprintf(&b, "%s %d %s %d %s\n", word, v.local, v.dst.Addr(), v.dst.Port(), base64.StdEncoding.EncodeToString(hdr))
 	}
 	n.WriteString("  chain relay {\n    type nat hook output priority -100; policy accept;\n")
 	for _, v := range vips {
-		fmt.Fprintf(&n, "    ip daddr %s tcp dport %d redirect to :%d\n", v.dst.Addr(), v.dst.Port(), v.local)
+		proto := "tcp"
+		if v.udp {
+			proto = "udp"
+		}
+		fmt.Fprintf(&n, "    ip daddr %s %s dport %d redirect to :%d\n", v.dst.Addr(), proto, v.dst.Port(), v.local)
 	}
 	n.WriteString("  }\n")
 	return b.String(), n.String()
@@ -208,8 +262,9 @@ func (s *Server) relayConfigLocked(self vmNet, token string, reach map[string]bo
 
 // relayResolve authenticates a relayed connection: its token must be a
 // running instance's, its source that instance's internal IP, and its
-// destination a forwarding rule or gateway the instance's network
-// reaches.
+// destination a forwarding rule, Private Service Connect endpoint or
+// gateway the instance's network reaches over the header's protocol. The
+// instance's egress firewall rules then decide it (relayfirewall.go).
 func (s *Server) relayResolve(h vmrelay.Header) (netip.AddrPort, func(net.Conn) bool, error) {
 	s.mu.Lock()
 	var inst obj
@@ -233,44 +288,112 @@ func (s *Server) relayResolve(h vmrelay.Header) (netip.AddrPort, func(net.Conn) 
 		reach[n] = true
 	}
 	var rule string
+	src := h.Src
 	for k, o := range s.res {
-		if o["_lb"] != true || !strings.Contains(k, "/forwardingRules/") || str(o, "IPAddress") != h.Dst.Addr().String() ||
-			!s.ruleReachableLocked(o, reach) {
+		if !strings.Contains(k, "/forwardingRules/") || str(o, "IPAddress") != h.Dst.Addr().String() {
 			continue
 		}
-		for _, p := range rulePorts(o) {
+		target, rk := o, k
+		if o["_lb"] != true {
+			// A Private Service Connect endpoint of the instance's own
+			// network: the producer's load balancer sees the connection
+			// from the endpoint's address in the attachment's NAT subnet.
+			p, ok := s.pscProducerRuleLocked(o)
+			if !ok || str(o, "network") != self.network {
+				continue
+			}
+			nat, ok := s.pscNATAddressLocked(o, s.res[str(o, "target")])
+			if !ok {
+				continue
+			}
+			target, rk = p, str(p, "selfLink")
+			if rk == "" {
+				rk = str(s.res[str(o, "target")], "targetService")
+			}
+			if (s.ruleKindLocked(target) == "udp") != h.UDP {
+				continue
+			}
+			for _, port := range rulePorts(target) {
+				if port == int(h.Dst.Port()) {
+					rule, src = rk, netip.AddrPortFrom(nat, h.Src.Port())
+				}
+			}
+			continue
+		}
+		if !s.ruleReachableLocked(o, reach) || (s.ruleKindLocked(o) == "udp") != h.UDP {
+			continue
+		}
+		for _, p := range rulePorts(target) {
 			if p == int(h.Dst.Port()) {
-				rule = k
+				rule, src = rk, h.Src
 			}
 		}
 	}
+	var gwNet string
+	if rule == "" && !h.UDP {
+		if g := s.opts.Gateways; g != nil {
+			for n := range reach {
+				for _, a := range g.RelayAddresses(n) {
+					if a == h.Dst {
+						gwNet = n
+					}
+				}
+			}
+		}
+	}
+	if rule == "" && gwNet == "" {
+		s.mu.Unlock()
+		return netip.AddrPort{}, nil, errors.New("nothing the instance reaches is at " + h.Dst.Addr().String() + ":" +
+			strconv.Itoa(int(h.Dst.Port())) + "/" + h.Proto())
+	}
+	if nics := sliceOf(inst["networkInterfaces"]); len(nics) > 0 && !h.Dst.Addr().IsPrivate() && !inRanges(h.Dst.Addr(), PrivateRanges) {
+		nic, _ := nics[0].(map[string]any)
+		if len(sliceOf(nic["accessConfigs"])) == 0 && !s.natInternetLocked(inst) {
+			s.mu.Unlock()
+			return netip.AddrPort{}, nil, fmt.Errorf("the instance has no external IP and no Cloud NAT, so %s is not reachable", h.Dst)
+		}
+	}
+	fw := s.egressFirewallLocked(inst, self, h.Src, h.Dst, h.Proto())
 	s.mu.Unlock()
-	if rule != "" {
-		p := s.lb
-		p.mu.Lock()
-		var inj *vmrelay.Listener
-		if rl := p.listeners[rule]; rl != nil && rl.kind != "udp" {
-			for _, l := range rl.ls {
-				if l.rulePort == int(h.Dst.Port()) {
-					inj = l.inj
-				}
+	s.writeFirewallLog(fw.log)
+	if !fw.allow {
+		return netip.AddrPort{}, nil, fmt.Errorf("the egress firewall rule %s (priority %v) denies %s %s to %s",
+			str(fw.rule, "name"), fw.rule["priority"], self.name, h.Proto(), h.Dst)
+	}
+	if gwNet != "" {
+		g := s.opts.Gateways
+		return src, func(c net.Conn) bool { return g.RelayInject(gwNet, h.Dst, c) }, nil
+	}
+	if h.UDP {
+		port := int(h.Dst.Port())
+		return src, func(c net.Conn) bool {
+			go s.relayUDPFlow(rule, port, src, c)
+			return true
+		}, nil
+	}
+	p := s.lb
+	p.mu.Lock()
+	var inj *vmrelay.Listener
+	if rl := p.listeners[rule]; rl != nil && rl.kind != "udp" {
+		for _, l := range rl.ls {
+			if l.rulePort == int(h.Dst.Port()) {
+				inj = l.inj
 			}
 		}
-		p.mu.Unlock()
-		if inj == nil {
-			return netip.AddrPort{}, nil, fmt.Errorf("forwarding rule %s does not listen on port %d", rule, h.Dst.Port())
-		}
-		return h.Src, inj.Inject, nil
 	}
-	if g := s.opts.Gateways; g != nil {
-		for n := range reach {
-			for _, a := range g.RelayAddresses(n) {
-				if a == h.Dst {
-					nw := n
-					return h.Src, func(c net.Conn) bool { return g.RelayInject(nw, h.Dst, c) }, nil
-				}
-			}
+	p.mu.Unlock()
+	if inj == nil {
+		return netip.AddrPort{}, nil, fmt.Errorf("forwarding rule %s does not listen on port %d", rule, h.Dst.Port())
+	}
+	return src, inj.Inject, nil
+}
+
+// inRanges is whether one of the CIDRs holds a.
+func inRanges(a netip.Addr, cidrs []string) bool {
+	for _, c := range cidrs {
+		if p, err := netip.ParsePrefix(c); err == nil && p.Contains(a) {
+			return true
 		}
 	}
-	return netip.AddrPort{}, nil, errors.New("nothing the instance reaches is at " + h.Dst.Addr().String() + ":" + strconv.Itoa(int(h.Dst.Port())))
+	return false
 }

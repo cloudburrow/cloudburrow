@@ -211,6 +211,30 @@ func TestConsoleVPCFirewallsRoutesAndAddresses(t *testing.T) {
 	if err := fw.Delete(ctx, project, "allow-web"); err != nil {
 		t.Fatal(err)
 	}
+	// Logs On with metadata excluded (#2180).
+	if _, err := fw.Create(ctx, project, map[string]string{"name": "logged", "network": "app", "direction": "Egress", "action": "Deny",
+		"destinationRanges": "10.9.0.0/16", "protocols": "udp:53", "logs": "On", "logsMetadata": fwExcludeMetadata}); err != nil {
+		t.Fatal(err)
+	}
+	l, _ = fw.List(ctx, project)
+	if r := vpcRow(l, "logged"); r == nil || r.Fields["Logs"] != "On" {
+		t.Fatalf("the logged rule's row: %+v", r)
+	}
+	d, _ := fw.Detail(ctx, project, []string{"logged"})
+	meta := ""
+	if d.Edit != nil {
+		for _, f := range d.Edit.Fields {
+			if f.Name == "logsMetadata" {
+				meta = f.Default
+			}
+		}
+	}
+	if meta != fwExcludeMetadata {
+		t.Errorf("the logged rule's Metadata: %q", meta)
+	}
+	if err := fw.Delete(ctx, project, "logged"); err != nil {
+		t.Fatal(err)
+	}
 
 	routes := computeRoutesProvider{screen}
 	if _, err := routes.Create(ctx, project, map[string]string{"name": "to-net", "network": "app", "destRange": "192.168.0.0/16",

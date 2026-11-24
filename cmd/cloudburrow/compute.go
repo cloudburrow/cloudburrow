@@ -93,7 +93,10 @@ type computeService struct {
 	metadataHost func() string
 	// relayAt is the VM relay's in-cluster address (#2160), set by up.
 	relayAt func() string
-	cancel  context.CancelFunc
+	// firewallLog writes Firewall Rules Logging records to this
+	// instance's Cloud Logging (#2180), set by up when it is served.
+	firewallLog func(compute.FirewallLogEntry)
+	cancel      context.CancelFunc
 	// sql is the Cloud SQL Admin API, whose private IPs the VPC networks
 	// reach (#2141); nil without Cloud SQL.
 	sql    func() *sqladmin.Server
@@ -232,7 +235,11 @@ func (s *computeService) Start(ctx context.Context) error {
 		PrivateServices: s.privateServices, ServiceAttachment: s.serviceAttachment,
 		ProjectOrganization: s.projectOrganization, LB: &computeLB{cfg: s.cfg, vms: s.vms},
 		CertMaps: cm, IAP: computeIAPGate{svc: s}, NetSec: computeNetSec{ns: ns, cm: cm, endpoints: xdsEndpointPolicies(nsv)}, XDSCredentialDir: xdsCredDir, SourceTags: s.sourceTags,
-		RelayBind: s.cfg.BindAddress})
+		RelayBind: s.cfg.BindAddress, FirewallLog: func(e compute.FirewallLogEntry) {
+			if s.firewallLog != nil {
+				s.firewallLog(e)
+			}
+		}})
 	if err != nil {
 		return err
 	}

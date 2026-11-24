@@ -59,15 +59,31 @@ type Header struct {
 	Dst netip.AddrPort
 	// Token is the instance's guest token.
 	Token string
+	// UDP is a relayed UDP flow (the header's DGRAM family), whose
+	// datagrams follow the header as frames (WriteFrame, ReadFrame); a
+	// TCP connection's bytes follow it as they are.
+	UDP bool
+}
+
+// Proto is the header's transport: "tcp" or "udp".
+func (h Header) Proto() string {
+	if h.UDP {
+		return "udp"
+	}
+	return "tcp"
 }
 
 // Encode is h as a PROXY protocol version 2 header (PROXY command, TCP
-// over IPv4), its token in a TLVToken TLV.
+// or UDP over IPv4), its token in a TLVToken TLV.
 func Encode(h Header) []byte {
 	var b bytes.Buffer
 	b.Write(signature)
 	b.WriteByte(0x21) // version 2, PROXY
-	b.WriteByte(0x11) // AF_INET, STREAM
+	if h.UDP {
+		b.WriteByte(0x12) // AF_INET, DGRAM
+	} else {
+		b.WriteByte(0x11) // AF_INET, STREAM
+	}
 	src, dst := h.Src.Addr().As4(), h.Dst.Addr().As4()
 	body := make([]byte, 0, 12+3+len(h.Token))
 	body = append(body, src[:]...)
@@ -83,7 +99,7 @@ func Encode(h Header) []byte {
 }
 
 // Read reads a PROXY protocol version 2 header from r. Only the PROXY
-// command over TCP and IPv4 with a token is accepted.
+// command over TCP or UDP and IPv4 with a token is accepted.
 func Read(r *bufio.Reader) (Header, error) {
 	head := make([]byte, 16)
 	if _, err := io.ReadFull(r, head); err != nil {
@@ -95,8 +111,8 @@ func Read(r *bufio.Reader) (Header, error) {
 	if head[12] != 0x21 {
 		return Header{}, fmt.Errorf("PROXY header version and command 0x%02x, want 0x21", head[12])
 	}
-	if head[13] != 0x11 {
-		return Header{}, fmt.Errorf("PROXY header family 0x%02x, want 0x11 (TCP over IPv4)", head[13])
+	if head[13] != 0x11 && head[13] != 0x12 {
+		return Header{}, fmt.Errorf("PROXY header family 0x%02x, want 0x11 or 0x12 (TCP or UDP over IPv4)", head[13])
 	}
 	n := int(binary.BigEndian.Uint16(head[14:16]))
 	if n < 12 || 16+n > maxHeader {
@@ -109,6 +125,7 @@ func Read(r *bufio.Reader) (Header, error) {
 	h := Header{
 		Src: netip.AddrPortFrom(netip.AddrFrom4([4]byte(body[0:4])), binary.BigEndian.Uint16(body[8:10])),
 		Dst: netip.AddrPortFrom(netip.AddrFrom4([4]byte(body[4:8])), binary.BigEndian.Uint16(body[10:12])),
+		UDP: head[13] == 0x12,
 	}
 	for tlv := body[12:]; len(tlv) > 0; {
 		if len(tlv) < 3 {
@@ -127,6 +144,40 @@ func Read(r *bufio.Reader) (Header, error) {
 		return Header{}, errors.New("the PROXY header has no guest token")
 	}
 	return h, nil
+}
+
+// A relayed UDP flow is one connection to the Server: the header (its
+// family DGRAM), then each datagram the VM's client sends as a frame, a
+// 2-byte big-endian length and the datagram, and each reply back the same
+// way. The stream keeps the datagrams' boundaries, as the PROXY protocol
+// specification leaves the framing of a datagram flow over a stream to
+// the application.
+
+// MaxDatagram is the largest datagram a frame carries.
+const MaxDatagram = 65535
+
+// WriteFrame writes b as one frame.
+func WriteFrame(w io.Writer, b []byte) error {
+	if len(b) > MaxDatagram {
+		return fmt.Errorf("a datagram of %d bytes", len(b))
+	}
+	f := make([]byte, 2, 2+len(b))
+	binary.BigEndian.PutUint16(f, uint16(len(b)))
+	_, err := w.Write(append(f, b...))
+	return err
+}
+
+// ReadFrame reads one frame's datagram.
+func ReadFrame(r io.Reader) ([]byte, error) {
+	var l [2]byte
+	if _, err := io.ReadFull(r, l[:]); err != nil {
+		return nil, err
+	}
+	b := make([]byte, binary.BigEndian.Uint16(l[:]))
+	if _, err := io.ReadFull(r, b); err != nil {
+		return nil, err
+	}
+	return b, nil
 }
 
 // Conn is a relayed connection as the listener it is handed to sees it:
