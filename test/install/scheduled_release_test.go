@@ -450,8 +450,8 @@ func TestScheduledReleaseVersions(t *testing.T) {
 }
 
 // release-notes.sh takes a scheduled release's notes from its annotated tag
-// when CHANGELOG.md has no section, verbatim (headings included), and only
-// when the message carries the marker.
+// when CHANGELOG.md has no section, verbatim (headings included) after the
+// What's new section it adds, and only when the message carries the marker.
 func TestReleaseNotesFromAGeneratedTag(t *testing.T) {
 	r := newSchedRepo(t)
 	if err := os.WriteFile(filepath.Join(r.dir, "CHANGELOG.md"), []byte("# Changelog\n\n## [0.3.0] - 2026-11-18\n\n- old\n"), 0o644); err != nil {
@@ -478,7 +478,11 @@ func TestReleaseNotesFromAGeneratedTag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("release-notes.sh v0.4.0: %v\n%s", err, out)
 	}
-	if want := "Released automatically.\n\n### Added\n\n- a thing, see [docs](https://github.com/o/r/blob/v0.4.0/docs/x.md)\n"; out != want {
+	// No CHANGELOG.md is committed, so What's new is the landed branches'
+	// issues, named by branch with no RELEASE_NOTES_REPO to read titles from.
+	if want := "Released automatically.\n\n### What's new\n\nNo CHANGELOG.md entry was added since v0.3.0; these are the issues its landings closed:\n\n#### Other\n\n" +
+		"- `feat/11-thing` (#11)\n- `fix/12-bug` (#12)\n- `fix/21-other` (#21)\n\n" +
+		"### Added\n\n- a thing, see [docs](https://github.com/o/r/blob/v0.4.0/docs/x.md)\n"; out != want {
 		t.Errorf("got:\n%s\nwant:\n%s", out, want)
 	}
 	if out, err := run("v0.4.1"); err == nil {
