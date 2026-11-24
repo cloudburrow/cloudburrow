@@ -40,15 +40,19 @@ func loadOrCreatePostgresCredentials(cfg config.Config) (components.PostgresCred
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return c, err
 	}
-	c = components.PostgresCredentials{Password: randomPassword(), AdminPassword: randomPassword()}
+	// Passwords not kept are none: every call would make others.
+	if cfg.StateDir == "" {
+		return c, errors.New("the instance has no directory to keep its PostgreSQL passwords in")
+	}
 	if err := os.MkdirAll(cfg.InstanceDir(), 0o700); err != nil {
 		return c, err
 	}
-	b, _ := json.MarshalIndent(c, "", "  ")
+	n := components.PostgresCredentials{Password: randomPassword(), AdminPassword: randomPassword()}
+	b, _ := json.MarshalIndent(n, "", "  ")
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		return c, err
 	}
-	return c, nil
+	return n, nil
 }
 
 // postgresAdminPassword is the management role's password, "" when the

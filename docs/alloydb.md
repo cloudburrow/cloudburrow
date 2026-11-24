@@ -35,8 +35,6 @@ the PostgreSQL server Cloud SQL for PostgreSQL uses here, of the cluster's major
   PostgreSQL keeps them as placeholder settings with no effect.
 - `alloydbsuperuser` is an ordinary role, made at a primary's creation, which a cluster's users
   can be granted; as on Google, it is not PostgreSQL's superuser.
-- PostgreSQL trusts connections from inside the instance, as Cloud SQL's servers here do, so a
-  built-in user's password is set but a wrong one is not refused.
 - An instance's machine (vCPUs, memory) is recorded; the server takes what the machine gives it.
 
 ## Instances and read pools

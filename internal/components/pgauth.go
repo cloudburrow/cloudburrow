@@ -50,19 +50,21 @@ const (
 
 // WithPostgresAuth gives b, a PostgreSQL server, its management role
 // (admin, with adminPassword) and the password user is given when it has
-// none (userPassword, "" for none: a Cloud SQL instance created with no
-// rootPassword, whose postgres user then cannot sign in, as Google
-// documents: "You must set root passwords before you can connect").
+// none (userPassword; "" keeps it without one: a Cloud SQL instance
+// created with no rootPassword, whose postgres user then cannot sign in,
+// as Google documents: "You must set root passwords before you can
+// connect").
 func WithPostgresAuth(b Backend, admin, adminPassword, user, userPassword string) Backend {
 	b.Env = copyEnv(b.Env)
 	b.Env[pgAdminUserEnv] = admin
 	b.Env[pgAdminPasswordEnv] = adminPassword
-	if user != "" && userPassword != "" {
+	delete(b.Env, pgUserNameEnv)
+	delete(b.Env, pgUserPasswordEnv)
+	if user != "" {
 		b.Env[pgUserNameEnv] = user
-		b.Env[pgUserPasswordEnv] = userPassword
-	} else {
-		delete(b.Env, pgUserNameEnv)
-		delete(b.Env, pgUserPasswordEnv)
+		if userPassword != "" {
+			b.Env[pgUserPasswordEnv] = userPassword
+		}
 	}
 	// The managed connection poolers read the server's pg_shadow as the
 	// management role (poolerScript).
@@ -94,7 +96,11 @@ const pgAuthHeader = "# cloudburrow-password-auth (#2208)"
 //     where the instance's tunnel arrives, so only another server's pod
 //     replicates without one;
 //   - cloudsql_roles_sql is the management role, a superuser with the
-//     instance's management password, and the user's first password.
+//     instance's management password, and the user's first password, or
+//     none. The user has no password yet when its rolpassword is NULL, or
+//     the empty password's MD5: PostgreSQL 9.6's image runs initdb with
+//     --pwfile of an empty line whatever POSTGRES_PASSWORD is, which a
+//     9.6 server would accept.
 const pgAuthLib = `cloudsql_hba() {
   f="$PGDATA/pg_hba.conf"
   [ -f "$f" ] || return 0
@@ -114,8 +120,10 @@ cloudsql_roles_sql() {
     echo "DO \$\$BEGIN IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = '$CLOUDSQL_ADMIN_USER') THEN CREATE ROLE $CLOUDSQL_ADMIN_USER SUPERUSER LOGIN; END IF; END\$\$;"
     echo "ALTER ROLE $CLOUDSQL_ADMIN_USER SUPERUSER LOGIN PASSWORD '$CLOUDSQL_ADMIN_PASSWORD';"
   fi
-  if [ -n "${CLOUDSQL_USER_NAME:-}" ] && [ -n "${CLOUDSQL_USER_PASSWORD:-}" ]; then
-    echo "DO \$\$BEGIN IF EXISTS (SELECT 1 FROM pg_catalog.pg_authid WHERE rolname = '$CLOUDSQL_USER_NAME' AND rolpassword IS NULL) THEN ALTER ROLE \"$CLOUDSQL_USER_NAME\" PASSWORD '$CLOUDSQL_USER_PASSWORD'; END IF; END\$\$;"
+  if [ -n "${CLOUDSQL_USER_NAME:-}" ]; then
+    cloudsql_pw=NULL
+    [ -z "${CLOUDSQL_USER_PASSWORD:-}" ] || cloudsql_pw="'$CLOUDSQL_USER_PASSWORD'"
+    echo "DO \$\$BEGIN IF EXISTS (SELECT 1 FROM pg_catalog.pg_authid WHERE rolname = '$CLOUDSQL_USER_NAME' AND (rolpassword IS NULL OR rolpassword = 'md5' || md5(rolname))) THEN ALTER ROLE \"$CLOUDSQL_USER_NAME\" PASSWORD $cloudsql_pw; END IF; END\$\$;"
   fi
 }
 `

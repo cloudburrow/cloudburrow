@@ -243,7 +243,7 @@
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch11_test.go:519 TestTerraformRegionalSecretDataSources",
-          "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
+          "test/compat/terraform_batch4_test.go:216 TestTerraformSecretVersionDeletionPolicy",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
       },
@@ -268,7 +268,7 @@
           "test/compat/secrettype_test.go:21 TestSecretManagerSecretType",
           "test/compat/sysparams1954_test.go:180 TestSystemParametersSecretManager",
           "test/compat/terraform_batch11_test.go:479 TestTerraformRegionalSecretIAM",
-          "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
+          "test/compat/terraform_batch4_test.go:216 TestTerraformSecretVersionDeletionPolicy",
           "test/compat/terraform_batch8_test.go:171 TestTerraformSecretManagerSecretIAM",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
@@ -291,7 +291,7 @@
           "test/compat/secrettags1961_test.go:31 TestSecretManagerTagsAndAliasesAtCreation",
           "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch11_test.go:479 TestTerraformRegionalSecretIAM",
-          "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
+          "test/compat/terraform_batch4_test.go:216 TestTerraformSecretVersionDeletionPolicy",
           "test/compat/terraform_batch8_test.go:171 TestTerraformSecretManagerSecretIAM",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
@@ -315,7 +315,7 @@
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",
-          "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
+          "test/compat/terraform_batch4_test.go:216 TestTerraformSecretVersionDeletionPolicy",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
       },
@@ -389,7 +389,7 @@
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
-          "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
+          "test/compat/terraform_batch4_test.go:216 TestTerraformSecretVersionDeletionPolicy",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
       },
@@ -597,7 +597,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/orgpolicycustom1895_test.go:185 TestOrgPolicyCustomConstraintsRunJobsWorkerPools",
-          "test/compat/runcloudsql_test.go:140 TestRunJobCloudSQLVolume",
+          "test/compat/runcloudsql_test.go:141 TestRunJobCloudSQLVolume",
           "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
@@ -656,7 +656,7 @@
         "method": "google.cloud.run.v2.Jobs/RunJob",
         "status": "Verified",
         "tests": [
-          "test/compat/runcloudsql_test.go:140 TestRunJobCloudSQLVolume",
+          "test/compat/runcloudsql_test.go:141 TestRunJobCloudSQLVolume",
           "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
@@ -5169,7 +5169,7 @@
           "test/compat/resourcemanagerfolders_test.go:234 TestTerraformGoogleFolder",
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
           "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
-          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
+          "test/compat/terraform_batch4_test.go:296 TestTerraformFolderAndOrganizationIAM",
           "test/compat/terraform_batch9_test.go:207 TestTerraformFolderIAMAuditConfig"
         ]
       },
@@ -5180,7 +5180,7 @@
           "test/compat/resourcemanagerfolders_test.go:234 TestTerraformGoogleFolder",
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
           "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
-          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
+          "test/compat/terraform_batch4_test.go:296 TestTerraformFolderAndOrganizationIAM",
           "test/compat/terraform_batch9_test.go:207 TestTerraformFolderIAMAuditConfig"
         ]
       },
@@ -5190,7 +5190,7 @@
         "tests": [
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
           "test/compat/terraform_batch10_test.go:460 TestTerraformResourceManagerDataSources",
-          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
+          "test/compat/terraform_batch4_test.go:296 TestTerraformFolderAndOrganizationIAM",
           "test/compat/terraform_batch9_test.go:207 TestTerraformFolderIAMAuditConfig"
         ]
       },
@@ -5199,7 +5199,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
-          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
+          "test/compat/terraform_batch4_test.go:296 TestTerraformFolderAndOrganizationIAM",
           "test/compat/terraform_batch9_test.go:207 TestTerraformFolderIAMAuditConfig"
         ]
       },
@@ -5232,7 +5232,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
-          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
+          "test/compat/terraform_batch4_test.go:296 TestTerraformFolderAndOrganizationIAM",
           "test/compat/terraform_batch9_test.go:207 TestTerraformFolderIAMAuditConfig"
         ]
       },
@@ -5264,7 +5264,7 @@
         "tests": [
           "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
           "test/compat/terraform_batch10_test.go:93 TestTerraformOrganizationIAMAuditConfig",
-          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
+          "test/compat/terraform_batch4_test.go:296 TestTerraformFolderAndOrganizationIAM"
         ]
       },
       {
@@ -5740,7 +5740,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
-          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
+          "test/compat/terraform_batch4_test.go:296 TestTerraformFolderAndOrganizationIAM"
         ]
       },
       {
@@ -5780,7 +5780,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanageriam_test.go:136 TestResourceManagerFolderAndOrgIAM",
-          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
+          "test/compat/terraform_batch4_test.go:296 TestTerraformFolderAndOrganizationIAM"
         ]
       },
       {
@@ -8660,7 +8660,7 @@
           "test/compat/memorystoretls_test.go:43 TestMemorystoreInTransitEncryption",
           "test/compat/memorystoreupgrade_test.go:28 TestMemorystoreVersionsAndUpgrade",
           "test/compat/memorystorewindows1909_test.go:52 TestMemorystoreMaintenanceWindowSchedules",
-          "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
+          "test/compat/terraform_batch4_test.go:140 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:174 TestTerraformRedisInTransitEncryption",
           "test/compat/terraform_redis_test.go:229 TestTerraformRedisCustomerManagedKey",
@@ -8674,7 +8674,7 @@
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
           "test/compat/memorystoretls1768_test.go:184 TestTerraformRedisInTransitEncryptionBefore60",
-          "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
+          "test/compat/terraform_batch4_test.go:140 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:174 TestTerraformRedisInTransitEncryption",
           "test/compat/terraform_redis_test.go:229 TestTerraformRedisCustomerManagedKey",
@@ -8732,7 +8732,7 @@
           "test/compat/memorystoretls1768_test.go:33 TestMemorystoreInTransitEncryptionBefore60",
           "test/compat/memorystoretls_test.go:43 TestMemorystoreInTransitEncryption",
           "test/compat/memorystorewindows1909_test.go:52 TestMemorystoreMaintenanceWindowSchedules",
-          "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
+          "test/compat/terraform_batch4_test.go:140 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:174 TestTerraformRedisInTransitEncryption",
           "test/compat/terraform_redis_test.go:229 TestTerraformRedisCustomerManagedKey",
@@ -8787,7 +8787,7 @@
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
           "test/compat/memorystorenetwork1906_test.go:29 TestMemorystoreInstanceNetwork",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
-          "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
+          "test/compat/terraform_batch4_test.go:140 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
@@ -14440,6 +14440,7 @@
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
           "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlpasswordauth2208_test.go:61 TestCloudSQLPasswordAuthentication",
           "test/compat/cloudsqlphysical_test.go:41 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlphysical_test.go:54 TestCloudSQLExternalMySQL57Physical",
           "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
@@ -14448,8 +14449,8 @@
           "test/compat/cloudsqlservercerts_test.go:81 TestCloudSQLServerCertificates",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
-          "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:300 TestCloudSQLCascadingAndCrossRegionReplicas"
+          "test/compat/cloudsqlversions_test.go:118 TestCloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:305 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
       },
       {
@@ -14472,6 +14473,7 @@
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
           "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlpasswordauth2208_test.go:61 TestCloudSQLPasswordAuthentication",
           "test/compat/cloudsqlphysical_test.go:41 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlphysical_test.go:54 TestCloudSQLExternalMySQL57Physical",
           "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
@@ -14481,8 +14483,8 @@
           "test/compat/cloudsqlstopstart_test.go:30 TestCloudSQLStopAndStart",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
-          "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:300 TestCloudSQLCascadingAndCrossRegionReplicas"
+          "test/compat/cloudsqlversions_test.go:118 TestCloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:305 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
       },
       {
@@ -14497,7 +14499,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlinstances_test.go:321 TestTerraformSQLDatabaseInstance",
-          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
@@ -14510,8 +14512,8 @@
           "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
           "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlreplicaupgrade_test.go:237 TestGcloudSQLOldPostgresVersion",
-          "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions",
-          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/cloudsqlversions_test.go:118 TestCloudSQLDatabaseVersions",
+          "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -14526,8 +14528,8 @@
           "test/compat/cloudsqlpoolmetrics2163_test.go:54 TestCloudSQLConnectionPoolingMetrics",
           "test/compat/cloudsqlreplicaupgrade_test.go:114 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:237 TestGcloudSQLOldPostgresVersion",
-          "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions",
-          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/cloudsqlversions_test.go:118 TestCloudSQLDatabaseVersions",
+          "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
@@ -14536,7 +14538,7 @@
         "method": "sql.databases.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/terraform_batch12_sql_test.go:29 TestTerraformSQLDataSources"
         ]
@@ -14547,14 +14549,14 @@
         "tests": [
           "test/compat/cloudsqlreplicaupgrade_test.go:114 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlreplicaupgrade_test.go:237 TestGcloudSQLOldPostgresVersion",
-          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
         "method": "sql.databases.update",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
@@ -14562,7 +14564,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqltransfers_test.go:349 TestSQLAdminTiersAndFlags",
-          "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions"
+          "test/compat/cloudsqlversions_test.go:118 TestCloudSQLDatabaseVersions"
         ]
       },
       {
@@ -14688,13 +14690,13 @@
           "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
-          "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:300 TestCloudSQLCascadingAndCrossRegionReplicas",
-          "test/compat/cloudsqlversions_test.go:414 TestGcloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:451 TestTerraformSQLDatabaseVersion",
+          "test/compat/cloudsqlversions_test.go:118 TestCloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:305 TestCloudSQLCascadingAndCrossRegionReplicas",
+          "test/compat/cloudsqlversions_test.go:419 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:456 TestTerraformSQLDatabaseVersion",
           "test/compat/consolecloudsqldataapi_test.go:28 TestConsoleCloudSQLDataAPIAndProjectBackups",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
-          "test/compat/terraform_batch4_test.go:405 TestTerraformSQLSourceRepresentation",
+          "test/compat/terraform_batch4_test.go:406 TestTerraformSQLSourceRepresentation",
           "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade",
           "test/compat/terraform_sql_provision_test.go:54 TestTerraformSQLProvisionScript"
         ]
@@ -14804,15 +14806,15 @@
           "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
-          "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:207 TestCloudSQLMajorVersionUpgrade",
-          "test/compat/cloudsqlversions_test.go:300 TestCloudSQLCascadingAndCrossRegionReplicas",
-          "test/compat/cloudsqlversions_test.go:414 TestGcloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:451 TestTerraformSQLDatabaseVersion",
+          "test/compat/cloudsqlversions_test.go:118 TestCloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:212 TestCloudSQLMajorVersionUpgrade",
+          "test/compat/cloudsqlversions_test.go:305 TestCloudSQLCascadingAndCrossRegionReplicas",
+          "test/compat/cloudsqlversions_test.go:419 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:456 TestTerraformSQLDatabaseVersion",
           "test/compat/sqladmin_test.go:433 TestGcloudSQL",
-          "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers",
+          "test/compat/sqladmin_test.go:52 TestSQLAdminInstancesDescribeTheRunningServers",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
-          "test/compat/terraform_batch4_test.go:405 TestTerraformSQLSourceRepresentation",
+          "test/compat/terraform_batch4_test.go:406 TestTerraformSQLSourceRepresentation",
           "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade"
         ]
       },
@@ -14859,6 +14861,7 @@
           "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlmysqlpooling2141_test.go:37 TestCloudSQLMySQLManagedConnectionPooling",
           "test/compat/cloudsqlmysqlroot1993_test.go:277 TestCloudSQLMySQLRootDeletedReplica",
+          "test/compat/cloudsqlpasswordauth2208_test.go:61 TestCloudSQLPasswordAuthentication",
           "test/compat/cloudsqlpasswordpolicy_test.go:27 TestCloudSQLPasswordValidationPolicy",
           "test/compat/cloudsqlpgreplicas1524_test.go:24 TestCloudSQLReadReplicasBeforePostgres12",
           "test/compat/cloudsqlphysical_test.go:41 TestCloudSQLExternalMySQLPhysical",
@@ -14884,16 +14887,16 @@
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
           "test/compat/cloudsqluserpolicy2009_test.go:41 TestCloudSQLUserPasswordPolicy",
-          "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:207 TestCloudSQLMajorVersionUpgrade",
-          "test/compat/cloudsqlversions_test.go:300 TestCloudSQLCascadingAndCrossRegionReplicas",
-          "test/compat/cloudsqlversions_test.go:414 TestGcloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:451 TestTerraformSQLDatabaseVersion",
+          "test/compat/cloudsqlversions_test.go:118 TestCloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:212 TestCloudSQLMajorVersionUpgrade",
+          "test/compat/cloudsqlversions_test.go:305 TestCloudSQLCascadingAndCrossRegionReplicas",
+          "test/compat/cloudsqlversions_test.go:419 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:456 TestTerraformSQLDatabaseVersion",
           "test/compat/consolecloudsqlinstances_test.go:237 TestConsoleCloudSQLReadReplicaPostgres96",
           "test/compat/consolecloudsqlinstances_test.go:503 TestConsoleCloudSQLHighAvailabilityPostgres11",
           "test/compat/orgpolicycustom1895_sql_test.go:27 TestOrgPolicyCustomConstraintsCloudSQL",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
-          "test/compat/terraform_batch4_test.go:405 TestTerraformSQLSourceRepresentation",
+          "test/compat/terraform_batch4_test.go:406 TestTerraformSQLSourceRepresentation",
           "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade",
           "test/compat/terraform_sql_provision_test.go:54 TestTerraformSQLProvisionScript"
         ]
@@ -14907,7 +14910,7 @@
           "test/compat/cloudsqlinstances_test.go:294 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
           "test/compat/sqladmin_test.go:433 TestGcloudSQL",
-          "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers",
+          "test/compat/sqladmin_test.go:52 TestSQLAdminInstancesDescribeTheRunningServers",
           "test/compat/terraform_batch12_sql_test.go:29 TestTerraformSQLDataSources"
         ]
       },
@@ -14948,10 +14951,10 @@
           "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
-          "test/compat/cloudsqlversions_test.go:113 TestCloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:207 TestCloudSQLMajorVersionUpgrade",
-          "test/compat/cloudsqlversions_test.go:414 TestGcloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:451 TestTerraformSQLDatabaseVersion",
+          "test/compat/cloudsqlversions_test.go:118 TestCloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:212 TestCloudSQLMajorVersionUpgrade",
+          "test/compat/cloudsqlversions_test.go:419 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:456 TestTerraformSQLDatabaseVersion",
           "test/compat/orgpolicycustom1895_sql_test.go:27 TestOrgPolicyCustomConstraintsCloudSQL",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
           "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade"
@@ -14964,7 +14967,7 @@
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqlpitrrestore_test.go:33 TestCloudSQLPointInTimeRestoreFromBackupDR",
           "test/compat/cloudsqlpitrrestore_test.go:74 TestGcloudSQLPointInTimeRestoreRefused",
-          "test/compat/sqladmin_test.go:103 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:104 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ]
       },
       {
@@ -14995,7 +14998,7 @@
           "test/compat/cloudsqlreplicaupgrade_test.go:114 TestCloudSQLPostgresOldVersionsAndRefusals",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
-          "test/compat/cloudsqlversions_test.go:300 TestCloudSQLCascadingAndCrossRegionReplicas",
+          "test/compat/cloudsqlversions_test.go:305 TestCloudSQLCascadingAndCrossRegionReplicas",
           "test/compat/consolecloudsqlinstances_test.go:237 TestConsoleCloudSQLReadReplicaPostgres96"
         ]
       },
@@ -15145,10 +15148,10 @@
           "test/compat/cloudsqlswitchover_test.go:196 TestGcloudSQLSwitchover",
           "test/compat/cloudsqlswitchover_test.go:31 TestCloudSQLSwitchover",
           "test/compat/cloudsqlswitchoverpg_test.go:35 TestCloudSQLSwitchoverPostgres",
-          "test/compat/cloudsqlversions_test.go:207 TestCloudSQLMajorVersionUpgrade",
-          "test/compat/cloudsqlversions_test.go:414 TestGcloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:451 TestTerraformSQLDatabaseVersion",
-          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/cloudsqlversions_test.go:212 TestCloudSQLMajorVersionUpgrade",
+          "test/compat/cloudsqlversions_test.go:419 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:456 TestTerraformSQLDatabaseVersion",
+          "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
           "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade",
@@ -15160,7 +15163,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlmaintenance_test.go:51 TestCloudSQLRescheduleMaintenance",
-          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
@@ -15285,7 +15288,7 @@
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
           "test/compat/cloudsqlmysqlroot1993_test.go:277 TestCloudSQLMySQLRootDeletedReplica",
-          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
@@ -15297,7 +15300,7 @@
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
           "test/compat/cloudsqluserpolicy2009_test.go:41 TestCloudSQLUserPasswordPolicy",
-          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
@@ -15312,12 +15315,13 @@
           "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlmysqlpooling2141_test.go:37 TestCloudSQLMySQLManagedConnectionPooling",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
+          "test/compat/cloudsqlpasswordauth2208_test.go:61 TestCloudSQLPasswordAuthentication",
           "test/compat/cloudsqlpasswordpolicy_test.go:27 TestCloudSQLPasswordValidationPolicy",
           "test/compat/cloudsqlpooling2141_test.go:35 TestCloudSQLManagedConnectionPooling",
           "test/compat/cloudsqlpoolmetrics2163_test.go:54 TestCloudSQLConnectionPoolingMetrics",
           "test/compat/cloudsqluserpolicy2009_test.go:41 TestCloudSQLUserPasswordPolicy",
-          "test/compat/cloudsqlversions_test.go:207 TestCloudSQLMajorVersionUpgrade",
-          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/cloudsqlversions_test.go:212 TestCloudSQLMajorVersionUpgrade",
+          "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
@@ -15330,9 +15334,10 @@
           "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
           "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
+          "test/compat/cloudsqlpasswordauth2208_test.go:61 TestCloudSQLPasswordAuthentication",
           "test/compat/cloudsqlstopstart_test.go:30 TestCloudSQLStopAndStart",
           "test/compat/cloudsqluserpolicy2009_test.go:41 TestCloudSQLUserPasswordPolicy",
-          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:433 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
@@ -15343,9 +15348,10 @@
         "tests": [
           "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
           "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
+          "test/compat/cloudsqlpasswordauth2208_test.go:61 TestCloudSQLPasswordAuthentication",
           "test/compat/cloudsqlpasswordpolicy_test.go:27 TestCloudSQLPasswordValidationPolicy",
           "test/compat/cloudsqluserpolicy2009_test.go:41 TestCloudSQLUserPasswordPolicy",
-          "test/compat/sqladmin_test.go:280 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       }
@@ -24490,7 +24496,8 @@
         "method": "google.cloud.alloydb.v1.AlloyDBAdmin/CreateUser",
         "status": "Verified",
         "tests": [
-          "test/compat/alloydb_test.go:214 TestAlloyDBInstancesConnectorAndBackups"
+          "test/compat/alloydb_test.go:214 TestAlloyDBInstancesConnectorAndBackups",
+          "test/compat/alloydbpasswordauth2208_test.go:64 TestAlloyDBPasswordAuthentication"
         ]
       },
       {
@@ -24525,7 +24532,8 @@
         "method": "google.cloud.alloydb.v1.AlloyDBAdmin/ExecuteSql",
         "status": "Verified",
         "tests": [
-          "test/compat/alloydb_test.go:214 TestAlloyDBInstancesConnectorAndBackups"
+          "test/compat/alloydb_test.go:214 TestAlloyDBInstancesConnectorAndBackups",
+          "test/compat/alloydbpasswordauth2208_test.go:64 TestAlloyDBPasswordAuthentication"
         ]
       },
       {
