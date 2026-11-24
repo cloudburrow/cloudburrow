@@ -3,9 +3,12 @@ package bigqueryfront
 import (
 	"encoding/json"
 	"math"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/google/differential-privacy/go/v4/noise"
 )
 
 func mustDPQuery(t *testing.T, sql string) dpQuery {
@@ -123,49 +126,123 @@ FROM professors GROUP BY item`)
 	}
 }
 
+// seededLaplace is Laplace noise from a seeded source, for a deterministic
+// test: an int64 is rounded continuous Laplace, as the library's is (its
+// granularity, about 2^-40 of the scale here, aside), of scale
+// l0*lInf/epsilon. The threshold is the library's.
+type seededLaplace struct {
+	noise.Noise
+	r *rand.Rand
+}
+
+func (s seededLaplace) sample(l0 int64, lInf, eps float64) float64 {
+	return float64(l0) * lInf / eps * (s.r.ExpFloat64() - s.r.ExpFloat64())
+}
+
+func (s seededLaplace) AddNoiseInt64(x, l0, lInf int64, eps, delta float64) (int64, error) {
+	if _, err := s.Noise.AddNoiseInt64(x, l0, lInf, eps, delta); err != nil {
+		return 0, err
+	}
+	return x + int64(math.Round(s.sample(l0, float64(lInf), eps))), nil
+}
+
+func (s seededLaplace) AddNoiseFloat64(x float64, l0 int64, lInf, eps, delta float64) (float64, error) {
+	if _, err := s.Noise.AddNoiseFloat64(x, l0, lInf, eps, delta); err != nil {
+		return 0, err
+	}
+	return x + s.sample(l0, lInf, eps), nil
+}
+
+// TestDPNoiseDistribution checks the group selection, the clamping and the
+// noise's centre and scale over many runs, with a seeded noise (so the test
+// is deterministic) and with the library's own. Each bound is set so that
+// correct noise breaks it with probability under 1e-11 (computed below), so
+// under 1e-9 for the whole test, whatever the seed.
 func TestDPNoiseDistribution(t *testing.T) {
+	for _, src := range []struct {
+		name    string
+		laplace noise.Noise
+	}{
+		{"seeded", seededLaplace{noise.Laplace(), rand.New(rand.NewPCG(2213, 1))}},
+		{"library", nil},
+	} {
+		t.Run(src.name, func(t *testing.T) { dpNoiseDistribution(t, src.laplace) })
+	}
+}
+
+func dpNoiseDistribution(t *testing.T, laplace noise.Noise) {
 	q := mustDPQuery(t, `SELECT WITH DIFFERENTIAL_PRIVACY
     OPTIONS(epsilon=2, delta=1e-5, max_groups_contributed=1, privacy_unit_column=id)
     g, COUNT(*, contribution_bounds_per_group => (0, 1)) c, SUM(x, contribution_bounds_per_group => (0, 10)) s
 FROM t GROUP BY g`)
 	q.items[2].agg.sumInt = true
+	q.laplace = laplace
+	const units = 100
 	var rows [][]any
-	for u := 0; u < 1000; u++ {
+	for u := 0; u < units; u++ {
 		// Each unit has 3 rows (clamped to 1) and a sum of 50 (clamped to 10).
 		rows = append(rows, []any{"big", "3", "50", strconv.Itoa(u)})
 	}
 	rows = append(rows, []any{"small", "1", "1", "lonely"})
-	const runs = 400
-	var sumC, sqC float64
-	distinct := map[int64]bool{}
+	// Epsilon 2/3 for each of the selection, COUNT and SUM; l0 1. The
+	// noise X of a count is round(Laplace(1.5)): variance 4.58, and
+	// P(|X| >= 2) = P(|Laplace(1.5)| >= 1.5) = 1/e.
+	const runs = 2000
+	var sumC float64
+	smallKept, wide := 0, 0
 	for i := 0; i < runs; i++ {
 		out, msg := q.compute(rows)
 		if msg != "" {
 			t.Fatal(msg)
 		}
-		if len(out) != 1 || out[0][0] != "big" {
-			t.Fatalf("groups %v: the one-unit group must be dropped, the 1000-unit one kept", out)
+		// The selection's threshold is ceil(17.23) = 18 (delta 1e-5), so
+		// the 100-unit group is dropped with probability
+		// 2000 * exp(-82.5/1.5) / 2 < 1e-21 over the runs.
+		var big dpOut
+		for _, r := range out {
+			switch r[0] {
+			case "big":
+				big = r
+			case "small":
+				smallKept++
+			default:
+				t.Fatalf("groups %v", out)
+			}
 		}
-		c := out[0][1].(int64)
-		s := out[0][2].(int64)
-		if math.Abs(float64(s)-10000) > 2000 {
-			t.Fatalf("sum %d far from 10000: the contributions were not clamped", s)
+		if big == nil {
+			t.Fatalf("groups %v: the %d-unit group must be kept", out, units)
 		}
-		distinct[c] = true
+		c := big[1].(int64)
+		s := big[2].(int64)
+		// SUM's noise is round(Laplace(15)) (lInf 10): beyond 500 with
+		// probability 2000 * exp(-499.5/15) < 7e-12 over the runs. Without
+		// the clamping, the sum would be 5000.
+		if math.Abs(float64(s)-10*units) > 500 {
+			t.Fatalf("sum %d far from %d: the contributions were not clamped", s, 10*units)
+		}
+		if math.Abs(float64(c)-units) >= 2 {
+			wide++
+		}
 		sumC += float64(c)
-		sqC += float64(c) * float64(c)
 	}
-	mean := sumC / runs
-	sd := math.Sqrt(sqC/runs - mean*mean)
-	// Laplace, epsilon 2/3 per aggregate, l0 1, lInf 1: scale 1.5, sd 2.12.
-	if math.Abs(mean-1000) > 0.6 {
-		t.Errorf("mean count %v, want about 1000", mean)
+	// The one-unit group passes the threshold with probability
+	// P(1 + X >= 18) = exp(-16.5/1.5) / 2 = 8.4e-6 a run: 5 or more times
+	// in 2000 runs with probability C(2000,5) p^5 < 1.1e-11. Without the
+	// threshold it would be kept every time.
+	if smallKept >= 5 {
+		t.Errorf("the one-unit group was kept in %d of %d runs; want it dropped (probability 8.4e-6 a run)", smallKept, runs)
 	}
-	if sd < 1.5 || sd > 2.8 {
-		t.Errorf("count sd %v, want about 2.12 (Laplace scale 1.5)", sd)
+	// Chernoff, with X's moment generating function: the mean of 2000
+	// is more than 0.4 from 0 with probability < 2e-15.
+	if mean := sumC / runs; math.Abs(mean-units) > 0.4 {
+		t.Errorf("mean count %v, want %d (unbiased noise)", mean, units)
 	}
-	if len(distinct) < 5 {
-		t.Errorf("only %d distinct counts: no noise", len(distinct))
+	// |X| >= 2 in Binomial(2000, 1/e) runs, mean 736: outside [591, 884]
+	// with probability < 9e-12 (exact binomial tails). The range holds a
+	// Laplace scale between 1.23 and 1.83, so neither epsilon unsplit
+	// (scale 0.5) nor counted twice (3) passes, nor no noise.
+	if wide < 591 || wide > 884 {
+		t.Errorf("|count - %d| >= 2 in %d of %d runs, want 591..884 (Laplace scale 1.5: about 736)", units, wide, runs)
 	}
 }
 

@@ -240,7 +240,15 @@ func TestThreadPool(t *testing.T) {
 			if el := time.Since(start); el < 4*150*time.Millisecond {
 				t.Errorf("8 statements of 150ms on 2 threads took %v; want at least 600ms", el)
 			}
-			if st := f.Pool.Stats(); st.MaxActive != 2 || st.Active != 0 || st.Pending != 0 {
+			// The front releases a statement's thread after relaying its
+			// answer, so the client can see COMMIT's OK before the release:
+			// wait for the pool to settle (bounded by ctx), not for a time.
+			st := f.Pool.Stats()
+			for (st.Active != 0 || st.Pending != 0) && ctx.Err() == nil {
+				time.Sleep(time.Millisecond)
+				st = f.Pool.Stats()
+			}
+			if st.MaxActive != 2 || st.Active != 0 || st.Pending != 0 {
 				t.Errorf("pool stats %+v", st)
 			}
 			if tlsMode == "skip-verify" && srv.tlsSeen.Load() != 8 {
