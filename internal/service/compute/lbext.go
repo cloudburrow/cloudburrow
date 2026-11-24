@@ -10,8 +10,9 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
-	"net/http"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/lbauthz"
 )
 
 // What the load balancers' data plane reads from the APIs beside Compute
@@ -142,31 +143,10 @@ type ServerTLSPolicy struct {
 	Allowlisted          []*x509.Certificate
 }
 
-// ClientCert is the outcome of a request's client certificate check, as
-// the mTLS custom header variables report it.
-type ClientCert struct {
-	Present, Verified bool
-	// Error is client_cert_error's value, "" when there is none.
-	Error string
-	Leaf  *x509.Certificate
-	Chain []*x509.Certificate
-}
-
-// AuthzRequest is what an authorization policy matches a request on.
-type AuthzRequest struct {
-	// Rule is the forwarding rule's relative name.
-	Rule                 string
-	Host, Path, Method   string
-	Scheme, SNI          string
-	SourceIP, DestIP     string
-	SourcePort, DestPort int
-	Header               http.Header
-	Cert                 ClientCert
-	// SourceVM is the instance (projects/P/zones/Z/instances/I) whose
-	// internal address the request comes from, "" for none; its first
-	// service account, and the permanent IDs of its secure tags' values
-	// (its effective tags), are what a rule's source resources match.
-	SourceVM             string
-	SourceServiceAccount string
-	SourceTagValues      []int64
-}
+// ClientCert is the outcome of a request's client certificate check, and
+// AuthzRequest what an authorization policy matches a request on: the
+// load balancers' and Network Security's shared types (internal/lbauthz).
+type (
+	ClientCert   = lbauthz.ClientCert
+	AuthzRequest = lbauthz.Request
+)

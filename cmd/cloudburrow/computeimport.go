@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -113,15 +112,12 @@ func partitionOffset(head []byte) (int64, error) {
 // podExec runs a command in a pod of the namespace with stdin, returning
 // its standard output.
 func (b *computeVMs) podExec(ctx context.Context, pod string, stdin io.Reader, script string) ([]byte, error) {
-	args := []string{"--kubeconfig", b.cfg.KubeconfigPath(), "-n", b.ns(), "exec"}
+	args := []string{"exec"}
 	if stdin != nil {
 		args = append(args, "-i")
 	}
-	cmd := exec.CommandContext(ctx, "kubectl", append(args, pod, "--", "/bin/sh", "-c", script)...)
-	cmd.Stdin = stdin
 	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	if err := cmd.Run(); err != nil {
+	if err := k8s.New(b.cfg.KubeconfigPath(), "", b.ns()).Pipe(ctx, stdin, &out, &errb, append(args, pod, "--", "/bin/sh", "-c", script)...); err != nil {
 		return out.Bytes(), fmt.Errorf("%w: %s", err, strings.TrimSpace(vmTail(errb.String(), 5)))
 	}
 	return out.Bytes(), nil

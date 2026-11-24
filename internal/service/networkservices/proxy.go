@@ -19,6 +19,7 @@ import (
 	nsvpb "cloud.google.com/go/networkservices/apiv1/networkservicespb"
 
 	"github.com/cloudburrow/cloudburrow/internal/egress"
+	"github.com/cloudburrow/cloudburrow/internal/swpmatch"
 	"github.com/cloudburrow/cloudburrow/internal/vmrelay"
 )
 
@@ -49,16 +50,9 @@ import (
 //     to a googleapis.com API served here goes to this instance, and no
 //     connection is ever opened to Google (502 Bad Gateway instead).
 
-// GatewayRule is a gateway security policy rule as the proxy applies it.
-type GatewayRule struct {
-	Name          string
-	Priority      int32
-	Enabled       bool
-	Allow         bool
-	TLSInspection bool
-	Session       string
-	Application   string
-}
+// GatewayRule is a gateway security policy rule as the proxy applies it
+// (internal/swpmatch).
+type GatewayRule = swpmatch.GatewayRule
 
 // Policies is Network Security as the proxy reads it.
 type Policies interface {
@@ -123,7 +117,7 @@ type proxyPlane struct {
 	transport http.RoundTripper
 	dial      func(ctx context.Context, network, addr string) (net.Conn, error)
 	started   bool
-	m         matchers
+	m         swpmatch.Matchers
 	issuer    LeafIssuer     // TLS inspection's CA pool issuer (tlsinspect.go)
 	roots     *x509.CertPool // an inspected server's CA set; nil: the system's
 	leaves    leafCache
@@ -641,11 +635,11 @@ func (p *proxyPlane) sessionMatches(pols Policies, r GatewayRule, in matchInput)
 
 func sessionVars(in matchInput) map[string]any {
 	return map[string]any{
-		"source":      map[string]any{"ip": in.srcIP, "port": int64(in.srcPort)},
-		"destination": map[string]any{"port": int64(in.destPort)},
-		varHost:       strings.ToLower(in.host),
-		varTags:       nonNil(in.tags),
-		varSAs:        nonNil(in.serviceAccounts),
+		"source":         map[string]any{"ip": in.srcIP, "port": int64(in.srcPort)},
+		"destination":    map[string]any{"port": int64(in.destPort)},
+		swpmatch.VarHost: strings.ToLower(in.host),
+		swpmatch.VarTags: nonNil(in.tags),
+		swpmatch.VarSAs:  nonNil(in.serviceAccounts),
 	}
 }
 
@@ -668,8 +662,8 @@ func (p *proxyPlane) ruleMatches(pols Policies, r GatewayRule, in matchInput) bo
 	headers["host"] = req.Host
 	vars["request"] = map[string]any{"headers": headers, "method": req.Method, "host": req.Host, "path": req.URL.Path,
 		"query": req.URL.RawQuery, "scheme": strings.ToLower(in.scheme)}
-	vars[varURL] = strings.ToLower(in.host) + req.URL.Path
-	vars[varUA] = req.Header.Get("User-Agent")
+	vars[swpmatch.VarURL] = strings.ToLower(in.host) + req.URL.Path
+	vars[swpmatch.VarUA] = req.Header.Get("User-Agent")
 	return p.eval(pols, r.Application, true, vars)
 }
 
@@ -684,7 +678,7 @@ func (p *proxyPlane) eval(_ Policies, expr string, application bool, vars map[st
 	if strings.TrimSpace(expr) == "" {
 		return !application
 	}
-	prg, err := p.m.compile(p.urlList, expr, application)
+	prg, err := p.m.Compile(p.urlList, expr, application)
 	if err != nil {
 		return false
 	}

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/egress"
+	"github.com/cloudburrow/cloudburrow/internal/swpmatch"
 )
 
 // TLS inspection (#2160), as
@@ -60,11 +61,9 @@ import (
 type LeafIssuer func(ctx context.Context, pool, csrPEM string, lifetime time.Duration) (chainPEM []string, err error)
 
 // TLSInspections is what the proxy reads of a gateway security policy's
-// TLS inspection policy, when Policies also implements it: the CA pool
-// it issues from; ok is false when the policy names none (or it is gone).
-type TLSInspections interface {
-	TLSInspectionCAPool(policy string) (caPool string, ok bool)
-}
+// TLS inspection policy, when Policies also implements it
+// (internal/swpmatch).
+type TLSInspections = swpmatch.TLSInspections
 
 // leafLifetime is an interception leaf's validity. Google documents none.
 const leafLifetime = 24 * time.Hour

@@ -10,7 +10,7 @@ import (
 	"cel.dev/cel-go/cel"
 	nspb "cloud.google.com/go/networksecurity/apiv1/networksecuritypb"
 
-	"github.com/cloudburrow/cloudburrow/internal/service/compute"
+	"github.com/cloudburrow/cloudburrow/internal/lbauthz"
 )
 
 // The authorization policies' enforcement (#2160), as the AuthzPolicy
@@ -70,14 +70,14 @@ const errNotBool = whenErr("the expression must be a boolean")
 // through, a CONTENT_AUTHZ policy's last, with the body); then a DENY
 // policy that matches denies the request, and when there are ALLOW
 // policies one must match.
-func (s *Server) Authorize(r compute.AuthzRequest) compute.AuthzVerdict {
+func (s *Server) Authorize(r lbauthz.Request) lbauthz.Verdict {
 	pols := s.ForwardingRulePolicies(r.Rule)
-	var v compute.AuthzVerdict
+	var v lbauthz.Verdict
 	for _, p := range pols {
 		if p.GetAction() != nspb.AuthzPolicy_CUSTOM || !policyMatches(p, r) {
 			continue
 		}
-		c := compute.AuthzCustom{Policy: p.GetName(), IAP: p.GetCustomProvider().GetCloudIap() != nil}
+		c := lbauthz.Custom{Policy: p.GetName(), IAP: p.GetCustomProvider().GetCloudIap() != nil}
 		for _, e := range p.GetCustomProvider().GetAuthzExtension().GetResources() {
 			c.Extensions = append(c.Extensions, ruleRel(e))
 		}
@@ -107,7 +107,7 @@ func (s *Server) Authorize(r compute.AuthzRequest) compute.AuthzVerdict {
 	return v
 }
 
-func policyMatches(p *nspb.AuthzPolicy, r compute.AuthzRequest) bool {
+func policyMatches(p *nspb.AuthzPolicy, r lbauthz.Request) bool {
 	rules := p.GetHttpRules()
 	if len(rules) == 0 {
 		rules = p.GetNetworkRules()
@@ -123,7 +123,7 @@ func policyMatches(p *nspb.AuthzPolicy, r compute.AuthzRequest) bool {
 	return false
 }
 
-func ruleMatches(rule *nspb.AuthzPolicy_AuthzRule, r compute.AuthzRequest) bool {
+func ruleMatches(rule *nspb.AuthzPolicy_AuthzRule, r lbauthz.Request) bool {
 	if f := rule.GetFrom(); f != nil {
 		ok := false
 		for _, src := range f.GetSources() {
@@ -171,7 +171,7 @@ func ruleMatches(rule *nspb.AuthzPolicy_AuthzRule, r compute.AuthzRequest) bool 
 	return true
 }
 
-func sourceMatches(src *nspb.AuthzPolicy_AuthzRule_From_RequestSource, r compute.AuthzRequest) bool {
+func sourceMatches(src *nspb.AuthzPolicy_AuthzRule_From_RequestSource, r lbauthz.Request) bool {
 	if len(src.GetPrincipals()) > 0 {
 		ok := false
 		for _, p := range src.GetPrincipals() {
@@ -219,7 +219,7 @@ func sourceMatches(src *nspb.AuthzPolicy_AuthzRule_From_RequestSource, r compute
 
 // resourceMatches is whether the request's source VM is the resource: it
 // carries every tag value of the set, and its service account matches.
-func resourceMatches(res *nspb.AuthzPolicy_AuthzRule_RequestResource, r compute.AuthzRequest) bool {
+func resourceMatches(res *nspb.AuthzPolicy_AuthzRule_RequestResource, r lbauthz.Request) bool {
 	if r.SourceVM == "" {
 		return false
 	}
@@ -240,7 +240,7 @@ func resourceMatches(res *nspb.AuthzPolicy_AuthzRule_RequestResource, r compute.
 	return true
 }
 
-func principalMatches(p *nspb.AuthzPolicy_AuthzRule_Principal, r compute.AuthzRequest) bool {
+func principalMatches(p *nspb.AuthzPolicy_AuthzRule_Principal, r lbauthz.Request) bool {
 	c := r.Cert
 	if !c.Verified || c.Leaf == nil {
 		return false
@@ -299,7 +299,7 @@ func anyMatch(ms []*nspb.AuthzPolicy_AuthzRule_StringMatch, v string) bool {
 	return false
 }
 
-func operationMatches(op *nspb.AuthzPolicy_AuthzRule_To_RequestOperation, r compute.AuthzRequest) bool {
+func operationMatches(op *nspb.AuthzPolicy_AuthzRule_To_RequestOperation, r lbauthz.Request) bool {
 	if len(op.GetHosts()) > 0 && !anyMatch(op.GetHosts(), hostOnly(r.Host)) {
 		return false
 	}
@@ -343,7 +343,7 @@ func hostOnly(h string) string {
 	return h
 }
 
-func whenActivation(r compute.AuthzRequest) map[string]any {
+func whenActivation(r lbauthz.Request) map[string]any {
 	headers := map[string]any{}
 	for k, v := range r.Header {
 		headers[strings.ToLower(k)] = strings.Join(v, ",")

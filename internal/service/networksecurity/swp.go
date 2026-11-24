@@ -16,7 +16,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
-	"github.com/cloudburrow/cloudburrow/internal/service/networkservices"
+	"github.com/cloudburrow/cloudburrow/internal/swpmatch"
 )
 
 // Secure Web Proxy's resources (#2160): gateway security policies, their
@@ -254,7 +254,7 @@ func (s *Server) checkRule(r *nspb.GatewaySecurityPolicyRule) error {
 		if _, long := regexCount(f.expr); long != "" {
 			return apierror.InvalidArgument("Invalid value for field '%s': the regular expression '%s' is longer than %d characters.", f.field, long, maxRegexLen)
 		}
-		if err := networkservices.CheckMatcher(f.expr, f.app); err != nil {
+		if err := swpmatch.CheckMatcher(f.expr, f.app); err != nil {
 			return apierror.InvalidArgument("Invalid value for field '%s': '%s' is not a valid CEL expression: %v", f.field, f.expr, err)
 		}
 	}
@@ -442,7 +442,7 @@ func checkURLList(m proto.Message, location string) error {
 		return apierror.InvalidArgument("Invalid value for field 'values': a URL list has at most %d entries.", maxURLListEntries)
 	}
 	for i, v := range u.GetValues() {
-		if !networkservices.ValidURLListEntry(v) {
+		if !swpmatch.ValidURLListEntry(v) {
 			return apierror.InvalidArgument("Invalid value for field 'values[%d]': '%s'. An entry is a domain (with a period) or, with a forward slash, a well-formed URL.", i, v)
 		}
 	}
@@ -603,14 +603,14 @@ func (s *Server) DeleteTlsInspectionPolicy(_ context.Context, req *nspb.DeleteTl
 // --- What Secure Web Proxy reads ---------------------------------------------
 
 // GatewayRules are a gateway security policy's rules as the proxy applies
-// them (networkservices.Policies).
-func (s *Server) GatewayRules(policy string) ([]networkservices.GatewayRule, bool) {
+// them (swpmatch.Policies).
+func (s *Server) GatewayRules(policy string) ([]swpmatch.GatewayRule, bool) {
 	if !s.Exists(policy) {
 		return nil, false
 	}
-	var out []networkservices.GatewayRule
+	var out []swpmatch.GatewayRule
 	for _, r := range s.rulesOf(policy) {
-		out = append(out, networkservices.GatewayRule{Name: r.GetName(), Priority: r.GetPriority(), Enabled: r.GetEnabled(),
+		out = append(out, swpmatch.GatewayRule{Name: r.GetName(), Priority: r.GetPriority(), Enabled: r.GetEnabled(),
 			Allow: r.GetBasicProfile() == nspb.GatewaySecurityPolicyRule_ALLOW, TLSInspection: r.GetTlsInspectionEnabled(),
 			Session: r.GetSessionMatcher(), Application: r.GetApplicationMatcher()})
 	}
@@ -629,7 +629,7 @@ func (s *Server) URLList(name string) ([]string, bool) {
 }
 
 // TLSInspectionCAPool is the CA pool of a gateway security policy's TLS
-// inspection policy (networkservices.TLSInspections); ok is false when the
+// inspection policy (swpmatch.TLSInspections); ok is false when the
 // policy names none, or it is gone.
 func (s *Server) TLSInspectionCAPool(policy string) (string, bool) {
 	s.mu.Lock()
@@ -645,4 +645,4 @@ func (s *Server) TLSInspectionCAPool(policy string) (string, bool) {
 	return ruleRel(t.GetCaPool()), true
 }
 
-var _ networkservices.TLSInspections = (*Server)(nil)
+var _ swpmatch.TLSInspections = (*Server)(nil)

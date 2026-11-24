@@ -39,8 +39,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/locations"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
-	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 )
 
 // Networks is what a connector's network and subnet are checked against:
@@ -112,7 +112,7 @@ var MachineTypes = []string{"e2-micro", "f1-micro", "e2-standard-4"}
 // Connector): 100 Mbps, whatever the machine type.
 const mbpsPerInstance = 100
 
-func validLocation(r string) bool { return compute.IsRegion(r) }
+func validLocation(r string) bool { return locations.IsComputeRegion(r) }
 
 func (s *Server) CreateConnector(_ context.Context, req *vpcaccesspb.CreateConnectorRequest) (*longrunningpb.Operation, error) {
 	m := parentRE.FindStringSubmatch(req.GetParent())
@@ -193,7 +193,7 @@ func (s *Server) checkLocked(project, region, name string, c *vpcaccesspb.Connec
 			if !ok {
 				return apierror.InvalidArgument("Subnetwork '%s' was not found in region '%s' of project '%s'.", c.GetSubnet().GetName(), region, sp)
 			}
-			if n, ok := compute.ParseCIDR(cidr); !ok || maskBits(n) != 28 {
+			if n, ok := parseCIDR(cidr); !ok || maskBits(n) != 28 {
 				return apierror.InvalidArgument("Subnetwork '%s' has the range %s: a connector's subnet must have a /28 primary IPv4 range.", c.GetSubnet().GetName(), cidr)
 			}
 			if users := nets.SubnetUsers(rel); len(users) > 0 {
@@ -220,7 +220,7 @@ func (s *Server) checkLocked(project, region, name string, c *vpcaccesspb.Connec
 		if c.GetIpCidrRange() == "" {
 			return apierror.InvalidArgument("ip_cidr_range must be set with network.")
 		}
-		n, ok := compute.ParseCIDR(c.GetIpCidrRange())
+		n, ok := parseCIDR(c.GetIpCidrRange())
 		if !ok || n.String() != c.GetIpCidrRange() {
 			return apierror.InvalidArgument("Invalid IP CIDR range '%s': it must be an IPv4 range in CIDR notation whose address is the first of the range, such as 10.8.0.0/28.", c.GetIpCidrRange())
 		}
@@ -229,7 +229,7 @@ func (s *Server) checkLocked(project, region, name string, c *vpcaccesspb.Connec
 		}
 		inPrivate := false
 		for _, p := range private {
-			if pn, _ := compute.ParseCIDR(p); pn.Contains(n.IP) {
+			if pn, _ := parseCIDR(p); pn.Contains(n.IP) {
 				inPrivate = true
 			}
 		}
@@ -249,7 +249,7 @@ func (s *Server) checkLocked(project, region, name string, c *vpcaccesspb.Connec
 			if k == name || o.GetIpCidrRange() == "" || o.GetNetwork() != lastSeg(c.GetNetwork()) || projectOf(k) != project {
 				continue
 			}
-			if on, ok := compute.ParseCIDR(o.GetIpCidrRange()); ok && compute.Overlaps(n, on) {
+			if on, ok := parseCIDR(o.GetIpCidrRange()); ok && overlaps(n, on) {
 				return apierror.InvalidArgument("Invalid IP CIDR range '%s': it conflicts with connector '%s' (%s).", c.GetIpCidrRange(), lastSeg(k), o.GetIpCidrRange())
 			}
 		}
@@ -540,3 +540,16 @@ func (s *Server) saveLocked() error {
 	}
 	return nil
 }
+
+// parseCIDR parses an IPv4 CIDR block whose address is its network's, as
+// Compute Engine's subnet ranges are read.
+func parseCIDR(s string) (*net.IPNet, bool) {
+	ip, n, err := net.ParseCIDR(s)
+	if err != nil || ip.To4() == nil || !ip.Equal(n.IP) {
+		return nil, false
+	}
+	return n, true
+}
+
+// overlaps reports whether a and b share an address.
+func overlaps(a, b *net.IPNet) bool { return a.Contains(b.IP) || b.Contains(a.IP) }

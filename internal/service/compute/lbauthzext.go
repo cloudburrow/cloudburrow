@@ -21,6 +21,8 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/lbauthz"
 )
 
 // The CUSTOM action of the authorization policies (#2160), as
@@ -46,29 +48,12 @@ import (
 //     a call that fails or times out answers 500 unless failOpen is set,
 //     when the request goes on.
 
-// AuthzVerdict is the authorization policies' decision on a request.
-type AuthzVerdict struct {
-	// Custom are the CUSTOM policies whose rules the request matches, in
-	// evaluation order; each provider must allow it.
-	Custom []AuthzCustom
-	// Allowed is the DENY and ALLOW policies' decision, applied once every
-	// custom provider has allowed the request.
-	Allowed bool
-	// Content are the CUSTOM policies of the CONTENT_AUTHZ profile, asked
-	// last, with the request's body.
-	Content []AuthzCustom
-}
-
-// AuthzCustom is one CUSTOM policy's provider.
-type AuthzCustom struct {
-	// Policy is the authorization policy's name.
-	Policy string
-	// IAP delegates the request to Cloud IAP.
-	IAP bool
-	// Extensions are the authorization extensions' names
-	// (projects/P/locations/L/authzExtensions/E).
-	Extensions []string
-}
+// AuthzVerdict is the authorization policies' decision on a request,
+// and AuthzCustom one CUSTOM policy's provider (internal/lbauthz).
+type (
+	AuthzVerdict = lbauthz.Verdict
+	AuthzCustom  = lbauthz.Custom
+)
 
 // AuthzExtension is a Service Extensions authorization extension
 // (networkservices.googleapis.com authzExtensions) as the load balancers

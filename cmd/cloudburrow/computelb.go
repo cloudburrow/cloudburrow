@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os/exec"
 	"strconv"
 	"sync"
 
@@ -139,23 +138,13 @@ while(my @r=$sel->can_read){for my $h(@r){
 // TCP only.
 func (l *computeLB) InstanceUDP(ctx context.Context, vm compute.VMSpec, port int) (compute.DatagramConn, error) {
 	bg, cancel := context.WithCancel(l.vms.bg)
-	cmd := exec.CommandContext(bg, "kubectl", "--kubeconfig", l.cfg.KubeconfigPath(), "-n", l.vms.ns(), "exec", "-i", vm.Key, "-c", "vm",
+	in, out, wait, err := k8s.New(l.cfg.KubeconfigPath(), "", l.vms.ns()).Duplex(bg, "exec", "-i", vm.Key, "-c", "vm",
 		"--", "perl", "-e", udpRelayScript, strconv.Itoa(port))
-	in, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
 		return nil, err
 	}
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		cancel()
-		return nil, err
-	}
-	go func() { _ = cmd.Wait() }()
+	go func() { _ = wait() }()
 	return &execDatagrams{in: in, out: bufio.NewReader(out), cancel: cancel}, nil
 }
 

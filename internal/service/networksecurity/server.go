@@ -63,7 +63,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
-	"github.com/cloudburrow/cloudburrow/internal/service/compute"
+	"github.com/cloudburrow/cloudburrow/internal/locations"
 )
 
 // Options configure a Server.
@@ -190,9 +190,9 @@ var (
 )
 
 // Locations are the locations served: global and Compute Engine's regions.
-func Locations() []string { return append([]string{"global"}, compute.Regions()...) }
+func Locations() []string { return append([]string{"global"}, locations.ComputeRegions()...) }
 
-func validLocation(l string) bool { return l == "global" || compute.IsRegion(l) }
+func validLocation(l string) bool { return l == "global" || locations.IsComputeRegion(l) }
 
 // parseParent checks a collection's parent, projects/P/locations/L.
 func parseParent(parent string) (project, location string, err error) {

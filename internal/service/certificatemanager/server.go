@@ -57,7 +57,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
-	"github.com/cloudburrow/cloudburrow/internal/service/compute"
+	"github.com/cloudburrow/cloudburrow/internal/locations"
 )
 
 // Issuer issues a certificate for domains from the local CA:
@@ -160,13 +160,13 @@ var (
 )
 
 // Locations are the locations served: global and Compute Engine's regions.
-func Locations() []string { return append([]string{"global"}, compute.Regions()...) }
+func Locations() []string { return append([]string{"global"}, locations.ComputeRegions()...) }
 
 func validLocation(l string) bool {
 	if l == "global" {
 		return true
 	}
-	return compute.IsRegion(l)
+	return locations.IsComputeRegion(l)
 }
 
 // parseListParent is parseParent for a list, which also takes the

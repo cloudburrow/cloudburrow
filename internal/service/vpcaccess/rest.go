@@ -16,7 +16,6 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/locations"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
-	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
@@ -42,7 +41,7 @@ func (l *locationsServer) ListLocations(_ context.Context, req *locationpb.ListL
 	mk := func(id string) *locationpb.Location {
 		return &locationpb.Location{Name: req.GetName() + "/locations/" + id, LocationId: id}
 	}
-	ids, err := aipfilter.LocationIDs(req.GetFilter(), compute.Regions(), func(id string) (*locationpb.Location, error) { return mk(id), nil })
+	ids, err := aipfilter.LocationIDs(req.GetFilter(), locations.ComputeRegions(), func(id string) (*locationpb.Location, error) { return mk(id), nil })
 	if err != nil {
 		return nil, err
 	}

@@ -49,8 +49,8 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/locations"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
-	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 )
 
 // Options configure a Server.
@@ -459,7 +459,7 @@ func checkGroup(g *iappb.TunnelDestGroup) error {
 
 func (s *Server) CreateTunnelDestGroup(_ context.Context, req *iappb.CreateTunnelDestGroupRequest) (*iappb.TunnelDestGroup, error) {
 	m := groupParentRE.FindStringSubmatch(req.GetParent())
-	if m == nil || !compute.IsRegion(m[2]) {
+	if m == nil || !locations.IsComputeRegion(m[2]) {
 		return nil, apierror.InvalidArgument("Invalid parent '%s': it must be projects/{project}/iap_tunnel/locations/{region}.", req.GetParent())
 	}
 	if !groupIDRE.MatchString(req.GetTunnelDestGroupId()) {

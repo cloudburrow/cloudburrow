@@ -1,4 +1,10 @@
-package networkservices
+// Package swpmatch holds Secure Web Proxy's rule matchers (#2160): the CEL
+// sessionMatcher and applicationMatcher language, URL lists, and the rule
+// and TLS inspection views the proxy (internal/service/networkservices)
+// reads of Network Security's gateway security policies
+// (internal/service/networksecurity), which checks rules with the same
+// code. Neither service imports the other.
+package swpmatch
 
 import (
 	"net"
@@ -27,12 +33,13 @@ import (
 // source.matchTag(), source.matchServiceAccount()) are rewritten by macros
 // into hidden variables, so one compiled program serves every request.
 
+// The hidden variables the per-request functions read.
 const (
-	varHost = "__swp_host"
-	varURL  = "__swp_url"
-	varUA   = "__swp_ua"
-	varTags = "__swp_tags"
-	varSAs  = "__swp_sas"
+	VarHost = "__swp_host"
+	VarURL  = "__swp_url"
+	VarUA   = "__swp_ua"
+	VarTags = "__swp_tags"
+	VarSAs  = "__swp_sas"
 )
 
 func identIs(e ast.Expr, name string) bool {
@@ -41,7 +48,7 @@ func identIs(e ast.Expr, name string) bool {
 
 var swpMacros = []cel.Macro{
 	cel.GlobalMacro("host", 0, func(eh parser.ExprHelper, _ ast.Expr, _ []ast.Expr) (ast.Expr, *common.Error) {
-		return eh.NewIdent(varHost), nil
+		return eh.NewIdent(VarHost), nil
 	}),
 	cel.ReceiverMacro("host", 0, func(eh parser.ExprHelper, t ast.Expr, _ []ast.Expr) (ast.Expr, *common.Error) {
 		if !identIs(t, "request") {
@@ -53,25 +60,25 @@ var swpMacros = []cel.Macro{
 		if !identIs(t, "request") {
 			return nil, nil
 		}
-		return eh.NewIdent(varURL), nil
+		return eh.NewIdent(VarURL), nil
 	}),
 	cel.ReceiverMacro("useragent", 0, func(eh parser.ExprHelper, t ast.Expr, _ []ast.Expr) (ast.Expr, *common.Error) {
 		if !identIs(t, "request") {
 			return nil, nil
 		}
-		return eh.NewIdent(varUA), nil
+		return eh.NewIdent(VarUA), nil
 	}),
 	cel.ReceiverMacro("matchTag", 1, func(eh parser.ExprHelper, t ast.Expr, args []ast.Expr) (ast.Expr, *common.Error) {
 		if !identIs(t, "source") {
 			return nil, nil
 		}
-		return eh.NewCall(operators.In, args[0], eh.NewIdent(varTags)), nil
+		return eh.NewCall(operators.In, args[0], eh.NewIdent(VarTags)), nil
 	}),
 	cel.ReceiverMacro("matchServiceAccount", 1, func(eh parser.ExprHelper, t ast.Expr, args []ast.Expr) (ast.Expr, *common.Error) {
 		if !identIs(t, "source") {
 			return nil, nil
 		}
-		return eh.NewCall(operators.In, args[0], eh.NewIdent(varSAs)), nil
+		return eh.NewCall(operators.In, args[0], eh.NewIdent(VarSAs)), nil
 	}),
 }
 
@@ -81,9 +88,9 @@ func matcherEnv(lists func(name string) ([]string, bool), application bool) (*ce
 	opts := []cel.EnvOption{
 		cel.Variable("source", cel.MapType(cel.StringType, cel.DynType)),
 		cel.Variable("destination", cel.MapType(cel.StringType, cel.DynType)),
-		cel.Variable(varHost, cel.StringType),
-		cel.Variable(varTags, cel.ListType(cel.StringType)),
-		cel.Variable(varSAs, cel.ListType(cel.StringType)),
+		cel.Variable(VarHost, cel.StringType),
+		cel.Variable(VarTags, cel.ListType(cel.StringType)),
+		cel.Variable(VarSAs, cel.ListType(cel.StringType)),
 		cel.Macros(swpMacros...),
 		cel.Function("inIpRange", cel.Overload("inIpRange_string_string", []*cel.Type{cel.StringType, cel.StringType}, cel.BoolType,
 			cel.BinaryBinding(func(a, b ref.Val) ref.Val {
@@ -100,18 +107,18 @@ func matcherEnv(lists func(name string) ([]string, bool), application bool) (*ce
 				if !ok {
 					return types.NewErr("inUrlList: no URL list %q", string(b.(types.String)))
 				}
-				return types.Bool(urlListMatches(string(a.(types.String)), l))
+				return types.Bool(URLListMatches(string(a.(types.String)), l))
 			}))),
 	}
 	if application {
 		opts = append(opts, cel.Variable("request", cel.MapType(cel.StringType, cel.DynType)),
-			cel.Variable(varURL, cel.StringType), cel.Variable(varUA, cel.StringType))
+			cel.Variable(VarURL, cel.StringType), cel.Variable(VarUA, cel.StringType))
 	}
 	return cel.NewEnv(opts...)
 }
 
-// matchers compiles and caches a Server's matcher programs.
-type matchers struct {
+// Matchers compiles and caches a proxy's matcher programs.
+type Matchers struct {
 	once     sync.Once
 	sess     *cel.Env
 	app      *cel.Env
@@ -119,7 +126,7 @@ type matchers struct {
 	programs sync.Map // "s:"/"a:" + expression -> cel.Program
 }
 
-func (m *matchers) init(lists func(string) ([]string, bool)) {
+func (m *Matchers) init(lists func(string) ([]string, bool)) {
 	m.once.Do(func() {
 		m.sess, m.err = matcherEnv(lists, false)
 		if m.err == nil {
@@ -128,9 +135,9 @@ func (m *matchers) init(lists func(string) ([]string, bool)) {
 	})
 }
 
-// compile checks an expression as a sessionMatcher (application false) or
+// Compile checks an expression as a sessionMatcher (application false) or
 // applicationMatcher.
-func (m *matchers) compile(lists func(string) ([]string, bool), expr string, application bool) (cel.Program, error) {
+func (m *Matchers) Compile(lists func(string) ([]string, bool), expr string, application bool) (cel.Program, error) {
 	m.init(lists)
 	if m.err != nil {
 		return nil, m.err
@@ -167,18 +174,18 @@ const errNotBool = celErr("the expression must evaluate to a boolean")
 // CheckMatcher compiles a sessionMatcher (application false) or an
 // applicationMatcher, as Network Security checks a rule's expressions.
 func CheckMatcher(expr string, application bool) error {
-	var m matchers
-	_, err := m.compile(func(string) ([]string, bool) { return nil, true }, expr, application)
+	var m Matchers
+	_, err := m.Compile(func(string) ([]string, bool) { return nil, true }, expr, application)
 	return err
 }
 
-// urlListMatches is whether value (a host, or a URL without its scheme:
+// URLListMatches is whether value (a host, or a URL without its scheme:
 // host + path) is in a URL list, as
 // https://docs.cloud.google.com/secure-web-proxy/docs/url-list-syntax-reference
 // describes it: "*" is a prefix wildcard of whole subdomain tokens or of
 // a path; an entry without a path matches any path; a value without "/"
 // (host()) matches only the entries' domains.
-func urlListMatches(value string, entries []string) bool {
+func URLListMatches(value string, entries []string) bool {
 	vHost, vPath, hasSlash := strings.Cut(value, "/")
 	vHost = strings.ToLower(vHost)
 	if h, _, err := net.SplitHostPort(vHost); err == nil {
@@ -230,4 +237,31 @@ func ValidURLListEntry(e string) bool {
 	}
 	host, _, _ := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(e, "https://"), "http://"), "/")
 	return host != "" && !strings.Contains(strings.TrimPrefix(host, "*"), "*")
+}
+
+// GatewayRule is a gateway security policy rule as the proxy applies it.
+type GatewayRule struct {
+	Name          string
+	Priority      int32
+	Enabled       bool
+	Allow         bool
+	TLSInspection bool
+	Session       string
+	Application   string
+}
+
+// TLSInspections is what the proxy reads of a gateway security policy's
+// TLS inspection policy, when its policy source also implements it: the
+// CA pool it issues from; ok is false when the policy names none (or it
+// is gone).
+type TLSInspections interface {
+	TLSInspectionCAPool(policy string) (caPool string, ok bool)
+}
+
+// relRef is a full or relative resource name's relative part.
+func relRef(ref string) string {
+	if i := strings.Index(ref, "projects/"); i >= 0 {
+		return ref[i:]
+	}
+	return ref
 }

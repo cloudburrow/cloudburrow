@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"os/exec"
 	"sync"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	ltype "google.golang.org/genproto/googleapis/logging/type"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 )
 
@@ -82,30 +82,25 @@ func (b *computeVMs) DeleteTPM(ctx context.Context, vm compute.VMSpec) error {
 
 // OpenTPM implements compute.VMTPM.
 func (b *computeVMs) OpenTPM(ctx context.Context, vm compute.VMSpec) (io.ReadWriteCloser, error) {
-	cmd := exec.CommandContext(b.bg, "kubectl", "--kubeconfig", b.cfg.KubeconfigPath(), "-n", b.ns(), "exec", "-i", vm.Key,
+	bg, cancel := context.WithCancel(b.bg)
+	in, out, wait, err := k8s.New(b.cfg.KubeconfigPath(), "", b.ns()).Duplex(bg, "exec", "-i", vm.Key,
 		"-c", vtpmContainer, "--", "perl", "/usr/lib/cloudburrow/tpm-relay", vtpmSocketDir+"/tpm.sock")
-	in, err := cmd.StdinPipe()
 	if err != nil {
+		cancel()
 		return nil, err
 	}
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	return &tpmPipe{cmd: cmd, in: in, out: out}, nil
+	return &tpmPipe{wait: wait, cancel: cancel, in: in, out: out}, nil
 }
 
 // tpmPipe is a TPM command channel over the relay's stdin and stdout: each
 // Write a command, each Read its whole response.
 type tpmPipe struct {
-	mu   sync.Mutex
-	cmd  *exec.Cmd
-	in   io.WriteCloser
-	out  io.Reader
-	resp []byte
+	mu     sync.Mutex
+	wait   func() error
+	cancel context.CancelFunc
+	in     io.WriteCloser
+	out    io.Reader
+	resp   []byte
 }
 
 func (p *tpmPipe) Write(b []byte) (int, error) {
@@ -162,13 +157,14 @@ func (p *tpmPipe) Read(b []byte) (int, error) {
 func (p *tpmPipe) Close() error {
 	_ = p.in.Close()
 	done := make(chan struct{})
-	go func() { _ = p.cmd.Wait(); close(done) }()
+	go func() { _ = p.wait(); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
-		_ = p.cmd.Process.Kill()
+		p.cancel()
 		<-done
 	}
+	p.cancel()
 	return nil
 }
 
