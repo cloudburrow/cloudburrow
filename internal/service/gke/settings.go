@@ -124,7 +124,8 @@ func enforcesNetworkPolicy(c *containerpb.Cluster) bool {
 // (re-read 2026-11-21: https://docs.cloud.google.com/kubernetes-engine/docs/how-to/network-policy).
 // GKE re-creates the nodes; locally the CNI (kindnet) is restarted with
 // enforcement on or off on every node, which is the change the nodes'
-// re-creation makes.
+// re-creation makes, and the nodes' connection tracking is flushed, so no
+// connection made before the change outlives it, as on new nodes.
 func (s *Server) SetNetworkPolicy(_ context.Context, req *containerpb.SetNetworkPolicyRequest) (*containerpb.Operation, error) {
 	p, err := parseName(req.GetName(), req.GetProjectId(), req.GetZone(), req.GetClusterId(), "", "", "cluster")
 	if err != nil {

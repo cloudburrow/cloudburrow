@@ -115,11 +115,32 @@ spec:
 	_, err = g.SetAddonsConfig(ctx, &containerpb.SetAddonsConfigRequest{Name: name, AddonsConfig: &containerpb.AddonsConfig{
 		CloudRunConfig: &containerpb.CloudRunConfig{Disabled: false}}})
 	wantPrivateCACode(t, "an add-on with no local counterpart", err, codes.Unimplemented)
+	// The probe is asked every second while enforcement is enabled, so
+	// the API server's service proxy keeps its connection to it alive
+	// across the change (main run 45422957668): GKE re-creates the nodes,
+	// so no connection made before outlives it.
+	keepAlive := make(chan struct{})
+	kept := make(chan struct{})
+	go func() {
+		defer close(kept)
+		for {
+			select {
+			case <-keepAlive:
+				return
+			case <-time.After(time.Second):
+				_ = gkeProbeServes(kc)
+			}
+		}
+	}()
 	op, err = g.SetNetworkPolicy(ctx, &containerpb.SetNetworkPolicyRequest{Name: name, NetworkPolicy: &containerpb.NetworkPolicy{Enabled: true}})
 	if err != nil {
+		close(keepAlive)
 		t.Fatal(err)
 	}
-	if got := gkeWait(t, g, project, zone, op); got.GetOperationType() != containerpb.Operation_SET_NETWORK_POLICY {
+	got := gkeWait(t, g, project, zone, op)
+	close(keepAlive)
+	<-kept
+	if got.GetOperationType() != containerpb.Operation_SET_NETWORK_POLICY {
 		t.Errorf("operation type %v", got.GetOperationType())
 	}
 	if !gkeEventually(90*time.Second, func() bool { return gkeProbeServes(kc) != nil }) {

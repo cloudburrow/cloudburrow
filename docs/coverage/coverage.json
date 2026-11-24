@@ -26318,7 +26318,7 @@
         "method": "google.container.v1.ClusterManager/CheckAutopilotCompatibility",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:357 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },
@@ -26465,7 +26465,7 @@
         "method": "google.container.v1.ClusterManager/ListUsableSubnetworks",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:357 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },
@@ -26495,7 +26495,7 @@
         "method": "google.container.v1.ClusterManager/SetLegacyAbac",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:357 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },
@@ -26543,7 +26543,7 @@
         "method": "google.container.v1.ClusterManager/SetNetworkPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:357 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },
@@ -26558,7 +26558,7 @@
         "method": "google.container.v1.ClusterManager/SetNodePoolManagement",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:357 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },

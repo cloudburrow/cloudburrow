@@ -108,6 +108,17 @@ func kindnetRole(policies bool) string {
 // nftables rules queue nothing (their queue is "bypass": with no
 // listener, packets pass). Enforcement is that right, given or taken
 // away, and kindnet restarted to see the change.
+//
+// GKE re-creates the nodes to make the change ("Enabling network policy
+// enforcement requires that your nodes be re-created", re-read
+// 2026-11-24: https://docs.cloud.google.com/kubernetes-engine/docs/how-to/network-policy),
+// so no connection made before it survives it. kindnet's rules accept a
+// connection's packets once it is established, and queue only new ones
+// to its policy check: a connection kept alive across the change (the API
+// server's service proxy keeps its connections to pods for 90 seconds of
+// idleness) would be let through by a deny-all policy just enabled (main
+// run 45422957668). Every node's connection tracking is flushed once
+// kindnet runs with the change, as new nodes start without any.
 func (g *GKE) SetNetworkPolicy(ctx context.Context, kind string, enabled bool) error {
 	if !strings.HasPrefix(kind, OwnerPrefix) {
 		return fmt.Errorf("%w: %q", ErrNotOwned, kind)
@@ -126,6 +137,15 @@ func (g *GKE) SetNetworkPolicy(ctx context.Context, kind string, enabled bool) e
 	}
 	if _, err := r.Run(ctx, "kubectl", "--kubeconfig", kc, "-n", "kube-system", "rollout", "status", "daemonset", "kindnet", "--timeout=180s"); err != nil {
 		return fmt.Errorf("kindnet did not roll out: %w", err)
+	}
+	nodes, err := g.clusterNodes(ctx, kind)
+	if err != nil {
+		return fmt.Errorf("list the nodes: %w", err)
+	}
+	for _, n := range nodes {
+		if _, err := r.Run(ctx, "docker", "exec", n, "conntrack", "-F"); err != nil {
+			return fmt.Errorf("flush node %s's connection tracking: %w", n, err)
+		}
 	}
 	return nil
 }
