@@ -46,9 +46,24 @@ func (s *Server) checkAutoHealingPoliciesLocked(project, region string, v any) (
 	out := []any{}
 	for i, e := range l {
 		p, _ := e.(map[string]any)
+		delay, hasDelay := 0.0, false
+		if d, ok := p["initialDelaySec"]; ok && d != nil {
+			f, ok := numOf(d)
+			if !ok || f < 0 || f > 3600 || f != float64(int(f)) {
+				return nil, invalid("Invalid value for field 'resource.autoHealingPolicies[%d].initialDelaySec': '%v'. Must be greater than or equal to 0 and less than or equal to 3600.", i, d)
+			}
+			delay, hasDelay = f, true
+		}
 		ref := str(p, "healthCheck")
 		if ref == "" {
-			return nil, required("resource.autoHealingPolicies[0].healthCheck")
+			// A policy with no health check: gcloud's update
+			// --clear-autohealing sends one empty policy, which clears
+			// autohealing; --initial-delay alone sets the delay with no
+			// health check to probe with.
+			if hasDelay {
+				out = append(out, obj{"initialDelaySec": delay})
+			}
+			continue
 		}
 		hc := Rel(ref, project)
 		o, ok := s.res[hc]
@@ -57,14 +72,6 @@ func (s *Server) checkAutoHealingPoliciesLocked(project, region string, v any) (
 		}
 		if r := lastSeg(str(o, "region")); r != "" && r != region {
 			return nil, invalid("Invalid value for field 'resource.autoHealingPolicies[%d].healthCheck': '%s'. A regional health check must be in the group's region, '%s'.", i, ref, region)
-		}
-		delay := 0.0
-		if d, ok := p["initialDelaySec"]; ok && d != nil {
-			f, ok := numOf(d)
-			if !ok || f < 0 || f > 3600 || f != float64(int(f)) {
-				return nil, invalid("Invalid value for field 'resource.autoHealingPolicies[%d].initialDelaySec': '%v'. Must be greater than or equal to 0 and less than or equal to 3600.", i, d)
-			}
-			delay = f
 		}
 		out = append(out, obj{"healthCheck": hc, "initialDelaySec": delay})
 	}

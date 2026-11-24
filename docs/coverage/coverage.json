@@ -16558,7 +16558,8 @@
         "method": "compute.instanceGroupManagers.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU",
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225"
         ]
       },
       {
@@ -16576,6 +16577,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU",
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225",
           "test/compat/computemigautoheal2225_test.go:30 TestComputeMIGAutohealing2225"
         ]
       },
@@ -16584,6 +16586,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU",
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225",
           "test/compat/computemigautoheal2225_test.go:30 TestComputeMIGAutohealing2225"
         ]
       },
@@ -16617,6 +16620,7 @@
         "method": "compute.instanceGroupManagers.patch",
         "status": "Verified",
         "tests": [
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225",
           "test/compat/computemigautoheal2225_test.go:30 TestComputeMIGAutohealing2225",
           "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139"
         ]
@@ -17652,7 +17656,8 @@
         "method": "compute.regionInstanceGroupManagers.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient",
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225"
         ]
       },
       {
@@ -17671,14 +17676,16 @@
         "method": "compute.regionInstanceGroupManagers.get",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient",
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225"
         ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient",
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225"
         ]
       },
       {
@@ -17711,6 +17718,7 @@
         "method": "compute.regionInstanceGroupManagers.patch",
         "status": "Verified",
         "tests": [
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225",
           "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139"
         ]
       },

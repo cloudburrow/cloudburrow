@@ -265,3 +265,128 @@ func TestGcloudComputeMIGAutohealing2225(t *testing.T) {
 	}
 	gc("compute", "instance-groups", "managed", "delete", name, "--zone", zone)
 }
+
+// TestTerraformComputeMIGAutohealing2225 (#2225): google_compute_health_check,
+// google_compute_instance_template, and a zonal
+// google_compute_instance_group_manager and a regional
+// google_compute_region_instance_group_manager, each with
+// auto_healing_policies (the health check, initial_delay_sec 60), apply
+// through `cloudburrow terraform` with egress to Google blocked; the
+// official clients read both policies back; the plan is clean; a new
+// initial_delay_sec (120) applies in place and the plan is clean again;
+// the auto_healing_policies blocks removed clear both groups' policies;
+// destroy removes every resource.
+// covers: compute.instanceGroupManagers.insert, compute.instanceGroupManagers.get, compute.instanceGroupManagers.patch, compute.instanceGroupManagers.delete, compute.regionInstanceGroupManagers.insert, compute.regionInstanceGroupManagers.get, compute.regionInstanceGroupManagers.patch, compute.regionInstanceGroupManagers.delete
+func TestTerraformComputeMIGAutohealing2225(t *testing.T) {
+	h := New(t)
+	opts := computeOpts(t, h) // skips without CLOUDBURROW_TEST_COMPUTE
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
+	t.Cleanup(cancel)
+	igms, err := computeapi.NewInstanceGroupManagersRESTClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rigms, _ := computeapi.NewRegionInstanceGroupManagersRESTClient(ctx, opts...)
+	m := newTFModule(t)
+	const zone, region = "us-central1-a", "us-central1"
+	name := fmt.Sprintf("tfah-%d", time.Now().UnixNano()%1e6)
+	module := func(delay int) string {
+		policy := ""
+		if delay >= 0 {
+			policy = fmt.Sprintf(`
+  auto_healing_policies {
+    health_check      = google_compute_health_check.hc.id
+    initial_delay_sec = %d
+  }`, delay)
+		}
+		return fmt.Sprintf(`
+resource "google_compute_health_check" "hc" {
+  project             = %[1]q
+  name                = "%[2]s-hc"
+  check_interval_sec  = 5
+  timeout_sec         = 5
+  healthy_threshold   = 1
+  unhealthy_threshold = 3
+  tcp_health_check {
+    port = 80
+  }
+}
+resource "google_compute_instance_template" "tpl" {
+  project      = %[1]q
+  name         = "%[2]s-tpl"
+  machine_type = "e2-small"
+  disk {
+    source_image = "debian-cloud/debian-12"
+    boot         = true
+    auto_delete  = true
+  }
+  network_interface {
+    network = "default"
+  }
+}
+resource "google_compute_instance_group_manager" "zonal" {
+  project            = %[1]q
+  name               = "%[2]s-z"
+  zone               = %[3]q
+  base_instance_name = "%[2]s-z"
+  target_size        = 1
+  version {
+    instance_template = google_compute_instance_template.tpl.id
+  }%[5]s
+}
+resource "google_compute_region_instance_group_manager" "regional" {
+  project                   = %[1]q
+  name                      = "%[2]s-r"
+  region                    = %[4]q
+  base_instance_name        = "%[2]s-r"
+  target_size               = 0
+  distribution_policy_zones = ["us-central1-a", "us-central1-b"]
+  version {
+    instance_template = google_compute_instance_template.tpl.id
+  }%[5]s
+}
+`, m.project, name, zone, region, policy)
+	}
+	check := func(delay int32) {
+		t.Helper()
+		z, err := igms.Get(ctx, &computepb.GetInstanceGroupManagerRequest{Project: m.project, Zone: zone, InstanceGroupManager: name + "-z"})
+		if err != nil {
+			t.Fatalf("the zonal group: %v", err)
+		}
+		r, err := rigms.Get(ctx, &computepb.GetRegionInstanceGroupManagerRequest{Project: m.project, Region: region, InstanceGroupManager: name + "-r"})
+		if err != nil {
+			t.Fatalf("the regional group: %v", err)
+		}
+		for what, pols := range map[string][]*computepb.InstanceGroupManagerAutoHealingPolicy{"zonal": z.GetAutoHealingPolicies(), "regional": r.GetAutoHealingPolicies()} {
+			if delay < 0 {
+				if len(pols) != 0 {
+					t.Fatalf("the %s group's autoHealingPolicies after the block was removed: %v", what, pols)
+				}
+				continue
+			}
+			if len(pols) != 1 || pols[0].GetInitialDelaySec() != delay || !strings.HasSuffix(pols[0].GetHealthCheck(), "/global/healthChecks/"+name+"-hc") {
+				t.Fatalf("the %s group's autoHealingPolicies: %v, want %s-hc with %ds", what, pols, name, delay)
+			}
+		}
+	}
+	m.write(module(60))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	check(60)
+	m.planClean()
+	m.write(module(120))
+	m.apply()
+	check(120)
+	m.planClean()
+	m.write(module(-1))
+	m.apply()
+	check(-1)
+	m.planClean()
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := igms.Get(ctx, &computepb.GetInstanceGroupManagerRequest{Project: m.project, Zone: zone, InstanceGroupManager: name + "-z"}); computeCode(err) != 404 {
+		t.Errorf("the zonal group after destroy: %v", err)
+	}
+	if _, err := rigms.Get(ctx, &computepb.GetRegionInstanceGroupManagerRequest{Project: m.project, Region: region, InstanceGroupManager: name + "-r"}); computeCode(err) != 404 {
+		t.Errorf("the regional group after destroy: %v", err)
+	}
+}

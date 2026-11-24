@@ -112,7 +112,6 @@ func TestMIGAutohealingPolicyValidation(t *testing.T) {
 	}{
 		{[]any{obj{"healthCheck": "global/healthChecks/hc"}, obj{"healthCheck": "global/healthChecks/hc"}}, "only one autohealing policy"},
 		{[]any{obj{"healthCheck": "global/healthChecks/nope"}}, "not found"},
-		{[]any{obj{"initialDelaySec": 10}}, "healthCheck"},
 		{[]any{obj{"healthCheck": "global/healthChecks/hc", "initialDelaySec": 3601}}, "initialDelaySec"},
 		{[]any{obj{"healthCheck": "global/healthChecks/hc", "initialDelaySec": -1}}, "initialDelaySec"},
 	}
@@ -144,6 +143,18 @@ func TestMIGAutohealingPolicyValidation(t *testing.T) {
 	call("PATCH", z+"/g", obj{"autoHealingPolicies": []any{}})
 	if g := call("GET", z+"/g", nil); g["autoHealingPolicies"] != nil {
 		t.Fatalf("cleared: %v", g["autoHealingPolicies"])
+	}
+	// gcloud's update --clear-autohealing sends one empty policy, which
+	// clears it too; --initial-delay alone keeps a delay with no health
+	// check.
+	call("PATCH", z+"/g", obj{"autoHealingPolicies": []any{obj{"healthCheck": "global/healthChecks/hc"}}})
+	call("PATCH", z+"/g", obj{"autoHealingPolicies": []any{obj{}}})
+	if g := call("GET", z+"/g", nil); g["autoHealingPolicies"] != nil {
+		t.Fatalf("cleared by an empty policy: %v", g["autoHealingPolicies"])
+	}
+	call("PATCH", z+"/g", obj{"autoHealingPolicies": []any{obj{"initialDelaySec": 10}}})
+	if p := objOf(listOf(call("GET", z+"/g", nil)["autoHealingPolicies"])[0]); p["initialDelaySec"] != 10.0 || p["healthCheck"] != nil {
+		t.Fatalf("a delay with no health check: %v", p)
 	}
 	call("DELETE", "global/healthChecks/hc", nil)
 }
