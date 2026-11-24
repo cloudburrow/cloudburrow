@@ -140,17 +140,25 @@ func TestColabEnterpriseRuntimesThroughThePages(t *testing.T) {
 	runtimeName := "browser-runtime"
 	p.submitForm(map[string]string{"notebookRuntimeTemplate": id, "displayName": runtimeName}, "displayName")
 	p.waitForWithin(`location.pathname === "/agent-platform/colab/runtimes" && `+rowReady(runtimeName), 30*time.Minute)
-	runtimeID := ""
-	for _, it := range list("colab-runtimes").Items {
-		if it.Fields["Runtime name"] == runtimeName && it.Fields["Runtime template"] == id {
-			runtimeID = it.Name
-			if it.Status != "Running" {
-				t.Errorf("the new runtime is %q, want Running", it.Status)
+	// Create answers once the runtime is assigned, as Google's does: it is
+	// Starting until its container is up (on a runner, the first one
+	// builds the runtime image), then Running.
+	runtimeID, created := "", ""
+	for deadline := time.Now().Add(10 * time.Minute); ; time.Sleep(2 * time.Second) {
+		for _, it := range list("colab-runtimes").Items {
+			if it.Fields["Runtime name"] == runtimeName && it.Fields["Runtime template"] == id {
+				runtimeID, created = it.Name, it.Status
 			}
+		}
+		if created != "Starting" || time.Now().After(deadline) {
+			break
 		}
 	}
 	if runtimeID == "" {
 		t.Fatalf("the Runtimes list has no %q", runtimeName)
+	}
+	if created != "Running" {
+		t.Errorf("the new runtime is %q, want Running", created)
 	}
 	t.Cleanup(func() {
 		consoleDo(t, http.MethodDelete, "/api/resources/colab-runtimes"+q+"&region=us-central1&name="+url.QueryEscape(runtimeID), "")

@@ -69,7 +69,8 @@ func agentPlatformConsole(t *testing.T) (*tab, *gardenModels) {
 // TestAgentPlatformNavigationAndRedirects (#1839): the old /ai/ address
 // lands on Agent Platform's Model Garden, whose product navigation carries
 // Google's pages; a page with no backend says it is not available locally,
-// and the overview tells served pages from absent ones.
+// and the overview tells served pages from absent ones. Colab Enterprise is
+// one entry under Notebooks, as in Google's menu, whose pages are its tabs.
 func TestAgentPlatformNavigationAndRedirects(t *testing.T) {
 	p, _ := agentPlatformConsole(t)
 	p.navigate("/ai/models")
@@ -88,6 +89,25 @@ func TestAgentPlatformNavigationAndRedirects(t *testing.T) {
 		if !contains(nav.Pages, want) {
 			t.Errorf("Agent Platform's pages %v lack %q", nav.Pages, want)
 		}
+	}
+
+	for _, sub := range []string{"My notebooks", "Runtimes", "Runtime templates", "Executions", "Schedules"} {
+		if contains(nav.Pages, sub) {
+			t.Errorf("Agent Platform's menu lists Colab Enterprise's %q; Google's has one Colab Enterprise entry", sub)
+		}
+	}
+	// Colab Enterprise's pages are its tabs, kept while it is off here.
+	p.navigate("/agent-platform/colab/runtimes")
+	p.waitFor(`document.querySelector("#not-served") !== null`)
+	var tabs []string
+	var current string
+	p.eval(`[...document.querySelectorAll("#view .page-tabs a")].map((a) => a.textContent)`, &tabs)
+	p.eval(`document.querySelector("#product-nav a[aria-current=page]")?.textContent.trim() || ""`, &current)
+	if strings.Join(tabs, ",") != "My notebooks,Runtimes,Runtime templates,Executions,Schedules" {
+		t.Errorf("Colab Enterprise's tabs are %v", tabs)
+	}
+	if current != "Colab Enterprise" {
+		t.Errorf("on Runtimes the menu marks %q; want Colab Enterprise", current)
 	}
 
 	// Tuning: Model Registry is served with Cloud Run since #1940.
@@ -112,8 +132,10 @@ func TestAgentPlatformNavigationAndRedirects(t *testing.T) {
 	var states map[string]string
 	p.eval(`Object.fromEntries([...document.querySelectorAll("#ap-overview li")].map((li) =>
 		[li.querySelector("a").textContent, li.dataset.state]))`, &states)
-	if states["Model Garden"] != "served" || states["Local models"] != "served" || states["Pipelines"] != "absent" ||
-		states["Studio"] != "off" {
+	// Pipelines runs on Cloud Run (#2173), off on this console, and
+	// Tuning has no local backend.
+	if states["Model Garden"] != "served" || states["Local models"] != "served" || states["Pipelines"] != "off" ||
+		states["Tuning"] != "absent" || states["Studio"] != "off" || states["My notebooks"] != "off" {
 		t.Errorf("the overview's page states are %v", states)
 	}
 }
