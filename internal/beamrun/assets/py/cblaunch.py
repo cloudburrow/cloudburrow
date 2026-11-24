@@ -191,6 +191,10 @@ def java_options(opts, args):
     o["environmentOptions"] = ["external_service_address=" + args.java_harness]
     o["credentialFactoryClass"] = "CbCredentialFactory"
     o["gcsEndpoint"] = os.environ.get("STORAGE_EMULATOR_HOST", "").rstrip("/") + "/storage/v1/"
+    # BigQueryIO's clients (BigQueryOptions.bigQueryEndpoint, the API's
+    # root URL): the instance's BigQuery through the relay.
+    if os.environ.get("BIGQUERY_EMULATOR_HOST"):
+        o["bigQueryEndpoint"] = os.environ["BIGQUERY_EMULATOR_HOST"].rstrip("/") + "/"
     o["parallelism"] = args.parallelism
     o["jobName"] = args.job_name
     if args.streaming:
@@ -339,14 +343,35 @@ def drain(rest):
     """Drains the job server's Flink job: Flink's stop with --drain, which
     takes a savepoint, stops the sources and advances the watermark to the
     end of time, so every window fires before the job finishes (the reads,
-    which watch the drain file, stop with it)."""
-    try:
-        base = "http://" + rest
-        for j in _rest(base, "GET", "/jobs").get("jobs", []):
-            if j.get("status") == "RUNNING":
-                _rest(base, "POST", "/jobs/%s/stop" % j["id"], {"drain": True, "targetDirectory": "file:///tmp/cb-drain"})
-    except Exception as e:
-        emit(event="message", importance="JOB_MESSAGE_WARNING", text="Draining the Flink job: %s" % e)
+    which watch the drain file, stop with it). A stop is retried until it
+    completes: one asked for before every task runs (a drain just after
+    the job started, or a launched template's) fails its savepoint."""
+    base = "http://" + rest
+    deadline = time.time() + 900
+    last_error = ""
+    while time.time() < deadline:
+        try:
+            jobs = _rest(base, "GET", "/jobs").get("jobs", [])
+            live = [j for j in jobs if j.get("status") in ("CREATED", "INITIALIZING", "RUNNING", "RESTARTING")]
+            if jobs and not live:
+                return
+            for j in live:
+                if j.get("status") != "RUNNING":
+                    continue
+                trig = _rest(base, "POST", "/jobs/%s/stop" % j["id"], {"drain": True, "targetDirectory": "file:///tmp/cb-drain"})
+                rid = trig.get("request-id")
+                while rid and time.time() < deadline:
+                    st = _rest(base, "GET", "/jobs/%s/savepoints/%s" % (j["id"], rid))
+                    if st.get("status", {}).get("id") == "COMPLETED":
+                        cause = st.get("operation", {}).get("failure-cause")
+                        if cause:
+                            last_error = str(cause.get("class", "")) + ": " + str(cause.get("stack-trace", ""))[:300]
+                        break
+                    time.sleep(0.5)
+        except Exception as e:
+            last_error = str(e)
+        time.sleep(2)
+    emit(event="message", importance="JOB_MESSAGE_WARNING", text="Draining the Flink job: %s" % (last_error or "it did not stop"))
 
 
 def main():

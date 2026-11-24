@@ -636,7 +636,7 @@ compat_shard() {
       FIXTURES=(--allow-unconfined-containers)
       TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,KMS,GCLOUD,DATAPROC,PUBSUB,DATAFLOW,DATASTORE,BIGTABLE,SPANNER
       export CLOUDBURROW_TEST_SPARK=1
-      COMPAT_RUN='^Test(BigQuerySpark|BqSpark|Dataproc|GcloudDataproc|PythonDataflow|DataflowJobsAPI|GcloudDataflow|TerraformDataflow)'
+      COMPAT_RUN='^Test(BigQuerySpark|BqSpark|Dataproc|GcloudDataproc|PythonDataflow|JavaDataflow|DataflowJobsAPI|DataflowSnapshots|DataflowProvided|GcloudDataflow|TerraformDataflow)'
       COMPAT_TIMEOUT=150m ;;
     localai|localaispeech)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI

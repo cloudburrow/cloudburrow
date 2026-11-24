@@ -106,7 +106,7 @@ func (s *Server) SnapshotJob(ctx context.Context, req *dataflowpb.SnapshotJobReq
 	if req.GetSnapshotSources() {
 		// The job's Pub/Sub sources' subscriptions are snapshotted with it
 		// on Google; CloudBurrow's reads keep their place in the job's
-		// state, so the snapshot names none (UNVERIFIED).
+		// state, so the snapshot names none (UNVERIFIED (docs re-read 2026-11-24: https://cloud.google.com/dataflow/docs/guides/using-snapshots)).
 		snap.PubsubMetadata = []*dataflowpb.PubsubSnapshotMetadata{}
 	}
 	key := snapKey(j.ProjectId, loc, snap.Id)
