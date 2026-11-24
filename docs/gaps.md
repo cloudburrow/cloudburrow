@@ -38,10 +38,10 @@ tracks it; a closed issue is named only where it says what was built.
 | App Hub | 5 | 1 | 1 | 3 | 0 |
 | AlloyDB for PostgreSQL | 6 | 1 | 4 | 1 | 0 |
 | Filestore | 7 | 2 | 4 | 1 | 0 |
-| Dataflow | 8 | 5 | 2 | 1 | 0 |
+| Dataflow | 7 | 4 | 2 | 1 | 0 |
 | Dataform | 7 | 0 | 3 | 4 | 0 |
 | Console | 11 | 5 | 5 | 1 | 0 |
-| **Total** | **113** | **21** | **38** | **48** | **6** |
+| **Total** | **112** | **20** | **38** | **48** | **6** |
 
 ## Cloud Storage
 
@@ -407,9 +407,8 @@ Create job from template.
 |---|---|---|
 | Flex Templates' `FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE`, `_SETUP_FILE` and `_EXTRA_PACKAGES` are not installed at launch (the launcher has no route to PyPI; the image must hold its packages), and Java Flex Templates (#2215) | no emulator support | S |
 | Google-provided templates built from Google's DataflowTemplates (Pub/Sub to BigQuery, Cloud Storage Text to BigQuery, Pub/Sub to Cloud Storage), offered in Create job from template's menu (#2215) | not built yet | M |
-| Java and Go SDK pipelines: their environments are refused with the reason; only Python 3.12 pipelines run (#2215) | not built yet | L |
+| Java and Go SDK pipelines: their environments are refused with the reason; only Python 3.12 pipelines run, so cross-language transforms (`ReadFromBigtable`, Beam YAML's Java providers) do not either (#2215) | not built yet | L |
 | Snapshots: `SnapshotJob`, `GetSnapshot`, `ListSnapshots`, `DeleteSnapshot` answer `UNIMPLEMENTED` (#2215) | not built yet | M |
-| Reading from Datastore and Spanner in a pipeline has no test, and `ReadFromBigtable` is a cross-language Java transform, which needs the Java SDK (#2215); their writes are verified | not built yet | S |
 | The pipeline components (#2210) | not built yet | M |
 | Workers are one local Flink cluster per job: machine types, zones, networks, disk sizes and service accounts are recorded, not used; `maxNumWorkers` bounds the job's parallelism | no emulator support | S |
 | The error codes and texts of invalid job names, a drain of a batch job and unknown template parameters (`UNVERIFIED`) | not documented by Google | S |

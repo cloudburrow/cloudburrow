@@ -5,6 +5,7 @@ package compat
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"cloud.google.com/go/dataflow/apiv1beta3/dataflowpb"
 	"cloud.google.com/go/datastore"
 	"cloud.google.com/go/spanner"
+	"cloud.google.com/go/storage"
+	"google.golang.org/api/iterator"
 )
 
 // TestPythonDataflowDatabases (#2215): Google's Datastore, Bigtable and
@@ -20,7 +23,8 @@ import (
 // write to the instance's emulators: the Python SDK's DataflowRunner
 // submits it, it runs on the local runner, and the Go clients read each
 // count back from Datastore (entity Word/kiwi), Bigtable (row kiwi, cf:n)
-// and Spanner (table Words).
+// and Spanner (table Words); a second job reads the Datastore kind and the
+// Spanner table back with ReadFromDatastore and ReadFromSpanner.
 func TestPythonDataflowDatabases(t *testing.T) {
 	h, _, c := dataflowEnv(t)
 	storageAddr := h.Endpoint(EnvStorage)
@@ -87,4 +91,46 @@ func TestPythonDataflowDatabases(t *testing.T) {
 	if strings.Join(got, ",") != "fig=1,kiwi=2" {
 		t.Errorf("Spanner Words = %v; want fig=1, kiwi=2", got)
 	}
+
+	// A second job reads them back with ReadFromDatastore and
+	// ReadFromSpanner.
+	out = runBeamPython(t, ctx, network, project, append([]string{"/flow/databases.py", "--db_project=" + project,
+		"--bigtable_instance=" + bigtableInstance, "--bigtable_table=" + table,
+		"--spanner_instance=" + spInstance, "--spanner_database=" + spDB, "--read_to=gs://" + bucket + "/read/"},
+		dataflowRunnerArgs(project, bucket, "databases-read-"+suffix)...)...)
+	id = jobIDOf(t, out)
+	if j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DONE, dataflowpb.JobState_JOB_STATE_FAILED); j.CurrentState != dataflowpb.JobState_JOB_STATE_DONE {
+		t.Fatalf("the reading job is %s:\n%s", j.CurrentState, jobMessages(t, ctx, c, project, id))
+	}
+	read := gcsText(t, ctx, h, bucket, "read/")
+	for _, want := range []string{"datastore kiwi=2", "datastore fig=1", "spanner kiwi=2", "spanner fig=1"} {
+		if !strings.Contains(read, want) {
+			t.Errorf("the reading job wrote no %q:\n%s", want, read)
+		}
+	}
+}
+
+// gcsText is every object under prefix in bucket, concatenated.
+func gcsText(t *testing.T, ctx context.Context, h *Harness, bucket, prefix string) string {
+	t.Helper()
+	sc := storageClient(t, h)
+	var b strings.Builder
+	it := sc.Bucket(bucket).Objects(ctx, &storage.Query{Prefix: prefix})
+	for {
+		a, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := sc.Bucket(bucket).Object(a.Name).NewReader(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := io.ReadAll(r)
+		r.Close()
+		b.Write(data)
+	}
+	return b.String()
 }
