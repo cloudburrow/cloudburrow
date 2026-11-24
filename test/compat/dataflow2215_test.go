@@ -491,3 +491,69 @@ func TestDataflowJobsAPI(t *testing.T) {
 		t.Errorf("SnapshotJob of a failed batch job = %v; want FAILED_PRECONDITION", err)
 	}
 }
+
+// covers: google.dataflow.v1beta3.MetricsV1Beta3/GetJobMetrics
+//
+// TestPythonDataflowCommittedAndTentative (#2215): a metric's committed
+// value is that of the bundles that finished successfully and its
+// tentative value that of every bundle attempted, as the Dataflow runner
+// reports them (Beam's MetricResult: attempted is the value "across all
+// attempts of executing all parts of the pipeline", committed that of the
+// work committed; the DataflowRunner reads the "tentative" context as
+// attempted). The pipeline
+// (testdata/dataflowpy/failing.py) counts each of its four elements and
+// fails on the last; the job is FAILED, its tentative count of seen
+// covers all four, and its committed count leaves out the failed
+// bundle's.
+func TestPythonDataflowCommittedAndTentative(t *testing.T) {
+	h, _, c := dataflowEnv(t)
+	storageAddr := h.Endpoint(EnvStorage)
+	dfAddr := h.Endpoint(EnvDataflow)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	sc := storageClient(t, h)
+	project := h.Project()
+	bucket := fmt.Sprintf("%s-dataflow-ct-%d", project, time.Now().UnixNano()%1e6)
+	dataflowBucket(t, ctx, sc, project, bucket)
+	network := beamNetwork(t, ctx, map[int]string{9000: storageAddr, 80: dfAddr})
+	name := fmt.Sprintf("tentative-%d", time.Now().UnixNano()%1e6)
+	out := runBeamPython(t, ctx, network, project, append([]string{"/flow/failing.py"}, dataflowRunnerArgs(project, bucket, name)...)...)
+	id := jobIDOf(t, out)
+	j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DONE, dataflowpb.JobState_JOB_STATE_FAILED)
+	if j.CurrentState != dataflowpb.JobState_JOB_STATE_FAILED {
+		t.Fatalf("the job is %s; want FAILED:\n%s", j.CurrentState, jobMessages(t, ctx, c, project, id))
+	}
+	var committed, tentative float64
+	var seen []string
+	for deadline := time.Now().Add(time.Minute); ; time.Sleep(2 * time.Second) {
+		m, err := c.metrics.GetJobMetrics(ctx, &dataflowpb.GetJobMetricsRequest{ProjectId: project, Location: "us-central1", JobId: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		committed, tentative, seen = 0, 0, nil
+		for _, u := range m.Metrics {
+			n := u.GetName()
+			if n.GetOrigin() != "user" || n.GetName() != "seen" || n.GetContext()["namespace"] != "dev.cloudburrow" {
+				continue
+			}
+			seen = append(seen, fmt.Sprintf("%v=%v", n.GetContext(), u.GetScalar().GetNumberValue()))
+			if !strings.Contains(n.GetContext()["step"], "Count") {
+				t.Errorf("seen's step is %q; want the Count step", n.GetContext()["step"])
+			}
+			if n.GetContext()["tentative"] == "true" {
+				tentative += u.GetScalar().GetNumberValue()
+			} else {
+				committed += u.GetScalar().GetNumberValue()
+			}
+		}
+		if tentative >= 4 || time.Now().After(deadline) {
+			break
+		}
+	}
+	if tentative < 4 {
+		t.Errorf("tentative seen = %v; want every attempted element (4): %v", tentative, seen)
+	}
+	if committed > 3 || committed >= tentative {
+		t.Errorf("committed seen = %v (tentative %v); want the failed bundle's elements left out: %v", committed, tentative, seen)
+	}
+}

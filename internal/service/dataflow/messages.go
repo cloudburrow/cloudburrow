@@ -72,16 +72,26 @@ func (s *Server) GetJobMetrics(_ context.Context, req *dataflowpb.GetJobMetricsR
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := &dataflowpb.JobMetrics{MetricTime: timestamppb.New(s.now())}
+	// A job's metrics recorded before committed and tentative values were
+	// kept apart have committed rows only; each then answers both.
+	split := false
+	for _, m := range r.metrics {
+		split = split || m.Tentative
+	}
 	for _, m := range r.metrics {
 		if req.GetStartTime() != nil && !m.Updated.IsZero() && m.Updated.Before(req.GetStartTime().AsTime()) {
 			continue
 		}
-		out.Metrics = append(out.Metrics, metricUpdates(m)...)
+		out.Metrics = append(out.Metrics, metricUpdates(m, split)...)
 	}
 	return out, nil
 }
 
-func metricUpdates(m Metric) []*dataflowpb.MetricUpdate {
+// metricUpdates are m's updates: a user metric's committed or, with the
+// context's "tentative" "true", its tentative value; the service's own
+// (ElementCount) committed only. Unless split, a committed user metric
+// answers its tentative value too.
+func metricUpdates(m Metric, split bool) []*dataflowpb.MetricUpdate {
 	ctx := map[string]string{}
 	if m.Origin == "user" {
 		ctx["step"], ctx["namespace"] = m.Step, m.Namespace
@@ -116,8 +126,13 @@ func metricUpdates(m Metric) []*dataflowpb.MetricUpdate {
 		}
 		return u
 	}
-	if m.Origin == "user" {
+	switch {
+	case m.Origin == "user" && !split:
 		return []*dataflowpb.MetricUpdate{mk(false), mk(true)}
+	case m.Origin == "user":
+		return []*dataflowpb.MetricUpdate{mk(m.Tentative)}
+	case m.Tentative:
+		return nil
 	}
 	return []*dataflowpb.MetricUpdate{mk(false)}
 }

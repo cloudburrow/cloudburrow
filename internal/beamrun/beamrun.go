@@ -185,6 +185,9 @@ type Metric struct {
 	Total       int64  `json:"total"`
 	Min         int64  `json:"min"`
 	Max         int64  `json:"max"`
+	// Tentative is an attempted value (every bundle attempted), not a
+	// committed one (the bundles that finished successfully).
+	Tentative bool `json:"tentative"`
 }
 
 // Result is how a job ended: State DONE, FAILED or CANCELLED.

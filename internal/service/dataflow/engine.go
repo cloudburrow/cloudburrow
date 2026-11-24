@@ -100,5 +100,9 @@ type Metric struct {
 	Kind                   string
 	Value                  int64
 	Count, Min, Max, Total int64
-	Updated                time.Time
+	// Tentative is an attempted value, of every bundle attempted, failed
+	// and running ones too; otherwise it is committed, of the bundles
+	// that finished successfully (Dataflow's committed and tentative).
+	Tentative bool
+	Updated   time.Time
 }

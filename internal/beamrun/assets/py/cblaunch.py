@@ -257,7 +257,8 @@ def harness_metrics(directory, producers):
         except Exception:
             continue
         for r in rows:
-            key = (r["name"], r["origin"], r.get("step", ""), r.get("namespace", ""), r.get("pcollection", ""), r["kind"])
+            key = (bool(r.get("tentative")), r["name"], r["origin"], r.get("step", ""), r.get("namespace", ""),
+                   r.get("pcollection", ""), r["kind"])
             if r["kind"] == "Distribution":
                 p = totals.get(key)
                 totals[key] = r if p is None else dict(p, count=p["count"] + r["count"], total=p["total"] + r["total"],
@@ -274,20 +275,46 @@ def harness_metrics(directory, producers):
 
 def runner_metrics(stub, job_id, producers):
     """The job's metrics as Beam's runner aggregated them from every SDK
-    worker, Python's and Java's (the job server's GetJobMetrics: the
-    attempted MonitoringInfos, which Flink's runner gathers in its
-    accumulators and answers once the job has finished): each
-    PCollection's ElementCount and the pipeline's user counters and
-    distributions, in sitecustomize's rows. None when the runner reports
-    none."""
+    worker, Python's, Java's and Go's (the job server's GetJobMetrics,
+    which Flink's runner gathers in its accumulators and answers once the
+    job has finished): its attempted MonitoringInfos as tentative rows,
+    its committed ones (if any) as committed rows. None when the runner
+    reports none."""
     try:
         res = stub.GetJobMetrics(beam_job_api_pb2.GetJobMetricsRequest(job_id=job_id), timeout=60)
     except Exception:
         return None
-    return monitoring_rows(res.metrics.attempted, producers)
+    rows = (monitoring_rows(res.metrics.attempted, producers, True) or []) + \
+        (monitoring_rows(res.metrics.committed, producers, False) or [])
+    return rows or None
 
 
-def monitoring_rows(infos, producers):
+def _ident(r):
+    return (r["name"], r["origin"], r.get("step", ""), r.get("namespace", ""), r.get("pcollection", ""), r["kind"])
+
+
+def final_metrics(runner, harness, state):
+    """A finished job's metrics: for each metric the workers' own totals
+    (committed for the bundles that finished successfully, tentative for
+    every bundle attempted) where they reported it; otherwise the
+    runner's, its attempted values tentative and its committed ones
+    committed. A runner that reports no committed values (Flink's) has
+    committed every attempted bundle of a job that is DONE, since no
+    bundle of it failed."""
+    out = list(harness or [])
+    seen = set(_ident(r) for r in out)
+    runner = runner or []
+    committed = set(_ident(r) for r in runner if not r.get("tentative"))
+    for r in runner:
+        if _ident(r) in seen:
+            continue
+        out.append(r)
+        if r.get("tentative") and state == "DONE" and _ident(r) not in committed:
+            out.append(dict(r, tentative=False))
+    return out
+
+
+def monitoring_rows(infos, producers, tentative=False):
     """infos (MonitoringInfos), summed into sitecustomize's rows: each
     PCollection's ElementCount and the user counters and distributions.
     None for none."""
@@ -315,7 +342,7 @@ def monitoring_rows(infos, producers):
         return None
     rows = []
     for (name, origin, step, ns, kind), v in totals.items():
-        row = {"name": name, "origin": origin, "step": step, "kind": kind}
+        row = {"name": name, "origin": origin, "step": step, "kind": kind, "tentative": tentative}
         if origin == "user":
             row["namespace"] = ns
         else:
@@ -584,10 +611,11 @@ def main():
         if time.time() - last > 5:
             last = time.time()
             emit(event="metrics", metrics=harness_metrics(args.metrics_dir, producers))
-    # Once the job has finished, its metrics are the runner's own, of all
-    # its workers (the Java workers' too); while it runs, the workers'.
-    emit(event="metrics", metrics=runner_metrics(stub, job_id, producers) or harness_metrics(args.metrics_dir, producers))
+    # Once the job has finished, its metrics are its workers' own, and
+    # the runner's for any metric no worker of ours reported (final_metrics).
     state = final.get("state") or STATE.Enum.Name(stub.GetState(beam_job_api_pb2.GetJobStateRequest(job_id=job_id)).state)
+    emit(event="metrics", metrics=final_metrics(runner_metrics(stub, job_id, producers),
+                                                harness_metrics(args.metrics_dir, producers), state))
     emit(event="done", state=state, message=final.get("message", ""))
 
 

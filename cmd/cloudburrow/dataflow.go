@@ -234,7 +234,7 @@ func (e dataflowEngine) Run(ctx context.Context, run dataflow.Run, r dataflow.Re
 			out := make([]dataflow.Metric, 0, len(ms))
 			for _, m := range ms {
 				out = append(out, dataflow.Metric{Name: m.Name, Origin: m.Origin, Step: m.Step, PCollection: m.PCollection,
-					Namespace: m.Namespace, Kind: m.Kind, Value: m.Value, Count: m.Count, Min: m.Min, Max: m.Max, Total: m.Total, Updated: now})
+					Namespace: m.Namespace, Kind: m.Kind, Value: m.Value, Count: m.Count, Min: m.Min, Max: m.Max, Total: m.Total, Tentative: m.Tentative, Updated: now})
 			}
 			r.Metrics(out)
 		},
