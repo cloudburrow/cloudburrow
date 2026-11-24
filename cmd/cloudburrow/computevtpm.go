@@ -32,6 +32,9 @@ const (
 	vtpmSocketDir = "/run/vtpm"
 )
 
+// vtpmStop is the vTPM container's preStop hook: SIGTERM to swtpm.
+var vtpmStop = []string{"/bin/sh", "-c", "kill -TERM 1"}
+
 func vtpmClaim(vm compute.VMSpec) string { return vm.Key + "-vtpm" }
 
 // vtpmPod adds the vTPM container, its claim and the shared socket
@@ -56,6 +59,11 @@ func vtpmPod(vm compute.VMSpec, ref string, spec map[string]any, mounts []any) [
 	c["restartPolicy"] = "Always"
 	c["startupProbe"] = map[string]any{"exec": map[string]any{"command": []string{"test", "-S", vtpmSocketDir + "/tpm.sock"}},
 		"periodSeconds": 1, "failureThreshold": 60}
+	// The guest image's stop signal is systemd's, SIGRTMIN+3, which swtpm
+	// (the container's PID 1) does not handle, so the kernel drops it and
+	// every stop, reset and delete waited out the pod's 30-second grace
+	// period for the kill. swtpm handles SIGTERM: it is sent first.
+	c["lifecycle"] = map[string]any{"preStop": map[string]any{"exec": map[string]any{"command": vtpmStop}}}
 	inits, _ := spec["initContainers"].([]any)
 	spec["initContainers"] = append(inits, c)
 	vols, _ := spec["volumes"].([]any)
