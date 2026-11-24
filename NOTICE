@@ -189,4 +189,9 @@ locally on a notebook's first Connect; pip installs Google's
 google-cloud-bigquery and bigquery-magics (Apache License, Version 2.0),
 IPython, pandas (BSD 3-Clause License), pyarrow (Apache License, Version
 2.0), db-dtypes and matplotlib into it. None of them is part of this
-repository or of the binary.
+repository or of the binary. For Vertex AI Workbench instances (#2198) the
+same image holds JupyterLab and Jupyter Server (BSD 3-Clause License),
+ipykernel (BSD 3-Clause License), terminado (BSD 2-Clause License) and
+Google's google-cloud-storage (Apache License, Version 2.0), every package
+pinned and hash-locked in internal/nbruntime/image/requirements.txt; they
+are installed only into that locally built image.

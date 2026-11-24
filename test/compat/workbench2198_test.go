@@ -12,12 +12,14 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	nbpb "cloud.google.com/go/notebooks/apiv2/notebookspb"
+	resourcemanager "cloud.google.com/go/resourcemanager/apiv3"
 	"github.com/google/uuid"
 	"golang.org/x/net/websocket"
 )
@@ -182,7 +184,12 @@ func TestWorkbenchJupyterLab(t *testing.T) {
 	c := clients["grpc"]
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)
 	t.Cleanup(cancel)
-	project := h.Project()
+	// The instance's own project, whose IAM policy Resource Manager
+	// keeps: the instance's service account is granted a role on it.
+	project := strings.TrimSpace(os.Getenv(EnvBigQueryProject))
+	if project == "" {
+		t.Skipf("%s is not set", EnvBigQueryProject)
+	}
 	parent := fmt.Sprintf("projects/%s/locations/us-central1-a", project)
 	id := "wb-lab-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
 	op, err := c.CreateInstance(ctx, &nbpb.CreateInstanceRequest{Parent: parent, InstanceId: id, Instance: &nbpb.Instance{
@@ -221,13 +228,30 @@ func TestWorkbenchJupyterLab(t *testing.T) {
 	if st, b := lab.do(http.MethodGet, "/api/kernelspecs", nil); st != http.StatusOK || !strings.Contains(string(b), `"python3"`) {
 		t.Fatalf("kernelspecs = %d %s", st, b)
 	}
-	dataset := "wb_lab_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
-	out, status := lab.execute(fmt.Sprintf(`
+	// The kernel's identity is the instance's service account, the
+	// project's Compute Engine default one, from the metadata server.
+	out, status := lab.execute(`
 import google.auth, google.auth.transport.requests
-from google.cloud import bigquery
 creds, project = google.auth.default()
 creds.refresh(google.auth.transport.requests.Request())
 print("identity", getattr(creds, "service_account_email", ""), project)
+`)
+	idm := regexp.MustCompile(`identity ([0-9]+-compute@developer\.gserviceaccount\.com) ` + regexp.QuoteMeta(project)).FindStringSubmatch(out)
+	if status != "ok" || idm == nil {
+		t.Fatalf("the kernel's identity = %s: %q, want the project's Compute Engine default service account", status, out)
+	}
+	// Which, as on Google, needs a BigQuery role to create and query
+	// tables (with IAM enforced).
+	pc, err := resourcemanager.NewProjectsClient(h.Context(), rmOptionsAt(runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_RESOURCEMANAGER", EnvResourceManager))...)
+	if err != nil {
+		t.Fatalf("resourcemanager.NewProjectsClient: %v", err)
+	}
+	t.Cleanup(func() { _ = pc.Close() })
+	grantProject(t, h, pc, project, "roles/bigquery.admin", "serviceAccount:"+idm[1])
+
+	dataset := "wb_lab_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+	out, status = lab.execute(fmt.Sprintf(`
+from google.cloud import bigquery
 client = bigquery.Client()
 client.create_dataset(%[1]q)
 client.query("CREATE TABLE %[1]s.answers AS SELECT 42 AS answer UNION ALL SELECT 7").result()
@@ -251,9 +275,6 @@ client.delete_dataset(%[1]q, delete_contents=True)
 		if !strings.Contains(out, want) {
 			t.Errorf("the cell's output %q lacks %q", out, want)
 		}
-	}
-	if !regexp.MustCompile(`identity [0-9]+-compute@developer\.gserviceaccount\.com ` + regexp.QuoteMeta(project)).MatchString(out) {
-		t.Errorf("the kernel's identity, in %q, is not the project's Compute Engine default service account", out)
 	}
 
 	// JupyterLab's Terminal: a shell in the instance.

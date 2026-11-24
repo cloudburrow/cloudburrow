@@ -176,6 +176,16 @@
         "verification": "built-and-run",
         "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
       },
+      "notebookRuntimeJupyterLab": {
+        "$comment": "pip install --require-hashes in internal/nbruntime/image/Dockerfile (#2198), a Vertex AI Workbench instance's JupyterLab: jupyterlab 4.6.5 and jupyter-server 2.21.1 (BSD-3-Clause), ipykernel 7.4.0 (BSD-3-Clause), terminado 0.18.1 (BSD-2-Clause), Google's google-cloud-storage 3.17.1 (Apache-2.0), and their dependencies. Every package of the image is pinned with its hashes in requirements.txt and spark.txt, uv pip compile --universal --generate-hashes of requirements.in and spark.in with --exclude-newer 2026-11-01; no installed distribution declares a GPL, LGPL or AGPL licence (checked 2026-11-24).",
+        "version": "jupyterlab 4.6.5, jupyter-server 2.21.1, ipykernel 7.4.0",
+        "source": "https://pypi.org/project/jupyterlab/4.6.5/",
+        "license": "BSD-3-Clause (JupyterLab, Jupyter Server, ipykernel), BSD-2-Clause (terminado), Apache-2.0 (Google's packages); BSD, MIT, Apache-2.0 and MPL-2.0 (their dependencies)",
+        "redistribution": "not published: installed into the locally built notebook runtime image; nothing of it is in the CLI",
+        "updateFeed": "pypi",
+        "verification": "built-and-run",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
+      },
       "tensorflow": {
         "$comment": "pip install tensorflow==2.20.0 in deploy/tfconvert/Dockerfile (#1775): Google's tf.lite.TFLiteConverter.from_saved_model converts imported SavedModels to TensorFlow Lite.",
         "version": "2.20.0",

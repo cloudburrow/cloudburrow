@@ -3,16 +3,22 @@
 package browser
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
+
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // TestWorkbenchJupyterLabFromTheConsole (#2198): an instance's row's Open
@@ -38,6 +44,22 @@ func TestWorkbenchJupyterLabFromTheConsole(t *testing.T) {
 	t.Cleanup(func() {
 		consoleDo(t, http.MethodDelete, "/api/resources/bigquery"+q+"&name="+url.QueryEscape(dataset)+"&force=true", "")
 	})
+
+	// The instance runs as the project's Compute Engine default service
+	// account, which, as on Google where automatic grants are off, needs a
+	// BigQuery role: granted on the project's IAM page's API.
+	sa := fmt.Sprintf("serviceAccount:%d-compute@developer.gserviceaccount.com", resource.ProjectNumber(project))
+	code, body := consoleDo(t, http.MethodPost, "/api/permissions/iam"+q, `{"Path":["`+project+`"],"Read":{}}`)
+	var pol struct {
+		Permissions struct{ Etag string }
+	}
+	if code != http.StatusOK || json.Unmarshal([]byte(body), &pol) != nil || pol.Permissions.Etag == "" {
+		t.Fatalf("read the project's policy = %d %s", code, body)
+	}
+	if code, body := consoleDo(t, http.MethodPost, "/api/permissions/iam"+q, `{"Path":["`+project+`"],"Etag":"`+pol.Permissions.Etag+
+		`","Grant":{"Members":["`+sa+`"],"Role":"roles/bigquery.admin"}}`); code != http.StatusOK {
+		t.Fatalf("grant roles/bigquery.admin to %s = %d %s", sa, code, body)
+	}
 
 	p := openWithin(t, 40*time.Minute)
 	listPath := "/agent-platform/workbench/instances" + q
@@ -65,6 +87,17 @@ func TestWorkbenchJupyterLabFromTheConsole(t *testing.T) {
 	ctx, cancel := chromedp.NewContext(p.ctx, chromedp.WithTargetID(id))
 	t.Cleanup(cancel)
 	lab := &tab{t: t, ctx: ctx}
+	t.Cleanup(func() {
+		if t.Failed() && ctx.Err() == nil {
+			var text string
+			if _, err := chromedp.Run(ctx, evaluateInto(`document.body.innerText.slice(0, 3000)`, &text)); err == nil {
+				t.Logf("JupyterLab showed: %s", text)
+			}
+			if png, err := chromedp.Run(ctx, chromedp.FullScreenshot(90)); err == nil {
+				t.Logf("JupyterLab's screenshot: %s", writeShot(t, "jupyterlab", png))
+			}
+		}
+	})
 	lab.waitForWithin(`location.pathname.startsWith("/lab") && document.querySelector(".jp-Launcher") !== null`, 3*time.Minute)
 	var host string
 	lab.eval(`location.host`, &host)
@@ -99,7 +132,8 @@ func TestWorkbenchJupyterLabFromTheConsole(t *testing.T) {
 	lab.waitForWithin(`document.querySelector(".jp-Terminal:not(.lm-mod-hidden) .xterm-helper-textarea") !== null`, time.Minute)
 	time.Sleep(2 * time.Second) // the shell's prompt
 	lab.run(chromedp.Focus(chromedp.CSS(`.jp-Terminal:not(.lm-mod-hidden) .xterm-helper-textarea`)))
-	lab.run(chromedp.SendKeys(chromedp.CSS(`.jp-Terminal:not(.lm-mod-hidden) .xterm-helper-textarea`), "echo $((6*7)) $(whoami) > from-terminal.txt"))
+	// Typed as text input, as a keyboard's characters reach xterm.js.
+	lab.run(cmd(input.InsertText, input.InsertTextParams{Text: "echo $((6*7)) $(whoami) > from-terminal.txt"}))
 	lab.run(chromedp.KeyEvent(kb.Enter))
 	var term string
 	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(time.Second) {
@@ -111,10 +145,24 @@ func TestWorkbenchJupyterLabFromTheConsole(t *testing.T) {
 	if term != "42 jupyter" {
 		t.Errorf("the terminal's command wrote %q, want 42 jupyter", term)
 	}
-	cancel()
 
 	auditScreens(t, []a11yPage{
 		{"workbench instances with JupyterLab", listPath, rowReady(name), ""},
 		{"workbench instance", "/agent-platform/workbench/instances/" + url.PathEscape(name) + q, settled, ""},
 	})
+}
+
+// writeShot keeps a failing JupyterLab window's screenshot beside the
+// harness's own.
+func writeShot(t *testing.T, name string, png []byte) string {
+	dir := os.Getenv(envScreenshots)
+	if dir == "" {
+		dir = filepath.Join(os.TempDir(), "cloudburrow-browser")
+	}
+	_ = os.MkdirAll(dir, 0o755)
+	path := filepath.Join(dir, strings.ReplaceAll(t.Name(), "/", "_")+"-"+name+".png")
+	if err := os.WriteFile(path, png, 0o644); err != nil {
+		return err.Error()
+	}
+	return path
 }

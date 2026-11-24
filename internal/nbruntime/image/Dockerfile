@@ -37,6 +37,9 @@ COPY kernel.py relay.py /opt/cloudburrow/
 COPY cloudburrow_endpoints.py /usr/local/lib/python3.12/site-packages/
 COPY jupyter_server_config.py /etc/jupyter/
 COPY ipython_kernel_config.py /etc/ipython/
+# Nothing in the instance reaches the internet, so JupyterLab neither
+# fetches Jupyter's news nor asks whether to.
+COPY overrides.json /usr/local/share/jupyter/lab/settings/
 RUN echo "import cloudburrow_endpoints" > /usr/local/lib/python3.12/site-packages/cloudburrow_endpoints.pth
 
 # Nothing in a notebook runs as root. A Colab runtime's HOME is colab's; a
