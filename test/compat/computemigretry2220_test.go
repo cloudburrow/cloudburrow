@@ -73,7 +73,7 @@ func retryNetwork(t *testing.T, ctx context.Context, nets *computeapi.NetworksCl
 // same names and is stable. A regional group records its failures for
 // regionInstanceGroupManagers.listErrors alike, and a resize to 0 drops
 // its pending VM.
-// covers: compute.instanceGroupManagers.listErrors, compute.regionInstanceGroupManagers.listErrors, compute.instanceGroupManagers.listManagedInstances, compute.instanceGroupManagers.resize
+// covers: compute.instanceGroupManagers.listErrors, compute.regionInstanceGroupManagers.listErrors, compute.instanceGroupManagers.listManagedInstances
 func TestComputeMIGCreationRetries2220(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h) // skips without CLOUDBURROW_TEST_COMPUTE

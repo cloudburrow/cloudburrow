@@ -15639,8 +15639,8 @@
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
       "Implemented": 277,
-      "Unimplemented": 84,
-      "Verified": 223
+      "Unimplemented": 82,
+      "Verified": 225
     },
     "rows": [
       {
@@ -16592,13 +16592,16 @@
       },
       {
         "method": "compute.instanceGroupManagers.listErrors",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computemigretry2220_test.go:77 TestComputeMIGCreationRetries2220"
+        ]
       },
       {
         "method": "compute.instanceGroupManagers.listManagedInstances",
         "status": "Verified",
         "tests": [
+          "test/compat/computemigretry2220_test.go:77 TestComputeMIGCreationRetries2220",
           "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139"
         ]
       },
@@ -17683,8 +17686,10 @@
       },
       {
         "method": "compute.regionInstanceGroupManagers.listErrors",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computemigretry2220_test.go:77 TestComputeMIGCreationRetries2220"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.listManagedInstances",
