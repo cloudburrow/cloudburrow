@@ -18,6 +18,7 @@ package sparkproc
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"time"
 )
@@ -51,6 +52,18 @@ func (c *Cluster) dockerClient(local bool) []string {
 	}
 	return []string{"--mount", "type=image,source=" + image + ",target=/usr/bin/docker,image-subpath=usr/local/bin/docker",
 		"-e", "DOCKER_HOST=tcp://" + host + ":" + dockerPort}
+}
+
+// ensureImage pulls image unless Docker already has it.
+func (d *Docker) ensureImage(ctx context.Context, image string) error {
+	if _, err := d.docker(ctx, "image", "inspect", image); err == nil {
+		return nil
+	}
+	d.logf("spark: pulling %s", image)
+	if out, err := d.docker(ctx, "pull", "--quiet", image); err != nil {
+		return errors.New("docker pull " + image + ": " + out)
+	}
+	return nil
 }
 
 // dockerd is the daemon container of node.

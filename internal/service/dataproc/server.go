@@ -171,6 +171,7 @@ type Server struct {
 	workflows map[string][]*dataprocpb.WorkflowTemplate // every version, the current last
 	history   *historyServer
 	apps      map[string]string // workload ID to Spark application ID (resolveApp)
+	appsSeen  map[string]bool   // Spark application IDs resolveAppFromHistory has read
 	wfCancel  map[string]bool   // workflow operations cancelled
 	// driverNext is each cluster's next driver node (placeDriverLocked).
 	driverNext map[string]int
