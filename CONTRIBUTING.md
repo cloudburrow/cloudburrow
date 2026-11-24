@@ -46,3 +46,19 @@ push the branch again.
   of the packages you changed, `go test ./test/repo/...`, and `make docs-check`.
 - Never mark an operation Verified in [docs/compatibility.md](docs/compatibility.md) without an
   official-SDK compat test that passes.
+- Add an entry under **Unreleased** in [CHANGELOG.md](CHANGELOG.md) for each user-visible change:
+  what a user can now do or no longer hits, naming the API, flag or console page and the issue.
+  CI plumbing and test-only fixes need none.
+
+## Landings
+
+Work reaches `main` through landings: one `land/N` branch that merges the reviewed branches with
+merge commits, and one CI run for all of them. **Every landing adds the CHANGELOG.md entries under
+Unreleased for the user-visible changes it lands**, in the Keep a Changelog headings the file uses
+(Added, Changed, Fixed), unless each merged branch already brought its own. Write them for users,
+one per feature or fix, and claim only what docs/compatibility.md supports. A scheduled release
+commits nothing to `CHANGELOG.md`: `scripts/release-notes.sh` builds its **What's new** from the
+entries added under Unreleased since the previous tag, and falls back to the titles of the issues
+the landings closed only for changes that have no entry. A landing with no entries makes a
+release whose notes are a list of issue titles. "Fix main CI" pull requests need an entry only for a
+product bug they fix, and the notes keep them in the collapsed **All landings** list.
