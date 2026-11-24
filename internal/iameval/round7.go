@@ -253,6 +253,7 @@ var ComputeJSON = func() []JSONMethod {
 	add("GET", `(`+p+`)`+zone+`/machineTypes`, "compute.machineTypes.list")
 	add("GET", `(`+p+zone+`/machineTypes/[^/]+)`, "compute.machineTypes.get")
 	add("GET", `(`+p+`)`+zone+`/diskTypes`, "compute.diskTypes.list")
+	add("GET", `(`+p+`)/aggregated/diskTypes`, "compute.diskTypes.list")
 	add("GET", `(`+p+zone+`/diskTypes/[^/]+)`, "compute.diskTypes.get")
 	add("GET", `(`+p+`)`, "compute.projects.get")
 	add("POST", `(`+p+`)/setCommonInstanceMetadata`, "compute.projects.setCommonInstanceMetadata")

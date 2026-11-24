@@ -41,7 +41,6 @@ func TestEveryUnservedMethodIsNotImplemented(t *testing.T) {
 		{"compute.images.setLabels", "POST", "projects/p/global/images/x/setLabels"},
 		{"compute.images.testIamPermissions", "POST", "projects/p/global/images/x/testIamPermissions"},
 		{"compute.machineTypes.aggregatedList", "GET", "projects/p/aggregated/machineTypes"},
-		{"compute.diskTypes.aggregatedList", "GET", "projects/p/aggregated/diskTypes"},
 		{"compute.disks.update", "PATCH", "projects/p/zones/us-central1-a/disks/x"},
 		{"compute.regionDisks.update", "PATCH", "projects/p/regions/us-central1/disks/x"},
 		{"compute.regionDisks.updateKmsKey", "POST", "projects/p/regions/us-central1/disks/x/updateKmsKey"},

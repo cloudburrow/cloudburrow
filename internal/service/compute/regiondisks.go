@@ -503,3 +503,47 @@ func (s *Server) resizeDiskLocked(project, scope, rel string, d, b obj) (obj, er
 		return nil
 	}, nil)
 }
+
+// aggregatedDiskTypes is diskTypes.aggregatedList (#2206): each zone's
+// zonal types and each region's regional types, by scope, as gcloud
+// compute disk-types list reads them; filter applies to each type.
+func (s *Server) aggregatedDiskTypes(c call) (obj, error) {
+	f, err := parseFilter(first(c.query, "filter"))
+	if err != nil {
+		return nil, err
+	}
+	zonal := make([]string, 0, len(diskTypes))
+	for n := range diskTypes {
+		zonal = append(zonal, n)
+	}
+	sort.Strings(zonal)
+	regional := make([]string, 0, len(regionDiskTypes))
+	for n := range regionDiskTypes {
+		regional = append(regional, n)
+	}
+	sort.Strings(regional)
+	items := map[string]any{}
+	for _, r := range Regions() {
+		var rl []obj
+		for _, n := range regional {
+			if o := regionDiskTypeObj(c.project, r, n); f.match(o) {
+				rl = append(rl, o)
+			}
+		}
+		if len(rl) > 0 {
+			items["regions/"+r] = map[string]any{"diskTypes": rl}
+		}
+		for _, z := range Zones(r) {
+			var zl []obj
+			for _, n := range zonal {
+				if o := diskTypeObj(c.project, z, n); f.match(o) {
+					zl = append(zl, o)
+				}
+			}
+			if len(zl) > 0 {
+				items["zones/"+z] = map[string]any{"diskTypes": zl}
+			}
+		}
+	}
+	return obj{"kind": "compute#diskTypeAggregatedList", "id": "projects/" + c.project + "/aggregated/diskTypes", "items": items}, nil
+}

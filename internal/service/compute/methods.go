@@ -109,7 +109,7 @@ var Methods = []Method{
 	{"compute.machineTypes.aggregatedList", false},
 	{"compute.diskTypes.get", true},
 	{"compute.diskTypes.list", true},
-	{"compute.diskTypes.aggregatedList", false},
+	{"compute.diskTypes.aggregatedList", true},
 	{"compute.disks.aggregatedList", true},
 	{"compute.disks.createSnapshot", true},
 	{"compute.disks.delete", true},

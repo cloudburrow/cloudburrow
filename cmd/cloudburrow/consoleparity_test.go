@@ -148,7 +148,7 @@ var parityRows = []parityRow{
 	{Resource: "Compute Engine regional disks", Service: "compute",
 		Methods: []string{"compute.regionDisks.insert", "compute.regionDisks.get", "compute.regionDisks.list", "compute.regionDisks.delete",
 			"compute.regionDisks.resize", "compute.regionDisks.setLabels", "compute.regionDisks.createSnapshot", "compute.regionDiskTypes.get",
-			"compute.regionDiskTypes.list", "compute.regionDisks.getIamPolicy", "compute.regionDisks.setIamPolicy", "compute.regionDisks.testIamPermissions"},
+			"compute.regionDiskTypes.list", "compute.diskTypes.aggregatedList", "compute.regionDisks.getIamPolicy", "compute.regionDisks.setIamPolicy", "compute.regionDisks.testIamPermissions"},
 		Provider: "compute-disks", Offers: "Disks (/compute/disks): a regional disk listed with both replica zones in the Zone column; Create a disk's Location (Single zone or Regional) with its Replica zone; the disk's page at [region, name] with Replica zones; Create snapshot, Edit size, Edit labels, Delete and the Permissions tab as a zonal disk's; a VM's Attach existing disk lists the regional disks replicated in its zone, with Force-attach disk (#2206)",
 		Tests: []string{"TestConsoleComputeAsyncReplication", "TestComputeRegionalDisksThroughTheBrowser"}},
 	{Resource: "Compute Engine Asynchronous Replication", Service: "compute",

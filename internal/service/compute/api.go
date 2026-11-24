@@ -435,6 +435,9 @@ func (s *Server) operation(c call, rel string) (obj, error) {
 // aggregated is an aggregatedList of addresses, subnetworks or operations,
 // by scope.
 func (s *Server) aggregated(c call, coll string) (obj, error) {
+	if coll == "diskTypes" {
+		return s.aggregatedDiskTypes(c)
+	}
 	var m map[string]obj
 	key, kind := coll, ""
 	switch coll {

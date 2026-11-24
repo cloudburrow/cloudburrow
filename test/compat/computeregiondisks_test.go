@@ -65,7 +65,7 @@ func newVMShell(t *testing.T, computeAddr, project string) vmShell {
 }
 
 // TestComputeRegionalDisksThroughTheGoClient (#2206), the official
-// compute/apiv1 REST client: regionDiskTypes; a regional disk's documented
+// compute/apiv1 REST client: regionDiskTypes and diskTypes.aggregatedList; a regional disk's documented
 // refusals (one replica zone, the same zone twice, regional pd-standard
 // under 200 GB); a regional disk attached to a VM in us-central1-a, a file
 // written to it over SSH; the attach refused from a VM in us-central1-b
@@ -76,7 +76,7 @@ func newVMShell(t *testing.T, computeAddr, project string) vmShell {
 // secondary's clone by bulkInsert, stopGroupAsyncReplication), the
 // secondary's data read back in a disk made from its snapshot; and the
 // deletes.
-// covers: compute.regionDiskTypes.list, compute.regionDiskTypes.get, compute.regionDisks.insert, compute.regionDisks.get, compute.regionDisks.list, compute.regionDisks.delete, compute.regionDisks.resize, compute.regionDisks.setLabels, compute.regionDisks.createSnapshot, compute.regionDisks.getIamPolicy, compute.regionDisks.setIamPolicy, compute.regionDisks.testIamPermissions, compute.regionDisks.addResourcePolicies, compute.regionDisks.removeResourcePolicies, compute.regionDisks.startAsyncReplication, compute.regionDisks.stopAsyncReplication, compute.regionDisks.stopGroupAsyncReplication, compute.regionDisks.bulkInsert, compute.resourcePolicies.insert, compute.resourcePolicies.get, compute.resourcePolicies.list, compute.resourcePolicies.delete, compute.resourcePolicies.aggregatedList, compute.instances.attachDisk, compute.regionOperations.get
+// covers: compute.diskTypes.aggregatedList, compute.regionDiskTypes.list, compute.regionDiskTypes.get, compute.regionDisks.insert, compute.regionDisks.get, compute.regionDisks.list, compute.regionDisks.delete, compute.regionDisks.resize, compute.regionDisks.setLabels, compute.regionDisks.createSnapshot, compute.regionDisks.getIamPolicy, compute.regionDisks.setIamPolicy, compute.regionDisks.testIamPermissions, compute.regionDisks.addResourcePolicies, compute.regionDisks.removeResourcePolicies, compute.regionDisks.startAsyncReplication, compute.regionDisks.stopAsyncReplication, compute.regionDisks.stopGroupAsyncReplication, compute.regionDisks.bulkInsert, compute.resourcePolicies.insert, compute.resourcePolicies.get, compute.resourcePolicies.list, compute.resourcePolicies.delete, compute.resourcePolicies.aggregatedList, compute.instances.attachDisk, compute.regionOperations.get
 func TestComputeRegionalDisksThroughTheGoClient(t *testing.T) {
 	h := New(t)
 	opts := computeOpts(t, h)
@@ -146,6 +146,24 @@ func TestComputeRegionalDisksThroughTheGoClient(t *testing.T) {
 	}
 	if found["pd-standard"] != "200GB-65536GB" || found["hyperdisk-balanced-high-availability"] == "" || found["pd-balanced"] == "" {
 		t.Fatalf("regionDiskTypes: %v", found)
+	}
+	ztypes, err := computeapi.NewDiskTypesRESTClient(ctx, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := map[string]int{}
+	for it := ztypes.AggregatedList(ctx, &computepb.AggregatedListDiskTypesRequest{Project: p}); ; {
+		pair, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		scopes[pair.Key] = len(pair.Value.GetDiskTypes())
+	}
+	if scopes["regions/"+region] != len(found) || scopes["zones/"+za] == 0 {
+		t.Errorf("diskTypes.aggregatedList: %v", scopes)
 	}
 	if dt, err := rtypes.Get(ctx, &computepb.GetRegionDiskTypeRequest{Project: p, Region: region, DiskType: "pd-ssd"}); err != nil || dt.GetValidDiskSize() != "10GB-65536GB" {
 		t.Fatalf("regionDiskTypes.get pd-ssd: %v %v", dt, err)
@@ -412,7 +430,7 @@ func TestGcloudComputeRegionalDisks(t *testing.T) {
 		_, _ = run("compute", "snapshots", "delete", snap)
 		_, _ = run("compute", "resource-policies", "delete", cg, "--region", region)
 	})
-	if got := gc("compute", "disk-types", "list", "--regions", region, "--format=value(name)"); !strings.Contains(got, "hyperdisk-balanced-high-availability") {
+	if got := gc("compute", "disk-types", "list", "--filter=region:"+region, "--format=value(name)"); !strings.Contains(got, "hyperdisk-balanced-high-availability") {
 		t.Errorf("disk-types list --regions: %s", got)
 	}
 	if out, err := run("compute", "disks", "create", rd, "--region", region, "--replica-zones", region+"-a,"+region+"-a", "--size", "10GB"); err == nil {
@@ -515,9 +533,6 @@ resource "google_compute_region_disk" "rd" {
   size          = %[4]d
   replica_zones = ["%[3]s-a", "%[3]s-b"]
   labels        = { env = %[5]q }
-  lifecycle {
-    ignore_changes = [resource_policies]
-  }
 }
 resource "google_compute_region_disk_resource_policy_attachment" "cg" {
   project = %[1]q

@@ -14962,8 +14962,8 @@
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
       "Implemented": 36,
-      "Unimplemented": 64,
-      "Verified": 103
+      "Unimplemented": 63,
+      "Verified": 104
     },
     "rows": [
       {
@@ -15020,8 +15020,10 @@
       },
       {
         "method": "compute.diskTypes.aggregatedList",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.diskTypes.get",

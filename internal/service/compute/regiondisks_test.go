@@ -352,3 +352,19 @@ func TestZonalAsyncReplication(t *testing.T) {
 		t.Errorf("the zonal secondary after removeResourcePolicies: %v", sec["resourcePolicies"])
 	}
 }
+
+// TestAggregatedDiskTypes (#2206): diskTypes.aggregatedList has the zonal
+// types by zone and the regional types by region.
+func TestAggregatedDiskTypes(t *testing.T) {
+	s, err := New(Options{VMs: newDataVMs()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := mustCall(t, s, "GET", "aggregated/diskTypes", nil)
+	items := m["items"].(map[string]any)
+	r := items["regions/us-central1"].(map[string]any)["diskTypes"].([]any)
+	z := items["zones/us-central1-a"].(map[string]any)["diskTypes"].([]any)
+	if len(r) != len(regionDiskTypes) || len(z) != len(diskTypes) {
+		t.Fatalf("aggregated diskTypes: %d regional, %d zonal", len(r), len(z))
+	}
+}
