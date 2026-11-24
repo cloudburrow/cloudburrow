@@ -39,6 +39,9 @@ const AP_PATHS = {
 };
 const AP_DOCS = "https://docs.cloud.google.com/gemini-enterprise-agent-platform/";
 
+// Colab Enterprise's pages, drawn as one page's tabs.
+const COLAB_TABS = ["notebooks", "runtimes", "runtime-templates", "executions", "schedules"].map((p) => `${AP}/colab/${p}`);
+
 function agentPlatformRoutes() {
   const base = { section: "AI and machine learning", product: "vertexai", productTitle: "Agent Platform", icon: "ai" };
   const page = (path, title, group, more) => ({ ...base, path, title, group, ...more });
@@ -88,30 +91,33 @@ function agentPlatformRoutes() {
     page(AP_PATHS.endpoints, "Endpoints", "Models", { service: "vertex-endpoints", screen: "ap-endpoints", listedWhenOff: true }),
     absent(`${AP}/batch-predictions`, "Batch inference", "Models", "projects.locations.batchPredictionJobs",
       "Batch prediction jobs over Cloud Storage or BigQuery input", AP_DOCS + "models"),
+    // Notebooks.
     // Colab Enterprise (#2105): its runtimes and runtime templates, whose
     // runtimes are the instance's notebook runtimes; the off state is the
-    // not-served page.
-    page(`${AP}/colab/notebooks`, "My notebooks", "Colab Enterprise", { service: "colab-notebooks", listedWhenOff: true,
+    // not-served page. Google's product menu has one Colab Enterprise
+    // entry under Notebooks, beside Workbench; its pages (My notebooks,
+    // Runtimes, Runtime templates, Executions, Schedules) are reached from
+    // there, here as the page's tabs.
+    page(`${AP}/colab/notebooks`, "My notebooks", "Notebooks", { navTitle: "Colab Enterprise", pageTabs: COLAB_TABS, service: "colab-notebooks", listedWhenOff: true,
       api: "Dataform single-file notebook repositories", about: "Your notebooks, each with Notebook actions > Schedule",
       docs: "https://docs.cloud.google.com/colab/docs/schedule-notebook-run",
       instead: "Start CloudBurrow with --services including run, dataform and bigquery: a notebook is kept in Dataform and runs on the local Vertex AI endpoint's runtimes." }),
-    page(`${AP}/colab/runtimes`, "Runtimes", "Colab Enterprise", { service: "colab-runtimes", listedWhenOff: true,
+    page(`${AP}/colab/runtimes`, "Runtimes", "Notebooks", { navHidden: true, navAs: `${AP}/colab/notebooks`, pageTabs: COLAB_TABS, service: "colab-runtimes", listedWhenOff: true,
       api: "projects.locations.notebookRuntimes", about: "Runtimes your notebooks run on, made from runtime templates",
       docs: "https://docs.cloud.google.com/colab/docs/create-runtime",
       instead: "Start CloudBurrow with --services including run and bigquery: run starts the local Vertex AI endpoint, and a runtime queries BigQuery." }),
-    page(`${AP}/colab/runtime-templates`, "Runtime templates", "Colab Enterprise", { service: "colab-templates", listedWhenOff: true,
+    page(`${AP}/colab/runtime-templates`, "Runtime templates", "Notebooks", { navHidden: true, navAs: `${AP}/colab/notebooks`, pageTabs: COLAB_TABS, service: "colab-templates", listedWhenOff: true,
       api: "projects.locations.notebookRuntimeTemplates", about: "The machine, disk, idle shutdown, environment and network a runtime is made with",
       docs: "https://docs.cloud.google.com/colab/docs/create-runtime-template",
       instead: "Start CloudBurrow with --services including run, which starts the local Vertex AI endpoint." }),
-    page(`${AP}/colab/executions`, "Executions", "Colab Enterprise", { service: "colab-executions", listedWhenOff: true,
+    page(`${AP}/colab/executions`, "Executions", "Notebooks", { navHidden: true, navAs: `${AP}/colab/notebooks`, pageTabs: COLAB_TABS, service: "colab-executions", listedWhenOff: true,
       api: "projects.locations.notebookExecutionJobs", about: "Runs of a notebook on a runtime, with View result for the executed notebook",
       docs: "https://docs.cloud.google.com/colab/docs/schedule-notebook-run",
       instead: "Start CloudBurrow with --services including run, storage and bigquery: an execution writes its executed notebook to Cloud Storage." }),
-    page(`${AP}/colab/schedules`, "Schedules", "Colab Enterprise", { service: "colab-schedules", listedWhenOff: true,
+    page(`${AP}/colab/schedules`, "Schedules", "Notebooks", { navHidden: true, navAs: `${AP}/colab/notebooks`, pageTabs: COLAB_TABS, service: "colab-schedules", listedWhenOff: true,
       api: "projects.locations.schedules", about: "Recurring notebook executions, with Pause, Resume and Delete",
       docs: "https://docs.cloud.google.com/colab/docs/schedule-notebook-run",
       instead: "Start CloudBurrow with --services including run, storage and bigquery." }),
-    // Notebooks.
     // Vertex AI Workbench instances (#2173): "Go to the Instances page"
     // (https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart,
     // read 2026-11-22), each a notebook runtime of the instance.
@@ -19610,7 +19616,9 @@ function renderAgentPlatformOverview(view) {
 // and says plainly that this instance does not serve it, rather than
 // drawing an empty table that would read as "you have none".
 function renderNotServed(view, match) {
-  setChildren(view, pageHeader(match.title, match.about || ""),
+  // A page drawn as one of its siblings' tabs (Colab Enterprise's) keeps
+  // them while off, so the others stay reachable from it.
+  setChildren(view, pageHeader(match.title, match.about || ""), match.pageTabs ? pageTabStrip(match) : null,
     el("div", { class: "card", id: "not-served" },
       el("h2", { text: "Not available locally" }),
       el("p", { text: `CloudBurrow does not serve ${match.title}. ` +
