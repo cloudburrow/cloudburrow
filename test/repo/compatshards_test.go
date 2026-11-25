@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -93,6 +94,19 @@ func TestCompatBrowserShardsMatchTheCIStep(t *testing.T) {
 	if want := strings.Join(shards, " "); got != want {
 		t.Errorf("COMPAT_BROWSER_SHARDS = %q, the browser step runs in %q", got, want)
 	}
+	// The compat step writes the instance's flags for the browser step,
+	// which reads them back, in each of those shards: without them the
+	// step has no instance to bring up again.
+	args := regexp.MustCompile(`(?m)^\s+([a-z|]+)\) printf '%s\\n' "\$\{CB\[@\]\}" > "\$RUNNER_TEMP/cb-args" ;;`).FindStringSubmatch(ci["compat"])
+	if args == nil {
+		t.Fatal("ci.yml's compat step does not write cb-args for the browser step")
+	}
+	have, want := strings.Split(args[1], "|"), strings.Fields(got)
+	slices.Sort(have)
+	slices.Sort(want)
+	if !slices.Equal(have, want) {
+		t.Errorf("the compat step writes cb-args in %q; the browser step runs in %q", args[1], got)
+	}
 }
 
 // Every shard has services, only variables compat-env.sh sets, probes that
@@ -147,15 +161,16 @@ func TestCompatShardListsLiveInOneFile(t *testing.T) {
 			t.Errorf("%s sets %q itself; it belongs in scripts/compat-shards.sh", name, strings.TrimSpace(m))
 		}
 	}
-	if !strings.Contains(ci["compat"], "RUN_SHARD_TESTS=$COMPAT_BROWSER_RUN_SHARD_TESTS") {
-		t.Error("ci.yml's browser step does not take the run shard's browser tests from scripts/compat-shards.sh")
-	}
-	if !strings.Contains(string(raw), `"$COMPAT_BROWSER_RUN_SHARD_TESTS"`) {
-		t.Error("scripts/verify-local.sh does not split the browser suite as CI does")
-	}
-	if !strings.Contains(ci["compat"], "CROSSSERVICE_SHARD_TESTS=$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS") ||
-		!strings.Contains(string(raw), `"$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS"`) {
-		t.Error("ci.yml's browser step or scripts/verify-local.sh does not take the crossservice shard's browser tests from scripts/compat-shards.sh")
+	// The browser suite's split too: each shard's -run and -skip patterns
+	// come from compat_browser_select, and neither file names a shard's
+	// browser list itself.
+	for name, text := range map[string]string{"ci.yml's browser step": ci["compat"], "scripts/verify-local.sh": string(raw)} {
+		if !strings.Contains(text, `compat_browser_select "$`) || !strings.Contains(text, `"$BROWSER_SKIP"`) || !strings.Contains(text, `"$BROWSER_RUN"`) {
+			t.Errorf("%s does not split the browser suite with compat_browser_select", name)
+		}
+		if m := regexp.MustCompile(`\$COMPAT_BROWSER_[A-Z_]+_TESTS`).FindString(text); m != "" {
+			t.Errorf("%s reads %s itself; compat_browser_select picks each shard's browser tests", name, m)
+		}
 	}
 	if !strings.Contains(ci["check"], "shellcheck -x -s bash scripts/compat-shards.sh scripts/verify-local.sh") {
 		t.Error("ci.yml's check job does not shellcheck scripts/compat-shards.sh and scripts/verify-local.sh as bash")
@@ -212,4 +227,161 @@ func compatTestNames(t *testing.T) map[string]bool {
 		}
 	}
 	return names
+}
+
+// The gke and gkeupgrade shards split the Kubernetes Engine tests
+// (COMPAT_GKE_TESTS) between them, on the served shard's instance, which
+// skips them all: each runs in exactly one of the two, and every name
+// COMPAT_GKE_UPGRADE_TEST_NAMES lists is a Kubernetes Engine test.
+func TestCompatGKEShardsSplitTheKubernetesEngineTests(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is not on PATH")
+	}
+	script, err := filepath.Abs(filepath.Join("..", "..", "scripts", "compat-shards.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog := `set -eu; . "$1"; echo "ALL=$COMPAT_GKE_TESTS"; echo "NAMES=$(echo $COMPAT_GKE_UPGRADE_TEST_NAMES)"
+for s in served gke gkeupgrade; do compat_shard "$s"; echo "$s.RUN=$COMPAT_RUN"; echo "$s.SKIP=$COMPAT_SKIP"; done`
+	out, err := exec.Command(bash, "-c", prog, "bash", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("compat-shards.sh: %v\n%s", err, out)
+	}
+	v := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		k, val, _ := strings.Cut(line, "=")
+		v[k] = val
+	}
+	all := regexp.MustCompile(v["ALL"])
+	runs := func(shard, name string) bool {
+		if r := v[shard+".RUN"]; r != "" && !regexp.MustCompile(r).MatchString(name) {
+			return false
+		}
+		if s := v[shard+".SKIP"]; s != "" && regexp.MustCompile(s).MatchString(name) {
+			return false
+		}
+		return true
+	}
+	tests := compatTestNames(t)
+	for _, n := range strings.Fields(v["NAMES"]) {
+		if !tests["Test"+n] || !all.MatchString("Test"+n) {
+			t.Errorf("COMPAT_GKE_UPGRADE_TEST_NAMES names %s, which is not a Kubernetes Engine test in test/compat", n)
+		}
+	}
+	gkeUpgrade := 0
+	for name := range tests {
+		if !all.MatchString(name) {
+			continue
+		}
+		if runs("served", name) {
+			t.Errorf("the served shard runs %s, a Kubernetes Engine test", name)
+		}
+		g, u := runs("gke", name), runs("gkeupgrade", name)
+		if g == u {
+			t.Errorf("%s runs in gke: %v and gkeupgrade: %v; want exactly one", name, g, u)
+		}
+		if u {
+			gkeUpgrade++
+		}
+	}
+	if gkeUpgrade == 0 {
+		t.Error("the gkeupgrade shard runs no test")
+	}
+}
+
+// The computevms and vpcvms shards run the served shard's tests that boot
+// VMs (COMPAT_COMPUTE_VM_TEST_NAMES, COMPAT_VPC_VM_TEST_NAMES), on its
+// instance, and served skips them: every name either list gives is a
+// compat test, and each test of served's instance but the Kubernetes
+// Engine ones runs in exactly one of the three shards.
+func TestCompatVMShardsSplitTheServedShard(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is not on PATH")
+	}
+	script, err := filepath.Abs(filepath.Join("..", "..", "scripts", "compat-shards.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog := `set -eu; . "$1"; echo "GKE=$COMPAT_GKE_TESTS"
+echo "computevms.NAMES=$(echo $COMPAT_COMPUTE_VM_TEST_NAMES)"; echo "vpcvms.NAMES=$(echo $COMPAT_VPC_VM_TEST_NAMES)"
+for s in served computevms vpcvms; do compat_shard "$s"; echo "$s.RUN=$COMPAT_RUN"; echo "$s.SKIP=$COMPAT_SKIP"; done`
+	out, err := exec.Command(bash, "-c", prog, "bash", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("compat-shards.sh: %v\n%s", err, out)
+	}
+	v := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		k, val, _ := strings.Cut(line, "=")
+		v[k] = val
+	}
+	gke := regexp.MustCompile(v["GKE"])
+	runs := func(shard, name string) bool {
+		if r := v[shard+".RUN"]; r != "" && !regexp.MustCompile(r).MatchString(name) {
+			return false
+		}
+		if s := v[shard+".SKIP"]; s != "" && regexp.MustCompile(s).MatchString(name) {
+			return false
+		}
+		return true
+	}
+	tests := compatTestNames(t)
+	shards := []string{"served", "computevms", "vpcvms"}
+	for _, s := range shards[1:] {
+		names := strings.Fields(v[s+".NAMES"])
+		if len(names) == 0 {
+			t.Errorf("the %s shard names no test", s)
+		}
+		for _, n := range names {
+			if !tests["Test"+n] || gke.MatchString("Test"+n) {
+				t.Errorf("the %s shard names %s, which is not a compat test of the served shard's", s, n)
+			}
+			if !runs(s, "Test"+n) {
+				t.Errorf("the %s shard does not run %s, which it names", s, n)
+			}
+		}
+	}
+	for name := range tests {
+		if gke.MatchString(name) {
+			continue
+		}
+		var in []string
+		for _, s := range shards {
+			if runs(s, name) {
+				in = append(in, s)
+			}
+		}
+		if len(in) != 1 {
+			t.Errorf("%s runs in %v of served, computevms and vpcvms; want exactly one", name, in)
+		}
+	}
+}
+
+// The compat job's log check and scripts/verify-local.sh's coverage list
+// every shard with a compat suite: the matrix but acceptance, whose
+// suites are test/e2e's and test/k8s's.
+func TestCompatShardLogListsNameEveryShard(t *testing.T) {
+	_, ci := workflowJobs(t, "ci.yml")
+	raw, err := os.ReadFile(filepath.Join("..", "..", "scripts", "verify-local.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []string
+	for _, s := range strings.Fields(compatShard(t, "")["COMPAT_SHARDS"]) {
+		if s != "acceptance" {
+			want = append(want, s)
+		}
+	}
+	list := strings.Join(want, " ")
+	var all strings.Builder
+	for _, body := range ci {
+		all.WriteString(body)
+	}
+	if !strings.Contains(all.String(), "for shard in "+list+"; do") {
+		t.Errorf("ci.yml's compat log check does not loop over %q", list)
+	}
+	if !strings.Contains(string(raw), "for s in "+list+"; do") {
+		t.Errorf("scripts/verify-local.sh does not loop over %q", list)
+	}
 }

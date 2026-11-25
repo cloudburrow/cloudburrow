@@ -135,7 +135,7 @@ func TestPrivateServiceConnectThroughTheGoClient2140(t *testing.T) {
 	// A producer's attachments, and endpoints to them.
 	// The producer's forwarding rule: an internal passthrough load
 	// balancer's (#2153), which must exist.
-	ilbTarget := internalLB(ctx, t, opts, p, region, "projects/"+p+"/global/networks/default", "ilb-"+sfx, "", 80)
+	ilbTarget := internalLB(ctx, t, opts, p, region, "projects/"+p+"/global/networks/default", "", "ilb-"+sfx, "", 80)
 	attachTo := func(name, pref, nat, target string) error {
 		return wait(sas.Insert(ctx, &computepb.InsertServiceAttachmentRequest{Project: p, Region: region, ServiceAttachmentResource: &computepb.ServiceAttachment{
 			Name: proto.String(name), TargetService: proto.String(target),
@@ -226,8 +226,10 @@ func TestPrivateServiceConnectThroughTheGoClient2140(t *testing.T) {
 			}
 		}
 	}
-	if count != 2 || agg != 2 {
-		t.Fatalf("list %d, aggregatedList %d endpoints", count, agg)
+	// The two endpoints and the producer's internal load balancer rule,
+	// ilb-<sfx>, which Google lists beside them.
+	if count != 3 || agg != 3 {
+		t.Fatalf("list %d, aggregatedList %d forwarding rules, want the 2 endpoints and the load balancer's", count, agg)
 	}
 	attachments, aggAtt := 0, 0
 	sit := sas.List(ctx, &computepb.ListServiceAttachmentsRequest{Project: p, Region: region})

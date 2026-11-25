@@ -213,7 +213,9 @@ func TestCloudRunFunctionsPagesThroughTheBrowser(t *testing.T) {
 	if err != nil || tr.GetDestination().GetCloudRun().GetService() == "" && tr.GetDestination().GetCloudFunction() != httpName {
 		t.Fatalf("GetTrigger after Add trigger = %v, %v; want one to the function", tr, err)
 	}
-	p.waitFor(fmt.Sprintf(`document.querySelector("#view table tbody").textContent.includes(%q)`, triggerID))
+	// The page redraws once Add trigger's pane closes, so its table can be
+	// missing for a frame (main run 45530827608).
+	p.waitFor(fmt.Sprintf(`document.querySelector("#view table tbody") !== null && document.querySelector("#view table tbody").textContent.includes(%q)`, triggerID))
 	p.pageAction("Delete trigger", map[string]string{"name": triggerID}, "")
 	it := ea.ListTriggers(ctx, &eventarcpb.ListTriggersRequest{Parent: parent})
 	for {

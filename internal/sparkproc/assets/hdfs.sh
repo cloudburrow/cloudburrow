@@ -115,10 +115,16 @@ datanode)
   mkdir -p "$data"
   if [ -n "${CB_DISK_GB:-}" ]; then
     # Each volume's capacity is its disk's: the node's boot disk size, or
-    # a local SSD's, the rest of the file system it is on reserved.
+    # a local SSD's, the rest of the file system it is on reserved. On a
+    # file system smaller than the disk the reservation is negative: the
+    # DataNode's capacity is the file system's size less the reservation
+    # (FsVolumeImpl.getCapacity), so still the disk's, while its available
+    # space stays what the file system has free (getAvailable takes the
+    # smaller, and a negative reservation leaves none of the free space
+    # reserved).
     size=$(df -P -B1 "$data" | awk 'NR==2 {print $2}')
     want=$((CB_DISK_GB * 1024 * 1024 * 1024))
-    if [ "$size" -gt "$want" ]; then
+    if [ "$size" -ne "$want" ]; then
       args+=(-D "dfs.datanode.du.reserved=$((size - want))")
     fi
   fi

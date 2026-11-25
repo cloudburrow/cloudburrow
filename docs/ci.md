@@ -213,6 +213,42 @@ The compat job's `gke` shard runs on the `served` shard's instance again. It run
 client, gcloud and Terraform), which make kind clusters beside the instance's; the `served` shard
 skips them. Together they passed the served suite's 60-minute deadline in main runs 45023269046
 and 45047408927: no test hung, and the Kubernetes Engine tests took 2,828 s of it.
+It skips `COMPAT_GKE_UPGRADE_TESTS`, which the `gkeupgrade` shard runs.
+
+### The gkeupgrade shard
+
+The compat job's `gkeupgrade` shard runs on the `served` shard's instance again too. It runs only
+`COMPAT_GKE_UPGRADE_TESTS` from `scripts/compat-shards.sh` (named in `COMPAT_GKE_UPGRADE_TEST_NAMES`):
+Kubernetes Engine's upgrades, rollbacks and IP and credential rotations, through the client and
+gcloud. The `gke` shard reached go test's 60-minute deadline in main run 45382531465 once Landing
+168 (#2100) added them: its tests had run 3,558 s, 2,080 s of them these. `test/repo`'s
+`TestCompatGKEShardsSplitTheKubernetesEngineTests` fails unless each Kubernetes Engine test runs in
+exactly one of the two shards.
+
+### The computevms and vpcvms shards
+
+The compat job's `computevms` and `vpcvms` shards run on the `served` shard's instance again too.
+`computevms` runs only `COMPAT_COMPUTE_VM_TESTS` from `scripts/compat-shards.sh` (named in
+`COMPAT_COMPUTE_VM_TEST_NAMES`): Compute Engine's VMs, disks, instance groups, rolling updates and
+metadata servers, through the client, gcloud and Terraform. `vpcvms` runs only
+`COMPAT_VPC_VM_TESTS` (`COMPAT_VPC_VM_TEST_NAMES`): the VPC networking tests that carry VM traffic
+(Cloud Router BGP, Cloud NAT, IPv6, load balancers and Private Service Connect to VMs, IAP tunnels).
+The `served` shard skips both. It reached go test's 60-minute deadline in main run 45422957668 once
+Landing 168 gave every VM its own metadata server, vTPM and VPC data plane: its tests had run
+3,592 s, 2,654 s of them these, and 430 never ran. `test/repo`'s
+`TestCompatVMShardsSplitTheServedShard` fails unless each of the served instance's tests but the
+Kubernetes Engine ones runs in exactly one of the three shards.
+
+`vpcvms` runs a browser step too: Landing 168's Compute Engine and VPC console tests
+(`COMPAT_BROWSER_VPCVMS_TEST_NAMES`: VM instances, Shared VPC, Cloud Router and NAT, Private Service
+Connect, Serverless VPC Access, load balancer Edit, Cloud Armor, Cloud CDN, IAP, Certificate
+Manager, network security, Secure Web Proxy), whose screens are drawn only where Compute Engine is
+served. They fell to the `storage` shard's browser step, the rest of the suite, which skipped all 43
+in main run 45422957668 and failed. Each shard's browser tests come from `compat_browser_select`,
+which ci.yml and `scripts/verify-local.sh` both call, and `cmd/cloudburrow`'s
+`TestBrowserTestsRunWhereTheirScreensAreServed` fails unless every browser test but the never-run
+ones is selected by exactly one browser shard whose `--services` draw each screen it names with
+`needService`.
 
 ### The localaispeech shard
 

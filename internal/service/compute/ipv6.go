@@ -149,9 +149,19 @@ func (s *Server) subnetV6Locked(netObj obj, access, seed string) (string, error)
 			}
 		}
 	case "EXTERNAL":
-		start := hashIndex(seed, 36)
+		// The search runs over the /64s of externalPool outside
+		// globalV6Pool (its second /32), so a start that hashes into the
+		// global pool no longer spends every probe there and fails a
+		// subnet that has 15 free /32s to take from (#2140 flake,
+		// Landing 168: 1 subnet in 16 was refused).
+		const per32, n32 = uint64(1) << 32, uint64(15)
+		start := hashIndex(seed, 36) % (n32 * per32)
 		for i := uint64(0); i < 1<<20; i++ {
-			if n := v6Block(externalPool, (start+i)&(1<<36-1), 64); !used[n.String()] && !globalV6Pool.Contains(n.IP) {
+			idx := (start + i) % (n32 * per32)
+			if idx >= per32 {
+				idx += per32 // skip 2600:1901::/32, the global pool
+			}
+			if n := v6Block(externalPool, idx, 64); !used[n.String()] && !globalV6Pool.Contains(n.IP) {
 				return n.String(), nil
 			}
 		}

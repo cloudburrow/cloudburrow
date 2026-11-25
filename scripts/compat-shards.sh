@@ -184,6 +184,12 @@ COMPAT_LOCALAI_TESTS="^Test($(echo "$COMPAT_LOCALAI_TEST_NAMES" | tr -s ' \n' '|
 # 6,765 s of its 120m in main run 45047408927, 3,360 s of them these
 # tests', before Landing 167's six new local AI tests (#1799, #2127,
 # #2131), which had run in no shard.
+# A fourteenth, gkeupgrade, is the served shard's instance again for
+# Kubernetes Engine's upgrade, rollback and rotation tests
+# (COMPAT_GKE_UPGRADE_TESTS), which the gke shard skips.
+# A fifteenth and sixteenth, computevms and vpcvms, are the served
+# shard's instance again for the tests that boot VMs
+# (COMPAT_COMPUTE_VM_TESTS, COMPAT_VPC_VM_TESTS), which served skips.
 COMPAT_LOCALAI_SPEECH_TESTS="^Test($(echo "$COMPAT_LOCALAI_TEST_NAMES" | tr -s ' ' '\n' | grep -E '^(Speech|BigQueryMLTranscribe)' | paste -sd'|' -))\$"
 
 # The Kubernetes Engine API's tests (COMPAT_GKE_TESTS), which make kind
@@ -194,8 +200,49 @@ COMPAT_LOCALAI_SPEECH_TESTS="^Test($(echo "$COMPAT_LOCALAI_TEST_NAMES" | tr -s '
 # 3 s), the Kubernetes Engine tests 2,440 s and then 2,828 s of it.
 COMPAT_GKE_TESTS='^Test(GKE[A-Za-z0-9_]*|GcloudContainer[A-Za-z0-9_]*|TerraformContainerClusterAndNodePool)$'
 
+# The gkeupgrade shard's tests (COMPAT_GKE_UPGRADE_TESTS), by name, which
+# the gke shard skips: Kubernetes Engine's upgrades, rollbacks and
+# rotations, through the client and gcloud, each of which moves a
+# cluster's control plane or nodes through versions or certificates. The
+# gke shard reached go test's 60m in main run 45382531465 once Landing
+# 168 (#2100) added them: its 25 tests had taken 3,558 s when the alarm
+# stopped TestGKENodeLabelsAndTaints, and TestGKERollbackSafeUpgrade alone
+# 577 s. These took 2,080 s of that, which leaves gke about 1,480 s with
+# its three tests that never ran (about 30 minutes in all).
+COMPAT_GKE_UPGRADE_TEST_NAMES="GKERollbackSafeUpgrade GKEUpgradeMasterThenNodePool
+  GcloudContainerClustersUpgrade GKERotationLocationsAndUpgradeInfo
+  GcloudContainerRotationLocationsAndUpgradeInfo GKERollbackNodePoolUpgrade
+  GcloudContainerNodePoolsRollback GKEAutoUpgradePausesPastItsWindow
+  GKEBlueGreenCompleteNodePoolUpgrade GcloudContainerNodePoolsCompleteUpgrade"
+COMPAT_GKE_UPGRADE_TESTS="^Test($(echo "$COMPAT_GKE_UPGRADE_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
+
+# The computevms and vpcvms shards' tests (COMPAT_COMPUTE_VM_TESTS and
+# COMPAT_VPC_VM_TESTS), by name, which the served shard skips: the tests
+# that boot Compute Engine VMs, each for minutes. The served shard reached
+# go test's 60m in main run 45422957668 once Landing 168 (#2139, #2140,
+# #2177, #2179) gave every VM its own metadata server, vTPM and VPC data
+# plane: its tests had run 3,592 s when the alarm stopped
+# TestShieldedVMHTTPSMetadataServer2179, with 430 tests never run, and
+# TestComputeVMsThroughTheGoClient took 345 s (68 s in 45341873552).
+# computevms has Compute Engine's VMs, disks, groups and metadata servers
+# (1,888 s of that run, plus three tests that never ran), vpcvms the VPC
+# networking tests that carry VM traffic (766 s, plus seven that never
+# ran), and served keeps about 940 s with the rest of its tests.
+COMPAT_COMPUTE_VM_TEST_NAMES="ComputeRegionalDisksThroughTheGoClient ComputeVMsThroughTheGoClient
+  ComputeLabelsSchedulingAndExternalIPsThroughTheGoClient ComputeRollingUpdatesThroughTheGoClient2139
+  TerraformComputeInstance ComputeRegionalGroupsThroughTheGoClient GcloudComputeInstances
+  ComputeOpsAgentWritesLogsAndMetrics ComputeAutoscalerScalesOnRealCPU
+  ShieldedVMHTTPSMetadataServer2179 VMAccessScopesLimitTokens2179 VMMetadataServerFromInsideTheVM2177"
+COMPAT_COMPUTE_VM_TESTS="^Test($(echo "$COMPAT_COMPUTE_VM_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
+COMPAT_VPC_VM_TEST_NAMES="CloudRouterBGPWithARouterApplianceVM2140 ComputeVMNetworkingThroughTheGoClient
+  RelayedConnectionsFollowTheEgressFirewall ComputeIPv6ThroughTheGoClient
+  CloudNATGivesVMsWithoutExternalIPsEgress GcloudStartIAPTunnel
+  RegionalAndInternalIPv6ForwardingRules2140 IPv6OnlyVMsAndGlobalIPv6LoadBalancing2140
+  InternalLBAndPSCEndpointCarryVMTraffic2140 VMIdentityThroughALoadBalancerAndSecureWebProxy"
+COMPAT_VPC_VM_TESTS="^Test($(echo "$COMPAT_VPC_VM_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
+
 # The shards, in the order ci.yml's matrix lists them.
-COMPAT_SHARDS="storage served gke run crossservice scale emulators memorystore sql sqlreplicas acceptance iam localai localaispeech"
+COMPAT_SHARDS="storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas acceptance iam localai localaispeech"
 
 # The crossservice shard's tests (COMPAT_CROSSSERVICE_TESTS), which the run shard skips:
 # Eventarc's, whose triggers route events from Cloud Storage, Pub/Sub,
@@ -304,6 +351,12 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # Document AI and Speech-to-Text (TestStoragePicker*, #2097), whose screens
 # are drawn where Cloud Run serves the local AI endpoint, and Logging's App
 # Hub dimensions (TestLoggingAppHub*, #2096), which need App Hub, run in run.
+# BigQuery Studio's screens that keep their assets in Dataform (notebooks,
+# pipelines, data preparations, the data canvas: #2094, #2105) need Dataform
+# beside BigQuery, which the emulators shard's instance does not serve and
+# the run instance does: their tests are named TestDataformBigQueryStudio*,
+# so TestDataform* runs them in crossservice (main run 45422957668 skipped
+# six named TestBigQueryStudio* in emulators, which failed the step).
 # The run shard's instance draws all of those screens, and the crossservice
 # shard brings up the same instance (compat_shard), so the run instance's
 # browser tests are split between them: the Cloud Run screens' (TestCloudRun*,
@@ -315,13 +368,50 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # and 83 of its 90 minutes; crossservice's, with no browser step, 44 to 56):
 # the Cloud Run screens' 38 took 657 s and 765 s of them, the other 66 690 s
 # and 925 s.
-COMPAT_BROWSER_SHARDS="storage served run crossservice emulators memorystore sql localai"
+# Landing 168's Compute Engine and VPC consoles (#2139, #2140, #2160,
+# #2180, #2181): VM instances with A1 and Shielded VM settings, IPv6-only
+# subnets, Shared VPC, Cloud Router and NAT, Private Service Connect,
+# Serverless VPC Access, firewall rule logs, load balancer Edit, Cloud
+# Armor, Cloud CDN, IAP, Certificate Manager, network security and Secure
+# Web Proxy. Every screen is drawn only where Compute Engine is served,
+# which the storage shard's instance is not, so main run 45422957668 skipped
+# all 43 there, which failed the step. The served shard's browser step
+# already takes 18 of its 20 minutes with the Kubernetes Engine pages, and
+# computevms's compat suite most of its job, so they run in vpcvms, the
+# served shard's instance again (COMPAT_BROWSER_VPCVMS_TEST_NAMES).
+COMPAT_BROWSER_SHARDS="storage served vpcvms run crossservice emulators memorystore sql localai"
+COMPAT_BROWSER_VPCVMS_TEST_NAMES="ComputeA1Screens ComputeA1ScreensMeetWCAG
+  ShieldedVMConsole2181 ShieldedVMConsole2181MeetsWCAG
+  IPv6OnlyFormsMeetWCAG2140 IPv6OnlySubnetAndInstanceThroughTheBrowser2140
+  IPv6LoadBalancerFrontendMeetsWCAG2140 IPv6LoadBalancerFrontendThroughTheBrowser2140
+  CreateInstanceInServiceProjectMeetsWCAG2140 CreateInstanceOnSharedSubnetThroughTheBrowser2140
+  SharedVPCIndividualSubnetsThroughTheBrowser2140 SharedVPCShareSubnetsMeetsWCAG2140
+  PrivateServiceConnectAndSharedVPCMeetWCAG2140 PrivateServiceConnectAndSharedVPCThroughTheBrowser2140
+  PSCEndpointGlobalAccessThroughTheBrowser2140d
+  CloudRouterAndNATMeetWCAG2140 CloudRouterAndNATThroughTheBrowser
+  RouterNamedSetsThroughTheBrowser2140d RouterRoutePoliciesAndNamedSetsMeetWCAG2140d
+  PrivateNATMeetsWCAG2140 PrivateNATThroughTheBrowser2140
+  ServerlessVPCAccessMeetsWCAG2140 ServerlessVPCAccessThroughTheBrowser2140
+  FirewallRuleLogsThroughTheBrowser
+  LoadBalancerEditThroughTheBrowser2160 CloudArmorThroughTheBrowser2160 CloudArmorRound3ThroughTheBrowser2160
+  CloudCDNThroughTheBrowser2160 IAPThroughTheBrowser2160 IAPTCPThroughTheBrowser2160 IAPBrowserSignIn2160
+  CertificateManagerThroughTheBrowser2160 CertificateManagerEditsThroughTheBrowser2160
+  TrustConfigsAndClientAuthenticationThroughTheBrowser2160 MutualTLSPagesMeetWCAG2160
+  AddressGroupsThroughTheBrowser2160 OrganizationAddressGroupsThroughTheBrowser2160
+  BackendAuthenticationThroughTheBrowser2160 CustomAuthorizationPolicyThroughTheBrowser2160
+  NetworkSecurityRound4MeetsWCAG2160 RoutingRuleMapsThroughTheBrowser2160
+  SecureWebProxyThroughTheBrowser2160 SecureWebProxyMeetsWCAG2160"
+COMPAT_BROWSER_VPCVMS_SHARD_TESTS="^Test($(echo "$COMPAT_BROWSER_VPCVMS_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore)'
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipelines|Workbench|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS='^Test(KMS|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipelines|Workbench|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
-COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^TestMemorystore'
+# Create an image from a Cloud Storage file (#2139) browses a bucket of
+# this instance's Cloud Storage from Compute Engine's Create an image: the
+# memorystore shard's instance serves both (main run 45422957668 skipped
+# both its tests in storage, which serves no Compute Engine).
+COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^Test(Memorystore|CreateImageFromCloudStorageFile)'
 # Private Service Connect's Connection Policies with Cloud SQL's create
 # page (TestConnectionPoliciesThroughTheBrowser, #2141) need Cloud SQL and
 # Compute Engine on one instance: the sql shard's (main run 45102950103
@@ -348,8 +438,48 @@ COMPAT_BROWSER_LOCALAI_SHARD_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbedd
 # first Connect, so it runs only when asked for
 # (CLOUDBURROW_TEST_NOTEBOOK_RUNTIME=1), as the Spark procedures' tests run
 # with CLOUDBURROW_TEST_SPARK (main runs 45047408927 and 45102950103 skipped
-# it in emulators, which failed the step).
-COMPAT_BROWSER_NEVER_TESTS='^Test(CloudRunFunctionsEditDownloadAndPermissionsThroughThePage|BigQueryStudioNotebookRuntimeThroughThePage)$'
+# it in emulators, which failed the step). So do Connect to a runtime's
+# (#2094), over the same runtime image, and the Spark notebook's and its
+# Manage sessions' (#2094, #2156), whose Spark Connect session runs in the
+# pinned 1.8 GB apache/spark image (CLOUDBURROW_TEST_SPARK) on Serverless
+# for Apache Spark, which only the nightly spark shard serves, beside
+# Dataform, which it does not (main run 45422957668 skipped all three in
+# emulators). So do Dataproc's pages (TestDataproc*ThroughThePage: #2156,
+# #2162, #2186, #2188, #2189), whose batches, sessions and clusters run in
+# the pinned apache/spark images (CLOUDBURROW_TEST_SPARK) on the Dataproc
+# API, which only the nightly spark shard serves (main run 45422957668
+# skipped all nine in storage).
+COMPAT_BROWSER_NEVER_TESTS='^Test(CloudRunFunctionsEditDownloadAndPermissionsThroughThePage|BigQueryStudioNotebookRuntimeThroughThePage|BigQueryStudioConnectToARuntimeThroughThePage|BigQuerySparkNotebookManageSessionsThroughThePage|BigQuerySparkNotebookThroughThePage|Dataproc[A-Za-z0-9]*ThroughThePage)$'
+
+# compat_browser_select <shard>: sets, for that shard's browser step,
+#   BROWSER_RUN   its go test -run pattern (every test when empty)
+#   BROWSER_SKIP  its go test -skip pattern
+# and returns 1 for a shard that runs no browser test. Every test the two
+# select must pass: ci.yml and verify-local.sh read both, and
+# cmd/cloudburrow's TestBrowserTestsRunWhereTheirScreensAreServed holds
+# each test to one shard whose instance draws every screen it needs.
+compat_browser_select() {
+  BROWSER_RUN=""
+  BROWSER_SKIP=$COMPAT_BROWSER_NEVER_TESTS
+  # The localai shard's tests are kept out of every other shard: the run
+  # shard's pattern (TestSpeech*) names one, whose transcription needs that
+  # shard's local models.
+  [ "$1" = localai ] || BROWSER_SKIP="$COMPAT_BROWSER_LOCALAI_SHARD_TESTS|$BROWSER_SKIP"
+  case "$1" in
+    # And the run instance's tests the crossservice shard runs.
+    run) BROWSER_RUN=$COMPAT_BROWSER_RUN_SHARD_TESTS BROWSER_SKIP="$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS|$BROWSER_SKIP" ;;
+    crossservice) BROWSER_RUN=$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS ;;
+    emulators) BROWSER_RUN=$COMPAT_BROWSER_EMULATORS_SHARD_TESTS ;;
+    memorystore) BROWSER_RUN=$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS ;;
+    sql) BROWSER_RUN=$COMPAT_BROWSER_SQL_SHARD_TESTS ;;
+    served) BROWSER_RUN=$COMPAT_BROWSER_SERVED_SHARD_TESTS ;;
+    vpcvms) BROWSER_RUN=$COMPAT_BROWSER_VPCVMS_SHARD_TESTS ;;
+    localai) BROWSER_RUN=$COMPAT_BROWSER_LOCALAI_SHARD_TESTS ;;
+    # The rest of the suite.
+    storage) BROWSER_SKIP="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS|$COMPAT_BROWSER_SQL_SHARD_TESTS|$COMPAT_BROWSER_SERVED_ONLY_TESTS|$COMPAT_BROWSER_VPCVMS_SHARD_TESTS|$BROWSER_SKIP" ;;
+    *) return 1 ;;
+  esac
+}
 
 # compat_shard <shard>: sets, for that shard,
 #   SERVICES     the instance's --services
@@ -426,7 +556,7 @@ compat_shard() {
       SETUP_TESTS="TestSecretManagerRestartSetup TestTasksRestartSetup TestSchedulerRestartSetup TestStorageAcrossRestart"
       PROBE_TESTS="TestSecretManagerAcrossRestart TestTasksAcrossRestart TestSchedulerAcrossRestart TestStorageAcrossRestart"
       PROBE_VARS=SECRETS,TASKS,SCHEDULER,STORAGE ;;
-    served|gke)
+    served|gke|gkeupgrade|computevms|vpcvms)
       # Cloud Trace (#2118), beside the Cloud Logging its spans' log
       # entries are correlated with.
       SERVICES=kms,logging,privateca,gke,monitoring,compute,trace,filestore
@@ -458,10 +588,23 @@ compat_shard() {
       # Filestore (#2192), in process: its NFS servers are mounted from
       # Kubernetes Engine clusters' pods (TestGKEFilestore*, gke shard).
       TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE,MONITORING,COMPUTE,TRACE,FILESTORE
-      if [ "$1" = gke ]; then
-        # The served shard's instance again, for the Kubernetes Engine
-        # tests alone (COMPAT_GKE_TESTS).
+      if [ "$1" = computevms ]; then
+        # The served shard's instance again, for the Compute Engine tests
+        # that boot VMs (COMPAT_COMPUTE_VM_TESTS).
+        COMPAT_RUN=$COMPAT_COMPUTE_VM_TESTS
+      elif [ "$1" = vpcvms ]; then
+        # The served shard's instance again, for the VPC tests that carry
+        # VM traffic (COMPAT_VPC_VM_TESTS).
+        COMPAT_RUN=$COMPAT_VPC_VM_TESTS
+      elif [ "$1" = gkeupgrade ]; then
+        # The served shard's instance again, for Kubernetes Engine's
+        # upgrade, rollback and rotation tests (COMPAT_GKE_UPGRADE_TESTS).
+        COMPAT_RUN=$COMPAT_GKE_UPGRADE_TESTS
+      elif [ "$1" = gke ]; then
+        # The served shard's instance again, for the other Kubernetes
+        # Engine tests (COMPAT_GKE_TESTS but COMPAT_GKE_UPGRADE_TESTS).
         COMPAT_RUN=$COMPAT_GKE_TESTS
+        COMPAT_SKIP=$COMPAT_GKE_UPGRADE_TESTS
         # Kubernetes Engine's logs (#2100): a cluster whose pod writes a
         # line every half second, all of whose lines, those written while
         # the CLI was stopped too, its in-cluster agent ships once.
@@ -469,7 +612,7 @@ compat_shard() {
         PROBE_TESTS="TestGKELogsAcrossRestart"
         PROBE_VARS=GKE,LOGGING
       else
-        COMPAT_SKIP=$COMPAT_GKE_TESTS
+        COMPAT_SKIP="$COMPAT_GKE_TESTS|$COMPAT_COMPUTE_VM_TESTS|$COMPAT_VPC_VM_TESTS"
         # Cloud KMS (#418): a key with ENABLED, DISABLED and
         # DESTROY_SCHEDULED versions and a ciphertext.
         SETUP_TESTS="TestKMSRestartSetup"
@@ -780,7 +923,7 @@ compat_shard() {
   # bq's (#696) run in the emulators shard, with BigQuery, and gcloud sql's
   # in the sql shard.
   case "$1" in
-    storage|served|gke|run|crossservice|scale|emulators|memorystore|sql|sqlreplicas) TEST_VARS+=,GCLOUD ;;
+    storage|served|gke|gkeupgrade|computevms|vpcvms|run|crossservice|scale|emulators|memorystore|sql|sqlreplicas) TEST_VARS+=,GCLOUD ;;
   esac
 }
 
@@ -810,8 +953,10 @@ EOF2
 # for the probes after the restart.
 compat_setup_exports() {
   case "$1" in
-    served)  export CLOUDBURROW_TEST_KMS_PROBE="$2/kms-probe.json" \
-               CLOUDBURROW_TEST_GKE_LOGS_PROBE="$2/gke-logs-probe.json" ;;
+    served)  export CLOUDBURROW_TEST_KMS_PROBE="$2/kms-probe.json" ;;
+    # The gke shard runs TestGKELogsRestartSetup since #2221 split it off
+    # served's tests (main run 45422957668, attempt 2: it skipped there).
+    gke)     export CLOUDBURROW_TEST_GKE_LOGS_PROBE="$2/gke-logs-probe.json" ;;
     storage) export CLOUDBURROW_TEST_SECRETS_PROBE="$2/secrets-probe.json" \
                CLOUDBURROW_TEST_TASKS_PROBE="$2/tasks-probe.json" \
                CLOUDBURROW_TEST_SCHEDULER_PROBE="$2/scheduler-probe.json" \

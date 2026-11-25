@@ -483,7 +483,18 @@ func (s *Server) ruleAddressLocked(x lbCtx, b, o obj, internal bool, ports []int
 	tmp := obj{}
 	sub := str(b, "subnetwork")
 	if sub == "" {
-		sub = subnetRel(x.project, x.region, "default")
+		// Google: the subnetwork "is optional" in an auto mode network,
+		// whose subnet in the region is named after it, and "must be
+		// specified" in a custom mode one (forwardingRules, subnetwork).
+		net := str(o, "network")
+		no, ok := s.res[net]
+		if !ok {
+			return notFound(net)
+		}
+		if a, _ := no["autoCreateSubnetworks"].(bool); !a {
+			return invalid("Invalid value for field 'resource.subnetwork': ''. Subnetwork should be specified for custom subnetmode network")
+		}
+		sub = subnetRel(strings.Split(net, "/")[1], x.region, lastSeg(net))
 	}
 	if err := s.regionalInternal(x.project, x.region, obj{"subnetwork": sub}, tmp, "", ""); err != nil {
 		return err

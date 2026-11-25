@@ -709,7 +709,7 @@
           "test/compat/run_test.go:149 TestRunRevisions",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runsettings_test.go:37 TestRunServiceStoredSettingsAndSubPath",
-          "test/compat/vpcaccess2140_test.go:234 TestRunVPCEgressThroughTheGoClient2140"
+          "test/compat/vpcaccess2140_test.go:244 TestRunVPCEgressThroughTheGoClient2140"
         ]
       },
       {
@@ -748,7 +748,7 @@
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount",
-          "test/compat/vpcaccess2140_test.go:234 TestRunVPCEgressThroughTheGoClient2140",
+          "test/compat/vpcaccess2140_test.go:244 TestRunVPCEgressThroughTheGoClient2140",
           "test/compat/vpctraffic2140_test.go:320 TestRunReachesVMsThroughConnectorsAndDirectVPCEgress2140"
         ]
       },
@@ -801,7 +801,7 @@
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount",
-          "test/compat/vpcaccess2140_test.go:234 TestRunVPCEgressThroughTheGoClient2140"
+          "test/compat/vpcaccess2140_test.go:244 TestRunVPCEgressThroughTheGoClient2140"
         ]
       },
       {
@@ -4541,7 +4541,7 @@
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations",
           "test/compat/terraform_hardcoded_test.go:217 TestTerraformLocationsIntercepted",
-          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       },
       {
@@ -5975,7 +5975,7 @@
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations",
           "test/compat/terraform_hardcoded_test.go:217 TestTerraformLocationsIntercepted",
-          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       },
       {
@@ -15638,9 +15638,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 277,
+      "Implemented": 274,
       "Unimplemented": 84,
-      "Verified": 223
+      "Verified": 226
     },
     "rows": [
       {
@@ -16869,8 +16869,10 @@
       },
       {
         "method": "compute.instances.getShieldedInstanceIdentity",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/shieldedvm2179_test.go:134 TestShieldedVMHTTPSMetadataServer2179"
+        ]
       },
       {
         "method": "compute.instances.insert",
@@ -16974,8 +16976,10 @@
       },
       {
         "method": "compute.instances.setShieldedInstanceIntegrityPolicy",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/shieldedvm2179_test.go:134 TestShieldedVMHTTPSMetadataServer2179"
+        ]
       },
       {
         "method": "compute.instances.setTags",
@@ -17044,8 +17048,10 @@
       },
       {
         "method": "compute.instances.updateShieldedInstanceConfig",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/shieldedvm2179_test.go:134 TestShieldedVMHTTPSMetadataServer2179"
+        ]
       },
       {
         "method": "compute.machineImages.delete",
@@ -17204,7 +17210,7 @@
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/vpcaccess2140_test.go:318 TestServerlessVPCAccessUpdateConnectorThroughTheGoClient2140"
+          "test/compat/vpcaccess2140_test.go:328 TestServerlessVPCAccessUpdateConnectorThroughTheGoClient2140"
         ]
       },
       {
@@ -25078,7 +25084,7 @@
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/CreateConnector",
         "status": "Verified",
         "tests": [
-          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient",
+          "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient",
           "test/compat/vpctraffic2140_test.go:320 TestRunReachesVMsThroughConnectorsAndDirectVPCEgress2140"
         ]
       },
@@ -25086,7 +25092,7 @@
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/DeleteConnector",
         "status": "Verified",
         "tests": [
-          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient",
+          "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient",
           "test/compat/vpctraffic2140_test.go:320 TestRunReachesVMsThroughConnectorsAndDirectVPCEgress2140"
         ]
       },
@@ -25094,14 +25100,14 @@
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/GetConnector",
         "status": "Verified",
         "tests": [
-          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       },
       {
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/ListConnectors",
         "status": "Verified",
         "tests": [
-          "test/compat/vpcaccess2140_test.go:78 TestServerlessVPCAccessConnectorsThroughTheGoClient"
+          "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       }
     ]
@@ -26475,7 +26481,7 @@
         "method": "google.container.v1.ClusterManager/CheckAutopilotCompatibility",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:357 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },
@@ -26483,15 +26489,15 @@
         "method": "google.container.v1.ClusterManager/CompleteControlPlaneUpgrade",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:305 TestGKERollbackSafeUpgrade",
-          "test/compat/gkemethods_test.go:475 TestGcloudContainerRotationLocationsAndUpgradeInfo"
+          "test/compat/gkemethods_test.go:307 TestGKERollbackSafeUpgrade",
+          "test/compat/gkemethods_test.go:477 TestGcloudContainerRotationLocationsAndUpgradeInfo"
         ]
       },
       {
         "method": "google.container.v1.ClusterManager/CompleteIPRotation",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:475 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:477 TestGcloudContainerRotationLocationsAndUpgradeInfo",
           "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo"
         ]
       },
@@ -26543,7 +26549,7 @@
         "method": "google.container.v1.ClusterManager/FetchClusterUpgradeInfo",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:475 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:477 TestGcloudContainerRotationLocationsAndUpgradeInfo",
           "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo"
         ]
       },
@@ -26551,7 +26557,7 @@
         "method": "google.container.v1.ClusterManager/FetchNodePoolUpgradeInfo",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:475 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:477 TestGcloudContainerRotationLocationsAndUpgradeInfo",
           "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo"
         ]
       },
@@ -26622,7 +26628,7 @@
         "method": "google.container.v1.ClusterManager/ListUsableSubnetworks",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:357 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },
@@ -26652,7 +26658,7 @@
         "method": "google.container.v1.ClusterManager/SetLegacyAbac",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:357 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },
@@ -26660,7 +26666,7 @@
         "method": "google.container.v1.ClusterManager/SetLocations",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:475 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:477 TestGcloudContainerRotationLocationsAndUpgradeInfo",
           "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo",
           "test/compat/gkezones_test.go:59 TestGKENodeZones"
         ]
@@ -26700,7 +26706,7 @@
         "method": "google.container.v1.ClusterManager/SetNetworkPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:357 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },
@@ -26715,7 +26721,7 @@
         "method": "google.container.v1.ClusterManager/SetNodePoolManagement",
         "status": "Verified",
         "tests": [
-          "test/compat/gkesettings_test.go:336 TestGcloudContainerClusterSettings",
+          "test/compat/gkesettings_test.go:357 TestGcloudContainerClusterSettings",
           "test/compat/gkesettings_test.go:57 TestGKEClusterSettings"
         ]
       },
@@ -26732,7 +26738,7 @@
         "method": "google.container.v1.ClusterManager/StartIPRotation",
         "status": "Verified",
         "tests": [
-          "test/compat/gkemethods_test.go:475 TestGcloudContainerRotationLocationsAndUpgradeInfo",
+          "test/compat/gkemethods_test.go:477 TestGcloudContainerRotationLocationsAndUpgradeInfo",
           "test/compat/gkemethods_test.go:98 TestGKERotationLocationsAndUpgradeInfo"
         ]
       },

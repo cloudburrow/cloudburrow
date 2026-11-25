@@ -199,7 +199,11 @@ func TestCreatePageHasNumberedSectionsAndABackArrow(t *testing.T) {
 	p.clickText("#view .create-step-continue button", "Continue")
 	p.waitFor(`document.querySelector("#view .create-step").classList.contains("is-folded") &&
 		!document.querySelectorAll("#view .create-step")[1].querySelector(".create-step-body").hidden`)
-	// The folded section opens again from its title.
+	// The folded section opens again from its title, scrolled clear of the
+	// sticky page header first: Continue focused the next section's field,
+	// which can leave the folded title under that header, where a click at
+	// its centre lands on the header (main CI 45422957668).
+	p.eval(`document.querySelector("#view .create-step-head").scrollIntoView({ block: "center" })`, nil)
 	p.run(chromedp.Click(chromedp.CSS(`#view .create-step-head`)))
 	p.waitFor(`!document.querySelector("#view .create-step-body").hidden`)
 

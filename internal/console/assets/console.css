@@ -2350,7 +2350,7 @@ tr.log-entry.is-pinned { background: var(--state-hover); }
 .bq-json { overflow-x: auto; max-height: 480px; }
 /* Positioned, so a state icon's sr-only text (absolute) scrolls with the table rather than widening the page. */
 .bq-history { overflow-x: auto; position: relative; }
-.bq-settings fieldset { border: 1px solid var(--border); border-radius: var(--radius); margin: 0 0 12px; padding: 8px 12px; }
+.bq-settings fieldset { border: 1px solid var(--border); border-radius: var(--radius); margin: 0 0 12px; padding: 8px 12px; min-inline-size: 0; }
 .bq-radio { display: block; margin: 4px 0; }
 .bq-dest-fields { display: grid; gap: 4px; margin-top: 8px; }
 /* A schema editor's Edit as text (#1861). */
@@ -2860,9 +2860,14 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
    the containing block of their absolutely positioned .sr-only spans, which
    would otherwise widen the page past a narrow window. */
 .bq-sched-wrap { position: relative; }
-.bq-auth, .bq-nb-options, .bq-frequency, .bq-pl-after, .bq-pl-settings fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; margin: 8px 0; }
+/* A fieldset's min-inline-size is its widest row's min-content, and a text
+   box's min-content is its size attribute's width: Notebook options' bucket
+   row (box + Browse) pushed Studio pipeline settings to 349 CSS pixels in a
+   320 window (WCAG 1.4.10, main run 45477746718). The groups shrink to the
+   pane, and the box takes what the row leaves beside its button. */
+.bq-auth, .bq-nb-options, .bq-frequency, .bq-pl-after, .bq-pl-settings fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; margin: 8px 0; min-inline-size: 0; }
 .input-with-button { display: flex; gap: 8px; align-items: center; }
-.input-with-button input { flex: 1; }
+.input-with-button input { flex: 1 1 0; min-width: 0; }
 .bq-canvas-row, .bq-canvas-actions, .bq-files-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
 .bq-canvas-row input[type="search"], .bq-canvas-row input[type="text"] { flex: 1 1 200px; min-width: 0; }
 .bq-canvas-found { list-style: none; padding: 0; margin: 4px 0; }

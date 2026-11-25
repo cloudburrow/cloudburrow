@@ -154,7 +154,7 @@ func TestPSCEndpointGlobalAccessThroughTheBrowser2140d(t *testing.T) {
 		return computeDo(t, caddr, "GET", project, "regions/us-central1/forwardingRules/ep", nil)["allowPscGlobalAccess"] == true
 	}
 	p := open(t)
-	path := "/net-services/psc/list/us-central1/ep" + q
+	path := "/net-services/psc/list/consumers/us-central1/ep" + q
 	p.navigate(path)
 	p.waitFor(settled + ` && document.querySelector("#view").textContent.includes("Global access")`)
 	var text string
@@ -211,8 +211,12 @@ func TestRouterRoutePoliciesAndNamedSetsMeetWCAG2140d(t *testing.T) {
 	if _, body := consoleDo(t, http.MethodGet, "/api/detail/netservices-psc-endpoints?project="+url.QueryEscape(project)+"&name=us-central1&name=ep", ""); !strings.Contains(body, "Global access") {
 		pscPublishedEndpoint(t, caddr, project)
 	}
-	ep := screen("an endpoint for a published service", "/net-services/psc/list/us-central1/ep", project)
-	edit := screen("an endpoint's Edit", "/net-services/psc/list/us-central1/ep", project)
+	ep := screen("an endpoint for a published service", "/net-services/psc/list/consumers/us-central1/ep", project)
+	edit := screen("an endpoint's Edit", "/net-services/psc/list/consumers/us-central1/ep", project)
+	// The endpoint's own page, not Page not found: Connected endpoints is at
+	// Google's /net-services/psc/list/consumers since #2141.
+	ep.ready += ` && document.querySelector("#view").textContent.includes("Global access")`
+	edit.ready += ` && document.querySelector("#view").textContent.includes("Global access")`
 	edit.then = `(() => { const b = document.querySelector("#view #detail-edit") ||
 		[...document.querySelectorAll("#view .page-actions button")].find((b) => b.textContent.trim() === "Edit"); if (b) b.click(); return true; })()`
 	auditScreens(t, append(pages, ep, edit))

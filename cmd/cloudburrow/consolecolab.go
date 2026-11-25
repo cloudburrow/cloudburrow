@@ -553,6 +553,13 @@ func (p colabRuntimesProvider) Create(ctx context.Context, project string, value
 	if err != nil {
 		return "", err
 	}
+	// Create answers once the runtime is assigned, as Google's does: the
+	// list shows it Starting until its container is up, which on a loaded
+	// runner, building the runtime image, outlasted the page's 70 seconds
+	// (main CI 45422957668). The operation is named under the runtime.
+	if rt, _, ok := strings.Cut(op.Name(), "/operations/"); ok && strings.Contains(rt, "/notebookRuntimes/") {
+		return vertexLast(rt), nil
+	}
 	r, err := op.Wait(ctx)
 	if err != nil {
 		return "", err
@@ -607,6 +614,33 @@ func (p colabRuntimesProvider) ActAt(ctx context.Context, project string, path [
 		return err
 	}
 	return fmt.Errorf("unknown action %q", action)
+}
+
+// Starts names Start, which answers once its operation has started, as
+// Google's StartNotebookRuntime does: the runtime is then Starting until
+// its container is up, which on a loaded runner outlasted the page's 70
+// seconds (main CI 45422957668).
+func (colabRuntimesProvider) Starts(action string) bool { return action == "start" }
+
+// StartAt starts a runtime and returns the wait for its operation.
+func (p colabRuntimesProvider) StartAt(ctx context.Context, project string, path []string, action string, _ map[string]string) (func(context.Context) error, error) {
+	if len(path) != 1 || action != "start" {
+		return nil, fmt.Errorf("unknown action %q", action)
+	}
+	c, err := p.api.notebooks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	op, err := c.StartNotebookRuntime(ctx, &aiplatformpb.StartNotebookRuntimeRequest{Name: colabParent(ctx, project) + "/notebookRuntimes/" + path[0]})
+	if err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+	return func(ctx context.Context) error {
+		defer func() { _ = c.Close() }()
+		_, err := op.Wait(ctx)
+		return err
+	}, nil
 }
 
 // Actions are a row's: Start or Stop, as its state allows.

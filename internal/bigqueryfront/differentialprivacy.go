@@ -134,6 +134,19 @@ type dpQuery struct {
 	// having is the HAVING condition, applied to the noisy rows (#1482);
 	// nil when none.
 	having []dpPart
+	// laplace is the Laplace noise of the group selection, COUNT, SUM and
+	// the implicit bounds; nil is the library's (secure, unseeded) one.
+	// Tests inject a seeded one. AVG and PERCENTILE_CONT always use the
+	// library's: its aggregations accept only its own noise.
+	laplace noise.Noise
+}
+
+// lap is dq's Laplace noise.
+func (dq dpQuery) lap() noise.Noise {
+	if dq.laplace != nil {
+		return dq.laplace
+	}
+	return noise.Laplace()
 }
 
 var dpFunctions = map[string]bool{"COUNT": true, "SUM": true, "AVG": true, "PERCENTILE_CONT": true}
@@ -1391,7 +1404,7 @@ func (dq dpQuery) compute(rows [][]any) ([]dpOut, string) {
 				}
 			}
 		}
-		lo, hi, ok := dpApproxBounds(all, l0, eps/2)
+		lo, hi, ok := dpApproxBounds(dq.lap(), all, l0, eps/2)
 		if !ok {
 			// "Implicit bounding can fail with datasets that contain a
 			// low number of privacy units, returning no results."
@@ -1426,7 +1439,7 @@ func (dq dpQuery) compute(rows [][]any) ([]dpOut, string) {
 				row[i] = g.cells[i]
 				continue
 			}
-			v, msg := dpAggregate(it.agg, g, i, bounds[i][0], bounds[i][1], l0, aggEps[i])
+			v, msg := dpAggregate(dq.lap(), it.agg, g, i, bounds[i][0], bounds[i][1], l0, aggEps[i])
 			if msg != "" {
 				return nil, msg
 			}
@@ -1438,29 +1451,30 @@ func (dq dpQuery) compute(rows [][]any) ([]dpOut, string) {
 }
 
 // selected reports whether group g is kept: a noisy count of its units,
-// Laplace noise with epsilon eps, thresholded with the query's delta (the
-// library's Count.ThresholdedResult); with PUBLIC_GROUPS every group is.
+// Laplace noise with epsilon eps, thresholded with the query's delta (what
+// the library's Count.ThresholdedResult does, on dq's noise); with
+// PUBLIC_GROUPS every group is.
 func (dq dpQuery) selected(g *dpGroup, eps float64, l0 int64) (bool, string) {
 	if dq.opts.public {
 		return true, ""
 	}
-	c, err := dpagg.NewCount(&dpagg.CountOptions{Epsilon: eps, MaxPartitionsContributed: l0, Noise: noise.Laplace()})
+	nz := dq.lap()
+	threshold, err := nz.Threshold(l0, 1, eps, 0, dq.opts.delta)
 	if err != nil {
 		return false, "Invalid differential privacy parameters: " + err.Error()
 	}
-	if err := c.IncrementBy(int64(len(g.units))); err != nil {
-		return false, err.Error()
-	}
-	kept, err := c.ThresholdedResult(dq.opts.delta)
+	c, err := nz.AddNoiseInt64(int64(len(g.units)), l0, 1, eps, 0)
 	if err != nil {
 		return false, "Invalid differential privacy parameters: " + err.Error()
 	}
-	return kept != nil, ""
+	// The threshold rounded up, as the library's: a fractional one never
+	// lets a smaller count through.
+	return c >= int64(math.Ceil(threshold)), ""
 }
 
 // dpAggregate is aggregate a's noisy value over g's units, the i-th
-// contribution of each, clamped to [lo, hi].
-func dpAggregate(a *dpAgg, g *dpGroup, i int, lo, hi float64, l0 int64, eps float64) (any, string) {
+// contribution of each, clamped to [lo, hi]; COUNT and SUM get lap's noise.
+func dpAggregate(lap noise.Noise, a *dpAgg, g *dpGroup, i int, lo, hi float64, l0 int64, eps float64) (any, string) {
 	clamp := func(v float64) float64 { return math.Max(lo, math.Min(hi, v)) }
 	var vals []float64
 	units := make([]string, 0, len(g.units))
@@ -1486,7 +1500,7 @@ func dpAggregate(a *dpAgg, g *dpGroup, i int, lo, hi float64, l0 int64, eps floa
 			if li < 1 {
 				li = 1
 			}
-			x, err := noise.Laplace().AddNoiseInt64(sum, l0, li, eps, 0)
+			x, err := lap.AddNoiseInt64(sum, l0, li, eps, 0)
 			if err != nil {
 				return bad(err)
 			}
@@ -1499,7 +1513,7 @@ func dpAggregate(a *dpAgg, g *dpGroup, i int, lo, hi float64, l0 int64, eps floa
 		if lInf == 0 {
 			lInf = 1
 		}
-		x, err := noise.Laplace().AddNoiseFloat64(sum, l0, lInf, eps, 0)
+		x, err := lap.AddNoiseFloat64(sum, l0, lInf, eps, 0)
 		if err != nil {
 			return bad(err)
 		}
@@ -1554,8 +1568,8 @@ func dpAggregate(a *dpAgg, g *dpGroup, i int, lo, hi float64, l0 int64, eps floa
 // two, each bin's count with Laplace noise, and the smallest and largest
 // bins whose noisy count passes the threshold (the approximate bounds
 // algorithm of Google's differential privacy library). ok is false when
-// no bin passes.
-func dpApproxBounds(vals []float64, l0 int64, eps float64) (lo, hi float64, ok bool) {
+// no bin passes. lap is the noise.
+func dpApproxBounds(lap noise.Noise, vals []float64, l0 int64, eps float64) (lo, hi float64, ok bool) {
 	const minK, maxK = -20, 63
 	type bin struct{ sign, k int } // sign 0: the zero bin
 	counts := map[bin]int64{}
@@ -1574,7 +1588,7 @@ func dpApproxBounds(vals []float64, l0 int64, eps float64) (lo, hi float64, ok b
 		}
 	}
 	bins := 1 + 2*(maxK-minK+1)
-	threshold, err := noise.Laplace().Threshold(l0, 1, eps, 0, 1e-9/float64(bins))
+	threshold, err := lap.Threshold(l0, 1, eps, 0, 1e-9/float64(bins))
 	if err != nil {
 		return 0, 0, false
 	}
@@ -1597,7 +1611,7 @@ func dpApproxBounds(vals []float64, l0 int64, eps float64) (lo, hi float64, ok b
 				}
 				b = bin{0, 0}
 			}
-			x, err := noise.Laplace().AddNoiseInt64(counts[b], l0, 1, eps, 0)
+			x, err := lap.AddNoiseInt64(counts[b], l0, 1, eps, 0)
 			if err != nil || float64(x) < threshold {
 				continue
 			}

@@ -572,7 +572,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [storage, served, gke, run, crossservice, scale, emulators, memorystore, sql, sqlreplicas, acceptance, iam, localai, localaispeech]
+        shard: [storage, served, gke, gkeupgrade, computevms, vpcvms, run, crossservice, scale, emulators, memorystore, sql, sqlreplicas, acceptance, iam, localai, localaispeech]
     env:
       SHARD: ${{ matrix.shard }}
       # Every make build here uses the emulator binaries the
@@ -598,7 +598,7 @@ jobs:
       # of embedding, speech, OCR and vision models, each held twice while
       # its cache is packed or unpacked.
       - name: Free disk for the Kubernetes Engine API's clusters
-        if: matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'localai' || matrix.shard == 'localaispeech'
+        if: matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'gkeupgrade' || matrix.shard == 'computevms' || matrix.shard == 'vpcvms' || matrix.shard == 'localai' || matrix.shard == 'localaispeech'
         run: |
           df -h /
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift
@@ -633,7 +633,7 @@ jobs:
       # since 586.0.0 had no `gcloud alpha source-manager hooks`, which
       # TestGcloudSourceManagerHooks drives (#1927; main run 44645694075).
       - name: Install the Google Cloud CLI
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'sqlreplicas' || matrix.shard == 'iam'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'gkeupgrade' || matrix.shard == 'computevms' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'sqlreplicas' || matrix.shard == 'iam'
         run: |
           curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-593.0.0-linux-x86_64.tar.gz
           echo "42c32b7553c712f71fcf6f124546c0519437f53755f47f9bd0c957998cd6b826  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
@@ -670,6 +670,18 @@ jobs:
         if: matrix.shard == 'sql'
         run: |
           echo "CLOUDBURROW_TEST_CLOUD_SQL_PROXY=$(make -s cloud-sql-proxy)" >> "$GITHUB_ENV"
+
+      # The Vertex AI Pipelines tasks' image (#2173): CloudBurrow never pulls
+      # a task's image, so TestVertexAIPipelinesThroughThePages and the
+      # TestVertexAIPipeline* compat tests skip without one on the host. The
+      # crossservice shard runs them, with python:3.15.2-alpine3.24 pulled by
+      # its multi-platform index digest (realTools.pipelineTaskImage).
+      - name: Pull the pipeline task image
+        if: matrix.shard == 'crossservice'
+        run: |
+          image="python@$(jq -er '.components.realTools.pipelineTaskImage.digest' dependencies.json)"
+          docker pull -q "$image"
+          echo "CLOUDBURROW_TEST_PIPELINE_IMAGE=$image" >> "$GITHUB_ENV"
 
       - uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376 # v1.15.2
         with:
@@ -1008,7 +1020,7 @@ jobs:
             grep -- '--- SKIP' compat.log || true
             # What the Kubernetes Engine clusters left (#1913): they are
             # deleted by name, so this should be what the instance began with.
-            if [ "$SHARD" = served ] || [ "$SHARD" = gke ]; then df -h /; kind get clusters; fi
+            if [ "$SHARD" = served ] || [ "$SHARD" = gke ] || [ "$SHARD" = gkeupgrade ] || [ "$SHARD" = computevms ] || [ "$SHARD" = vpcvms ]; then df -h /; kind get clusters; fi
           fi
 
           # The official Node.js clients (#589), configured from `cloudburrow
@@ -1035,9 +1047,10 @@ jobs:
           # browser step below, which brings it up again (#594): in the
           # storage shard, and in the run, crossservice, emulators,
           # memorystore and sql shards for the screens only their instances
-          # serve (#700, #854, #1472, #1568).
+          # serve (#700, #854, #1472, #1568), and in served and vpcvms for
+          # Compute Engine's and Kubernetes Engine's.
           case "$SHARD" in
-            storage|served|run|crossservice|emulators|memorystore|sql|localai) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
+            storage|served|vpcvms|run|crossservice|emulators|memorystore|sql|localai) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
           esac
           if [ "$SHARD" = storage ]; then
             # The official Python clients against the same instance (#287),
@@ -1185,7 +1198,7 @@ jobs:
       # Every test selected for the shard must pass: go test
       # exits 0 on a skip, and each skips without its variables or its screen.
       - name: Console in a headless browser
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai'
         run: |
           set -o pipefail
           # ubuntu-latest ships Google Chrome: it is in the runner image's
@@ -1260,6 +1273,9 @@ jobs:
           # reached, and the kubeconfig the Deploy test cleans up with
           # (#1913, #1925).
           if [ "$SHARD" = served ]; then BROWSER_VARS+=,GKE,KUBECONFIG,TRACE,LOGGING; fi
+          # The vpcvms shard's: the Compute Engine API, which the load balancer,
+          # router and IPv6 pages' fixtures and read-backs go through (Landing 168).
+          if [ "$SHARD" = vpcvms ]; then BROWSER_VARS+=,COMPUTE; fi
           # The localai shard's: the Embeddings page's Cloud Storage objects,
           # and the local AI endpoints (#1985).
           if [ "$SHARD" = localai ]; then BROWSER_VARS+=,STORAGE,LOCALAI,EMBEDDINGS; fi
@@ -1273,32 +1289,11 @@ jobs:
           . scripts/compat-shards.sh
           # What the restarted instance needs before its tests (#1985).
           compat_browser_prepare "$SHARD"
-          RUN_SHARD_TESTS=$COMPAT_BROWSER_RUN_SHARD_TESTS
-          CROSSSERVICE_SHARD_TESTS=$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS
-          EMULATORS_SHARD_TESTS=$COMPAT_BROWSER_EMULATORS_SHARD_TESTS
-          MEMORYSTORE_SHARD_TESTS=$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS
-          SQL_SHARD_TESTS=$COMPAT_BROWSER_SQL_SHARD_TESTS
-          SERVED_SHARD_TESTS=$COMPAT_BROWSER_SERVED_SHARD_TESTS
-          SERVED_ONLY_TESTS=$COMPAT_BROWSER_SERVED_ONLY_TESTS
-          LOCALAI_SHARD_TESTS=$COMPAT_BROWSER_LOCALAI_SHARD_TESTS
-          NEVER_TESTS=$COMPAT_BROWSER_NEVER_TESTS
-          case "$SHARD" in
-            # The localai shard's tests are kept out of run, whose pattern
-            # (TestSpeech*) names one of them: its transcription needs the
-            # local models only that shard starts.
-            # And the run instance's tests crossservice runs are kept out of run.
-            run) SELECT=(-run "$RUN_SHARD_TESTS" -skip "$CROSSSERVICE_SHARD_TESTS|$LOCALAI_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS") ;;
-            crossservice) SELECT=(-run "$CROSSSERVICE_SHARD_TESTS" -skip "$LOCALAI_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -E "$CROSSSERVICE_SHARD_TESTS") ;;
-            emulators) SELECT=(-run "$EMULATORS_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$EMULATORS_SHARD_TESTS") ;;
-            memorystore) SELECT=(-run "$MEMORYSTORE_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$MEMORYSTORE_SHARD_TESTS") ;;
-            sql) SELECT=(-run "$SQL_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$SQL_SHARD_TESTS") ;;
-            served) SELECT=(-run "$SERVED_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$SERVED_SHARD_TESTS") ;;
-            localai) SELECT=(-run "$LOCALAI_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$LOCALAI_SHARD_TESTS") ;;
-            *) SELECT=(-skip "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$MEMORYSTORE_SHARD_TESTS|$SQL_SHARD_TESTS|$SERVED_ONLY_TESTS|$LOCALAI_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$MEMORYSTORE_SHARD_TESTS|$SQL_SHARD_TESTS|$SERVED_ONLY_TESTS|$LOCALAI_SHARD_TESTS") ;;
-          esac
+          # Each shard's -run and -skip patterns (#2229's vpcvms among them),
+          # from compat_browser_select, which verify-local.sh calls too.
+          compat_browser_select "$SHARD"
+          SELECT=(-skip "$BROWSER_SKIP"); [ -z "$BROWSER_RUN" ] || SELECT+=(-run "$BROWSER_RUN")
           rc=0
-          NOT=$NEVER_TESTS; [ "$SHARD" = localai ] || NOT="$LOCALAI_SHARD_TESTS|$NEVER_TESTS"
-          if [ "$SHARD" = run ]; then NOT="$CROSSSERVICE_SHARD_TESTS|$NOT"; fi
           # 10m, and 20m in served, whose test makes a Kubernetes Engine
           # cluster and node pool, real kind nodes, through the pages (#1913,
           # #1925): about a minute on a laptop, several on a runner. And 20m
@@ -1326,9 +1321,14 @@ jobs:
           # suite took 1,930 s and 2,145 s) about a quarter of an hour from it.
           # And 30m in sql since AlloyDB's pages joined it (#2191): their two
           # tests start four PostgreSQL servers, a minute or so each.
-          BROWSER_TIMEOUT=10m; case "$SHARD" in served) BROWSER_TIMEOUT=20m ;; run|crossservice|storage|sql) BROWSER_TIMEOUT=30m ;; esac
+          # And 30m in vpcvms, whose 43 Compute Engine and VPC console tests
+          # (Landing 168) make VMs, subnets, routers and load balancers
+          # through the pages beside its compat suite's 766 s.
+          # served's GKE browser tests take about 2 minutes each, and its
+          # suite reached 20m (main run 45477746718), so it gets 30m too.
+          BROWSER_TIMEOUT=10m; case "$SHARD" in served|run|crossservice|storage|sql|vpcvms) BROWSER_TIMEOUT=30m ;; esac
           go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
-          for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}" | grep -vE "$NOT"); do
+          for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | grep -E "${BROWSER_RUN:-^Test}" | grep -vE "$BROWSER_SKIP"); do
             grep -q -- "^--- PASS: $t (" browser.log ||
               { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" browser.log || echo 'no result')"; rc=1; }
           done
@@ -1337,7 +1337,7 @@ jobs:
           echo "== browser ($SHARD): $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai')
+        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai')
         with:
           name: browser-screenshots-${{ matrix.shard }}
           path: |
@@ -1408,7 +1408,7 @@ jobs:
         run: |
           go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > all.txt
           missing=
-          for shard in storage served gke run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
+          for shard in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
             d=logs/compat-log-$shard
             [ -d "$d" ] || { echo "no logs from the $shard shard"; missing=1; continue; }
             # Top-level results only; a subtest's line is indented.
@@ -1455,8 +1455,14 @@ jobs:
           # apache/spark image with Google's connector from Maven Central,
           # on an --internal Docker network: CLOUDBURROW_TEST_SPARK, run
           # nightly by nightly-sql-ephemeral.yml's spark job (the spark
-          # shard of scripts/compat-shards.sh) and locally.
-          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|ModelGardenDeploysHuggingFaceModels|ModelGardenDeploysOnHuggingFacePyTorchInference|ModelGardenDeploysAnONNXModel|ModelGardenDeploysAnMLXModel|ModelGardenDeploysAGGUFModelOnTheAppleGPU|ModelGardenDeploysAnMLXModelOnTheAppleGPU|GenerateContentOnTheAppleGPU|CloudSQLServerInstance|BigQuerySparkStoredProcedures|BqSparkStoredProcedure|BigQuerySparkProcedureRuntimesAndTypes|BigQuerySparkProcedureContainerImage|BigQuerySparkProcedureInvoker|BigQuerySparkProcedureStagingAndCMEK)$'
+          # shard of scripts/compat-shards.sh) and locally. So do the
+          # Dataproc tests (#2162, #2234), which that job runs too. #2245:
+          # twelve tests from Landing 168 have no shard yet whose instance
+          # gives them what they need (Compute Engine VMs together with
+          # Cloud Run, Cloud Storage, Resource Manager or IAM enforcement,
+          # or the pipeline task image); they run locally, and each leaves
+          # this list once a shard runs it.
+          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|ModelGardenDeploysHuggingFaceModels|ModelGardenDeploysOnHuggingFacePyTorchInference|ModelGardenDeploysAnONNXModel|ModelGardenDeploysAnMLXModel|ModelGardenDeploysAGGUFModelOnTheAppleGPU|ModelGardenDeploysAnMLXModelOnTheAppleGPU|GenerateContentOnTheAppleGPU|CloudSQLServerInstance|BigQuerySparkStoredProcedures|BqSparkStoredProcedure|BigQuerySparkProcedureRuntimesAndTypes|BigQuerySparkProcedureContainerImage|BigQuerySparkProcedureInvoker|BigQuerySparkProcedureStagingAndCMEK|Dataproc[A-Za-z0-9_]*|GcloudDataproc|CloudNATTranslatesVMTraffic2140|CloudNATEndpointIndependentMappingAndDynamicPorts2140|SharedVPCThroughTheGoClient2140|SharedVPCIndividualSubnetsThroughTheGoClient2140|RunVPCEgressThroughTheGoClient2140|RunReachesVMsThroughConnectorsAndDirectVPCEgress2140|ComputeImageImportFromCloudStorageThroughTheGoClient|ComputeImageImportFromAVirtualDiskThroughTheGoClient|VMAccessScopesLimitTokens2179|VertexAIPipelineJobs|VertexAIPipelineSchedules|IAMEnforcementVertexAIRunIdentity)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1

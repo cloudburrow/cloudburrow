@@ -367,7 +367,7 @@ func (c *Cluster) Delete(ctx context.Context) error {
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrAbsent, c.opts.Name)
 	}
-	if _, err := c.runner.Run(ctx, "kind", "delete", "cluster", "--name", c.opts.Name); err != nil {
+	if err := c.deleteKind(ctx); err != nil {
 		return fmt.Errorf("delete cluster %s: %w", c.opts.Name, err)
 	}
 	// Remove only our own kubeconfig file.

@@ -61,11 +61,16 @@ func TestNATGatewaysTranslateTheirVMs(t *testing.T) {
 		t.Fatalf("gateways: %+v", gws)
 	}
 	g := gws[0]
+	// The VMs' insert operations still write their resources (status,
+	// lastStartTimestamp) in the background, so read them under s.mu.
+	s.mu.Lock()
 	sub := s.res["projects/"+p+"/regions/"+region+"/subnetworks/default"]
-	if g.IP != str(sub, "gatewayAddress") || g.Pod != "" || !g.Log || g.LogFilter != "ALL" || len(g.NatIPs) != 1 || len(g.VMs) != 2 {
+	gatewayAddress := str(sub, "gatewayAddress")
+	ipA, ipB := str(sliceOf(a["networkInterfaces"])[0].(map[string]any), "networkIP"), str(sliceOf(b["networkInterfaces"])[0].(map[string]any), "networkIP")
+	s.mu.Unlock()
+	if g.IP != gatewayAddress || g.Pod != "" || !g.Log || g.LogFilter != "ALL" || len(g.NatIPs) != 1 || len(g.VMs) != 2 {
 		t.Fatalf("gateway: %+v", g)
 	}
-	ipA, ipB := str(sliceOf(a["networkInterfaces"])[0].(map[string]any), "networkIP"), str(sliceOf(b["networkInterfaces"])[0].(map[string]any), "networkIP")
 	if v := g.VMs[0]; v.IP != ipA || v.NatIP != g.NatIPs[0] || v.PortLo != 1024 || v.PortHi != 1087 {
 		t.Fatalf("a's ports: %+v", v)
 	}

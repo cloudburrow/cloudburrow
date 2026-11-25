@@ -139,6 +139,18 @@ func (c *Cluster) setupLake(ctx context.Context) error {
 // (metastore.catalog.servlet.port).
 const icebergRESTPort = "9001"
 
+// icebergRESTCoreSite is the Iceberg REST catalog's core-site.xml: the
+// directories and files it creates in the shared warehouse writable to
+// the cluster's Spark user.
+const icebergRESTCoreSite = `<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <property>
+    <name>fs.permissions.umask-mode</name>
+    <value>000</value>
+  </property>
+</configuration>
+`
+
 // icebergREST says whether the cluster's ICEBERG component has image
 // 3.0's Iceberg REST catalog.
 func (c *Cluster) icebergREST() bool {
@@ -157,7 +169,21 @@ func (c *Cluster) startIcebergREST(ctx context.Context, image string) error {
 		return err
 	}
 	_ = os.Chmod(filepath.Join(c.dir, "warehouse", "iceberg"), 0o777)
+	// The catalog (the image's hive user) creates each namespace's and
+	// table's directories, and the Spark drivers and executors (another
+	// user) write the table's data and manifests into them: on a Linux
+	// host's bind mount, Hadoop's default umask (022) would leave them
+	// unwritable to Spark. The image's HIVE_CUSTOM_CONF_DIR core-site.xml
+	// sets the catalog's fs.permissions.umask-mode to 000.
+	conf := filepath.Join(c.dir, "iceberg-rest-conf")
+	if err := os.MkdirAll(conf, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(conf, "core-site.xml"), []byte(icebergRESTCoreSite), 0o644); err != nil {
+		return err
+	}
 	if err := c.runComponent(ctx, "iceberg-rest", "", "-v", filepath.Join(c.dir, "warehouse")+":/cb-warehouse",
+		"-v", conf+":/cb/iceberg-rest-conf:ro", "-e", "HIVE_CUSTOM_CONF_DIR=/cb/iceberg-rest-conf",
 		"-e", "DEFAULT_FS=file://", "-e", "HIVE_WAREHOUSE_PATH=/cb-warehouse/iceberg", "-e", "METASTORE_PORT=9084",
 		"-e", "SERVICE_OPTS=-Xmx512m -Dhive.metastore.warehouse.dir=file:///cb-warehouse/iceberg -Dhive.metastore.warehouse.external.dir=file:///cb-warehouse/iceberg", image); err != nil {
 		return err
