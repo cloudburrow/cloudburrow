@@ -172,8 +172,8 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_ONNX` | set by hand (`1`) when the instance is a `make build-onnx` binary started with `ONNXRUNTIME_LIB` set | `TestBigQueryMLImportedONNXModel` (#1711, BigQuery ML's imported ONNX models, with `CLOUDBURROW_TEST_STORAGE`); without it, `TestBigQueryMLONNXNeedsTheOnnxBuild` checks the default build's 501 |
 | `CLOUDBURROW_TEST_SPARK` | set by hand (`1`), or by the spark shard of scripts/compat-shards.sh, on a host whose Docker may pull the pinned `apache/spark` images (about 1.5 GB each, one per Spark of the runtime versions) and fetch Google's BigQuery connectors for Spark from Maven Central | `TestBigQuerySparkStoredProcedures`, `TestBqSparkStoredProcedure`, `TestBigQuerySparkProcedureRuntimesAndTypes`, `TestBigQuerySparkProcedureContainerImage` (with `CLOUDBURROW_TEST_RUN`, whose port serves Artifact Registry) and `TestBigQuerySparkProcedureInvoker` (with `CLOUDBURROW_TEST_METADATA` and Resource Manager) (#2104, BigQuery's stored procedures for Apache Spark, with `CLOUDBURROW_TEST_BIGQUERY`, `CLOUDBURROW_TEST_STORAGE` and `CLOUDBURROW_TEST_LOGGING`); set nightly by nightly-sql-ephemeral.yml's spark job, and never in ci.yml, whose `never` list names them |
 | `CLOUDBURROW_TEST_DOWNLOADS` | set by hand (`1`) to let tests download test data that is not cached yet; not an instance's | `TestEmbedContentEmbedsAFullParametricStereoTrackThroughThePredictionClient` (#1754, with `CLOUDBURROW_TEST_EMBEDDINGS` and `CLOUDBURROW_TEST_CONSOLE`, as the other EmbedContent tests): it reads ISO/IEC 14496-26's `al_sbr_ps_06.mp4` and `al_sbr_ps_06_ur.wav` through `internal/isoconformance`, which fetches them (about 3 MB, by HTTP range requests out of ISO's zips, pinned by SHA-256 and ISO's MD5) into the user's cache directory, never the repository; without the variable a file not cached yet skips the test |
-| `CLOUDBURROW_TEST_GCLOUD` | `--gcloud`, else `gcloud` on PATH | the gcloud and gsutil tests |
-| `CLOUDBURROW_TEST_TOFU` | `--tofu`, else `tofu` on PATH | the `TestTofu*` tests |
+| `CLOUDBURROW_TEST_GCLOUD` | `--gcloud`, else `gcloud` on PATH | the gcloud, gsutil and bq tests, which then fail rather than skip without the tools container; the gcloud that runs is always the tools image's (#2174) |
+| `CLOUDBURROW_TEST_TOFU` | `--tofu`, else `tofu` on PATH | the `TestTofu*` tests, which then fail rather than skip without the tools container; the tofu that runs is the tools image's (#2174) |
 
 Not set by the script, because no instance has a value for them: each is a test mode or a
 fixture a job makes for itself. `test/repo` fails when a variable in `test/compat` is in
@@ -213,15 +213,61 @@ The cluster name is needed to `kind load` the fixture image into **CloudBurrow's
 cluster, and the kubeconfig to port-forward the Knative gateway — CloudBurrow does not
 publish it on a host port. Both are skips, not failures, when unset.
 
-The gcloud, gsutil and bq tests run the gcloud named by `CLOUDBURROW_TEST_GCLOUD`, which must
-then exist, and the gsutil and bq beside it, or else the ones on PATH, and skip when there are
-none. CI
-sets it to the Google Cloud CLI release it installs, 593.0.0, whose archive checksum
-dependencies.json records. The Terraform and OpenTofu modules require `hashicorp/google`
-exactly, and each test copies `testdata/terraform/.terraform.lock.hcl` into its module before
-init, so a provider package that matches no locked hash fails init. Every one of these tests
-logs `gcloud version`, `gsutil version`, `bq version`, or `terraform version -json`
-(`tofu version -json`).
+### gcloud and Terraform run behind a network-layer egress block (#2174)
+
+Every gcloud, gsutil, bq, docker-credential-gcloud, Terraform and OpenTofu command the
+tests run, runs in the **tools container** (`toolscontainer_test.go`), never on the host:
+
+- **The image** (`testdata/tools/Dockerfile`) is Google's `google/cloud-sdk:593.0.0-slim`, by
+  digest, with Terraform 1.16.6, OpenTofu 1.12.6, and the `hashicorp/google` and
+  `google-beta` 8.12.0 providers in a filesystem mirror. Each download is checked against a
+  pinned SHA-256 at build time. The image's Terraform configuration names only that
+  mirror, so `init` never reaches a registry. The image is linux/amd64, the one platform
+  Google publishes, and runs emulated on an arm64 host.
+- **The network** is a `docker network create --internal` network, with no route out. The
+  test checks that Docker reports it as internal before any tool runs.
+  - The one other container on it is a relay, which forwards to a listener in the test
+    process. That listener dials only the host's loopback, and only for a connection that
+    carries the run's token.
+  - In the tools container, the nat table (`testdata/tools/init.sh`) does four things:
+    - it carries every TCP connection to a loopback address to the same port on the
+      host's loopback, where the instance and the tests' own servers listen;
+    - it answers every DNS query with 198.18.0.1, which is routed nowhere. That covers
+      `*.googleapis.com`, `*.google.com` and `metadata.google.internal`;
+    - it sends every other connection or datagram to the sink, which logs it and
+      refuses it (`testdata/egress/sink`);
+    - it refuses IPv6.
+  - Each logged attempt is an **escape**. The test whose tool made it fails, and so does
+    the run, at the end.
+- **The shim** (`testdata/tools/shim`) is what `PATH` names `gcloud`, `terraform` and the
+  rest. `TestMain` puts it first on `PATH`, before any test runs. It runs the tool with
+  `docker exec`, with the caller's working directory, environment and uid.
+  - Only the temporary directory (read-write), the repository, and the instance's state
+    directory, fixture and kubeconfig are mounted. Each is mounted at its own path.
+  - The shim refuses a path outside those mounts, and any path under
+    `~/.config/gcloud`. Until a test has started the container, it runs nothing.
+- **It fails closed.** Without Docker, or without an internal network, these tests skip and
+  give the reason. They fail instead when `CLOUDBURROW_TEST_GCLOUD` or
+  `CLOUDBURROW_TEST_TOFU` is set, as CI sets them. A tool is never run on the host.
+- **The proxy guards stay as a second layer.** `egressGuard` and `noGoogleEgress` still set
+  the proxy variables. Their proxies listen on the host's loopback, which the relay reaches.
+
+`TestToolsContainerBlocksGoogleAtTheNetworkLayer` is the self-test. It runs on a stack of its
+own, and checks these things:
+
+- a bare container on the internal network cannot reach 192.0.2.1 or 169.254.169.254, and
+  cannot resolve `storage.googleapis.com`;
+- in the tools container, with no proxy variable set, curl to `https://storage.googleapis.com`,
+  `http://169.254.169.254` and `http://metadata.google.internal` fails, and so does gcloud
+  with no endpoint override. Each attempt is logged as an escape;
+- the relay still reaches a server on the host's loopback.
+
+None of these requests leaves the machine.
+
+The Terraform and OpenTofu modules require `hashicorp/google` exactly. Each test copies
+`testdata/terraform/.terraform.lock.hcl` into its module before init, so a provider package
+that matches no locked hash fails init. Every one of these tests logs `gcloud version`,
+`gsutil version`, `bq version`, or `terraform version -json` (`tofu version -json`).
 
 `TestCloudRunRevisionReachesStorageAndPubSubWithNoClientOptions` needs Cloud Run, Storage and
 Pub/Sub in one instance. It reads `CLOUDBURROW_TEST_RUN_STORAGE` and `CLOUDBURROW_TEST_RUN_PUBSUB`
@@ -240,9 +286,8 @@ instance without Cloud Run, and needs `CLOUDBURROW_TEST_BIGQUERY`, `CLOUDBURROW_
 `CLOUDBURROW_TEST_KUBECONFIG` and `CLOUDBURROW_TEST_CLUSTER`, with docker, kind and go to build the
 env probe; it skips where Cloud Run is enabled, whose tests cover it.
 
-The `TestTofu*` tests run `cloudburrow terraform --binary tofu`. They use the OpenTofu binary
-named by `CLOUDBURROW_TEST_TOFU`, which must then exist, or else `tofu` on PATH, and skip when
-there is neither. CI's storage shard sets the variable.
+The `TestTofu*` tests run `cloudburrow terraform --binary tofu`, with the tools image's
+OpenTofu. CI's storage shard sets `CLOUDBURROW_TEST_TOFU`, so they fail there without it.
 
 `TestFunctionsFrameworkBuiltWithBuildpacks` (#678) runs only with
 `CLOUDBURROW_TEST_FUNCTIONS=1`, and then needs `CLOUDBURROW_TEST_CLUSTER`,

@@ -29,7 +29,15 @@ func TestMain(m *testing.M) {
 	// An instance that enforces IAM: Cloud Run services are invoked as
 	// the instance's own account (ownerinvoke1879_test.go).
 	useOwnerInvokeTokens()
-	os.Exit(m.Run())
+	// gcloud and Terraform run only in the tools container, on an internal
+	// network (toolscontainer_test.go, #2174): PATH names the shim first.
+	if f := flag.Lookup("test.list"); f == nil || f.Value.String() == "" {
+		if err := setupToolShims(); err != nil {
+			fmt.Fprintf(os.Stderr, "compat: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	os.Exit(teardownTools(m.Run()))
 }
 
 // cliArgs are the flags naming the harness's instance, for every test that

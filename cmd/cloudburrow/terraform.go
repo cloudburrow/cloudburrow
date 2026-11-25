@@ -901,6 +901,7 @@ func runTerraform(args []string, stdout, stderr io.Writer) error {
 	// locally (#1975); the environment carries those the provider reads
 	// from one, after the user's own, so these win.
 	env := append(os.Environ(), terraformRefusalEnv(cfg)...)
+	env = append(env, terraformMetadataEnv(cfg)...)
 	if h := bigtableHost(cfg); h != "" {
 		env = append(env, "BIGTABLE_EMULATOR_HOST="+h)
 	}
@@ -945,4 +946,17 @@ func runTerraform(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 	}
+}
+
+// terraformMetadataEnv points the provider's metadata lookups at this
+// instance's metadata server, as `cloudburrow env` does for every client
+// (#2038). Without them the provider's Go auth library probed
+// metadata.google.internal and 169.254.169.254 on every run, which the
+// compat tests' tools container caught at the network layer (#2174).
+func terraformMetadataEnv(cfg config.Config) []string {
+	if cfg.Endpoints.Metadata == 0 {
+		return nil
+	}
+	addr := net.JoinHostPort(cfg.BindAddress, fmt.Sprint(cfg.Endpoints.Metadata))
+	return []string{"GCE_METADATA_HOST=" + addr, "GCE_METADATA_ROOT=" + addr, "GCE_METADATA_IP=" + addr}
 }

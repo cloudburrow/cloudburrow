@@ -3975,6 +3975,31 @@
         "notes": "Multi-arch OCI index, resolved 2026-11-20 with docker buildx imagetools inspect.",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect node:24.11.1-bookworm-slim`."
       },
+      "compatToolsBase": {
+        "$comment": "test/compat/testdata/tools/Dockerfile builds FROM this digest: the tools container (#2174), where every gcloud, gsutil, bq, Terraform and OpenTofu command of the compat tests runs, on an --internal Docker network. The build adds Terraform 1.16.6 (releases.hashicorp.com, sha256 38034b38d03096399a7a1264a14561a8029b2b496fd1f169452656e53968f1b7, from its SHA256SUMS), OpenTofu 1.12.6 (sha256 50a6106fa4de523d09c87af85f3db1dd47535fc005727fdca6852146476b88ec) and, into a filesystem mirror, hashicorp/google 8.12.0 for Terraform (eddf30f5..., a zh: hash of testdata/terraform/.terraform.lock.hcl) and OpenTofu (3d9eee56..., likewise) and hashicorp/google-beta 8.12.0 (e40ea7bc09cee810da2fe997dbb126916f23c86413234624dd46da1aa9c2cbcf, from its SHA256SUMS), each checked against its pinned SHA-256.",
+        "image": "google/cloud-sdk:593.0.0-slim",
+        "digest": "sha256:e8394c66f4f66336af311343ff9a84c84521f8c1113ebc8abfe98bab9a155099",
+        "includes": {
+          "gcloud": "593.0.0",
+          "alpha": "2026.11.06",
+          "beta": "2026.11.06",
+          "gsutil": "5.38",
+          "bq": "2.1.42",
+          "terraform": "1.16.6",
+          "tofu": "1.12.6"
+        },
+        "platforms": [
+          "linux/amd64"
+        ],
+        "license": "google-cloud-cli-terms (the Cloud SDK); BUSL-1.1 (Terraform, run unmodified as a test tool, never distributed); MPL-2.0 (OpenTofu and the providers)",
+        "redistribution": "not published: built locally by the compat test only",
+        "scope": "test-only",
+        "usedBy": "test/compat/toolscontainer_test.go (#2174), through test/compat/testdata/tools/shim on PATH",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "notes": "Google publishes the 593.0.0 tags for linux/amd64 only (a single manifest, not an index; checked 2026-11-24 with docker buildx imagetools inspect), so the image is built and run as linux/amd64 everywhere. It carries alpha and beta, so no `gcloud components install` reaches dl.google.com.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect google/cloud-sdk:<version>-slim` when the gcloud pin moves."
+      },
       "alloydbAuthProxy": {
         "$comment": "Google's AlloyDB Auth Proxy, downloaded by test/compat/testdata/alloydbconnectors/Dockerfile and checked against the SHA-256 its release lists, for the daemon's architecture.",
         "version": "v1.18.0",

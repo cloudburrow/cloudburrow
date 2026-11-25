@@ -29,25 +29,17 @@ const (
 	EnvCLIArgs = "CLOUDBURROW_TEST_CLI_ARGS"
 )
 
-// EnvTofu names the OpenTofu binary the --binary tofu tests run (#719). CI's
-// storage shard sets it, so a missing tofu fails there rather than skipping.
+// EnvTofu, when set, says the run requires OpenTofu for the --binary tofu
+// tests (#719): CI's storage shard sets it, so a missing tools container
+// fails there rather than skipping. The tofu that runs is the tools image's
+// (#2174).
 const EnvTofu = "CLOUDBURROW_TEST_TOFU"
 
-// tofuBinary is the OpenTofu binary for a --binary tofu test: EnvTofu when
-// set, which must then resolve, otherwise tofu from PATH. It skips when
-// neither is there.
+// tofuBinary is the name `cloudburrow terraform --binary` takes for
+// OpenTofu: PATH's shim, which runs the tools image's tofu (toolBinary).
 func tofuBinary(t *testing.T) string {
 	t.Helper()
-	if v := os.Getenv(EnvTofu); v != "" {
-		path, err := exec.LookPath(v)
-		if err != nil {
-			t.Fatalf("%s=%s: %v", EnvTofu, v, err)
-		}
-		return path
-	}
-	if _, err := exec.LookPath("tofu"); err != nil {
-		t.Skipf("tofu is not on PATH and %s is not set", EnvTofu)
-	}
+	toolBinary(t, "tofu")
 	return "tofu"
 }
 
@@ -71,9 +63,7 @@ func TestTofuAppliesAndDestroysThroughTheWrapper(t *testing.T) {
 
 func testWrapperAppliesAndDestroys(t *testing.T, binary string) {
 	h := New(t)
-	if _, err := exec.LookPath(binary); err != nil {
-		t.Skipf("%s is not on PATH", binary)
-	}
+	toolBinary(t, binary) // in the tools container, never on the host (#2174)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)

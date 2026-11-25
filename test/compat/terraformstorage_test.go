@@ -36,9 +36,7 @@ func newTFModule(t *testing.T) *tfModule { return newTFModuleWith(t, "terraform"
 // newTFModuleWith is newTFModule for another binary, such as tofu.
 func newTFModuleWith(t *testing.T, binary string) *tfModule {
 	t.Helper()
-	if _, err := exec.LookPath(binary); err != nil {
-		t.Skipf("%s is not on PATH", binary)
-	}
+	toolBinary(t, binary) // in the tools container, never on the host (#2174)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
