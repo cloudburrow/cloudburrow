@@ -96,6 +96,10 @@ type Options struct {
 	// UpdateEvery is how often a managed instance group's PROACTIVE update
 	// takes its next step (#2139); 2s when zero.
 	UpdateEvery time.Duration
+	// MIGRetryBase is the backoff before a managed instance group's
+	// second retry of a VM it failed to make (#2220, migretry.go),
+	// doubling to a minute; 5s when zero.
+	MIGRetryBase time.Duration
 	// LB reaches load balancers' backends (#2153, lbplane.go); nil
 	// reaches only those this package can itself.
 	LB LBBackends
@@ -478,6 +482,19 @@ func newID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	return strconv.FormatUint(binary.BigEndian.Uint64(b[:])>>1, 10)
+}
+
+// sameFingerprint is whether a supplied fingerprint is cur. A fingerprint
+// is bytes (format "byte" in the discovery document), so a client may
+// send it base64url-encoded, as gcloud's apitools does, rather than in the
+// standard encoding the server writes: '-' and '_' for '+' and '/'.
+func sameFingerprint(supplied, cur string) bool {
+	if supplied == cur {
+		return true
+	}
+	a, err1 := base64.URLEncoding.DecodeString(strings.NewReplacer("+", "-", "/", "_").Replace(supplied))
+	b, err2 := base64.StdEncoding.DecodeString(cur)
+	return err1 == nil && err2 == nil && string(a) == string(b)
 }
 
 func newFingerprint() string {

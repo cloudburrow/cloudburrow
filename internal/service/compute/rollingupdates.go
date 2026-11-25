@@ -236,8 +236,15 @@ func (s *Server) patchManagerLocked(c call, l igLoc, rel string, m obj) (obj, er
 			return nil, err
 		}
 	}
-	if len(listOf(b["autoHealingPolicies"])) > 0 {
-		return nil, unimplemented("autohealing is not served: health checks are not")
+	var healing []any
+	if _, ok := b["autoHealingPolicies"]; ok {
+		// Autohealing (#2225): the policy given replaces the group's; an
+		// empty list clears it.
+		h, err := s.checkAutoHealingPoliciesLocked(c.project, l.region, b["autoHealingPolicies"])
+		if err != nil {
+			return nil, err
+		}
+		healing = h
 	}
 	for _, f := range []string{"name", "zone", "region", "baseInstanceName", "instanceGroup"} {
 		if v, ok := b[f]; ok && v != nil && str(b, f) != "" && lastSeg(str(b, f)) != lastSeg(str(m, f)) {
@@ -329,6 +336,13 @@ func (s *Server) patchManagerLocked(c call, l igLoc, rel string, m obj) (obj, er
 		}
 	}
 	m["updatePolicy"] = norm(up)
+	if _, ok := b["autoHealingPolicies"]; ok {
+		if len(healing) == 0 {
+			delete(m, "autoHealingPolicies")
+		} else {
+			m["autoHealingPolicies"] = healing
+		}
+	}
 	m["fingerprint"] = newFingerprint()
 	if _, err := s.rollManagerLocked(l.project, rel, m); err != nil {
 		return nil, err
@@ -465,6 +479,11 @@ func (s *Server) refreshManagedLocked(mgr string, o obj, tpl string) {
 // settledLocked is whether every VM of a manager is RUNNING with no
 // operation of its own running.
 func (s *Server) settledLocked(rel string) bool {
+	for vm := range pendingOf(s.res[rel]) {
+		if _, made := s.res[vm]; !made {
+			return false // a VM the group failed to make, to retry (#2220)
+		}
+	}
 	prefix := rel[:strings.Index(rel, "/instanceGroupManagers/")]
 	prefix = prefix[:strings.LastIndex(prefix, "/")] // projects/P/zones or projects/P/regions
 	prefix = prefix[:strings.LastIndex(prefix, "/")] + "/zones/"
@@ -477,7 +496,7 @@ func (s *Server) settledLocked(rel string) bool {
 	}
 	for _, vm := range s.managedLocked(rel) {
 		o := s.res[vm]
-		if o == nil || o["_deleting"] == true || s.queued[vm] > 0 || str(o, "status") != stRunning {
+		if o == nil || o["_deleting"] == true || o["_drain"] != nil || s.queued[vm] > 0 || str(o, "status") != stRunning {
 			return false
 		}
 	}
@@ -585,7 +604,9 @@ func (s *Server) rollManagerLocked(project, rel string, m obj) (bool, error) {
 			replace = append(replace, vm)
 		}
 	}
-	budget := unav
+	// A VM its autohealing health check has yet to find HEALTHY is not
+	// available (#2225).
+	budget := max(0, unav-s.unhealthyYetLocked(rel, m))
 	for _, vm := range restart {
 		if budget == 0 {
 			break
@@ -625,14 +646,16 @@ func (s *Server) rollManagerLocked(project, rel string, m obj) (bool, error) {
 
 // addManagedVMLocked makes one more VM of a manager, beyond its size.
 func (s *Server) addManagedVMLocked(project, rel string, m obj) error {
-	have := s.liveManagedLocked(rel)
+	have := s.membersLocked(rel, m)
 	for {
 		name := str(m, "baseInstanceName") + "-" + randLower(4)
 		zone := s.nextZoneLocked(m, have)
-		if _, taken := s.res[zoneRel(project, zone, "instances", name)]; taken {
+		vm := zoneRel(project, zone, "instances", name)
+		if _, taken := s.res[vm]; taken || pendingEntry(m, vm) != nil {
 			continue
 		}
-		return s.insertManagedVMLocked(project, zone, rel, m, name)
+		s.createManagedLocked(project, rel, m, zone, name, s.newVMTemplateLocked(rel, m), "CREATING")
+		return nil
 	}
 }
 
@@ -700,7 +723,16 @@ func (s *Server) applyUpdatesLocked(c call, l igLoc, rel string, m obj) (obj, er
 func (s *Server) rollOnce() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	changed := false
+	// Retry the VMs groups failed to make (#2220).
+	changed := s.retryManagersLocked()
+	// Connection draining's ends (#2226).
+	if s.finishDrainsLocked() {
+		changed = true
+	}
+	// Autohealing (#2225).
+	if s.autohealLocked() {
+		changed = true
+	}
 	for k, m := range s.res {
 		if !strings.Contains(k, "/instanceGroupManagers/") {
 			continue

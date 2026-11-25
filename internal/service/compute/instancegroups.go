@@ -2,7 +2,6 @@ package compute
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
@@ -151,6 +150,7 @@ func (s *Server) instanceGroups(c call, l igLoc) (obj, error) {
 			return nil, invalid("Invalid value for field 'instanceGroup': '%s'. A managed instance group's instances are added and removed by its manager.", rel)
 		}
 		members := groupMembersLocked(g)
+		var removed []string
 		for i, e := range listOf(c.body["instances"]) {
 			im, _ := e.(map[string]any)
 			ir := Rel(str(im, "instance"), c.project)
@@ -173,9 +173,17 @@ func (s *Server) instanceGroups(c call, l igLoc) (obj, error) {
 				members = append(members, ir)
 				continue
 			}
+			if hasStr(members, ir) {
+				removed = append(removed, ir)
+			}
+		}
+		if len(removed) > 0 {
+			// Connection draining (#2226): a running member drains,
+			// staying a member until its timeout passes.
+			now := s.drainMembersLocked(rel, g, removed)
 			var keep []string
 			for _, m := range members {
-				if m != ir {
+				if !hasStr(now, m) {
 					keep = append(keep, m)
 				}
 			}
@@ -354,7 +362,8 @@ func (s *Server) instanceGroupManagers(c call, l igLoc) (obj, error) {
 	case n == 3 && post:
 		return s.insertManager(c, l)
 	}
-	if n < 4 || n > 5 || (n == 4 && !get && !del && c.method != http.MethodPatch) || (n == 5 && (!post || !servedManagerVerbs[p[4]])) {
+	if n < 4 || n > 5 || (n == 4 && !get && !del && c.method != http.MethodPatch) ||
+		(n == 5 && p[4] == "listErrors" && !get) || (n == 5 && p[4] != "listErrors" && (!post || !servedManagerVerbs[p[4]])) {
 		return nil, unimplemented("%s on instanceGroupManagers/%s is not served", c.method, strings.Join(p[3:], "/"))
 	}
 	rel := coll + "/" + p[3]
@@ -378,6 +387,8 @@ func (s *Server) instanceGroupManagers(c call, l igLoc) (obj, error) {
 	case n == 4 && c.method == http.MethodPatch:
 		// Versions and updatePolicy: rolling updates (rollingupdates.go).
 		return s.patchManagerLocked(c, l, rel, m)
+	case get && verb == "listErrors":
+		return s.listErrorsLocked(c, m)
 	case post && verb == "applyUpdatesToInstances":
 		return s.applyUpdatesLocked(c, l, rel, m)
 	case n == 4 && del:
@@ -388,7 +399,7 @@ func (s *Server) instanceGroupManagers(c call, l igLoc) (obj, error) {
 			}
 		}
 		for _, vm := range s.liveManagedLocked(rel) {
-			if err := s.deleteManagedLocked(c.project, vm); err != nil {
+			if err := s.deleteManagedNowLocked(c.project, vm); err != nil {
 				return nil, err
 			}
 		}
@@ -433,15 +444,34 @@ func (s *Server) instanceGroupManagers(c call, l igLoc) (obj, error) {
 		m["fingerprint"] = newFingerprint()
 		return s.done(c.project, l.scope, "setInstanceTemplate", rel, m["id"])
 	case post && verb == "listManagedInstances":
-		var items []obj
+		var items []any
 		for _, vm := range s.managedLocked(rel) {
 			o := s.res[vm]
-			items = append(items, obj{"instance": vm, "id": o["id"], "name": o["name"], "instanceStatus": str(o, "status"),
+			mi := obj{"instance": vm, "id": o["id"], "name": o["name"], "instanceStatus": str(o, "status"),
 				"currentAction": s.currentActionLocked(vm, o),
-				"version":       obj{"instanceTemplate": instanceTemplateOf(o)}})
+				"version":       obj{"instanceTemplate": instanceTemplateOf(o)}}
+			if la := lastAttemptOf(pendingEntry(m, vm)); la != nil {
+				mi["lastAttempt"] = la
+			}
+			if ih := s.instanceHealthLocked(m, vm); ih != nil {
+				mi["instanceHealth"] = ih
+			}
+			items = append(items, mi)
+		}
+		// The VMs the group has yet to make: no id or status while they
+		// do not exist, their last attempt's errors (#2220).
+		var pending []string
+		for vm := range pendingOf(m) {
+			if _, made := s.res[vm]; !made {
+				pending = append(pending, vm)
+			}
+		}
+		sort.Strings(pending)
+		for _, vm := range pending {
+			items = append(items, pendingManagedInstance(vm, pendingEntry(m, vm)))
 		}
 		if items == nil {
-			items = []obj{}
+			items = []any{}
 		}
 		return obj{"managedInstances": items}, nil
 	case post && (verb == "startInstances" || verb == "stopInstances" || verb == "suspendInstances" || verb == "resumeInstances"):
@@ -461,13 +491,18 @@ func (s *Server) instanceGroupManagers(c call, l igLoc) (obj, error) {
 		return s.done(c.project, l.scope, verb, rel, m["id"])
 	case post && (verb == "recreateInstances" || verb == "deleteInstances"):
 		targets, err := s.managedTargetsLocked(c, rel)
+		if verb == "deleteInstances" {
+			// A VM the group is still making can be deleted too: its
+			// creation stops (#2220).
+			targets, err = s.memberTargetsLocked(c, rel, m)
+		}
 		if err != nil {
 			return nil, err
 		}
 		for _, vm := range targets {
 			o := s.res[vm]
 			if verb == "deleteInstances" {
-				if err := s.deleteManagedLocked(c.project, vm); err != nil {
+				if err := s.removeMemberLocked(c.project, m, vm); err != nil {
 					return nil, err
 				}
 				continue
@@ -488,11 +523,20 @@ func (s *Server) instanceGroupManagers(c call, l igLoc) (obj, error) {
 	return nil, unimplemented("%s on instanceGroupManagers/%s is not served", c.method, strings.Join(p[3:], "/"))
 }
 
-// managedTargetsLocked are a manager verb's instances[], each the
+// managedTargetsLocked are a manager verb's instances[], each a VM of the
 // manager's.
 func (s *Server) managedTargetsLocked(c call, rel string) ([]string, error) {
+	return s.targetsInLocked(c, rel, s.liveManagedLocked(rel))
+}
+
+// memberTargetsLocked are a manager verb's instances[], each a VM of the
+// manager's or one it is still making.
+func (s *Server) memberTargetsLocked(c call, rel string, m obj) ([]string, error) {
+	return s.targetsInLocked(c, rel, s.membersLocked(rel, m))
+}
+
+func (s *Server) targetsInLocked(c call, rel string, live []string) ([]string, error) {
 	var targets []string
-	live := s.liveManagedLocked(rel)
 	for _, e := range strsAny(c.body["instances"]) {
 		ir := Rel(e, c.project)
 		if !hasStr(live, ir) {
@@ -506,12 +550,26 @@ func (s *Server) managedTargetsLocked(c call, rel string) ([]string, error) {
 	return targets, nil
 }
 
-// currentActionLocked is a managed VM's currentAction.
+// currentActionLocked is a managed VM's currentAction: VERIFYING during
+// its autohealing initial delay (#2225).
 func (s *Server) currentActionLocked(vm string, o obj) string {
+	a := s.baseActionLocked(vm, o)
+	if a == "NONE" && o["_ahVerifying"] == true {
+		return "VERIFYING"
+	}
+	return a
+}
+
+// baseActionLocked is a managed VM's currentAction, autohealing's
+// verification aside.
+func (s *Server) baseActionLocked(vm string, o obj) string {
 	if s.queued[vm] == 0 && s.res[vm] != nil {
 		delete(o, "_mgrAction")
 	}
 	switch {
+	case o["_drain"] != nil:
+		// Draining before its manager deletes or recreates it (#2226).
+		return str(drainOf(o), "action")
 	case o["_deleting"] == true:
 		return "DELETING"
 	case str(o, "_mgrAction") != "":
@@ -566,8 +624,9 @@ func (s *Server) insertManager(c call, l igLoc) (obj, error) {
 	if r := lastSeg(str(s.res[t], "region")); r != "" && r != l.region {
 		return nil, invalid("Invalid value for field 'resource.instanceTemplate': '%s'. A regional instance template makes VMs of its region only.", tref)
 	}
-	if _, ok := b["autoHealingPolicies"]; ok && len(listOf(b["autoHealingPolicies"])) > 0 {
-		return nil, unimplemented("autohealing is not served: health checks are not")
+	healing, err := s.checkAutoHealingPoliciesLocked(c.project, l.region, b["autoHealingPolicies"])
+	if err != nil {
+		return nil, err
 	}
 	base := str(b, "baseInstanceName")
 	if base == "" {
@@ -622,6 +681,9 @@ func (s *Server) insertManager(c call, l igLoc) (obj, error) {
 			return nil, err
 		}
 		m["resourcePolicies"] = obj{"workloadPolicy": wp}
+	}
+	if len(healing) > 0 {
+		m["autoHealingPolicies"] = healing
 	}
 	g := obj{"kind": "compute#instanceGroup", "id": newID(), "name": name, locKey: locVal, "selfLink": group,
 		"creationTimestamp": s.stamp(), "size": size, "fingerprint": newFingerprint(), "_manager": rel}
@@ -680,7 +742,7 @@ func (s *Server) nextZoneLocked(m obj, have []string) string {
 	zones := managerZones(m)
 	count := map[string]int{}
 	for _, vm := range have {
-		count[lastSeg(str(s.res[vm], "zone"))]++
+		count[zoneOfRel(vm)]++
 	}
 	if targetShapeOf(m) == "ANY_SINGLE_ZONE" {
 		for _, z := range zones {
@@ -699,17 +761,23 @@ func (s *Server) nextZoneLocked(m obj, have []string) string {
 	return best
 }
 
-// victimLocked is the VM a resize down deletes first: the newest, of the
-// zone with the most of the group's VMs for a regional group.
+// victimLocked is the VM a resize down deletes first: one the group has
+// not yet made, else the newest, of the zone with the most of the
+// group's VMs for a regional group.
 func (s *Server) victimLocked(m obj, have []string) string {
+	for _, vm := range have {
+		if _, made := s.res[vm]; !made {
+			return vm
+		}
+	}
 	count := map[string]int{}
 	for _, vm := range have {
-		count[lastSeg(str(s.res[vm], "zone"))]++
+		count[zoneOfRel(vm)]++
 	}
 	sorted := append([]string(nil), have...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		a, b := s.res[sorted[i]], s.res[sorted[j]]
-		if ca, cb := count[lastSeg(str(a, "zone"))], count[lastSeg(str(b, "zone"))]; ca != cb && str(m, "region") != "" {
+		if ca, cb := count[zoneOfRel(sorted[i])], count[zoneOfRel(sorted[j])]; ca != cb && str(m, "region") != "" {
 			return ca > cb
 		}
 		if ta, tb := str(a, "creationTimestamp"), str(b, "creationTimestamp"); ta != tb {
@@ -720,14 +788,10 @@ func (s *Server) victimLocked(m obj, have []string) string {
 	return sorted[0]
 }
 
-// insertManagedVMLocked makes one of a manager's VMs, named name, in zone,
-// from its current template.
-func (s *Server) insertManagedVMLocked(project, zone, rel string, m obj, name string) error {
-	return s.insertManagedVMFromLocked(project, zone, rel, m, name, s.newVMTemplateLocked(rel, m))
-}
-
-// insertManagedVMFromLocked makes one of a manager's VMs from template tpl.
-func (s *Server) insertManagedVMFromLocked(project, zone, rel string, m obj, name, tpl string) error {
+// insertManagedVMFromLocked starts making one of a manager's VMs from
+// template tpl; it returns the insert operation's URL. Callers go through
+// createManagedLocked, which retries a failed creation (#2220).
+func (s *Server) insertManagedVMFromLocked(project, zone, rel string, m obj, name, tpl string) (string, error) {
 	props, _ := s.res[tpl]["properties"].(map[string]any)
 	md, _ := deepCopy(props["metadata"]).(map[string]any)
 	if md == nil {
@@ -736,18 +800,40 @@ func (s *Server) insertManagedVMFromLocked(project, zone, rel string, m obj, nam
 	items := listOf(md["items"])
 	items = append(items, map[string]any{"key": "created-by", "value": rel}, map[string]any{"key": "instance-template", "value": tpl})
 	md["items"] = items
-	_, err := s.insertInstance(call{method: http.MethodPost, project: project, parts: []string{"zones", zone, "instances"},
+	op, err := s.insertInstance(call{method: http.MethodPost, project: project, parts: []string{"zones", zone, "instances"},
 		query: map[string][]string{"sourceInstanceTemplate": {tpl}}, body: obj{"name": name, "metadata": md}}, zone)
-	if err == nil {
-		if o := s.res[zoneRel(project, zone, "instances", name)]; o != nil {
-			mgrAction(o, "CREATING")
-		}
+	if err != nil {
+		return "", err
 	}
-	return err
+	if o := s.res[zoneRel(project, zone, "instances", name)]; o != nil {
+		mgrAction(o, "CREATING")
+	}
+	return str(op, "selfLink"), nil
 }
 
-// deleteManagedLocked deletes one of a manager's VMs.
+// removeMemberLocked deletes one of a manager's members: its VM, or, for
+// one not yet made, its pending creation.
+func (s *Server) removeMemberLocked(project string, m obj, vm string) error {
+	dropPendingLocked(m, vm)
+	if _, ok := s.res[vm]; !ok {
+		return nil
+	}
+	return s.deleteManagedLocked(project, vm)
+}
+
+// deleteManagedLocked deletes one of a manager's VMs, once it has drained
+// (#2226): DELETING meanwhile.
 func (s *Server) deleteManagedLocked(project, vm string) error {
+	o := s.res[vm]
+	if s.beginDrainLocked(vm, o, "DELETING", obj{"do": "delete"}) {
+		o["_deleting"] = true
+		return nil
+	}
+	return s.deleteManagedNowLocked(project, vm)
+}
+
+// deleteManagedNowLocked deletes one of a manager's VMs at once.
+func (s *Server) deleteManagedNowLocked(project, vm string) error {
 	o := s.res[vm]
 	if _, err := s.deleteInstance(project, "zones/"+lastSeg(str(o, "zone")), vm, o); err != nil {
 		return err
@@ -768,23 +854,23 @@ func (s *Server) reconcileManagerLocked(l igLoc, rel string, m obj, opType strin
 // resizeToLocked makes or deletes a manager's VMs until it has its
 // targetSize.
 func (s *Server) resizeToLocked(project, rel string, m obj) error {
-	have := s.liveManagedLocked(rel)
+	have := s.membersLocked(rel, m)
 	want := int(m["targetSize"].(float64))
 	for len(have) < want {
 		name := str(m, "baseInstanceName") + "-" + randLower(4)
 		zone := s.nextZoneLocked(m, have)
 		vmRel := zoneRel(project, zone, "instances", name)
-		if _, taken := s.res[vmRel]; taken {
+		if _, taken := s.res[vmRel]; taken || pendingEntry(m, vmRel) != nil {
 			continue
 		}
-		if err := s.insertManagedVMLocked(project, zone, rel, m, name); err != nil {
-			return err
-		}
+		// A creation that fails is retried (#2220), so the resize
+		// itself succeeds, as Google's does.
+		s.createManagedLocked(project, rel, m, zone, name, s.newVMTemplateLocked(rel, m), "CREATING")
 		have = append(have, vmRel)
 	}
 	for len(have) > want {
 		vm := s.victimLocked(m, have)
-		if err := s.deleteManagedLocked(project, vm); err != nil {
+		if err := s.removeMemberLocked(project, m, vm); err != nil {
 			return err
 		}
 		var keep []string
@@ -808,7 +894,8 @@ func (s *Server) refreshManagerLocked(m obj) {
 		"abandoning": 0.0, "creatingWithoutRetries": 0.0, "refreshing": 0.0, "resuming": 0.0, "starting": 0.0,
 		"stopping": 0.0, "suspending": 0.0}
 	key := map[string]string{"NONE": "none", "CREATING": "creating", "DELETING": "deleting", "RECREATING": "recreating",
-		"STARTING": "starting", "STOPPING": "stopping", "SUSPENDING": "suspending", "RESUMING": "resuming"}
+		"STARTING": "starting", "STOPPING": "stopping", "SUSPENDING": "suspending", "RESUMING": "resuming",
+		"VERIFYING": "verifying", "RESTARTING": "restarting", "REFRESHING": "refreshing", "ABANDONING": "abandoning"}
 	stable := true
 	rel := str(m, "selfLink")
 	vms := s.managedLocked(rel)
@@ -822,8 +909,23 @@ func (s *Server) refreshManagerLocked(m obj) {
 		if a != "DELETING" {
 			live++
 		}
-		k := key[a]
+		if k := key[a]; k != "" {
+			acts[k] = acts[k].(float64) + 1
+		}
+	}
+	// The VMs it is still making, or re-making (#2220).
+	for vm, v := range pendingOf(m) {
+		if _, made := s.res[vm]; made {
+			continue
+		}
+		e, _ := v.(map[string]any)
+		k := key[str(e, "action")]
+		if k == "" {
+			k = "creating"
+		}
 		acts[k] = acts[k].(float64) + 1
+		stable = false
+		live++
 	}
 	if float64(live) != m["targetSize"] {
 		stable = false
@@ -859,6 +961,15 @@ func (s *Server) recreateManagedLocked(project, mgr string, m obj, vm string, o 
 // recreateManagedFromLocked re-creates a managed VM from template tpl, by
 // the same name.
 func (s *Server) recreateManagedFromLocked(project, mgr string, m obj, vm string, o obj, tpl string) error {
+	if s.beginDrainLocked(vm, o, "RECREATING", obj{"do": "recreate", "template": tpl}) {
+		return nil // once it has drained (#2226)
+	}
+	return s.recreateManagedFromNowLocked(project, mgr, m, vm, o, tpl)
+}
+
+// recreateManagedFromNowLocked re-creates a managed VM from template tpl
+// at once.
+func (s *Server) recreateManagedFromNowLocked(project, mgr string, m obj, vm string, o obj, tpl string) error {
 	if instanceTemplateOf(o) == tpl {
 		if _, err := s.recreateLocked(project, "zones/"+lastSeg(str(o, "zone")), vm, o); err != nil {
 			return err
@@ -866,6 +977,22 @@ func (s *Server) recreateManagedFromLocked(project, mgr string, m obj, vm string
 		mgrAction(o, "RECREATING")
 		return nil
 	}
+	return s.remakeManagedNowLocked(project, mgr, m, vm, o, tpl)
+}
+
+// remakeManagedLocked deletes a managed VM and makes it again, by the same
+// name, from template tpl: a pending member, listed RECREATING, until it is
+// made (its creation retried while it fails, #2220). Autohealing recreates
+// VMs this way (#2225).
+func (s *Server) remakeManagedLocked(project, mgr string, m obj, vm string, o obj, tpl string) error {
+	if s.beginDrainLocked(vm, o, "RECREATING", obj{"do": "remake", "template": tpl}) {
+		return nil // once it has drained (#2226)
+	}
+	return s.remakeManagedNowLocked(project, mgr, m, vm, o, tpl)
+}
+
+// remakeManagedNowLocked is remakeManagedLocked at once.
+func (s *Server) remakeManagedNowLocked(project, mgr string, m obj, vm string, o obj, tpl string) error {
 	zone, name := lastSeg(str(o, "zone")), str(o, "name")
 	op, err := s.deleteInstance(project, "zones/"+zone, vm, o)
 	if err != nil {
@@ -873,6 +1000,14 @@ func (s *Server) recreateManagedFromLocked(project, mgr string, m obj, vm string
 	}
 	mgrAction(o, "RECREATING")
 	opRel := str(op, "selfLink")
+	// The group is re-making it: a pending member until it is made
+	// (#2220), listed RECREATING.
+	if pendingEntry(m, vm) == nil {
+		if m["_pending"] == nil {
+			m["_pending"] = map[string]any{}
+		}
+		pendingOf(m)[vm] = map[string]any{"zone": zone, "name": name, "action": "RECREATING", "template": tpl, "inFlight": true}
+	}
 	// Until it is made again, the VM is pending (queued under its own
 	// name), so no loop takes the group for settled and short of a VM
 	// in between and makes one of a new name.
@@ -887,19 +1022,15 @@ func (s *Server) recreateManagedFromLocked(project, mgr string, m obj, vm string
 			}
 		}()
 		cur, ok := s.res[mgr]
-		if !ok {
+		if !ok || pendingEntry(cur, vm) == nil {
 			return
 		}
 		if _, taken := s.res[vm]; taken {
+			// Its deletion failed: the VM stays, and is no longer pending.
+			dropPendingLocked(cur, vm)
 			return
 		}
-		if err := s.insertManagedVMFromLocked(project, zone, mgr, cur, name, tpl); err != nil {
-			fmt.Printf("compute: recreating %s: %v\n", vm, err)
-			return
-		}
-		if n := s.res[vm]; n != nil {
-			mgrAction(n, "RECREATING")
-		}
+		s.createManagedLocked(project, mgr, cur, zone, name, tpl, "RECREATING")
 		_ = s.saveLocked()
 	}()
 	return nil

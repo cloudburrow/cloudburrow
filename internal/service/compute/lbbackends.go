@@ -179,8 +179,11 @@ func buildBackendService(s *Server, x lbCtx, b, old obj) (obj, error) {
 	} else if v, ok := num(b, "timeoutSec"); ok {
 		o["timeoutSec"] = v
 	}
-	cd := objOf(b["connectionDraining"])
-	o["connectionDraining"] = obj{"drainingTimeoutSec": numOr(cd, "drainingTimeoutSec", 0)}
+	cd, err := checkConnectionDraining(b)
+	if err != nil {
+		return nil, err
+	}
+	o["connectionDraining"] = cd
 	if err := s.buildPolicyFields(x, b, o, true); err != nil {
 		return nil, err
 	}

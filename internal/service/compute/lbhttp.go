@@ -437,7 +437,18 @@ func (t *lbTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, errNoHealthy
 		}
 		st.tried[ep.id] = true
-		resp, err := t.send(req, body, st, ep)
+		sreq, end := req, func() {}
+		if ep.kind == "vm" || ep.kind == "ip" {
+			// Tracked, so the end of a drain can cut it (#2226).
+			ctx, cancel := context.WithCancel(req.Context())
+			sreq, end = req.WithContext(ctx), t.s.lb.bal.track(ep.flightKey(), st.set.rel, cancel)
+		}
+		resp, err := t.send(sreq, body, st, ep)
+		if err != nil {
+			end()
+		} else {
+			resp.Body = &trackedBody{ReadCloser: resp.Body, end: end}
+		}
 		t.s.lb.bal.done(ep)
 		if err == nil {
 			t.s.lb.bal.recordORCA(ep, resp)

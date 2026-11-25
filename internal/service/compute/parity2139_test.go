@@ -244,6 +244,15 @@ func TestTemplatesMachineImagesAndGroups(t *testing.T) {
 		"scheduling": obj{"provisioningModel": "SPOT", "automaticRestart": true}}}); err == nil {
 		t.Error("a Spot template that restarts automatically was accepted")
 	}
+	// A template's numeric id in place of its name, as the Terraform
+	// provider reads it.
+	id := str(call("GET", "global/instanceTemplates/web", nil, nil), "id")
+	if byID := call("GET", "global/instanceTemplates/"+id, nil, nil); str(byID, "name") != "web" || str(byID, "id") != id {
+		t.Fatalf("the template by its id = %v", byID)
+	}
+	if _, err := s.Call("GET", "p2139", "global/instanceTemplates/12345", nil, nil); err == nil {
+		t.Error("an unknown template id was found")
+	}
 	call("POST", "zones/us-central1-a/instances", map[string][]string{"sourceInstanceTemplate": {"global/instanceTemplates/web"}}, obj{"name": "w1"})
 	w1 := call("GET", "zones/us-central1-a/instances/w1", nil, nil)
 	tags, _ := w1["tags"].(map[string]any)

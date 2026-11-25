@@ -405,7 +405,7 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		})
 	case post && verb == "setMetadata":
 		cur, _ := o["metadata"].(map[string]any)
-		if fp := str(c.body, "fingerprint"); fp != str(cur, "fingerprint") {
+		if fp := str(c.body, "fingerprint"); !sameFingerprint(fp, str(cur, "fingerprint")) {
 			return nil, errf(http.StatusPreconditionFailed, "conditionNotMet",
 				"Supplied fingerprint does not match current metadata fingerprint.")
 		}
@@ -423,7 +423,7 @@ func (s *Server) instances(c call, zone string) (obj, error) {
 		return s.setLabels(c.project, scope, rel, c.body)
 	case post && verb == "setTags":
 		cur, _ := o["tags"].(map[string]any)
-		if fp := str(c.body, "fingerprint"); fp != str(cur, "fingerprint") {
+		if fp := str(c.body, "fingerprint"); !sameFingerprint(fp, str(cur, "fingerprint")) {
 			return nil, errf(http.StatusPreconditionFailed, "conditionNotMet", "Supplied fingerprint does not match current tags fingerprint.")
 		}
 		o["tags"] = obj{"items": c.body["items"], "fingerprint": newFingerprint()}

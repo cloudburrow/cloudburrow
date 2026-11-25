@@ -37,19 +37,11 @@ func (s *Server) instanceTemplates(c call, scope string) (obj, error) {
 	rel := coll + "/" + p[base]
 	o, ok := s.res[rel]
 	if !ok {
-		// A template is also named by its numeric ID, as Google's API
-		// takes it (Terraform reads one by self_link_unique's uniqueId).
-		if id := p[base]; id != "" && strings.Trim(id, "0123456789") == "" {
-			for k, t := range s.res {
-				if strings.HasPrefix(k, coll+"/") && !strings.Contains(k[len(coll)+1:], "/") && str(t, "id") == id {
-					rel, o, ok = k, t, true
-					break
-				}
-			}
+		// Compute Engine takes a template's numeric id in place of its
+		// name, as the Terraform provider reads and deletes it by.
+		if rel, o, ok = s.byIDLocked(coll, p[base]); !ok {
+			return nil, notFound(coll + "/" + p[base])
 		}
-	}
-	if !ok {
-		return nil, notFound(rel)
 	}
 	switch c.method {
 	case http.MethodGet:
@@ -65,6 +57,19 @@ func (s *Server) instanceTemplates(c call, scope string) (obj, error) {
 		return s.done(c.project, scope, "delete", rel, o["id"])
 	}
 	return nil, unimplemented("%s on instanceTemplates/%s is not served", c.method, p[base])
+}
+
+// byIDLocked is the resource of coll whose numeric id is seg.
+func (s *Server) byIDLocked(coll, seg string) (string, obj, bool) {
+	if seg == "" || strings.Trim(seg, "0123456789") != "" {
+		return "", nil, false
+	}
+	for k, o := range s.res {
+		if strings.HasPrefix(k, coll+"/") && !strings.Contains(k[len(coll)+1:], "/") && str(o, "id") == seg {
+			return k, o, true
+		}
+	}
+	return "", nil, false
 }
 
 func (s *Server) insertTemplate(c call, scope, coll string) (obj, error) {

@@ -94,7 +94,12 @@ func buildHealthCheck(s *Server, x lbCtx, b, old obj) (obj, error) {
 	if err != nil {
 		return nil, err
 	}
-	sub["portSpecification"] = spec
+	if str(in, "portSpecification") != "" {
+		// Google keeps portSpecification only when it is given: with port
+		// or portName alone, the probe follows them (as the Terraform
+		// provider, whose port_specification is not computed, expects).
+		sub["portSpecification"] = spec
+	}
 	switch spec {
 	case "USE_FIXED_PORT":
 		port := numOr(in, "port", hcDefaultPort[typ])
@@ -211,7 +216,11 @@ func probeOf(o obj) hcProbe {
 	}
 	p.typ = str(o, "type")
 	sub := objOf(o[hcTypes[p.typ]])
-	switch str(sub, "portSpecification") {
+	spec := str(sub, "portSpecification")
+	if spec == "" && sub["port"] == nil && str(sub, "portName") != "" {
+		spec = "USE_NAMED_PORT"
+	}
+	switch spec {
 	case "USE_NAMED_PORT":
 		p.portName = str(sub, "portName")
 	case "USE_SERVING_PORT":
