@@ -7,10 +7,12 @@ name: Scheduled release
 # version, the notes); docs/ci.md#releasing describes the rules, and how to
 # pause, force or dry-run a release.
 #
-# Nothing is committed to main. The notes are generated from the landings
-# since the last tag and kept in the annotated tag's message, which
-# scripts/release-notes.sh reads when CHANGELOG.md has no section for the
-# tag. A tag pushed with GITHUB_TOKEN starts no workflow, so this calls
+# Nothing is committed to main. The notes are CHANGELOG.md's entries added
+# under Unreleased since the last tag (or its section for the version), kept
+# in the annotated tag's message, which scripts/release-notes.sh reads when
+# CHANGELOG.md has no section for the tag. With no entries the plan job
+# fails with "CHANGELOG Unreleased is empty", a dry run included, and
+# nothing is tagged: write the entries on main, then run it again. A tag pushed with GITHUB_TOKEN starts no workflow, so this calls
 # release.yml with the tag (workflow_call): the same jobs, gate, signing,
 # smoke tests, promotion and tap update as a pushed tag. No secret beyond
 # the ones release.yml already reads.
@@ -90,6 +92,7 @@ jobs:
         id: notes
         env:
           RELEASE: ${{ steps.plan.outputs.release }}
+          BLOCKED: ${{ steps.plan.outputs.blocked }}
           TAG: ${{ steps.plan.outputs.tag }}
           SHA: ${{ steps.plan.outputs.sha }}
           REASON: ${{ steps.plan.outputs.reason }}
@@ -99,7 +102,9 @@ jobs:
           {
             echo "## Scheduled release"
             echo
-            if [ "${RELEASE}" != true ]; then
+            if [ "${BLOCKED}" = true ]; then
+              echo "**Blocked**: ${TAG} at \`${SHA}\` cannot be released. ${REASON}."
+            elif [ "${RELEASE}" != true ]; then
               echo "Nothing to release: ${REASON}."
             else
               if [ "${DRY_RUN}" = true ]; then
@@ -113,6 +118,11 @@ jobs:
               sed 1d "${RUNNER_TEMP}/notes.md"
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
+          # Empty notes are never published, and a dry run says so too.
+          if [ "${BLOCKED}" = true ]; then
+            echo "::error::${REASON}"
+            exit 1
+          fi
           [ "${RELEASE}" = true ] || exit 0
           delimiter="NOTES_$(openssl rand -hex 16)"
           { echo "notes<<${delimiter}"; cat "${RUNNER_TEMP}/notes.md"; echo "${delimiter}"; } >> "${GITHUB_OUTPUT}"
@@ -156,8 +166,6 @@ jobs:
       attestations: write
       checks: read
       actions: read
-      # release.yml reads closed issues for the notes (scripts/release-notes.sh).
-      issues: read
     uses: ./.github/workflows/release.yml
     with:
       release_tag: ${{ needs.plan.outputs.tag }}

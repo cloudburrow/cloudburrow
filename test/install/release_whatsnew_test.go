@@ -1,6 +1,7 @@
 package install
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,9 +9,13 @@ import (
 	"testing"
 )
 
-// The What's new section scripts/release-notes.sh puts in a scheduled
-// release's generated notes: v0.6.0's notes listed only landing titles, most
-// of them "Fix main CI ...", and said nothing about what was released.
+// What a scheduled release's notes say. v0.6.0's listed only landing
+// titles, most of them "Fix main CI ..."; v0.7.0's listed branch names
+// (`feat/2160-lb-4-e`) under Added, issue titles that state a problem
+// ("AlloyDB for PostgreSQL: not served") as features, issues that were
+// reopened, and every CI-fix pull request. Now the notes are the entries
+// written under Unreleased in CHANGELOG.md (release-notes.sh --unreleased),
+// and with none the release is refused.
 
 const changelogV1 = `# Changelog
 
@@ -26,10 +31,11 @@ const changelogV1 = `# Changelog
 `
 
 // whatsNewRepo is a repository with v1.0.0, then a landing of feat/31-gpu
-// (which adds a CHANGELOG.md entry when entry is true), feat/32-trace and
-// fix/33-race, then a "Fix main CI" pull request, tagged v1.1.0 with
-// generated notes whose landing list holds both.
-func whatsNewRepo(t *testing.T, entry bool) string {
+// (which adds CHANGELOG.md entries when entry is true), feat/32-trace and
+// fix/33-race, each merged by git's own "Merge branch '...'" message, then a
+// "Fix main CI" pull request that says "Closes #34". It returns the
+// directory and main's head.
+func whatsNewRepo(t *testing.T, entry bool) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	g := func(args ...string) string { return gitIn(t, dir, nil, args...) }
@@ -55,7 +61,8 @@ func whatsNewRepo(t *testing.T, entry bool) string {
 	gpu := ""
 	if entry {
 		gpu = strings.Replace(changelogV1, "- An entry from before v1.0.0 (#1).\n",
-			"- An entry from before v1.0.0 (#1).\n- Apple GPU for local models (#31): see\n  [the docs](docs/gpu.md).\n", 1)
+			"- An entry from before v1.0.0 (#1).\n- Apple GPU for local models (#31): see\n  [the docs](docs/gpu.md).\n\n### Fixed\n\n- A race in the scheduler (#33).\n", 1)
+		gpu = strings.Replace(gpu, "## [Unreleased]\n\n", "## [Unreleased]\n\n- Faster start-up (#35).\n\n", 1)
 	}
 	branch("feat/31-gpu", "gpu", gpu)
 	branch("feat/32-trace", "trace", "")
@@ -63,128 +70,133 @@ func whatsNewRepo(t *testing.T, entry bool) string {
 	branch("fix/main-ci-after-9", "ci", "")
 	g("checkout", "-q", "-b", "land/9", "main")
 	for _, b := range []string{"feat/31-gpu", "feat/32-trace", "fix/33-race"} {
-		g("merge", "-q", "--no-ff", b, "-m", "Landing 9: merge "+b)
+		g("merge", "-q", "--no-ff", "--no-edit", b)
 	}
 	g("checkout", "-q", "main")
 	g("merge", "-q", "--no-ff", "land/9", "-m", "Merge pull request #109 from o/land/9", "-m", "Landing 9")
 	g("merge", "-q", "--no-ff", "fix/main-ci-after-9", "-m", "Merge pull request #110 from o/fix/main-ci-after-9", "-m", "Fix main CI after Landing 9\n\nCloses #34")
-	msg := filepath.Join(t.TempDir(), "msg")
-	body := "CloudBurrow v1.1.0\n\n<!-- cloudburrow-release-notes: generated -->\nReleased automatically.\n\n" +
-		"### Landings\n\n- Fix main CI after Landing 9 (#110)\n- Landing 9 (#109)\n"
-	if err := os.WriteFile(msg, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	g("tag", "-a", "--cleanup=verbatim", "-F", msg, "v1.1.0")
-	return dir
+	return dir, g("rev-parse", "HEAD")
 }
 
-func whatsNew(t *testing.T, dir string, env ...string) string {
+func releaseNotesIn(t *testing.T, dir string, args ...string) (string, string, error) {
 	t.Helper()
-	script, err := filepath.Abs(filepath.Join("..", "..", "scripts", "release-notes.sh"))
+	cmd := exec.Command("sh", append([]string{scriptPath(t, "release-notes.sh")}, args...)...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	return out.String(), errb.String(), err
+}
+
+// TestReleaseNotesUnreleasedEntries: --unreleased prints the entries added
+// under Unreleased since the previous tag, under their own ### headings (an
+// entry under none under "### Changes"), and not an entry the previous tag
+// already had. Nothing comes from the branches, the merges or "Closes #34".
+func TestReleaseNotesUnreleasedEntries(t *testing.T) {
+	dir, head := whatsNewRepo(t, true)
+	out, stderr, err := releaseNotesIn(t, dir, "--unreleased", "v1.0.0", head)
 	if err != nil {
+		t.Fatalf("release-notes.sh --unreleased: %v\n%s", err, stderr)
+	}
+	want := "### Changes\n\n- Faster start-up (#35).\n\n" +
+		"### Added\n\n- Apple GPU for local models (#31): see\n  [the docs](docs/gpu.md).\n\n" +
+		"### Fixed\n\n- A race in the scheduler (#33).\n"
+	if out != want {
+		t.Errorf("got:\n%s\nwant:\n%s", out, want)
+	}
+	for _, banned := range []string{"before v1.0.0", "feat/", "fix/", "#34", "#32", "Merge", "Landing"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("the entries hold %q:\n%s", banned, out)
+		}
+	}
+}
+
+// TestReleaseNotesUnreleasedEmptyFails: with no entry added, there is no
+// fallback made of branch names or issue titles: it fails, prints nothing,
+// and says "CHANGELOG Unreleased is empty".
+func TestReleaseNotesUnreleasedEmptyFails(t *testing.T) {
+	dir, head := whatsNewRepo(t, false)
+	out, stderr, err := releaseNotesIn(t, dir, "--unreleased", "v1.0.0", head)
+	if err == nil {
+		t.Fatalf("release-notes.sh --unreleased succeeded with no entries:\n%s", out)
+	}
+	if out != "" {
+		t.Errorf("printed notes on failure:\n%s", out)
+	}
+	if !strings.Contains(stderr, "CHANGELOG Unreleased is empty") {
+		t.Errorf("the error does not say the Unreleased section is empty: %q", stderr)
+	}
+}
+
+// generatedTag tags main's head v1.1.0 with a scheduled release's message.
+func generatedTag(t *testing.T, dir, body string) {
+	t.Helper()
+	msg := filepath.Join(t.TempDir(), "msg")
+	if err := os.WriteFile(msg, []byte("CloudBurrow v1.1.0\n\n<!-- cloudburrow-release-notes: generated -->\n"+body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("sh", script, "v1.1.0")
+	gitIn(t, dir, nil, "tag", "-a", "--cleanup=verbatim", "-F", msg, "v1.1.0")
+}
+
+// TestReleaseNotesRefuseGeneratedNotesWithoutEntries: a generated tag whose
+// message holds no entry, only the intro and a folded pull request list (or
+// v0.7.0's branch-name Added list inside it), is refused, so the release
+// job publishes nothing rather than empty notes.
+func TestReleaseNotesRefuseGeneratedNotesWithoutEntries(t *testing.T) {
+	dir, _ := whatsNewRepo(t, false)
+	generatedTag(t, dir, "Built from main.\n\n<details><summary>Pull requests</summary>\n\n### Added\n\n- README: a logo (#5)\n\n</details>\n")
+	out, stderr, err := releaseNotesIn(t, dir, "v1.1.0")
+	if err == nil || out != "" {
+		t.Fatalf("notes without an entry were published: %v\n%s", err, out)
+	}
+	if !strings.Contains(stderr, "CHANGELOG Unreleased is empty") || !strings.Contains(stderr, "v1.1.0") {
+		t.Errorf("the error does not name the tag and the empty Unreleased: %q", stderr)
+	}
+}
+
+// TestReleaseNotesFromGeneratedNotesAreVerbatim: generated notes with
+// entries are printed as they are, links made absolute, with nothing added.
+func TestReleaseNotesFromGeneratedNotesAreVerbatim(t *testing.T) {
+	dir, _ := whatsNewRepo(t, true)
+	body := "Built from main.\n\n### Added\n\n- A GPU, see [docs](docs/gpu.md) (#31).\n\n<details><summary>Pull requests</summary>\n\n- README: a logo (#5)\n\n</details>\n"
+	generatedTag(t, dir, body)
+	cmd := exec.Command("sh", scriptPath(t, "release-notes.sh"), "v1.1.0")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), append([]string{"RELEASE_NOTES_REPO=", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1"}, env...)...)
+	cmd.Env = append(os.Environ(), "RELEASE_NOTES_LINK_BASE=https://github.com/o/r/blob/v1.1.0")
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("release-notes.sh v1.1.0: %v", err)
 	}
-	return string(out)
-}
-
-// TestReleaseNotesWhatsNewFromTheChangelog: the entries added under
-// Unreleased since the previous tag lead the notes, under their headings and
-// with their links made absolute, an older entry is not repeated, landed
-// issues no entry names follow, and the landings, "Fix main CI" among them,
-// are only in the collapsed All landings block.
-func TestReleaseNotesWhatsNewFromTheChangelog(t *testing.T) {
-	out := whatsNew(t, whatsNewRepo(t, true), "RELEASE_NOTES_LINK_BASE=https://github.com/o/r/blob/v1.1.0")
-	want := "Released automatically.\n\n" +
-		"### What's new\n\n" +
-		"The [CHANGELOG.md](https://github.com/o/r/blob/v1.1.0/CHANGELOG.md) entries added under **Unreleased** since v1.0.0:\n\n" +
-		"#### Added\n\n" +
-		"- Apple GPU for local models (#31): see\n  [the docs](https://github.com/o/r/blob/v1.1.0/docs/gpu.md).\n\n" +
-		"Also closed by the landings since v1.0.0, with no CHANGELOG.md entry:\n\n" +
-		"#### Other\n\n" +
-		"- `feat/32-trace` (#32)\n- `fix/33-race` (#33)\n- Issue #34 (#34)\n\n" +
-		"<details><summary>All landings</summary>\n\n" +
-		"- Fix main CI after Landing 9 (#110)\n- Landing 9 (#109)\n\n" +
-		"</details>\n"
-	if out != want {
+	if want := strings.Replace(body, "](docs/gpu.md)", "](https://github.com/o/r/blob/v1.1.0/docs/gpu.md)", 1); string(out) != want {
 		t.Errorf("got:\n%s\nwant:\n%s", out, want)
 	}
-	if strings.Contains(out, "before v1.0.0") {
-		t.Error("an entry released before v1.0.0 is listed again")
-	}
-	if strings.Contains(out, "main-ci") {
-		t.Error("the fix/main-ci branch is listed as a change")
-	}
 }
 
-// fakeGHIssues answers `gh issue view N ... --jq ...` the way the --jq
-// expression in release-notes.sh would: "<workflow-red?>\t<title>".
-const fakeGHIssues = `#!/bin/sh
-echo "$*" >> "$(dirname "$0")/calls"
-[ "$1 $2" = "issue view" ] || exit 1
-case "$3" in
-31) printf 'false\tApple GPU (Metal) acceleration for local AI\n' ;;
-32) printf 'false\tCloud Trace: serve the Trace API\n' ;;
-33) printf 'false\tConsole parity: Pub/Sub pages match the Google Cloud console\n' ;;
-34) printf 'true\tCLI integration is failing\n' ;;
-*) exit 1 ;;
-esac
-`
-
-// TestReleaseNotesWhatsNewFromIssues: with no CHANGELOG.md entry added, the
-// landed issues are listed by the area their title names, Other last, read
-// from the repository with gh; an issue labelled workflow-red is left out.
-func TestReleaseNotesWhatsNewFromIssues(t *testing.T) {
-	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(fakeGHIssues), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	out := whatsNew(t, whatsNewRepo(t, false),
-		"RELEASE_NOTES_REPO=o/r", "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	want := "Released automatically.\n\n" +
-		"### What's new\n\n" +
-		"No CHANGELOG.md entry was added since v1.0.0; these are the issues its landings closed:\n\n" +
-		"#### Cloud Trace\n\n- serve the Trace API (#32)\n\n" +
-		"#### Console\n\n- Pub/Sub pages match the Google Cloud console (#33)\n\n" +
-		"#### Other\n\n- Apple GPU (Metal) acceleration for local AI (#31)\n\n" +
-		"<details><summary>All landings</summary>\n\n" +
-		"- Fix main CI after Landing 9 (#110)\n- Landing 9 (#109)\n\n" +
-		"</details>\n"
-	if out != want {
-		t.Errorf("got:\n%s\nwant:\n%s", out, want)
-	}
-	calls, _ := os.ReadFile(filepath.Join(bin, "calls"))
-	if !strings.Contains(string(calls), "issue view 31 -R o/r ") {
-		t.Errorf("gh was not asked for the issues of o/r:\n%s", calls)
-	}
-}
-
-// TestReleaseNotesJobsCanReadThePreviousTag: each release.yml job that runs
-// release-notes.sh checks out the whole history, so the previous tag and its
-// CHANGELOG.md are there, and names the repository and the issues
-// permission its gh lookups need. The scheduled release grants that
-// permission to the release it calls.
-func TestReleaseNotesJobsCanReadThePreviousTag(t *testing.T) {
+// TestReleaseNotesNeedNoIssueLookups: nothing reads issues any more, so no
+// release job names a repository for gh or asks for issues: read, and the
+// jobs still check out the whole history for the annotated tag.
+func TestReleaseNotesNeedNoIssueLookups(t *testing.T) {
 	jobs := releaseJobs(t)
 	for _, name := range []string{"verify", "publish"} {
 		j := job(t, jobs, name)
 		if !strings.Contains(j, "sh scripts/release-notes.sh") {
 			t.Fatalf("%s no longer runs release-notes.sh", name)
 		}
-		for _, want := range []string{"          fetch-depth: 0", "RELEASE_NOTES_REPO: ${{ github.repository }}", "      issues: read\n"} {
-			if !strings.Contains(j, want) {
-				t.Errorf("release.yml's %s job lacks %q", name, want)
+		if !strings.Contains(j, "          fetch-depth: 0") {
+			t.Errorf("release.yml's %s job does not check out the full history", name)
+		}
+		for _, banned := range []string{"RELEASE_NOTES_REPO", "issues: read"} {
+			if strings.Contains(j, banned) {
+				t.Errorf("release.yml's %s job still has %q, which only the dropped issue-title fallback used", name, banned)
 			}
 		}
 	}
-	rel := job(t, workflowJobs(t, filepath.Join("..", "..", ".github", "workflows", "scheduled-release.yml")), "release")
-	if !strings.Contains(rel, "      issues: read\n") {
-		t.Error("scheduled-release.yml's release job does not grant issues: read to release.yml")
+	b, err := os.ReadFile(scriptPath(t, "release-notes.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(uncommented(string(b)), "gh ") {
+		t.Error("release-notes.sh still calls gh")
 	}
 }

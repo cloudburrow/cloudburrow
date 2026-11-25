@@ -7,13 +7,13 @@ version may change behaviour.
 
 The release workflow publishes a tag's section of this file as the release notes. A scheduled
 release (every one to two days, [docs/ci.md](docs/ci.md#releasing)) commits nothing here: its
-notes are generated from the landings since the previous tag and kept in its annotated tag, and
-are used only when this file has no section for the tag. A tag with neither is refused. Those
-generated notes open with a **What's new** section made of the entries added under
-**Unreleased** since the previous tag (`scripts/release-notes.sh`), so every landing adds an entry
-here for each user-visible change it carries ([CONTRIBUTING.md](CONTRIBUTING.md#landings)). Before
-tagging `vX.Y.Z` by hand, move the entries under **Unreleased** into a new
-`## [X.Y.Z] - YYYY-MM-DD` section and add its link at the bottom.
+notes are the entries added under **Unreleased** since the previous tag (or this file's section for
+its version, when one was written first), kept in its annotated tag and used only when this file
+has no section for the tag. With no such entries it is not released: its run fails with
+"CHANGELOG Unreleased is empty", a dry run included, so every landing adds an entry here for each
+user-visible change it carries ([CONTRIBUTING.md](CONTRIBUTING.md#landings)). Before tagging
+`vX.Y.Z` by hand, move the entries under **Unreleased** into a new `## [X.Y.Z] - YYYY-MM-DD`
+section and add its link at the bottom.
 
 ## [Unreleased]
 
@@ -73,6 +73,67 @@ tagging `vX.Y.Z` by hand, move the entries under **Unreleased** into a new
 
 - Official Spanner, Bigtable and Cloud Storage gRPC clients made by CloudBurrow no longer export
   their built-in metrics to Google; `cloudburrow env` sets `SPANNER_DISABLE_BUILTIN_METRICS=true`.
+
+## [0.7.0] - 2026-11-25
+
+Released by the schedule from `b42906d73`. These entries were written after the release, from the
+landings since v0.6.0 (#2199 to #2246) and the issues they closed. Only a row of
+[docs/compatibility.md](docs/compatibility.md) marked Verified is a support claim.
+
+### New services
+
+- **AlloyDB for PostgreSQL**: clusters, primary instances and read pools, backups and point-in-time
+  restore, users and IAM sign-in, the Auth Proxy and connectors (#2191).
+- **Filestore**: instances served over NFS and mounted by GKE and Compute Engine VMs (#2192).
+- **Dataform**: BigQuery Studio files, source control and saved query versions (#2105).
+- **Serverless for Apache Spark**: Dataproc batches and interactive sessions, and BigQuery Studio
+  Spark notebooks (#2156).
+
+### Compute Engine and networking
+
+- **Load balancing**: forwarding rules, backend services, instance groups and service attachments
+  (#2153), then UDP, Cloud Armor, Cloud CDN, IAP, Certificate Manager, gRPC proxies and the load
+  balancer edit page (#2160).
+- **Metadata server**: a VM's metadata server answers its own instance metadata (#2177); an HTTPS
+  endpoint with vTPM-backed identity, guest-attribute limits and access-scope checks (#2179).
+- **Shielded VM** settings in the console: create, details, and edit while stopped (#2181).
+- **VPC firewall**: egress rules and UDP for VMs' relayed connections, and Firewall Rules Logging
+  (#2180).
+- Image import from VMDK, VHD and VHDX disks; Google's Ops Agent in every VM image (#2139).
+
+### Data and analytics
+
+- **BigQuery continuous queries** and the Reservation API's CONTINUOUS assignments, first part.
+  Stream-to-stream JOINs and window aggregations follow in v0.8 (#2193).
+- **Dataproc**: high-availability clusters with a YARN ResourceManager on every master (#2189).
+- **Colab Enterprise and Dataform**: pipeline schedules, service-account impersonation, Workbench
+  and permission checks (#2173).
+
+### Cloud SQL
+
+- Managed connection pooling for MySQL (#2141), and connection pooling metrics in Cloud Monitoring
+  (#2163).
+- More of what was refused before is now served, including Backup and DR for AlloyDB and Filestore
+  (part of #1524).
+
+### Kubernetes Engine
+
+- The ClusterManager methods that returned 501: IP rotation, network policy, legacy ABAC,
+  GetJSONWebKeys, upgrade info and autoscaling. Cluster logging now runs on every node, as on GKE
+  (#2100).
+
+### Console
+
+- BigQuery Studio, Compute Engine, VPC networking and Cloud SQL pages brought closer to Google's
+  console (#2094, #2139, #2140, #2141).
+
+### Terraform
+
+- Endpoint overrides for every served API and more provider resources tested (part of #1578).
+
+### Install script
+
+- On Apple Silicon, `install.sh` also installs the Apple GPU (Metal) runner (#2201).
 
 ## [0.6.0] - 2026-11-24
 
@@ -975,7 +1036,8 @@ operation in [docs/compatibility.md](docs/compatibility.md) and summarised in
   one `checksums.txt`, a Homebrew formula and an installer that refuses an archive it cannot
   verify (#71, #324).
 
-[Unreleased]: https://github.com/cloudburrow/cloudburrow/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/cloudburrow/cloudburrow/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.3.0...v0.4.0

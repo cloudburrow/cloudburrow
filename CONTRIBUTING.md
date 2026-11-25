@@ -57,8 +57,7 @@ merge commits, and one CI run for all of them. **Every landing adds the CHANGELO
 Unreleased for the user-visible changes it lands**, in the Keep a Changelog headings the file uses
 (Added, Changed, Fixed), unless each merged branch already brought its own. Write them for users,
 one per feature or fix, and claim only what docs/compatibility.md supports. A scheduled release
-commits nothing to `CHANGELOG.md`: `scripts/release-notes.sh` builds its **What's new** from the
-entries added under Unreleased since the previous tag, and falls back to the titles of the issues
-the landings closed only for changes that have no entry. A landing with no entries makes a
-release whose notes are a list of issue titles. "Fix main CI" pull requests need an entry only for a
-product bug they fix, and the notes keep them in the collapsed **All landings** list.
+commits nothing to `CHANGELOG.md`: its notes are the entries added under Unreleased since the
+previous tag, and with none it is not released (its run fails with "CHANGELOG Unreleased is
+empty"). Nothing is generated from branch names or issue titles. "Fix main CI" pull requests need
+an entry only for a product bug they fix; the notes leave them out of their pull request list.

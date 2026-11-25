@@ -32,10 +32,18 @@
 # for a change that adds behaviour (fix/... for one that corrects it), and
 # git records them in every merge, so the rule needs no API and no label.
 #
-# The notes: generated from the merges since the last tag (the landings on
-# main's first-parent line, and the feat/ and fix/ branches each one merged),
-# behind the marker line scripts/release-notes.sh looks for in an annotated
-# tag's message. Nothing is committed to main.
+# The notes: what CHANGELOG.md at the commit says, behind the marker line
+# scripts/release-notes.sh looks for in an annotated tag's message: its
+# `## [X.Y.Z]` section for the version when there is one, else the entries
+# added under ## [Unreleased] since the last tag (release-notes.sh
+# --unreleased), under their ### headings. Then a collapsed list of the pull
+# requests, without the ones that only fix CI or the tests ("Fix main CI",
+# "Landing N", "round N", "flaky", "CI: ..."), and a link to the full diff.
+# Branch names and issue titles are never used: they name work, not what a
+# release does. With no entries nothing is released: `release` is false,
+# `blocked` is true and `reason` starts "CHANGELOG Unreleased is empty", so
+# a dry run shows what to write and scheduled-release.yml fails rather than
+# tag. Nothing is committed to main.
 #
 # NOW (seconds since the epoch) and MAIN_REF (origin/main) can be set for a
 # test. CANDIDATES (30) is how many of main's successful push runs are tried.
@@ -148,56 +156,61 @@ if git rev-parse -q --verify "refs/tags/${next}" >/dev/null; then
 	exit 1
 fi
 
-# The notes.
+# The notes. What's in them is CHANGELOG.md at the commit: its section for
+# this version when one was written, else the entries added under
+# Unreleased since the last tag. With neither, nothing is released.
 url="https://github.com/${repo}"
-tab="$(printf '\t')"
+changelog_at="${notes}.changelog"
+git show "${sha}:CHANGELOG.md" > "${changelog_at}" 2>/dev/null || : > "${changelog_at}"
+if ! news="$(sh "${here}/release-notes.sh" "${next}" "${changelog_at}" 2>/dev/null)" &&
+	! news="$(sh "${here}/release-notes.sh" --unreleased "${last_tag}" "${sha}" 2>/dev/null)"; then
+	rm -f "${changelog_at}"
+	out tag "${next}"
+	out blocked true
+	why="CHANGELOG Unreleased is empty: no entry was added under ## [Unreleased] in CHANGELOG.md since ${last_tag} at ${sha}; write the ${next} entries there (or a ## [${next#v}] section) and land them, then run the release again"
+	echo "::error::${why}"
+	skip "${why}"
+fi
+rm -f "${changelog_at}"
+
+# Pull requests that only fix CI or the tests, or merge a landing (whose
+# branches the entries above describe), are not news: the full diff has them.
+internal='^(Fix main CI|CI: )|Landing [0-9]+|[Rr]ound [0-9]+|[Ff]laky|main run [0-9]+'
+# A subject's trailing pull request references, "(#2202) (#2203)", become the
+# last one, the pull request that merged it.
+one_ref() {
+	sed -E -e ':a' -e 's/ \(#[0-9]+\)( \(#[0-9]+\))$/\1/' -e 'ta'
+}
 landings="$(git rev-list --first-parent --merges "${last_tag}..${sha}")"
 {
 	echo "${marker}"
-	echo "Released automatically from [\`$(git rev-parse --short "${sha}")\`](${url}/commit/${sha}) on main, whose full CI run"
-	echo "passed, compatibility shards included. Changes since [${last_tag}](${url}/releases/tag/${last_tag})"
-	echo "([diff](${url}/compare/${last_tag}...${next})). The curated entries for this work are under"
-	echo "**Unreleased** in [CHANGELOG.md](CHANGELOG.md) at this tag; only a row of"
-	echo "[docs/compatibility.md](docs/compatibility.md) marked Verified is a support claim."
-	# Each branch a landing merged, by kind: "<kind>\t<line>".
-	for m in $(git rev-list --merges "${last_tag}..${sha}"); do
-		case "
-${landings}
-" in *"
-${m}
-"*) continue ;; esac
-		git log -1 --format=%s "${m}" | sed -n -E \
-			-e "s/^Merge (feat|fix)\/([^ ]+) \((.*)\) into (.*)\$/\1${tab}\3 (\`\1\/\2\`, \4)/p" \
-			-e "s/^Merge branch '(feat|fix)\/([^']+)'.*\$/\1${tab}\`\1\/\2\`/p"
-	done > "${notes}.branches"
-	for kind in feat:Added fix:Fixed; do
-		lines="$(awk -F "${tab}" -v k="${kind%%:*}" '$1 == k { print "- " $2 }' "${notes}.branches")"
-		if [ -n "${lines}" ]; then
-			echo
-			echo "### ${kind#*:}"
-			echo
-			printf '%s\n' "${lines}"
-		fi
-	done
-	rm -f "${notes}.branches"
-	if [ -n "${landings}" ]; then
-		echo
-		echo "### Landings"
-		echo
+	echo "Built from [\`$(git rev-parse --short "${sha}")\`](${url}/commit/${sha}) on main after its full CI run passed,"
+	echo "compatibility shards included. Changes since [${last_tag}](${url}/releases/tag/${last_tag}):"
+	echo "[full diff](${url}/compare/${last_tag}...${next}). Only a row marked Verified in"
+	echo "[docs/compatibility.md](docs/compatibility.md) is a support claim."
+	echo
+	printf '%s\n' "${news}"
+	{
 		for m in ${landings}; do
 			subject="$(git log -1 --format=%s "${m}")"
 			title="$(git log -1 --format=%b "${m}" | sed -n 1p)"
 			pr="$(printf '%s\n' "${subject}" | sed -n 's/^Merge pull request #\([0-9][0-9]*\) from .*/#\1/p')"
-			echo "- ${title:-${subject}}${pr:+ (${pr})}"
+			line="${title:-${subject}}${pr:+ (${pr})}"
+			printf '%s\n' "${line}"
 		done
-	fi
-	direct="$(git log --first-parent --no-merges --format='- %s (%h)' "${last_tag}..${sha}")"
-	if [ -n "${direct}" ]; then
+		git log --first-parent --no-merges --format='%s' "${last_tag}..${sha}"
+	} | grep -Ev "${internal}" | one_ref | awk 'NF && !seen[$0]++ { print "- " $0 }' > "${notes}.landed" || true
+	if [ -s "${notes}.landed" ]; then
 		echo
-		echo "### Other commits"
+		echo "<details><summary>Pull requests</summary>"
 		echo
-		printf '%s\n' "${direct}"
+		cat "${notes}.landed"
+		echo
+		echo "Fixes to CI and the tests are left out; the [full diff](${url}/compare/${last_tag}...${next}) has every change."
+		echo
+		echo "</details>"
 	fi
+	rm -f "${notes}.landed"
 } > "${notes}"
 
 out release true
