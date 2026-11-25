@@ -795,7 +795,7 @@ compat_shard() {
       # Resource Manager's tags on one instance, which only this shard serves
       # together.
       COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$|CloudAssetAnalyzeIamPolicyEveryAssetType$)' ;;
-    spark)
+    spark|dataflow)
       # BigQuery's stored procedures for Apache Spark (#2104), nightly only
       # (nightly-sql-ephemeral.yml's spark job), not one of ci.yml's
       # COMPAT_SHARDS: spark-submit runs in the pinned apache/spark images
@@ -815,7 +815,7 @@ compat_shard() {
       # And, for the shard's browser tests (#2234), Dataform, which BigQuery
       # Studio's notebooks are, and Kubernetes Engine, whose cluster Dataproc
       # on GKE's page runs on.
-      SERVICES+=,dataform,gke
+      [ "$1" = dataflow ] || SERVICES+=,dataform,gke
       # --allow-unconfined-containers (#2162): the Dataproc DOCKER component's
       # rootless daemons run unconfined, so only with it; TestDataprocDockerComponent
       # runs here, and TestDataprocDockerComponentOff, the refusal without
@@ -829,8 +829,20 @@ compat_shard() {
       # which Cloud Run starts.
       TEST_VARS+=,PREDICTION
       export CLOUDBURROW_TEST_SPARK=1
-      COMPAT_RUN='^Test(BigQuerySpark|BqSpark|Dataproc|GcloudDataproc|PythonDataflow|JavaDataflow|GoDataflow|DataflowJobsAPI|DataflowSnapshots|DataflowProvided|GcloudDataflow|TerraformDataflow|WorkbenchJupyterLabBearerAndIdentity$)'
-      COMPAT_TIMEOUT=150m ;;
+      # The dataflow shard (#2215), nightly-sql-ephemeral.yml's dataflow job,
+      # is the same instance for the Dataflow tests alone: together they
+      # took the spark shard past its 150m (nightly run 45680880225, 4,319 s
+      # of Dataflow and 4,475 s of the rest when go test's alarm stopped
+      # TestDataprocHDFS, with the HDFS and YARN tests, GcloudDataproc and
+      # the Workbench test never run).
+      COMPAT_DATAFLOW_RUN='^Test(PythonDataflow|JavaDataflow|GoDataflow|DataflowJobsAPI|DataflowSnapshots|DataflowProvided|GcloudDataflow|TerraformDataflow)'
+      if [ "$1" = dataflow ]; then
+        COMPAT_RUN=$COMPAT_DATAFLOW_RUN
+        COMPAT_TIMEOUT=120m
+      else
+        COMPAT_RUN='^Test(BigQuerySpark|BqSpark|Dataproc|GcloudDataproc|WorkbenchJupyterLabBearerAndIdentity$)'
+        COMPAT_TIMEOUT=150m
+      fi ;;
     localai|localaispeech)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI
       # and ML functions' tables and object tables, Resource Manager (every

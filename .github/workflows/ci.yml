@@ -1464,9 +1464,9 @@ jobs:
           # on an --internal Docker network: CLOUDBURROW_TEST_SPARK, run
           # nightly by nightly-sql-ephemeral.yml's spark job (the spark
           # shard of scripts/compat-shards.sh) and locally. So do the
-          # Dataproc tests (#2162, #2234) and the Dataflow ones, whose Beam
-          # pipelines run on the pinned Flink job server (#2215), which that
-          # job runs too. The remote compute tests (#2209) need the stand-in
+          # Dataproc tests (#2162, #2234), which that job runs too, and the
+          # Dataflow ones, whose Beam pipelines run on the pinned Flink job
+          # server (#2215), which its dataflow job runs. The remote compute tests (#2209) need the stand-in
           # remote host, a privileged Docker-in-Docker container with sshd
           # (scripts/remote-compute-standin.sh) that the instance is started
           # on; they run locally, until a shard starts one. #2245:
