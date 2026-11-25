@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Instance groups (#2139): unmanaged instanceGroups
@@ -926,4 +927,115 @@ func randLower(n int) string {
 		out[i] = alpha[int(v)%len(alpha)]
 	}
 	return string(out)
+}
+
+// migRetry is a managed instance group's next attempt at the VMs whose
+// creation failed: at is when, and failures how many failed in a row.
+type migRetry struct {
+	at       time.Time
+	failures int
+}
+
+// managerOfVM is the managed instance group that made a VM (its
+// created-by metadata), or "".
+func managerOfVM(o obj) string {
+	for _, it := range listOf(vmMetadataItems(o)) {
+		im, _ := it.(map[string]any)
+		if str(im, "key") == "created-by" {
+			return str(im, "value")
+		}
+	}
+	return ""
+}
+
+// migRetryDelay is how long a group waits before it tries again to make a
+// VM whose creation failed, doubling with each failure in a row up to
+// migRetryMax.
+var (
+	migRetryDelay = 5 * time.Second
+	migRetryMax   = 2 * time.Minute
+)
+
+// retryManagedCreateLocked has the group mgr try again to make a VM whose
+// creation failed and was undone. A managed instance group keeps trying
+// to create the VMs its target size calls for
+// (https://docs.cloud.google.com/compute/docs/instance-groups/working-with-managed-instances,
+// "creating" in currentActions; only creatingWithoutRetries gives up), so
+// a VM that failed to boot does not leave the group one short for good.
+func (s *Server) retryManagedCreateLocked(mgr, vm string, err error) {
+	if mgr == "" {
+		return
+	}
+	if _, ok := s.res[mgr]; !ok {
+		return
+	}
+	if s.migRetry == nil {
+		s.migRetry = map[string]migRetry{}
+	}
+	r := s.migRetry[mgr]
+	d := migRetryDelay << min(r.failures, 8)
+	if d > migRetryMax || d <= 0 {
+		d = migRetryMax
+	}
+	r.failures++
+	r.at = s.opts.Now().Add(d)
+	s.migRetry[mgr] = r
+	fmt.Printf("compute: %s: creating %s failed (%v); the group tries again in %s\n", mgr, vm, err, d)
+}
+
+// repairManagersLocked makes, for every group whose retry is due, the VMs
+// it is short of its target size, and reports whether it made any.
+func (s *Server) repairManagersLocked() bool {
+	changed := false
+	now := s.opts.Now()
+	for mgr, r := range s.migRetry {
+		m, ok := s.res[mgr]
+		if !ok {
+			delete(s.migRetry, mgr)
+			continue
+		}
+		// An operation on the group itself (a resize, its deletion) or a
+		// VM being made again under its own name settles it first.
+		if now.Before(r.at) || s.queued[mgr] > 0 || s.managerPendingLocked(m) {
+			continue
+		}
+		want, _ := m["targetSize"].(float64)
+		live := s.liveManagedLocked(mgr)
+		if len(live) >= int(want) {
+			// Whole: the failure count is kept until no VM of the group
+			// is still being made, so one that fails at once again backs
+			// off further.
+			busy := false
+			for _, vm := range live {
+				busy = busy || s.queued[vm] > 0
+			}
+			if !busy {
+				delete(s.migRetry, mgr)
+			}
+			continue
+		}
+		// The next failure sets the next time.
+		r.at = now.Add(migRetryMax)
+		s.migRetry[mgr] = r
+		if err := s.resizeToLocked(projectOfRel(mgr), mgr, m); err != nil {
+			fmt.Printf("compute: %s: making its VMs again: %v\n", mgr, err)
+			continue
+		}
+		changed = true
+	}
+	return changed
+}
+
+// managerPendingLocked is whether one of the group's VMs is queued to be
+// made again under its own name (recreateManagedFromLocked).
+func (s *Server) managerPendingLocked(m obj) bool {
+	prefix := str(m, "baseInstanceName") + "-"
+	for k, n := range s.queued {
+		if n > 0 && strings.Contains(k, "/instances/"+prefix) {
+			if _, ok := s.res[k]; !ok {
+				return true
+			}
+		}
+	}
+	return false
 }

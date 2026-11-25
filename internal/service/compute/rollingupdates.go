@@ -699,6 +699,9 @@ func (s *Server) rollOnce() {
 		}
 		changed = changed || did
 	}
+	if s.repairManagersLocked() {
+		changed = true
+	}
 	if changed {
 		_ = s.saveLocked()
 	}

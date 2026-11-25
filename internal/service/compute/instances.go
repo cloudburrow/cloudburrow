@@ -671,12 +671,14 @@ func (s *Server) insertInstance(c call, zone string) (obj, error) {
 		return nil
 	}, func(err error) {
 		if err != nil {
+			mgr := managerOfVM(s.res[rel])
 			delete(s.res, rel)
 			for _, d := range created {
 				delete(s.res, d)
 			}
 			s.releaseDisksLocked(rel)
 			s.releaseAddressesLocked(rel)
+			s.retryManagedCreateLocked(mgr, rel, err)
 			return
 		}
 		if cur, ok := s.res[rel]; ok {

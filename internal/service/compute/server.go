@@ -236,6 +236,9 @@ type Server struct {
 	ca *vtpmCA
 	// gaRate is each instance's guest attribute writes (guestmetadata.go).
 	gaRate map[string][]time.Time
+	// migRetry is, by managed instance group, when it next tries again
+	// to make the VMs whose creation failed (instancegroups.go).
+	migRetry map[string]migRetry
 }
 
 // New returns a Server with its state restored.
