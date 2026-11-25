@@ -36,9 +36,13 @@ func (t *providedTemplates) Stage(ctx context.Context, name string) (string, err
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	path := "gs://" + providedBucket + "/latest/" + name
-	if _, err := t.storage.Read(ctx, path+"_metadata"); err == nil {
-		if _, err := t.storage.Read(ctx, path); err == nil {
-			return path, nil
+	// A template staged by an older launcher (another StageVersion) is
+	// staged again: its pipeline options are fixed in the template file.
+	if v, err := t.storage.Read(ctx, path+"_cbstage"); err == nil && string(v) == beamrun.StageVersion {
+		if _, err := t.storage.Read(ctx, path+"_metadata"); err == nil {
+			if _, err := t.storage.Read(ctx, path); err == nil {
+				return path, nil
+			}
 		}
 	}
 	tpl, ok, err := t.p.Template(ctx, name)
@@ -55,6 +59,9 @@ func (t *providedTemplates) Stage(ctx context.Context, name string) (string, err
 		return "", err
 	}
 	if err := t.storage.Write(ctx, path+"_metadata", tpl.Metadata); err != nil {
+		return "", err
+	}
+	if err := t.storage.Write(ctx, path+"_cbstage", []byte(beamrun.StageVersion)); err != nil {
 		return "", err
 	}
 	return path, nil

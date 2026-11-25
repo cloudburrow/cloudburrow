@@ -89,7 +89,7 @@ func checkParameters(meta *dataflowpb.TemplateMetadata, params map[string]string
 	// unexpected parameters: ['input' (perhaps you meant 'runner')]"
 	// (quoted in Apache Beam's issue BEAM-2470, 2017; a close match is
 	// suggested). Google publishes no text for a missing required one:
-	// UNVERIFIED (searched 2026-11-24: the templates guides, the REST
+	// UNVERIFIED (docs re-read 2026-11-24: the templates guides, the REST
 	// reference, gcloud's reference and Beam's sources).
 	if len(unknown) > 0 {
 		names := make([]string, 0, len(unknown))
@@ -107,7 +107,7 @@ func checkParameters(meta *dataflowpb.TemplateMetadata, params map[string]string
 		for _, m := range missing {
 			violations = append(violations, fmt.Sprintf("The template parameters are invalid. Missing required parameter: %s", m))
 		}
-		return apierror.InvalidArgument("%s", strings.Join(violations, "; ")) // UNVERIFIED (searched 2026-11-24)
+		return apierror.InvalidArgument("%s", strings.Join(violations, "; ")) // UNVERIFIED (docs re-read 2026-11-24)
 	}
 	return nil
 }

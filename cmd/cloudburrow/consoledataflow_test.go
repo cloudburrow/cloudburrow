@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/cloudburrow/cloudburrow/internal/beamrun"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +87,23 @@ func TestConsoleDataflow(t *testing.T) {
 			v[k] = x
 		}
 		return v
+	}
+	// The template menu offers every Google-provided template the
+	// instance builds (beamrun.ProvidedNames), each by Google's name.
+	_, fields := p.CreateForm()
+	for _, f := range fields {
+		if f.Name != "template" {
+			continue
+		}
+		offered := map[string]bool{}
+		for _, o := range f.Options {
+			offered[o] = true
+		}
+		for _, n := range beamrun.ProvidedNames {
+			if !offered[n] || f.OptionLabels[n] == "" {
+				t.Errorf("Create job from template does not offer %s by its name (%q)", n, f.OptionLabels[n])
+			}
+		}
 	}
 	if _, err := p.Create(ctx, project, form(map[string]string{"jobName": "words", "gcsPath": "gs://b/missing", "tempLocation": "gs://b/tmp"})); err == nil {
 		t.Error("a job was launched from a template that does not exist")

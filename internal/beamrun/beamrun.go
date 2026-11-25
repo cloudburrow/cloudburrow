@@ -359,8 +359,13 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	if parallelism > MaxParallelism {
 		parallelism = MaxParallelism
 	}
-	jsArgs := []string{"run", "-d", "--name", js, "--label", label, "--network", network, "--memory", "3g",
-		"-v", filepath.Join(dir, "flink") + ":/cb-flink:ro"}
+	env := d.clientEnv(job, dir, relayIP)
+	// The job server's JVM gets the emulator variables too: Java I/O whose
+	// splitting runs there (a Google-provided template's SpannerIO read
+	// partitions its query when the job starts) reaches the instance's
+	// emulators, as the workers do, and never the default endpoints.
+	jsArgs := append([]string{"run", "-d", "--name", js, "--label", label, "--network", network, "--memory", "3g",
+		"-v", filepath.Join(dir, "flink") + ":/cb-flink:ro"}, env...)
 	if d.Snapshots != "" {
 		if err := os.MkdirAll(d.Snapshots, 0o777); err != nil {
 			return failed(err.Error())
@@ -372,7 +377,6 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 		return failed("start the Flink job server: " + out)
 	}
 	cleanup = append(cleanup, func() { bg("rm", "-f", "-v", js) })
-	env := d.clientEnv(job, dir, relayIP)
 	// The workers write their metrics' totals to metrics/ (sitecustomize).
 	poolArgs := append([]string{"run", "-d", "--name", pool, "--label", label, "--network", "container:" + js, "-v", dir + ":/cb:ro",
 		"-v", filepath.Join(dir, "metrics") + ":/cb/metrics", "-e", "CB_METRICS_DIR=/cb/metrics"}, env...)

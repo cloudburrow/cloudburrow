@@ -70,7 +70,12 @@ func TestPythonDataflowDatabases(t *testing.T) {
 	if err != nil || len(row["cf"]) != 1 || string(row["cf"][0].Value) != "2" {
 		t.Errorf("Bigtable row kiwi = %v, %v; want cf:n 2", row, err)
 	}
-	sp, err := spanner.NewClient(ctx, db, spannerOpts(spannerAddr)...)
+	// The Go Spanner client exports its built-in metrics to Cloud
+	// Monitoring at Google unless told it talks to an emulator: on
+	// 2026-11-24 this client dialed Google once a minute. Both guards.
+	t.Setenv("SPANNER_EMULATOR_HOST", spannerAddr)
+	t.Setenv("SPANNER_DISABLE_BUILTIN_METRICS", "true")
+	sp, err := spanner.NewClientWithConfig(ctx, db, spanner.ClientConfig{DisableNativeMetrics: true}, spannerOpts(spannerAddr)...)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -125,14 +125,21 @@ func beamNetwork(t *testing.T, ctx context.Context, addrs map[int]string) string
 // reachable.
 func runBeamPython(t *testing.T, ctx context.Context, network, project string, args ...string) string {
 	t.Helper()
+	return runBeamPythonWith(t, ctx, nil, network, project, args...)
+}
+
+// runBeamPythonWith is runBeamPython with extra docker run options.
+func runBeamPythonWith(t *testing.T, ctx context.Context, docker []string, network, project string, args ...string) string {
+	t.Helper()
 	root := moduleRoot(t)
-	run := append([]string{"run", "--rm", "--network", network,
-		"-v", filepath.Join(root, "internal", "beamrun", "assets", "py") + ":/cb/py:ro",
-		"-v", filepath.Join(root, "testdata", "dataflowpy") + ":/flow:ro",
-		"-e", "CB_DATAFLOW=1", "-e", "CB_PROJECT=" + project, "-e", "PYTHONPATH=/cb/py",
+	run := append(append([]string{"run", "--rm"}, docker...), "--network", network,
+		"-v", filepath.Join(root, "internal", "beamrun", "assets", "py")+":/cb/py:ro",
+		"-v", filepath.Join(root, "testdata", "dataflowpy")+":/flow:ro",
+		"-e", "CB_DATAFLOW=1", "-e", "CB_PROJECT="+project, "-e", "PYTHONPATH=/cb/py",
 		"-e", "STORAGE_EMULATOR_HOST=http://relay.cloudburrow.localhost:9000", "-e", "PUBSUB_EMULATOR_HOST=relay.cloudburrow.localhost:9001",
 		"-e", "BIGQUERY_EMULATOR_HOST=http://relay.cloudburrow.localhost:9002", "-e", "CB_BIGQUERY_URL=http://relay.cloudburrow.localhost:9002/bigquery/v2/",
-		"--entrypoint", "python", beamPythonImage}, args...)
+		"--entrypoint", "python", beamPythonImage)
+	run = append(run, args...)
 	out, err := exec.CommandContext(ctx, "docker", run...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("python %s: %v\n%s", strings.Join(args, " "), err, out)

@@ -2,6 +2,7 @@ package beamrun
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -46,6 +47,11 @@ const (
 	// module's libraries from Maven Central.
 	buildTimeout = 45 * time.Minute
 )
+
+// StageVersion names the launch options Stage fixes in a staged template;
+// it changes whenever they do, so templates staged before are staged again
+// (2: --pubsubRootUrl; 3: --spannerHost).
+const StageVersion = "3"
 
 // ProvidedNames are the Google-provided classic templates CloudBurrow
 // builds, by name (their @Template name in DataflowTemplates' v1 module).
@@ -336,9 +342,19 @@ func (p *Provided) Stage(ctx context.Context, t ProvidedTemplate, project, templ
 		"--gcpTempLocation=" + stagingPath + "temp/", "--tempLocation=" + stagingPath + "temp/",
 		"--apiRootUrl=http://" + relayName + "/",
 		fmt.Sprintf("--gcsEndpoint=http://%s:%d/storage/v1/", relayName, storagePort),
+		// A batch PubsubIO write publishes through Pub/Sub's REST API
+		// (PubsubJsonClient), which the instance's Pub/Sub serves too.
+		fmt.Sprintf("--pubsubRootUrl=http://%s:%d", relayName, pubsubPort),
 		"--credentialFactoryClass=CbCredentialFactory", "--labels=" + labels}
 	if t.Streaming {
 		opts = append(opts, "--autoscalingAlgorithm=THROUGHPUT_BASED", "--maxNumWorkers=5")
+	}
+	// A Spanner template's SpannerIO is given its spannerHost parameter
+	// (default batch-spanner.googleapis.com) and so ignores
+	// SPANNER_EMULATOR_HOST: the template is staged with the instance's
+	// Spanner (plain gRPC, through the relay) as its value.
+	if bytes.Contains(t.Metadata, []byte(`"spannerHost"`)) {
+		opts = append(opts, fmt.Sprintf("--spannerHost=http://%s:%d", relayName, spannerPort))
 	}
 	keys := make([]string, 0, len(t.RuntimeParameters))
 	for k := range t.RuntimeParameters {

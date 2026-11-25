@@ -171,7 +171,12 @@ func TestPythonDataflowBeamYAMLJavaProvider(t *testing.T) {
 	args := append([]string{"-m", "apache_beam.yaml.main", "--yaml_pipeline=" + yaml,
 		`--beam_services={"sdks:java:io:google-cloud-platform:expansion-service:shadowJar": "` + expansion + `"}`},
 		dataflowRunnerArgs(project, bucket, name)...)
-	id := jobIDOf(t, runBeamPython(t, ctx, submit, project, args...))
+	// Beam YAML's beamJar providers need a Java on the submitting machine
+	// even when --beam_services names a running service (its
+	// ExternalJavaProvider.available looks java up), as on a developer's
+	// machine with a JDK: the Beam Java image's JDK, mounted read-only.
+	jdk := []string{"--mount", "type=image,source=" + beamJava17Image + ",target=/cb-jdk", "-e", "JAVA_HOME=/cb-jdk/opt/java/openjdk"}
+	id := jobIDOf(t, runBeamPythonWith(t, ctx, jdk, submit, project, args...))
 	if j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DONE, dataflowpb.JobState_JOB_STATE_FAILED); j.CurrentState != dataflowpb.JobState_JOB_STATE_DONE {
 		t.Fatalf("job %s is %s:\n%s", id, j.CurrentState, jobMessages(t, ctx, c, project, id))
 	}

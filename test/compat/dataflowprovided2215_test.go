@@ -360,7 +360,12 @@ func TestDataflowProvidedTemplatesMore(t *testing.T) {
 	t.Run("Spanner_to_GCS_Text", func(t *testing.T) {
 		spInstance, spDB := "provided-"+suffix, "fruit"
 		db := spannerDatabase(t, ctx, spannerAddr, project, spInstance, spDB, "CREATE TABLE Fruit (Name STRING(64) NOT NULL, N INT64) PRIMARY KEY (Name)")
-		sp, err := spanner.NewClient(ctx, db, spannerOpts(spannerAddr)...)
+		// The Go Spanner client exports built-in metrics to Google unless
+		// told it talks to an emulator: on 2026-11-24 this client dialed
+		// Google once a minute. Both guards.
+		t.Setenv("SPANNER_EMULATOR_HOST", spannerAddr)
+		t.Setenv("SPANNER_DISABLE_BUILTIN_METRICS", "true")
+		sp, err := spanner.NewClientWithConfig(ctx, db, spanner.ClientConfig{DisableNativeMetrics: true}, spannerOpts(spannerAddr)...)
 		if err != nil {
 			t.Fatal(err)
 		}
