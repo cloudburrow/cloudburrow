@@ -232,7 +232,8 @@ COMPAT_COMPUTE_VM_TEST_NAMES="ComputeRegionalDisksThroughTheGoClient ComputeVMsT
   ComputeLabelsSchedulingAndExternalIPsThroughTheGoClient ComputeRollingUpdatesThroughTheGoClient2139
   TerraformComputeInstance ComputeRegionalGroupsThroughTheGoClient GcloudComputeInstances
   ComputeOpsAgentWritesLogsAndMetrics ComputeAutoscalerScalesOnRealCPU
-  ShieldedVMHTTPSMetadataServer2179 VMAccessScopesLimitTokens2179 VMMetadataServerFromInsideTheVM2177"
+  ShieldedVMHTTPSMetadataServer2179 VMAccessScopesLimitTokens2179 VMMetadataServerFromInsideTheVM2177
+  ComputeConcurrentVMBootsAnswerSSH2250"
 COMPAT_COMPUTE_VM_TESTS="^Test($(echo "$COMPAT_COMPUTE_VM_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 COMPAT_VPC_VM_TEST_NAMES="CloudRouterBGPWithARouterApplianceVM2140 ComputeVMNetworkingThroughTheGoClient
   RelayedConnectionsFollowTheEgressFirewall ComputeIPv6ThroughTheGoClient

@@ -246,8 +246,51 @@ func collectDiagnostics(ctx context.Context, cfg config.Config, k *kubectl, admi
 		} else {
 			b.add("logs", "logs.txt", logs.Bytes())
 		}
+		b.addSerialConsoles(ctx, cfg, k)
 	}
 	return b
+}
+
+// addSerialConsoles adds each Compute Engine VM's serial console, the
+// guest's boot (#2250): what logs.txt's 200 lines across every workload
+// leave out. A guest that restarted has its previous console too.
+func (b *bundle) addSerialConsoles(ctx context.Context, cfg config.Config, k *kubectl) {
+	raw, err := k.run(ctx, "get", "pods", "-n", cfg.Cluster.Namespace, "-l", "cloudburrow.dev/vm",
+		"-o", `jsonpath={range .items[*]}{.metadata.name} {.status.containerStatuses[?(@.name=="vm")].restartCount}{"\n"}{end}`)
+	if err != nil {
+		b.fail("VM serial consoles", err)
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
+		}
+		for _, prev := range []bool{false, true} {
+			if prev && (len(f) < 2 || f[1] == "0") {
+				continue
+			}
+			args, file := diagnoseSerialArgs(cfg.Cluster.Namespace, f[0], prev)
+			out, err := k.run(ctx, args...)
+			if err != nil {
+				b.fail("VM serial console "+f[0], err)
+				continue
+			}
+			b.add("VM serial console "+f[0], file, []byte(console.Redact(ansiRE.ReplaceAllString(string(out), ""))))
+		}
+	}
+}
+
+// diagnoseSerialArgs is the kubectl logs of one VM pod's guest console,
+// its last 2000 lines, and the bundle file it goes in.
+func diagnoseSerialArgs(ns, pod string, previous bool) ([]string, string) {
+	args := []string{"logs", pod, "-n", ns, "-c", "vm", "--tail", "2000"}
+	file := "kubernetes/serial/" + pod + ".txt"
+	if previous {
+		args = append(args, "--previous")
+		file = "kubernetes/serial/" + pod + ".previous.txt"
+	}
+	return args, file
 }
 
 // forwarderState picks the port-forwards' readiness out of /readyz, which is
