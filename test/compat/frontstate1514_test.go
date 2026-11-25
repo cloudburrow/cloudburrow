@@ -22,6 +22,8 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // untilServed retries call while the tunnel reconnects to the restarted
@@ -63,7 +65,7 @@ func TestSpannerFrontRestartKeepsItsState(t *testing.T) {
 	ddl(`CREATE TABLE Notes (Id INT64 NOT NULL, N INT64 NOT NULL, Note STRING(MAX)) PRIMARY KEY (Id, N), INTERLEAVE IN PARENT Items ON DELETE CASCADE`,
 		`ALTER TABLE Items ADD COLUMN Twice INT64 AS (Id * 2) STORED`,
 		"CREATE ROLE keeper", "GRANT SELECT ON TABLE Items TO ROLE keeper")
-	dc, err := spanner.NewClient(ctx, f.database, spannerOpts(f.addr)...)
+	dc, err := localclient.Spanner(ctx, f.database, spannerOpts(f.addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}

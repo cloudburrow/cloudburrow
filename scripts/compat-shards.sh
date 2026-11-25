@@ -977,3 +977,8 @@ compat_probe_expect() {
   done
   echo "CLOUDBURROW_TEST_STORAGE_RESTART_PROBE=$1:$2/storage-restart-probe.json"
 }
+
+# The official Spanner clients export built-in metrics to Google's Cloud
+# Monitoring whatever endpoint they dial unless this is "true" (ci.yml sets
+# it for every job too; scripts/compat-env.sh prints it).
+export SPANNER_DISABLE_BUILTIN_METRICS=true

@@ -15,6 +15,8 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/dynamicpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // btEnumType is the data API's Type of a schema bundle's enum.
@@ -80,7 +82,7 @@ func TestBigtableSQLProtoColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ac.Close() })
-	c, err := bigtable.NewClient(ctx, h.Project(), id)
+	c, err := localclient.Bigtable(ctx, h.Project(), id)
 	if err != nil {
 		t.Fatal(err)
 	}

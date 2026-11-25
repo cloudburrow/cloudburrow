@@ -26,6 +26,11 @@ env:
   # at runtime, but keeping them unset means a mistake cannot cost money.
   GOOGLE_APPLICATION_CREDENTIALS: ""
   GOOGLE_CLOUD_PROJECT: ""
+  # The official Spanner clients (Go, Java, Python, Node) export built-in
+  # metrics to Cloud Monitoring (monitoring.googleapis.com) whatever endpoint
+  # they dial, unless this is "true"; internal/localclient also turns them off
+  # in every Go client the repository makes.
+  SPANNER_DISABLE_BUILTIN_METRICS: "true"
 
 jobs:
   # Decides whether a pull request touches code the slow suites cover.

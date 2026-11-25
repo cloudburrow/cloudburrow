@@ -16,6 +16,8 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/dynamicpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // musicFiles is "Query protobuf data"'s example schema: package_name's
@@ -76,7 +78,7 @@ func TestSQLProtoColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := bigtable.NewClient(ctx, "p", "proto-inst", opt)
+	c, err := localclient.Bigtable(ctx, "p", "proto-inst", opt)
 	if err != nil {
 		t.Fatal(err)
 	}

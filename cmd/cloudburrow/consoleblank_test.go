@@ -14,6 +14,7 @@ import (
 	ssmpb "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
 	"context"
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -508,7 +509,7 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	btc, err := bigtable.NewClient(ctx, blankProject, bigtableInstance, localOpts(bt.Addr)...)
+	btc, err := localclient.Bigtable(ctx, blankProject, bigtableInstance, localOpts(bt.Addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}

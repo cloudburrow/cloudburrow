@@ -19,6 +19,8 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // Environment variables for the optional emulators, exported by
@@ -216,7 +218,7 @@ func TestBigtableTableAndRows(t *testing.T) {
 		t.Fatalf("CreateColumnFamily: %v", err)
 	}
 
-	c, err := bigtable.NewClient(ctx, h.Project(), instanceID)
+	c, err := localclient.Bigtable(ctx, h.Project(), instanceID)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -317,7 +319,7 @@ func TestSpannerSchemaAndQuery(t *testing.T) {
 	}
 
 	dbName := fmt.Sprintf("projects/%s/instances/%s/databases/testdb", h.Project(), instanceID)
-	c, err := spanner.NewClient(ctx, dbName, opts...)
+	c, err := localclient.Spanner(ctx, dbName, opts...)
 	if err != nil {
 		t.Fatalf("spanner.NewClient: %v", err)
 	}

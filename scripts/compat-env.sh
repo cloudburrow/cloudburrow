@@ -469,6 +469,12 @@ for n in "${SELECTED[@]}"; do
   fi
 done
 [ ${#OUT[@]} -eq 0 ] || printf '%s\n' "${OUT[@]}"
+# Not a CLOUDBURROW_TEST_* variable, so eval form only: the official Spanner
+# clients (Go, Java, Python, Node) export built-in metrics to Google's Cloud
+# Monitoring whatever endpoint a test gives them unless it is "true", and a
+# test that sets no SPANNER_EMULATOR_HOST would otherwise reach Google.
+# ci.yml sets it for every job, and compat-shards.sh for verify-local.sh.
+[ -n "$plain" ] || echo "export SPANNER_DISABLE_BUILTIN_METRICS='true'"
 if [ ${#UNSET[@]} -gt 0 ]; then
   echo "compat-env: not set, so the tests that need them skip: ${UNSET[*]}" >&2
 fi

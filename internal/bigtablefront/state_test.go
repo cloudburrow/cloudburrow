@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // serveKept serves a front for the emulator at emu that keeps its state in
@@ -84,7 +85,7 @@ func TestFrontKeepsItsStateAcrossARestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := bigtable.NewClient(ctx, "p", "kept-i", opt)
+	c, err := localclient.Bigtable(ctx, "p", "kept-i", opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +139,7 @@ func TestFrontKeepsItsStateAcrossARestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c2, err := bigtable.NewClient(ctx, "p", "kept-i", opt2)
+	c2, err := localclient.Bigtable(ctx, "p", "kept-i", opt2)
 	if err != nil {
 		t.Fatal(err)
 	}
