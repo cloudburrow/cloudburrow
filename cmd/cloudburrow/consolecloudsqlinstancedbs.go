@@ -88,6 +88,10 @@ func sqlUserAuthentication(t string) string {
 		return "Cloud IAM (service account)"
 	case "CLOUD_IAM_GROUP":
 		return "Cloud IAM (group)"
+	case "CLOUD_IAM_GROUP_USER":
+		return "Cloud IAM (group user)"
+	case "CLOUD_IAM_GROUP_SERVICE_ACCOUNT":
+		return "Cloud IAM (group service account)"
 	}
 	return t
 }
@@ -159,10 +163,11 @@ func databaseUserActions(in *sqladminapi.DatabaseInstance, dbNames, userRefs []s
 	}
 	add = append(add,
 		console.Field{Name: "principal", Label: "Principal", Type: "text", Required: true, VisibleWhen: iam,
-			Help: "a user's or service account's email; it signs in with an IAM access token, and needs roles/cloudsql.instanceUser"},
+			Help: "a user's, service account's or Cloud Identity group's email; it signs in with an IAM access token (a group's members with their own), and needs roles/cloudsql.instanceUser"},
 		console.Field{Name: "type", Label: "Type", Type: "select", Required: true, Default: "CLOUD_IAM_USER", VisibleWhen: iam,
-			Options:      []string{"CLOUD_IAM_USER", "CLOUD_IAM_SERVICE_ACCOUNT"},
-			OptionLabels: map[string]string{"CLOUD_IAM_USER": "IAM user", "CLOUD_IAM_SERVICE_ACCOUNT": "IAM service account"}})
+			Options: []string{"CLOUD_IAM_USER", "CLOUD_IAM_SERVICE_ACCOUNT", "CLOUD_IAM_GROUP"},
+			OptionLabels: map[string]string{"CLOUD_IAM_USER": "IAM user", "CLOUD_IAM_SERVICE_ACCOUNT": "IAM service account",
+				"CLOUD_IAM_GROUP": "IAM group"}})
 	acts = append(acts, console.Action{ID: "add-user", Label: "Add user account", Title: "Add a user account to instance " + in.Name,
 		Submit: "Add", Fields: add})
 	if len(userRefs) > 0 {
@@ -266,6 +271,10 @@ func sqlUserStatus(u *sqladminapi.User) string {
 	}
 	if u.DualPasswordType == "DUAL_PASSWORD" {
 		out = append(out, "Old password retained")
+	}
+	// A group deleted from Cloud Identity stays, INACTIVE (#1524).
+	if u.Type == "CLOUD_IAM_GROUP" && u.IamStatus != "" {
+		out = append(out, "IAM status: "+strings.ToLower(u.IamStatus))
 	}
 	return orDash(strings.Join(out, "; "))
 }

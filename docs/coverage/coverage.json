@@ -15634,6 +15634,7 @@
         "tests": [
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
+          "test/compat/cloudsqliamgroups1524_test.go:47 TestCloudSQLIAMGroupAuthentication",
           "test/compat/consolecloudsqldataapi_test.go:28 TestConsoleCloudSQLDataAPIAndProjectBackups",
           "test/compat/terraform_sql_provision_test.go:54 TestTerraformSQLProvisionScript"
         ]
@@ -16194,6 +16195,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
+          "test/compat/cloudsqliamgroups1524_test.go:47 TestCloudSQLIAMGroupAuthentication",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
           "test/compat/cloudsqlmysqlroot1993_test.go:277 TestCloudSQLMySQLRootDeletedReplica",
           "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers",
@@ -16206,6 +16208,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
+          "test/compat/cloudsqliamgroups1524_test.go:47 TestCloudSQLIAMGroupAuthentication",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
           "test/compat/cloudsqluserpolicy2009_test.go:41 TestCloudSQLUserPasswordPolicy",
           "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers"
@@ -16218,6 +16221,7 @@
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqlfields_test.go:65 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
+          "test/compat/cloudsqliamgroups1524_test.go:47 TestCloudSQLIAMGroupAuthentication",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
           "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
@@ -16239,6 +16243,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
+          "test/compat/cloudsqliamgroups1524_test.go:47 TestCloudSQLIAMGroupAuthentication",
           "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
           "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
@@ -21815,6 +21820,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812",
+          "test/compat/cloudsqliamgroups1524_test.go:47 TestCloudSQLIAMGroupAuthentication",
           "test/compat/terraform_served1578_test.go:52 TestTerraformCloudIdentityGroupAndMembership"
         ]
       },

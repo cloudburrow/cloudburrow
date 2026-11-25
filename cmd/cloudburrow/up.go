@@ -1385,7 +1385,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// IAM database authentication (#1944) checks a token this instance
 		// minted, and the principal's cloudsql.instances.login.
 		if creds != nil {
-			sqlAdminSrv.UseIAM(sqlAdminIAM(creds, iamEnforcer))
+			sqlAdminSrv.UseIAM(sqlAdminIAM(creds, iamEnforcer, func() *resourcemanager.Registry { return projectRegistry }))
 			// The Admin API's own methods (#1879).
 			sqlAdminSrv.Enforce = cloudSQLEnforcer(iamEnforcer)
 		}

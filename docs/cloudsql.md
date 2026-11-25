@@ -108,7 +108,7 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM groups (`CLOUD_IAM_GROUP`; IAM users and service accounts are served, see [IAM database authentication](#iam-database-authentication-1944)), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), SQL Server
+What answers 501, saying why: `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), SQL Server
 versions (their images are linux/amd64 only), `MYSQL_5_7` and `MYSQL_5_6` on a node that cannot run linux/amd64 images, and
 their replicas, high availability, point-in-time recovery and upgrades anywhere (see [Database versions](#database-versions-and-major-version-upgrades-1381)), BAK and TDE imports and exports (SQL Server's files),
 and promoting or switching over to a PostgreSQL read replica upgraded on its own before its primary is upgraded (#1524); read
@@ -1382,7 +1382,50 @@ As Google documents it for PostgreSQL and MySQL
 - A refused sign-in is the server's: PostgreSQL `FATAL 28000 Cloud SQL IAM service account
   authentication failed for user "…"`, MySQL `ERROR 1045 Access denied for user …`, with the reason.
 
-Not served: `CLOUD_IAM_GROUP` (501), and a token sent as a password to the server's own port.
+Not served: a token sent as a password to the server's own port.
+
+### IAM group authentication (#1524)
+
+As Google documents it
+([postgres/iam-authentication](https://docs.cloud.google.com/sql/docs/postgres/iam-authentication),
+[mysql/iam-authentication](https://docs.cloud.google.com/sql/docs/mysql/iam-authentication),
+[postgres/add-manage-iam-users](https://docs.cloud.google.com/sql/docs/postgres/add-manage-iam-users),
+[mysql/add-manage-iam-users](https://docs.cloud.google.com/sql/docs/mysql/add-manage-iam-users), read
+2026-11-25), on PostgreSQL and MySQL 8.0 and later (Google's
+[announcement](https://cloud.google.com/blog/products/databases/introducing-cloud-sql-iam-group-authentication)
+gives MySQL 8.0+; `MYSQL_5_7` and `MYSQL_5_6` are 400). The groups are this instance's Cloud Identity
+groups (`cloudidentity.googleapis.com` on the Resource Manager port):
+
+- `users.insert` of type `CLOUD_IAM_GROUP` with the group's email as `name`
+  (`gcloud sql users create GROUP_EMAIL --type=cloud_iam_group`) adds the group, with no privileges.
+  PostgreSQL: a `NOLOGIN` role named by the email (at most 63 characters), `GRANT … TO "group@domain"`.
+  MySQL: a role `'NAME'@'DOMAIN'`, NAME the part before the `@` (at most 32 characters), `GRANT … TO
+  'NAME'@'DOMAIN'`; `users.list` answers it with that host (UNVERIFIED: Google's sample lists only the
+  name). At most 200 groups; a duplicate is 409, a password or a host 400. A longer name is reached by
+  nesting the group in a parent group with a shorter one.
+- A member of the group, directly or through nested groups, signs in with its own IAM account and an
+  access token this instance minted, named as an IAM user is (`sa@project.iam`, or `sa` on MySQL), the
+  same paths as IAM database authentication above (`WithIAMAuthN`, the token as the password,
+  `executeSql` with `autoIamAuthn`, and Cloud SQL Studio's IAM sign-in, which takes the same check but no compat test runs). It needs `cloudsql.instances.login`, usually
+  `roles/cloudsql.instanceUser` granted to the group. Its first successful sign-in to the primary
+  creates its account, `CLOUD_IAM_GROUP_USER` or `CLOUD_IAM_GROUP_SERVICE_ACCOUNT`, a member of the role
+  of each of the instance's groups it is in, whose privileges it inherits (MySQL: as default roles;
+  `SET ROLE ALL` takes new ones in an open session). On a read replica it must have signed in to the
+  primary first; its account replicates (built, not yet run by a compat test).
+- Membership is read from Cloud Identity at every sign-in, `users.list` and `users.get`, and when a
+  group is removed, where Google's take about 15 minutes: the account gains or loses the groups'
+  roles, and is dropped once it is in none of the instance's groups (on PostgreSQL kept, outside
+  every group, while it owns objects, as Google asks for their ownership to be reassigned). On a
+  replica nothing is written: a member outside the groups is refused there, its account staying.
+- A group deleted from Cloud Identity is `iamStatus: INACTIVE` and passes on no privileges; one that
+  exists is `ACTIVE`. Removing a group from the instance (`users.delete`) takes its privileges from its
+  members and removes the members in no other group of the instance; a group that owns objects is 400.
+- A member's account is neither created (`users.insert` of a group user type is 400) nor deleted
+  (`users.delete`, 400) through the API; an individual `CLOUD_IAM_USER` or `CLOUD_IAM_SERVICE_ACCOUNT`
+  identical to a member's account is 400; an existing individual user signs in as itself, never
+  through a group.
+- The console's Users page adds a group (Add user account, Cloud IAM, type IAM group), lists groups and
+  members with their authentication, an inactive group's status, and removes a group.
 
 ### Cloud Run's Cloud SQL volume (#1346)
 

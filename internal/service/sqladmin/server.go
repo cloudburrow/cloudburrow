@@ -49,6 +49,9 @@ type User struct {
 	// Type is the Admin API's user type, "" for BUILT_IN; IAMEmail is an
 	// IAM user's full email, which MySQL's user name drops (#1944).
 	Type, IAMEmail string
+	// IAMStatus is a CLOUD_IAM_GROUP's iamStatus (#1524), ACTIVE or
+	// INACTIVE; "" for every other type.
+	IAMStatus string
 	// Policy is the user's own password policy and its status (#2009),
 	// nil for none or where the engine serves none.
 	Policy *UserPolicy
@@ -893,13 +896,25 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 				return u, nil
 			}
 		}
-		// An IAM user is named by its email too (#1944).
+		// An IAM user is named by its email too (#1944), and an IAM
+		// group by its email, whatever its MySQL host (#1524).
 		for _, u := range us {
-			if u.IAMEmail != "" && strings.EqualFold(u.IAMEmail, name) && (host == "" || host == u.Host) {
+			if u.IAMEmail != "" && strings.EqualFold(u.IAMEmail, name) && (host == "" || host == u.Host || u.Type == TypeIAMGroup) {
+				return u, nil
+			}
+		}
+		for _, u := range us {
+			if groupNamed(u, name) && (host == "" || host == u.Host) {
 				return u, nil
 			}
 		}
 		return User{}, Errorf(http.StatusNotFound, "Not Found: user %s does not exist in instance %s.", name, e.Instance())
+	}
+	if r.Method == http.MethodGet {
+		// Group members' accounts follow Cloud Identity (#1524).
+		if err := s.syncGroupMembers(ctx, project, e); err != nil {
+			return "sql.users.list", nil, err
+		}
 	}
 	if len(rest) == 1 && r.Method == http.MethodGet {
 		u, err := find(rest[0], q.Get("host"))
@@ -910,6 +925,7 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		if err != nil {
 			return "sql.users.get", nil, err
 		}
+		us = s.withGroupStatus(us)
 		return "sql.users.get", userJSON(project, e, us[0]), nil
 	}
 	if len(rest) != 0 {
@@ -924,6 +940,7 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		if err != nil {
 			return "sql.users.list", nil, err
 		}
+		us = s.withGroupStatus(us)
 		items := []any{}
 		for _, u := range us {
 			items = append(items, userJSON(project, e, u))
@@ -950,9 +967,17 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 			op, err := s.insertIAMUser(ctx, base, project, e, u.Type, u.Name, u.Host, u.Password)
 			return "sql.users.insert", op, err
 		}
+		if u.Type == TypeIAMGroup {
+			op, err := s.insertIAMGroup(ctx, base, project, e, u.Name, u.Host, u.Password)
+			return "sql.users.insert", op, err
+		}
+		if isGroupMemberType(u.Type) {
+			return "sql.users.insert", nil, Errorf(http.StatusBadRequest, "Invalid request: a %s user is created by Cloud SQL at the group member's "+
+				"first sign-in to the instance; add its group as a CLOUD_IAM_GROUP user.", u.Type)
+		}
 		if u.Type != "" && u.Type != TypeBuiltIn {
 			return "sql.users.insert", nil, unimplemented("users of type "+u.Type,
-				"only BUILT_IN, CLOUD_IAM_USER and CLOUD_IAM_SERVICE_ACCOUNT users are served (IAM groups are not)")
+				"BUILT_IN, CLOUD_IAM_USER, CLOUD_IAM_SERVICE_ACCOUNT and CLOUD_IAM_GROUP users are served")
 		}
 		var expiration int64
 		if u.PasswordPolicy != nil {
@@ -991,7 +1016,7 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		if err != nil {
 			return "sql.users.update", nil, err
 		}
-		if cur.Type == TypeIAMUser || cur.Type == TypeIAMServiceAccount {
+		if cur.Type == TypeIAMUser || cur.Type == TypeIAMServiceAccount || cur.Type == TypeIAMGroup || isGroupMemberType(cur.Type) {
 			// An IAM user signs in with an access token, never a password.
 			if u.Password != "" {
 				return "sql.users.update", nil, Errorf(http.StatusBadRequest, "Invalid request: %s is an IAM user, which has no password.", cur.Name)
@@ -1047,8 +1072,20 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		if err != nil {
 			return "sql.users.delete", nil, err
 		}
-		if err := e.DeleteUser(ctx, cur); err != nil {
-			return "sql.users.delete", nil, err
+		switch {
+		case cur.Type == TypeIAMGroup:
+			if err := s.deleteIAMGroup(ctx, project, e, cur); err != nil {
+				return "sql.users.delete", nil, err
+			}
+		case isGroupMemberType(cur.Type):
+			// "You can't manually remove an IAM group user from a Cloud
+			// SQL instance by using gcloud CLI" (add-manage-iam-users).
+			return "sql.users.delete", nil, Errorf(http.StatusBadRequest, "Invalid request: %s is a %s, which Cloud SQL removes when it leaves "+
+				"the instance's IAM groups in Cloud Identity; it is not deleted through the API.", cur.Name, cur.Type)
+		default:
+			if err := e.DeleteUser(ctx, cur); err != nil {
+				return "sql.users.delete", nil, err
+			}
 		}
 		s.forgetPasswords(project, e.Instance(), cur.Name, cur.Host)
 		return "sql.users.delete", s.done(base, project, e, "DELETE_USER", cur.Name), nil
@@ -1068,6 +1105,9 @@ func userJSON(project string, e Engine, u User) map[string]any {
 	}
 	if u.IAMEmail != "" {
 		m["iamEmail"] = u.IAMEmail
+	}
+	if u.IAMStatus != "" {
+		m["iamStatus"] = u.IAMStatus
 	}
 	if u.Policy != nil {
 		if pp := u.Policy.json(); len(pp) > 0 {
