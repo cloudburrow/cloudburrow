@@ -52,8 +52,12 @@ type gqlBind struct {
 	sql string
 	// a group variable: its quantified path
 	quant *graphQuant
-	// a path variable: its length
-	pathLen string
+	// a path variable: its length, its cost (ANY CHEAPEST's sum of its
+	// edges' COST) and its value (TO_JSON(p): its elements' keys, in order)
+	pathLen  string
+	pathCost string
+	pathVal  string
+	quants   []*graphQuant // its quantified edges, whose keys pathVal reads
 }
 
 func (b *gqlBind) materialized() bool { return b.qual != "" }
@@ -213,6 +217,7 @@ type gqlPatVar struct {
 	edge   bool
 	labels []*gqlLabel
 	quant  *gqlQuantSpec
+	cost   [2]int // an edge pattern's COST expression, {0, 0} without one
 	// restrict are the element tables an OPTIONAL MATCH's variable can be:
 	// those it is in the working table
 	restrict []*graphElement
@@ -222,6 +227,13 @@ type gqlQuantSpec struct {
 	lo, hi int
 	props  []gqlProp
 	conds  [][2]int
+	cost   [2]int // the edge's COST expression, per edge
+	// a quantified path pattern, ((src)-[e]->(dst) WHERE ...){m,n}: its
+	// node patterns, their inline filters, and the conditions (the nodes'
+	// and the subpath's WHERE) each edge's endpoints are held to
+	src, dst  *gqlPatVar
+	nodeProps []gqlProp
+	nodeConds [][2]int
 }
 
 // gqlProp is an inline property filter, {prop: value}.
@@ -238,7 +250,7 @@ type gqlPatEdge struct {
 }
 
 type gqlPath struct {
-	search  string // ANY, ANY SHORTEST: one path per pair of endpoints
+	search  string // ANY, ANY SHORTEST, ANY CHEAPEST: one path per pair of endpoints
 	mode    string // WALK, TRAIL, ACYCLIC
 	edges   []int  // its edges, in t.pat.edges
 	nodes   []*gqlPatVar
@@ -269,6 +281,7 @@ type gqlTranslator struct {
 	precededByEdge bool
 	lastProps      []gqlProp
 	lastConds      [][2]int
+	lastCost       [2]int
 	err            error // a failure while collapsing
 	parens         bool  // COLUMNS (...): the final list is parenthesized
 }
@@ -512,6 +525,9 @@ func (t *gqlTranslator) pathPattern(pat *gqlPattern) error {
 	case ps.isKw("ANY") && ps.isKwN(1, "SHORTEST"):
 		ps.p += 2
 		path.search = "ANY SHORTEST"
+	case ps.isKw("ANY") && ps.isKwN(1, "CHEAPEST") && ps.peekN(2).kind != tkNumber:
+		ps.p += 2
+		path.search = "ANY CHEAPEST"
 	case ps.isKw("ANY") && ps.peekN(1).kind != tkNumber && !ps.isKwN(1, "CHEAPEST"):
 		ps.p++
 		path.search = "ANY"
@@ -544,6 +560,10 @@ func (t *gqlTranslator) pathSeq(pat *gqlPattern, path *gqlPath, last **gqlPatVar
 	ps := t.ps
 	for {
 		switch {
+		case ps.isP("(") && t.isSubpath() && t.quantifiedSubpath():
+			if err := t.quantSubpath(pat, path, last); err != nil {
+				return err
+			}
 		case ps.isP("(") && t.isSubpath():
 			ps.p++
 			mode := ""
@@ -725,13 +745,18 @@ func (t *gqlTranslator) element(pat *gqlPattern, edge bool, open, close string) 
 		}
 		conds = append(conds, [2]int{e.lo, e.hi})
 	}
-	if ps.isKw("COST") {
-		return nil, unsupportedSQL{"an edge pattern's COST"}
+	var cost [2]int
+	if edge && ps.acceptKw("COST") {
+		e, err := ps.expr()
+		if err != nil {
+			return nil, err
+		}
+		cost = [2]int{e.lo, e.hi}
 	}
 	if err := ps.expectP(close); err != nil {
 		return nil, err
 	}
-	t.lastProps, t.lastConds = props, conds
+	t.lastProps, t.lastConds, t.lastCost = props, conds, cost
 	if !edge {
 		pat.props = append(pat.props, props...)
 		pat.conds = append(pat.conds, conds...)
@@ -753,12 +778,13 @@ func (t *gqlTranslator) edge(pat *gqlPattern) (*gqlPatVar, int, error) {
 	var v *gqlPatVar
 	var props []gqlProp
 	var conds [][2]int
+	var cost [2]int
 	if ps.isP("[") {
 		var err error
 		if v, err = t.element(pat, true, "[", "]"); err != nil {
 			return nil, 0, err
 		}
-		props, conds = t.lastProps, t.lastConds
+		props, conds, cost = t.lastProps, t.lastConds, t.lastCost
 		if err := ps.expectP("-"); err != nil {
 			return nil, 0, err
 		}
@@ -780,10 +806,11 @@ func (t *gqlTranslator) edge(pat *gqlPattern) (*gqlPatVar, int, error) {
 		if err != nil {
 			return nil, 0, err
 		}
-		q.props, q.conds = props, conds
+		q.props, q.conds, q.cost = props, conds, cost
 		v.quant = q
 		return v, dir, nil
 	}
+	v.cost = cost
 	pat.props = append(pat.props, props...)
 	pat.conds = append(pat.conds, conds...)
 	return v, dir, nil
@@ -1079,6 +1106,20 @@ func (t *gqlTranslator) matchIn(pat *gqlPattern, br *gqlBranch) ([]*gqlBranch, e
 				}
 				gq.hopConds = append(gq.hopConds, "("+s+")")
 			}
+			if v.quant.src != nil {
+				s, err := t.subpathHopCond(hb, gb, v.quant)
+				if err != nil {
+					return nil, err
+				}
+				gq.hopConds = append(gq.hopConds, s)
+			}
+			if c := v.quant.cost; hasCost(c) {
+				s, err := t.render(hb, c[0], c[1])
+				if err != nil {
+					return nil, err
+				}
+				gq.cost = "(" + s + ")"
+			}
 			for p := range t.refProps[v.name] {
 				if gb.table.hasProperty(p) {
 					if _, err := gb.table.column(p); err != nil {
@@ -1096,18 +1137,45 @@ func (t *gqlTranslator) matchIn(pat *gqlPattern, br *gqlBranch) ([]*gqlBranch, e
 			if p.pathVar == "" {
 				continue
 			}
-			var parts []string
+			var parts, costs, vals []string
+			var quants []*graphQuant
 			fixed := 0
-			for _, i := range p.edges {
-				if gb := bindOf(pat.edges[i].e); gb.kind == bGroup {
+			for k, n := range p.nodes {
+				if nbd := bindOf(n); nbd != nil && nbd.table != nil && !nbd.materialized() {
+					vals = append(vals, "["+elemKeySQL(nbd)+"]")
+				}
+				if k >= len(p.edges) {
+					continue
+				}
+				pe := pat.edges[p.edges[k]]
+				if gb := bindOf(pe.e); gb.kind == bGroup {
 					gb.quant.withLen = true
 					parts = append(parts, gb.alias+".cb_len")
+					if gb.quant.cost != "" {
+						costs = append(costs, gb.alias+".cb_cost")
+					}
+					quants = append(quants, gb.quant)
+					vals = append(vals, gb.alias+".cb_ids")
 				} else {
 					fixed++
+					if hasCost(pe.e.cost) {
+						s, err := t.render(nb, pe.e.cost[0], pe.e.cost[1])
+						if err != nil {
+							return nil, err
+						}
+						costs = append(costs, "("+s+")")
+					}
+					if gb.table != nil && !gb.materialized() {
+						vals = append(vals, "["+elemKeySQL(gb)+"]")
+					}
 				}
 			}
 			parts = append(parts, fmt.Sprint(fixed))
-			nb.bind(p.pathVar, &gqlBind{kind: bPath, pathLen: "(" + strings.Join(parts, " + ") + ")"})
+			pb := &gqlBind{kind: bPath, pathLen: "(" + strings.Join(parts, " + ") + ")", quants: quants, pathVal: pathValueSQL(vals)}
+			if len(costs) > 0 {
+				pb.pathCost = "(" + strings.Join(costs, " + ") + ")"
+			}
+			nb.bind(p.pathVar, pb)
 		}
 		out = append(out, nb)
 	}
@@ -1330,6 +1398,8 @@ func (t *gqlTranslator) searchMatch(pat *gqlPattern) error {
 		}
 		if c.kind == bPath {
 			c.pathLen = strings.Replace(c.pathLen, qa+".", qb+".", 1)
+			c.pathCost = strings.Replace(c.pathCost, qa+".", qb+".", 1)
+			c.pathVal = strings.Replace(c.pathVal, qa+".", qb+".", 1)
 		}
 		return &c
 	}
@@ -1348,9 +1418,16 @@ func (t *gqlTranslator) searchMatch(pat *gqlPattern) error {
 	sortPairs(ida, idb)
 	idA, idB := "CONCAT("+strings.Join(ida, ", '|', ")+")", "CONCAT("+strings.Join(idb, ", '|', ")+")"
 	better := idB + " < " + idA
-	if path.search == "ANY SHORTEST" {
+	switch path.search {
+	case "ANY SHORTEST":
 		la, lb := ob.binds[path.pathVar].pathLen, other(ob.binds[path.pathVar]).pathLen
 		better = "(" + lb + " < " + la + " OR " + lb + " = " + la + " AND " + idB + " < " + idA + ")"
+	case "ANY CHEAPEST":
+		ca, cb := ob.binds[path.pathVar].pathCost, other(ob.binds[path.pathVar]).pathCost
+		if ca == "" {
+			return unsupportedSQL{"ANY CHEAPEST with no edge COST"}
+		}
+		better = "(" + cb + " < " + ca + " OR " + cb + " = " + ca + " AND " + idB + " < " + idA + ")"
 	}
 	var cols []string
 	for _, n := range names {
@@ -1375,6 +1452,8 @@ func (t *gqlTranslator) searchMatch(pat *gqlPattern) error {
 		b.qual = qs
 		if b.kind == bPath {
 			b.pathLen = strings.Replace(b.pathLen, qa+".", qs+".", 1)
+			b.pathCost = strings.Replace(b.pathCost, qa+".", qs+".", 1)
+			b.pathVal = strings.Replace(b.pathVal, qa+".", qs+".", 1)
 		}
 		if wb != nil && wb.binds[n] != nil {
 			on = append(on, elemEqual(wb.binds[n], &b))

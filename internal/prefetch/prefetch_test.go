@@ -566,3 +566,25 @@ func TestUnwrapCopyRefusesAShortCopy(t *testing.T) {
 		t.Fatal("a copy cut short was accepted")
 	}
 }
+
+// The patched Spanner emulator this CLI embeds (#2029) is an image it
+// builds, listed after BigQuery's and built by BuildSpanner, not pulled.
+func TestPrefetcherBuildsThePatchedSpannerImage(t *testing.T) {
+	t.Parallel()
+	c := Cache{Dir: t.TempDir()}
+	plan := testPlan()
+	plan.SpannerImage = "dev.local/cloudburrow-spanner-emulator:1.5.58-cb.x-abc"
+	arts := c.Artifacts(plan)
+	if a := arts[3]; a.Ref != plan.SpannerImage || !a.Built || !a.Spanner || a.Kind != HostImage {
+		t.Fatalf("artifact 3 = %+v, want the built Spanner image", a)
+	}
+	built := 0
+	p := &Prefetcher{Cache: c, Runner: &fakeRunner{archive: archive(t, true)},
+		BuildSpanner: func(context.Context) (string, error) { built++; return plan.SpannerImage, nil }}
+	if err := p.storeHost(context.Background(), arts[3]); err != nil || built != 1 {
+		t.Fatalf("storeHost = %v, built %d", err, built)
+	}
+	if strings.Contains(p.Runner.(*fakeRunner).joined(), " pull") {
+		t.Error("the Spanner image was pulled")
+	}
+}

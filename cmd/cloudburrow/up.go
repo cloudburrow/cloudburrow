@@ -1059,6 +1059,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// embeds (#1061), in the cluster before its Deployment.
 		imageComps = append(imageComps, newBigQueryImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), cfg.Name, comps, stdout))
 	}
+	if serviceEnabled(cfg, config.ServiceSpanner) {
+		// The patched Spanner emulator this CLI embeds (#2029), or Google's image, with a warning.
+		imageComps = append(imageComps, newSpannerImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), cfg.Name, comps, stdout))
+	}
 	coord.RegisterConcurrent(imageComps...)
 	// `kind create` returns before its node is Ready (#1588), so the
 	// images above and Knative's manifests overlap the node's start; the

@@ -359,19 +359,65 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
+  # The patched Spanner emulator every CLI embeds (#2029): Google's emulator
+  # and GoogleSQL, from the source third_party/spanner-emulator pins and
+  # checks, with CloudBurrow's patches, built once per architecture on that
+  # architecture's runner (a C++ build under emulation would not finish), by
+  # scripts/spanner-emulator-binaries.sh. Never from a cache: what a release
+  # ships is built by this run. The build jobs check each archive against
+  # the SHA-256 sums this job writes beside it.
+  spanner-emulator:
+    name: build the Spanner emulator linux/${{ matrix.arch }}
+    needs: require-ci-green
+    strategy:
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    # Bazel builds GoogleSQL and the emulator from nothing: hours on a
+    # standard runner's 4 CPUs (GoogleSQL alone took over an hour on 8).
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_REF }}
+      - name: Make room for Bazel's output base
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift
+          df -h /
+      - name: Build the emulator
+        env:
+          SPANNER_EMULATOR_BUILD_DIR: ${{ runner.temp }}/spanner-emulator-build
+          BAZEL_JOBS: "4"
+        run: bash scripts/spanner-emulator-binaries.sh -arch "${{ matrix.arch }}" -out "$RUNNER_TEMP/spanner-emulator"
+      - name: Write the archive's SHA-256 sum
+        run: |
+          cd "$RUNNER_TEMP/spanner-emulator"
+          sha256sum spanner-emulator-*-linux-${{ matrix.arch }}.tar.gz | tee SHA256SUMS-${{ matrix.arch }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: spanner-emulator-linux-${{ matrix.arch }}
+          path: ${{ runner.temp }}/spanner-emulator
+          retention-days: 7
+          if-no-files-found: error
+          overwrite: true
+
   build:
     name: build ${{ matrix.goos }}/${{ matrix.goarch }}
-    needs: [verify, runtime-image-publish, bigquery-emulator, litert-lm-macos]
+    needs: [verify, runtime-image-publish, bigquery-emulator, spanner-emulator, litert-lm-macos]
     # A tag needs the runtime image's digest to stamp; a dry run, which
     # builds no image, builds the CLIs with the dev default.
     if: >-
       !cancelled() && needs.verify.result == 'success' &&
       needs.bigquery-emulator.result == 'success' &&
+      needs.spanner-emulator.result == 'success' &&
       needs.litert-lm-macos.result == 'success' &&
       (needs.runtime-image-publish.result == 'success' ||
        (needs.runtime-image-publish.result == 'skipped' && !(startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.release_tag, 'v'))))
     runs-on: ubuntu-latest
-    # 20: the embedded BigQuery emulator is built once, by the job above (#1087).
+    # 20: the embedded BigQuery and Spanner emulators are built once, by the
+    # jobs above (#1087, #2029).
     timeout-minutes: 20
     strategy:
       matrix:
@@ -406,6 +452,24 @@ jobs:
           echo "$SUMS  SHA256SUMS" | sha256sum -c -
           sha256sum -c SHA256SUMS
           cp bigquery-emulator-* "$GITHUB_WORKSPACE/internal/bigqueryimage/bin/"
+
+      # The patched Spanner emulator the spanner-emulator jobs built (#2029),
+      # each archive checked against its sum, then held to the patches
+      # checked out here: an archive's name carries their hash, and the test
+      # fails unless this CLI embeds a whole build for both architectures.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: spanner-emulator-linux-*
+          path: ${{ runner.temp }}/spanner-emulator
+          merge-multiple: true
+      - name: Check the Spanner emulator archives and put them in place
+        run: |
+          set -eu
+          cd "$RUNNER_TEMP/spanner-emulator"
+          for arch in amd64 arm64; do sha256sum -c "SHA256SUMS-$arch"; done
+          cp spanner-emulator-*-linux-*.tar.gz "$GITHUB_WORKSPACE/internal/spannerimage/bin/"
+          cd "$GITHUB_WORKSPACE"
+          CLOUDBURROW_REQUIRE_SPANNER_BUILDS=1 go test -count=1 -run TestEmbeddedBuilds ./internal/spannerimage/
 
       # The Apple GPU runner (#2159), for the darwin/arm64 archive only.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -478,6 +542,9 @@ jobs:
           fi
           # The embedded BigQuery emulator's licences and notices (#1061).
           gzip -dc internal/bigqueryimage/bin/bigquery-emulator-licenses.txt.gz > "dist/${NAME}/LICENSES-bigquery-emulator.txt"
+          # The embedded Spanner emulator's licences (#2029): the same bundle
+          # is in both architectures' archives.
+          tar -xzOf internal/spannerimage/bin/spanner-emulator-*-linux-amd64.tar.gz licenses.txt.gz | gzip -dc > "dist/${NAME}/LICENSES-spanner-emulator.txt"
           tar -czf "dist/${NAME}.tar.gz" -C dist "${NAME}"
           (cd dist && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256")
 

@@ -128,13 +128,11 @@ func finGraphClient(t *testing.T, h *Harness, instanceID string) (context.Contex
 // ARRAY_LENGTH and SUM (a Recursive Union whose base is the start nodes);
 // TRAIL and ACYCLIC; ANY and ANY SHORTEST (one path per pair of
 // endpoints: an Anti Semi Apply of the paths to the better ones); GQL's
-// UNION ALL; and a subquery in the select list
+// UNION ALL; a quantified path pattern (each edge's endpoints held to its
+// node patterns); TO_JSON of a path; and a subquery in the select list
 // of a SELECT that aggregates. Each returns Google's documented rows; the
 // engine's errors (unbounded quantifiers, a {0} path, a FROM-less SELECT
-// with WHERE, a graph element returned) are the same in every mode; what
-// the planner does not plan yet (a quantified path of more than one edge,
-// a path variable as a value) runs in NORMAL mode
-// and is refused by name in PLAN mode.
+// with WHERE, a graph element returned) are the same in every mode.
 //
 // covers: google.spanner.v1.Spanner/ExecuteSql, google.spanner.v1.Spanner/ExecuteStreamingSql
 func TestSpannerGraphQueryPlansOfEveryStatement(t *testing.T) {
@@ -198,6 +196,9 @@ func TestSpannerGraphQueryPlansOfEveryStatement(t *testing.T) {
 		{name: "ANY SHORTEST", sql: `GRAPH FinGraph MATCH ANY SHORTEST (a:Account {is_blocked:true})-[t:Transfers]->{1, 4} (b:Account) RETURN a.id AS a_id, ARRAY_LENGTH(t) AS path_length, b.id AS b_id`, rows: 3, check: has("Anti Semi Apply", "Recursive Union")},
 		{name: "ANY SHORTEST TRAIL subpath", sql: `GRAPH FinGraph MATCH ANY SHORTEST (TRAIL ->{1,4}) RETURN COUNT(1) as num_paths`, rows: 1, check: has("Anti Semi Apply")},
 		{name: "ANY then ALL", sql: `GRAPH FinGraph MATCH ANY (a:Account {id: 20})->(mid:Account)->(a:Account) MATCH ALL (p:Person)->(mid) RETURN p.name, mid.id`, rows: 1, check: has("Anti Semi Apply")},
+		{name: "quantified path pattern", sql: `GRAPH FinGraph MATCH (src:Account) ((:Account)-[:Transfers]->(mid:Account {is_blocked:true})){1,2} -[:Transfers]->(dst:Account) RETURN src.id AS src_account_id, dst.id AS dst_account_id`, rows: 3, check: has("Recursive Union")},
+		{name: "quantified path pattern alone", sql: `GRAPH FinGraph MATCH ((a:Account)-[t:Transfers]->(b:Account)){1,3} RETURN ARRAY_LENGTH(t) AS hops`, rows: 23, check: has("Recursive Union")},
+		{name: "TO_JSON of a path", sql: `GRAPH FinGraph MATCH p=(account:Account {is_blocked: false})-[transfer:Transfers]-(dst:Account) RETURN TO_JSON(p) as results`, rows: 6, check: has("Union All")},
 		{name: "GRAPH_TABLE RETURN", sql: `SELECT name FROM GRAPH_TABLE(FinGraph MATCH (n:Person) RETURN n.name) ORDER BY name`, rows: 3, check: has("Sort")},
 		{name: "UNION ALL", sql: `GRAPH FinGraph MATCH (n:Person) RETURN n.id AS id UNION ALL MATCH (n:Account) RETURN n.id AS id`, rows: 6, check: has("Union All")},
 		{name: "subquery in an aggregating select list", sql: `SELECT (SELECT COUNT(*) FROM Person) AS x, COUNT(*) AS c FROM Account`, rows: 1, check: has("Aggregate")},
@@ -215,6 +216,7 @@ func TestSpannerGraphQueryPlansOfEveryStatement(t *testing.T) {
 		{`GRAPH FinGraph MATCH (src:Account {id: 7})-[e:Transfers WHERE e.amount > 100]->{0,2} (dst:Account) WHERE src.id != dst.id LET total_amount = SUM(e.amount) RETURN src.id AS src_account_id, dst.id AS dst_account_id, ARRAY_LENGTH(e) AS number_of_hops, total_amount`,
 			[]string{"7 16 1 300", "7 20 2 600"}},
 		{`GRAPH FinGraph MATCH (n:Person) OPTIONAL MATCH (n:Person)-[:Owns]->(a:Account {is_blocked: TRUE}) RETURN n.name, a.id AS blocked_account_id`, []string{"Alex NULL", "Dana NULL", "Lee 16"}},
+		{`GRAPH FinGraph MATCH (src:Account) ((:Account)-[:Transfers]->(mid:Account {is_blocked:true})){1,2} -[:Transfers]->(dst:Account) RETURN src.id AS src_account_id, dst.id AS dst_account_id`, []string{"20 20", "7 20", "7 20"}},
 	} {
 		for _, mode := range []string{"NORMAL", "PROFILE"} {
 			var it *spanner.RowIterator
@@ -257,23 +259,11 @@ func TestSpannerGraphQueryPlansOfEveryStatement(t *testing.T) {
 			}
 		}
 	}
-	// not planned yet: NORMAL runs them, PLAN refuses them by name
-	for _, c := range []struct {
-		sql  string
-		rows int
-		what string
-	}{
-		{`GRAPH FinGraph MATCH (src:Account) ((:Account)-[:Transfers]->(mid:Account {is_blocked:true})){1,2} -[:Transfers]->(dst:Account) RETURN src.id AS src_account_id, dst.id AS dst_account_id`, 3, "side by side"},
-		{`GRAPH FinGraph MATCH p=(account:Account {is_blocked: false})-[transfer:Transfers]-(dst:Account) RETURN TO_JSON(p) as results`, 6, "path variable p"},
-	} {
-		got, err := rowValues(client.Single().Query(ctx, spanner.Statement{SQL: c.sql}))
-		if err != nil || len(got) != c.rows {
-			t.Errorf("%s: NORMAL %d rows (%v); want %d", c.sql, len(got), err, c.rows)
-		}
-		_, err = client.Single().AnalyzeQuery(ctx, spanner.Statement{SQL: c.sql})
-		if status.Code(err) != codes.Unimplemented || !strings.Contains(fmt.Sprint(err), c.what) {
-			t.Errorf("%s in PLAN mode: %v; want UNIMPLEMENTED naming %q", c.sql, err, c.what)
-		}
+	// a quantified path pattern's node read outside it is still refused
+	// by name in PLAN mode
+	q := `GRAPH FinGraph MATCH ((a:Account)-[t:Transfers]->(b:Account)){1,2} RETURN b.id AS b_id`
+	if _, err := client.Single().AnalyzeQuery(ctx, spanner.Statement{SQL: q}); status.Code(err) != codes.Unimplemented && status.Code(err) != codes.InvalidArgument {
+		t.Errorf("%s in PLAN mode: %v; want the engine's error or UNIMPLEMENTED naming group variable b", q, err)
 	}
 }
 

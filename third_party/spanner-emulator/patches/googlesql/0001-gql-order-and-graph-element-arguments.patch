@@ -1,0 +1,88 @@
+CloudBurrow patch 1 of 1 to GoogleSQL 2026.7.2 (google/googlesql, tag
+2026.7.2, Apache-2.0), as the Cloud Spanner emulator v1.5.58 builds it.
+It is applied after the emulator's own build/bazel/googlesql.patch: the
+emulator patch 0001 copies it to build/bazel/cloudburrow_googlesql.patch and
+lists it in MODULE.bazel's archive_override for googlesql.
+
+Upstream files: googlesql/reference_impl/algebrizer_graph.cc and
+googlesql/analyzer/function_signature_matcher.cc.
+
+Why (cloudburrow/cloudburrow#2029):
+
+1. algebrizer_graph.cc, AlgebrizeGraphTableScan: the emulator runs queries
+   on GoogleSQL's reference evaluator with scramble_undefined_orderings set
+   (backend/query/query_engine.cc), so any relation not marked ordered is
+   reordered by ReorderingTupleIterator (odd rows first, then even rows: for
+   three rows, the first two swap). GoogleSQL's resolver never sets
+   is_ordered on a ResolvedGraphTableScan or on the ResolvedGraphLinearScans
+   it wraps, so the projection over a GQL query's final
+   `RETURN ... ORDER BY` was marked unordered and its rows came back
+   scrambled. Spanner returns them in the ORDER BY's order. The algebrizer
+   now reads the order from the last scan of the innermost linear scan (the
+   ResolvedOrderByScan, or the ResolvedLimitOffsetScan over it). SQL's ORDER
+   BY was never affected: its ResolvedProjectScan and OrderByScan carry
+   is_ordered.
+
+2. function_signature_matcher.cc: a graph element was refused for any ANY
+   argument unless FEATURE_SQL_GRAPH_EXPOSE_GRAPH_ELEMENT was on, so
+   `LET path_length = COUNT(t)` over a group variable (Google's documented
+   ANY SHORTEST example, graph-patterns page) failed with "No matching
+   signature for aggregate function COUNT". Spanner documents that "Graph
+   elements can be used in GQL predicates, functions and subqueries within
+   GQL". With FEATURE_SQL_GRAPH on, graph elements exist only inside a graph
+   query (RETURN and COLUMNS still refuse a graph-typed column without
+   EXPOSE_GRAPH_ELEMENT), so the matcher now takes them there.
+
+diff --git a/googlesql/analyzer/function_signature_matcher.cc b/googlesql/analyzer/function_signature_matcher.cc
+index 3495907..4776337 100644
+--- a/googlesql/analyzer/function_signature_matcher.cc
++++ b/googlesql/analyzer/function_signature_matcher.cc
+@@ -1573,8 +1573,13 @@ absl::StatusOr<bool> FunctionSignatureMatcher::
+       if (
+           // Disallow graph types when the signature does not *explicitly* take
+           // graph element types: even if the signature type is ANY.
++          // Graph elements only exist inside a graph query when
++          // FEATURE_SQL_GRAPH_EXPOSE_GRAPH_ELEMENT is off (the RETURN and
++          // COLUMNS checks keep them from leaving it), and GQL takes them
++          // in any function there, e.g. COUNT(e) of a group variable.
+           (!language_.LanguageFeatureEnabled(
+                FEATURE_SQL_GRAPH_EXPOSE_GRAPH_ELEMENT) &&
++           !language_.LanguageFeatureEnabled(FEATURE_SQL_GRAPH) &&
+            input_type != nullptr && input_type->IsGraphElement()) ||
+           // Disallow measure types for templated arguments except
+           // ARG_KIND_EXPR_MEASURE_ANY_1.
+diff --git a/googlesql/reference_impl/algebrizer_graph.cc b/googlesql/reference_impl/algebrizer_graph.cc
+index fdbf7db..2d9b8f8 100644
+--- a/googlesql/reference_impl/algebrizer_graph.cc
++++ b/googlesql/reference_impl/algebrizer_graph.cc
+@@ -383,6 +383,19 @@ TryGetNodeReferencesFromEdgeReferences(
+ 
+   return result;
+ }
++// Whether a GQL query's result is ordered: the resolver leaves is_ordered
++// unset on the ResolvedGraphTableScan and on the ResolvedGraphLinearScans it
++// wraps, so the order of a final `RETURN ... ORDER BY` (a ResolvedOrderByScan,
++// or a ResolvedLimitOffsetScan over one) is read from the last scan of the
++// innermost linear scan, which is the scan whose rows the query returns.
++bool GqlFinalScanIsOrdered(const ResolvedScan* scan) {
++  while (scan != nullptr && scan->Is<ResolvedGraphLinearScan>()) {
++    const auto* linear = scan->GetAs<ResolvedGraphLinearScan>();
++    if (linear->scan_list().empty()) return false;
++    scan = linear->scan_list().back().get();
++  }
++  return scan != nullptr && scan->is_ordered();
++}
+ }  // namespace
+ 
+ absl::StatusOr<std::unique_ptr<RelationalOp>>
+@@ -398,7 +411,9 @@ Algebrizer::AlgebrizeGraphTableScan(
+   // and not embed the expressions in it.
+   return AlgebrizeProjectScanInternal(
+       graph_table_scan->column_list(), graph_table_scan->shape_expr_list(),
+-      graph_table_scan->input_scan(), graph_table_scan->is_ordered(),
++      graph_table_scan->input_scan(),
++      graph_table_scan->is_ordered() ||
++          GqlFinalScanIsOrdered(graph_table_scan->input_scan()),
+       active_conjuncts);
+ }
+ 

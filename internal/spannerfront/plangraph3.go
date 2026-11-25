@@ -127,6 +127,26 @@ func (t *gqlTranslator) exportOf(name, from string) (*gqlExport, error) {
 		x.suffixes = []string{"s"}
 	case bPath:
 		x.suffixes = []string{"len"}
+		cost, val := false, false
+		for _, br := range t.branches {
+			if b := br.binds[from]; b != nil {
+				cost = cost || b.pathCost != ""
+				val = val || b.pathVal != ""
+			}
+		}
+		if cost {
+			x.suffixes = append(x.suffixes, "cost")
+		}
+		if val && t.pathUsedAsValue(name, from) {
+			x.suffixes = append(x.suffixes, "v")
+			for _, br := range t.branches {
+				if b := br.binds[from]; b != nil {
+					for _, q := range b.quants {
+						q.withIDs = true
+					}
+				}
+			}
+		}
 	}
 	return x, nil
 }
@@ -162,6 +182,15 @@ func (t *gqlTranslator) exportValue(x *gqlExport, b *gqlBind, suffix string) (st
 	case bScalar:
 		return b.sql, nil
 	case bPath:
+		switch suffix {
+		case "cost":
+			if b.pathCost == "" {
+				return "NULL", nil
+			}
+			return b.pathCost, nil
+		case "v":
+			return b.pathVal, nil
+		}
 		return b.pathLen, nil
 	case bGroup:
 		if suffix == "len" {
@@ -209,6 +238,12 @@ func (x *gqlExport) materialize(qual string) *gqlBind {
 	}
 	if x.kind == bPath {
 		b.pathLen = qual + "." + b.prefix + "__len"
+		if b.cols[b.prefix+"__cost"] {
+			b.pathCost = qual + "." + b.prefix + "__cost"
+		}
+		if b.cols[b.prefix+"__v"] {
+			b.pathVal = qual + "." + b.prefix + "__v"
+		}
 	}
 	return b
 }
@@ -933,6 +968,47 @@ func (t *gqlTranslator) render(br *gqlBranch, lo, hi int) (string, error) {
 				emit(i, i+3, arg.pathLen)
 				i += 3
 				continue
+			case (fn == "TO_JSON" || fn == "SAFE_TO_JSON") && arg != nil && arg.kind == bPath && arg.pathVal != "" && i+3 < hi && ps.toks[i+3].text == ")":
+				// the path's elements' identities, in order
+				for _, q := range arg.quants {
+					q.withIDs = true
+				}
+				emit(i, i+3, fn+"("+arg.pathVal+")")
+				i += 3
+				continue
+			case fn == "PROPERTY_EXISTS" && arg != nil && arg.kind == bElem && i+5 < hi && ps.toks[i+3].text == "," && isNameTok(ps.toks[i+4]) && ps.toks[i+5].text == ")":
+				emit(i, i+5, propertyExistsSQL(arg, ps.toks[i+4].text))
+				i += 5
+				continue
+			case (fn == "SAME" || fn == "ALL_DIFFERENT") && arg != nil && arg.kind == bElem:
+				var els []*gqlBind
+				j := i + 2
+				for ; j < hi; j += 2 {
+					b := bindAt(j)
+					if b == nil || b.kind != bElem || j+1 >= hi || (ps.toks[j+1].text != "," && ps.toks[j+1].text != ")") {
+						els = nil
+						break
+					}
+					els = append(els, b)
+					if ps.toks[j+1].text == ")" {
+						break
+					}
+				}
+				if len(els) == 0 {
+					break
+				}
+				emit(i, j+1, sameSQL(els, fn == "ALL_DIFFERENT"))
+				i = j + 1
+				continue
+			case fn == "COUNT" && arg != nil && arg.kind == bGroup && i+3 < hi && ps.toks[i+3].text == ")":
+				// horizontal: the group variable's edges
+				v, err := t.exportValue(&gqlExport{kind: bGroup}, arg, "len")
+				if err != nil {
+					return "", err
+				}
+				emit(i, i+3, v)
+				i += 3
+				continue
 			case fn == "LABELS" && arg != nil && arg.kind == bElem && i+3 < hi && ps.toks[i+3].text == ")":
 				emit(i, i+3, labelsSQL(arg))
 				i += 3
@@ -979,6 +1055,33 @@ func (t *gqlTranslator) render(br *gqlBranch, lo, hi int) (string, error) {
 			emit(i, i+2, col)
 			i += 2
 			continue
+		}
+		// node IS [NOT] SOURCE|DESTINATION [OF] edge
+		if i+3 < hi && strings.EqualFold(ps.toks[i+1].text, "IS") {
+			j := i + 2
+			neg := strings.EqualFold(ps.toks[j].text, "NOT")
+			if neg {
+				j++
+			}
+			end := strings.ToUpper(ps.toks[j].text)
+			if (end == "SOURCE" || end == "DESTINATION") && j+1 < hi {
+				j++
+				if strings.EqualFold(ps.toks[j].text, "OF") {
+					j++
+				}
+				if w := bindAt(j); w != nil && w.kind == bElem && w.edge && !v.edge {
+					c, err := endpointSQL(v, w, end == "SOURCE")
+					if err != nil {
+						return "", err
+					}
+					if neg {
+						c = "(NOT " + c + ")"
+					}
+					emit(i, j, c)
+					i = j
+					continue
+				}
+			}
 		}
 		if i+2 < hi && (ps.toks[i+1].text == "=" || ps.toks[i+1].text == "!=" || ps.toks[i+1].text == "<>") {
 			if w := bindAt(i + 2); w != nil && w.kind == bElem && !(i+3 < hi && ps.toks[i+3].text == ".") {
