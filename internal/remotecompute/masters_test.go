@@ -57,26 +57,34 @@ func TestWaitPortsFree(t *testing.T) {
 // A master whose process is gone is ended; one whose process runs is left
 // to it; a recorded pid that is no ssh is never signalled.
 func TestCloseOrphanedMasters(t *testing.T) {
-	sleep, err := exec.LookPath("sleep")
+	// The fixture is this test binary, which sleeps when asked
+	// (TestHelperSleep), under a link named ssh, so it runs as "ssh" (a
+	// copied system binary would not run on macOS, its signature broken,
+	// and a link to sleep is no sleep where coreutils is one multicall
+	// binary that reads its argv[0], as Ubuntu 26.04's).
+	self, err := os.Executable()
 	if err != nil {
-		t.Skip("no sleep")
+		t.Skip(err)
 	}
-	// A link named ssh runs as "ssh" (a copied system binary would not
-	// run on macOS, its signature broken).
 	bin := filepath.Join(t.TempDir(), "ssh")
-	if err := os.Symlink(sleep, bin); err != nil {
+	if err := os.Symlink(self, bin); err != nil {
 		t.Fatal(err)
 	}
+	sleeper := func(path, secs string) *exec.Cmd {
+		c := exec.Command(path, "-test.run=^TestHelperSleep$")
+		c.Env = append(os.Environ(), "CB_TEST_HELPER_SLEEP="+secs)
+		return c
+	}
 	start := func() *exec.Cmd {
-		c := exec.Command(bin, "60")
+		c := sleeper(bin, "60")
 		if err := c.Start(); err != nil {
-			t.Skipf("cannot run a copy of sleep: %v", err)
+			t.Skipf("cannot run the test binary as ssh: %v", err)
 		}
 		t.Cleanup(func() { _ = c.Process.Kill(); _, _ = c.Process.Wait() })
 		return c
 	}
 	orphan, kept := start(), start()
-	other := exec.Command(sleep, "60")
+	other := sleeper(self, "60")
 	if err := other.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +93,7 @@ func TestCloseOrphanedMasters(t *testing.T) {
 	go func() { _, _ = orphan.Process.Wait(); close(exited) }()
 
 	// A finished process's pid stands for a process that is gone.
-	gone := exec.Command(sleep, "0")
+	gone := sleeper(self, "0")
 	if err := gone.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -128,3 +136,14 @@ func TestCloseOrphanedMasters(t *testing.T) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// TestHelperSleep is TestCloseOrphanedMasters's fixture process: with
+// CB_TEST_HELPER_SLEEP set, it sleeps that many seconds.
+func TestHelperSleep(t *testing.T) {
+	v := os.Getenv("CB_TEST_HELPER_SLEEP")
+	if v == "" {
+		return
+	}
+	n, _ := strconv.Atoi(v)
+	time.Sleep(time.Duration(n) * time.Second)
+}

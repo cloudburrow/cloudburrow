@@ -393,6 +393,9 @@ func (m *Manager) BeginSignIn(ctx context.Context, cloud Cloud, opts SignInOptio
 	st := &signInState{status: SignInStatus{ID: newID("signin"), Cloud: cloud, State: "waiting", Prompt: si.Prompt()}, signIn: si, cancel: cancel}
 	m.mu.Lock()
 	m.signIns[st.status.ID] = st
+	// The status as it starts: the goroutine below changes st.status
+	// under mu.
+	started := st.status
 	m.mu.Unlock()
 	go func() {
 		choices, err := si.Wait(bg)
@@ -405,7 +408,7 @@ func (m *Manager) BeginSignIn(ctx context.Context, cloud Cloud, opts SignInOptio
 		}
 		st.status.State, st.status.Choices = "choose", choices
 	}()
-	return st.status, nil
+	return started, nil
 }
 
 // SignInStatusOf is a sign-in's state.

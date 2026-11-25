@@ -433,6 +433,9 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 	s.jobs[key] = r
 	s.addMessageLocked(r, dataflowpb.JobMessageImportance_JOB_MESSAGE_BASIC, "Starting the Flex Template launcher for image "+image+".")
 	s.save()
+	// The answer's view, taken now: the launch below changes the job under
+	// mu once it starts.
+	launched := viewOf(job, dataflowpb.JobView_JOB_VIEW_SUMMARY)
 	s.mu.Unlock()
 
 	var args []string
@@ -468,5 +471,5 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 			s.save()
 		}
 	}()
-	return &dataflowpb.LaunchFlexTemplateResponse{Job: viewOf(job, dataflowpb.JobView_JOB_VIEW_SUMMARY)}, nil
+	return &dataflowpb.LaunchFlexTemplateResponse{Job: launched}, nil
 }

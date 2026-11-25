@@ -103,8 +103,16 @@ const (
 	kmsPort          = "8087"
 )
 
-// IdlePoll is how often an instance's kernel activity is read.
-var IdlePoll = 30 * time.Second
+// defaultIdlePoll is how often an instance's kernel activity is read when
+// Manager.IdlePoll is zero.
+const defaultIdlePoll = 30 * time.Second
+
+func (m *Manager) idlePoll() time.Duration {
+	if m.IdlePoll > 0 {
+		return m.IdlePoll
+	}
+	return defaultIdlePoll
+}
 
 // account is the instance's service account email.
 func (j *Jupyter) account(project string) string {
@@ -176,10 +184,31 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 		}
 		return errors.New("BigQuery is not served by this instance, so a Workbench instance has nothing to query")
 	}
-	var stops []func()
+	// stops are what stopAll undoes, newest first. A Disconnect runs
+	// stopAll (s.stop) while this launch may still be adding to them, so
+	// they are under stopsMu, and one added after stopAll runs at once.
+	var (
+		stopsMu sync.Mutex
+		stops   []func()
+		stopped bool
+	)
+	addStop := func(f func()) {
+		stopsMu.Lock()
+		if stopped {
+			stopsMu.Unlock()
+			f()
+			return
+		}
+		stops = append(stops, f)
+		stopsMu.Unlock()
+	}
 	stopAll := func() {
-		for i := len(stops) - 1; i >= 0; i-- {
-			stops[i]()
+		stopsMu.Lock()
+		fs := stops
+		stops, stopped = nil, true
+		stopsMu.Unlock()
+		for i := len(fs) - 1; i >= 0; i-- {
+			fs[i]()
 		}
 	}
 	s.stop = stopAll
@@ -191,7 +220,7 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 		if err != nil {
 			return "", err
 		}
-		stops = append(stops, stop)
+		addStop(stop)
 		return port + "=" + t, nil
 	}
 	// The instance's metadata server, on the host's loopback.
@@ -203,7 +232,7 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 		}
 		meta := &http.Server{Handler: hostguard.Wrap(m.metadataHandler(s), "metadata.google.internal"), ReadHeaderTimeout: 10 * time.Second}
 		go func() { _ = meta.Serve(ln) }()
-		stops = append(stops, func() { _ = meta.Close() })
+		addStop(func() { _ = meta.Close() })
 		metaAddr = ln.Addr().String()
 	}
 
@@ -342,7 +371,7 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 			logs, _ := m.docker(ctx, "logs", "--tail", "40", kernel)
 			return fmt.Errorf("%v: %s", err, strings.ReplaceAll(logs, token, "<token>"))
 		}
-		stops = append(stops, k.close)
+		addStop(k.close)
 		python, notes = k.python, k.notes
 		m.mu.Lock()
 		s.kernel = k
@@ -359,8 +388,8 @@ func (m *Manager) launchJupyter(ctx context.Context, s *session) error {
 	m.mu.Unlock()
 	if idle > 0 {
 		done := make(chan struct{})
-		stops = append(stops, func() { close(done) })
-		go m.watchActivity(s, done)
+		addStop(func() { close(done) })
+		go m.watchActivity(s, done, m.idlePoll())
 	}
 	if colab {
 		m.logf("notebook runtime %s: connected (%s)", s.key, kernel)
@@ -514,8 +543,8 @@ func activity(ctx context.Context, addr, token string) (time.Time, bool, error) 
 
 // watchActivity shuts the instance down after its idle timeout with no
 // kernel or terminal activity.
-func (m *Manager) watchActivity(s *session, done chan struct{}) {
-	t := time.NewTicker(IdlePoll)
+func (m *Manager) watchActivity(s *session, done chan struct{}, poll time.Duration) {
+	t := time.NewTicker(poll)
 	defer t.Stop()
 	for {
 		select {

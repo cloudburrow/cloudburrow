@@ -132,6 +132,9 @@ type Result struct {
 type Manager struct {
 	// Instance labels the containers and networks made.
 	Instance string
+	// IdlePoll is how often a Workbench instance's kernel activity is
+	// read for its idle shutdown; zero is every 30 seconds.
+	IdlePoll time.Duration
 	// BigQuery is the instance's BigQuery REST address on the host
 	// (host:port), live at each connect.
 	BigQuery func() string

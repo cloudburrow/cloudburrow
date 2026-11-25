@@ -66,9 +66,7 @@ func TestJupyterInstance(t *testing.T) {
 	}))
 	defer jl.Close()
 	bin, calls := fakeJupyterDocker(t, jl.URL)
-	defer func(p time.Duration) { IdlePoll = p }(IdlePoll)
-	IdlePoll = 20 * time.Millisecond
-	m := &Manager{Instance: "w1", Docker: bin, BigQuery: func() string { return "127.0.0.1:9050" }, Storage: func() string { return "127.0.0.1:9023" }}
+	m := &Manager{Instance: "w1", IdlePoll: 20 * time.Millisecond, Docker: bin, BigQuery: func() string { return "127.0.0.1:9050" }, Storage: func() string { return "127.0.0.1:9023" }}
 	defer m.Close()
 	key := "workbench/projects/p/locations/us-central1-a/instances/one"
 	busy.Store(true)
