@@ -63,7 +63,7 @@ func TestCloudSQLConsoleGoogleLayout(t *testing.T) {
 		menu = append(menu, s.Label)
 		secs[s.ID] = s
 	}
-	if got := strings.Join(menu, ","); got != "Overview,System insights,Query insights,Connections,Users,Databases,Backups,Replicas,Operations" {
+	if got := strings.Join(menu, ","); got != "Overview,Cloud SQL Studio,System insights,Query insights,Connections,Users,Databases,Backups,Replicas,Operations" {
 		t.Errorf("menu %s", got)
 	}
 	labels := func(acts []console.Action) string {

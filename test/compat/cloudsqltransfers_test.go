@@ -35,7 +35,7 @@ func sqlTransferEngines(t *testing.T, h *Harness) []sqlTransferEngine {
 	if os.Getenv(EnvCloudSQL) != "" {
 		conn := func(t *testing.T) *pgx.Conn {
 			t.Helper()
-			c, err := pgx.Connect(h.Context(), fmt.Sprintf("postgres://cloudburrow@%s/cloudburrow?sslmode=disable", h.Endpoint(EnvCloudSQL)))
+			c, err := pgx.Connect(h.Context(), upPGURL(h.Endpoint(EnvCloudSQL), "cloudburrow"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -483,7 +483,7 @@ func TestConsoleCloudSQLImportAndExport(t *testing.T) {
 	defer func() { _, _ = svc.Databases.Delete(project, "postgres", dbName).Do() }()
 	act("import", map[string]string{"uri": uri, "fileType": "SQL", "database": dbName})
 	got := ""
-	c, err := pgx.Connect(h.Context(), fmt.Sprintf("postgres://cloudburrow@%s/%s?sslmode=disable", h.Endpoint(EnvCloudSQL), dbName))
+	c, err := pgx.Connect(h.Context(), upPGURL(h.Endpoint(EnvCloudSQL), dbName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -622,7 +622,7 @@ func TestSQLAdminServerCARotation(t *testing.T) {
 		t.Fatalf("connectSettings after rotateServerCa: %v %+v", err, cs.ServerCaCert)
 	}
 	c := sqlBackupCase{table: "ca_rows", register: pgRegister, dsn: func(_, conn string) string {
-		return fmt.Sprintf("host=%s user=cloudburrow dbname=cloudburrow sslmode=disable", conn)
+		return fmt.Sprintf("host=%s user=cloudburrow password=%s dbname=cloudburrow sslmode=disable", conn, upPGPassword())
 	}}
 	rows := sqlBackupRows(t, h, c, p+":us-central1:postgres", "DROP TABLE IF EXISTS ca_rows", "CREATE TABLE ca_rows (id INT PRIMARY KEY, name TEXT)",
 		"INSERT INTO ca_rows VALUES (1, 'a')")

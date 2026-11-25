@@ -560,6 +560,7 @@ func (s *Server) RestoreCluster(ctx context.Context, req *alloydbpb.RestoreClust
 		srcServer string
 		at        time.Time
 		dir       string
+		password  string // the postgres user's, which the restored data keeps
 	)
 	switch {
 	case req.GetBackupSource() != nil:
@@ -573,6 +574,7 @@ func (s *Server) RestoreCluster(ctx context.Context, req *alloydbpb.RestoreClust
 		c.DatabaseVersion = b.GetDatabaseVersion()
 		c.Source = &alloydbpb.Cluster_BackupSource{BackupSource: &alloydbpb.BackupSource{BackupName: b.GetName(), BackupUid: b.GetUid()}}
 		dir = s.backupDir(b)
+		password = s.passwords[b.GetName()]
 	case req.GetContinuousBackupSource() != nil:
 		src, err := s.cluster(req.GetContinuousBackupSource().GetCluster())
 		if err != nil {
@@ -592,6 +594,7 @@ func (s *Server) RestoreCluster(ctx context.Context, req *alloydbpb.RestoreClust
 		}
 		srcServer = serverName(p.GetName())
 		c.DatabaseVersion = src.GetDatabaseVersion()
+		password = s.passwords[src.GetName()]
 		if s.restoreRoot() == "" {
 			return nil, apierror.FailedPrecondition("point-in-time recovery is not available: this instance keeps no backups")
 		}
@@ -620,6 +623,9 @@ func (s *Server) RestoreCluster(ctx context.Context, req *alloydbpb.RestoreClust
 	s.stampCluster(name, c, location)
 	s.clusters[name] = c
 	s.addBuiltinUser(name, "")
+	if password != "" {
+		s.passwords[name] = password
+	}
 	op, err := s.startOp(req.GetParent(), "restore", name, req.GetRequestId())
 	if err != nil {
 		return nil, err

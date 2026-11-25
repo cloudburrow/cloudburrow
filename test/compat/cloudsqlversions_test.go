@@ -59,8 +59,13 @@ func (e sqlEngine) root(t *testing.T, h *Harness, connName string) *sql.DB {
 	if e.mysql {
 		return e.open(t, h, connName, "root", "Root-pass1", "mysql")
 	}
-	return e.open(t, h, connName, "postgres", "x", "postgres")
+	return e.open(t, h, connName, "postgres", pgRootPassword, "postgres")
 }
+
+// pgRootPassword is the rootPassword the tests create PostgreSQL instances
+// with: postgres signs in with it, as on Cloud SQL, where the server checks
+// it (#2208).
+const pgRootPassword = "Root-pass1"
 
 func createSQLInstance(t *testing.T, svc *sqladmin.Service, project string, in *sqladmin.DatabaseInstance) *sqladmin.DatabaseInstance {
 	t.Helper()
@@ -419,7 +424,7 @@ func TestGcloudSQLDatabaseVersions(t *testing.T) {
 	g := newGcloudSession(t, h)
 	name := fmt.Sprintf("gcloud-v-%d", time.Now().UnixNano()%1e6)
 	g.must("sql", "instances", "create", name, "--project", g.project, "--database-version=POSTGRES_15",
-		"--tier=db-custom-1-3840", "--region=us-central1", "--no-backup", "--quiet")
+		"--root-password=Root-pass1", "--tier=db-custom-1-3840", "--region=us-central1", "--no-backup", "--quiet")
 	defer g.run(nil, "sql", "instances", "delete", name, "--project", g.project, "--quiet")
 	out := g.must("sql", "instances", "describe", name, "--project", g.project, "--format=value(databaseVersion,databaseInstalledVersion)")
 	if !strings.Contains(out, "POSTGRES_15") || !strings.Contains(out, "POSTGRES_15_19") {

@@ -140,7 +140,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_MEMORYSTORE_ADMIN` | `CLOUDBURROW_MEMORYSTORE_ENDPOINT` | Memorystore admin API (#1302) |
 | `CLOUDBURROW_TEST_MEMORYSTORE_PROJECT` | `GOOGLE_CLOUD_PROJECT` | the project the one Memorystore instance is in |
 | `CLOUDBURROW_TEST_MYSQL`, `CLOUDBURROW_TEST_MYSQL_PASSWORD` | `MYSQL_HOST`:`MYSQL_PORT`, `MYSQL_PASSWORD` | Cloud SQL for MySQL |
-| `CLOUDBURROW_TEST_CLOUDSQL` | `PGHOST`:`PGPORT` | Cloud SQL for PostgreSQL |
+| `CLOUDBURROW_TEST_CLOUDSQL`, `CLOUDBURROW_TEST_CLOUDSQL_PASSWORD` | `PGHOST`:`PGPORT`, `PGPASSWORD` | Cloud SQL for PostgreSQL (#2208: the server checks the password) |
 | `CLOUDBURROW_TEST_SQLADMIN` | `CLOUDBURROW_SQLADMIN_ENDPOINT` | the Cloud SQL Admin API (#1301), with either Cloud SQL service |
 | `CLOUDBURROW_TEST_BACKUPDR` | `CLOUDBURROW_BACKUPDR_ENDPOINT` | the Backup and DR Service (#1433), `--services backupdr` with either Cloud SQL service; gcloud backup-dr and Terraform's `google_backup_dr_*` |
 | `CLOUDBURROW_TEST_COMPUTE` | `CLOUDBURROW_COMPUTE_ENDPOINT` | the Compute Engine API's VPC networking (#1936), `--services compute`; JSON under `/compute/v1/`, in process |

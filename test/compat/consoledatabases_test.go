@@ -357,7 +357,7 @@ func TestConsoleCloudSQLCreateAndDropDatabase(t *testing.T) {
 	name := "console_" + strings.NewReplacer("cb-test-", "", "-", "_").Replace(project)
 	t.Cleanup(func() {
 		c, err := pgx.Connect(context.Background(),
-			fmt.Sprintf("postgres://cloudburrow@%s/cloudburrow?sslmode=disable", pgAddr))
+			upPGURL(pgAddr, "cloudburrow"))
 		if err != nil {
 			return
 		}
@@ -385,7 +385,7 @@ func TestConsoleCloudSQLCreateAndDropDatabase(t *testing.T) {
 	}
 	// A real database: pgx connects to it and it answers as itself. Closed
 	// before the drop, which PostgreSQL refuses while a session is open.
-	c, err := pgx.Connect(ctx, fmt.Sprintf("postgres://cloudburrow@%s/%s?sslmode=disable", pgAddr, name))
+	c, err := pgx.Connect(ctx, upPGURL(pgAddr, name))
 	if err != nil {
 		t.Fatalf("pgx cannot connect to the console-created database: %v", err)
 	}

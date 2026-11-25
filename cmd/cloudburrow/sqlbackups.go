@@ -165,11 +165,19 @@ func (m *mysqlArchiver) sh(ctx context.Context, stdin io.Reader, stdout io.Write
 // root@'%', which a TCP sign-in from 127.0.0.1 is too, unless the user
 // deleted it. mysqladmin ping succeeds once the server runs, even when it
 // refuses the login.
-const mysqlRootEnv = `export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"; MYSQL_LOCAL="-u` + sqladmin.MySQLAdminUser + ` -h127.0.0.1 -P3306 --protocol=TCP"; ` +
+//
+// The administrative account's password is CloudBurrow's management
+// password (#2208, CLOUDSQL_ADMIN_PASSWORD), which no user knows; an
+// instance whose account still has its creation password (before its
+// next start refreshes it) signs in with that, and one with no account
+// as root.
+const mysqlRootEnv = `export MYSQL_PWD="${CLOUDSQL_ADMIN_PASSWORD:-${MYSQL_ROOT_PASSWORD:-}}"; MYSQL_LOCAL_USER=` + sqladmin.MySQLAdminUser +
+	`; MYSQL_LOCAL="-u$MYSQL_LOCAL_USER -h127.0.0.1 -P3306 --protocol=TCP"; ` +
 	`i=0; until mysqladmin $MYSQL_LOCAL --connect-timeout=2 ping >/dev/null 2>&1; do ` +
 	`i=$((i+1)); if [ "$i" -ge 120 ]; then ` +
 	`echo "mysqld did not answer on 127.0.0.1:3306 in 120s" >&2; exit 1; fi; sleep 1; done
-mysql $MYSQL_LOCAL -N -e 'SELECT 1' >/dev/null 2>&1 || MYSQL_LOCAL="-uroot -h127.0.0.1 -P3306 --protocol=TCP"
+mysql $MYSQL_LOCAL -N -e 'SELECT 1' >/dev/null 2>&1 || { export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"
+  mysql $MYSQL_LOCAL -N -e 'SELECT 1' >/dev/null 2>&1 || { MYSQL_LOCAL_USER=root; MYSQL_LOCAL="-uroot -h127.0.0.1 -P3306 --protocol=TCP"; }; }
 `
 
 func (m *mysqlArchiver) query(ctx context.Context, stmt string) (string, error) {

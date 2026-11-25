@@ -35,7 +35,7 @@ func TestCloudSQLReencrypt(t *testing.T) {
 	suffix := fmt.Sprint(time.Now().UnixNano() % 1e6)
 	key, version := sqlKey(t, h, "reenc-"+suffix)
 	name := "reenc-" + suffix
-	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17",
+	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1",
 		Settings:                    &sqladmin.Settings{Tier: "db-custom-1-3840"},
 		DiskEncryptionConfiguration: &sqladmin.DiskEncryptionConfiguration{KmsKeyName: key}}).Do()
 	if err != nil {

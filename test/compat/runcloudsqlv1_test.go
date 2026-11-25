@@ -115,7 +115,7 @@ func TestGcloudRunDeployCloudSQL(t *testing.T) {
 	project := "--project=" + h.Project()
 	t.Cleanup(func() { _, _ = g.run(nil, "run", "services", "delete", id, region, project, "--quiet") })
 	out, err := g.run(nil, "run", "deploy", id, "--image="+postgresImage, region, project, "--no-allow-unauthenticated",
-		"--command=sh", "--args=^@^-c@"+cloudSQLServeScript, "--set-env-vars=CONN="+conn,
+		"--command=sh", "--args=^@^-c@"+cloudSQLServeScript, "--set-env-vars=CONN="+conn+",PGPASSWORD="+upPGPassword(),
 		"--add-cloudsql-instances="+conn, "--quiet", "--log-http")
 	if err != nil {
 		t.Fatalf("gcloud run deploy --add-cloudsql-instances: %v\n%s", err, out)

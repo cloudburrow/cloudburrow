@@ -416,7 +416,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// AlloyDB for PostgreSQL (#2191), in process: Clusters, a cluster's
 	// Overview, Backups, Users and Databases.
 	if enabled[config.ServiceAlloyDB] && d.alloyDB != nil {
-		providers = append(providers, alloyDBProvider{svc: d.alloyDB}, alloyDBBackupsProvider{svc: d.alloyDB})
+		providers = append(providers, alloyDBProvider{svc: d.alloyDB,
+			savedQueries: filepath.Join(d.cfg.InstanceDir(), alloyDBSavedQueriesFile),
+			iamPrincipal: metadata.ServiceAccountEmail(d.cfg.DefaultProject())}, alloyDBBackupsProvider{svc: d.alloyDB})
 	}
 	if enabled[config.ServiceAppHub] && d.appHub != nil {
 		providers = append(providers, appHubProvider{svc: d.appHub}, appHubDiscoveredProvider{svc: d.appHub}, appHubSettingsProvider{svc: d.appHub})
@@ -592,7 +594,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			return bigtableInstancesProvider{endpoint: a, savedQueries: filepath.Join(d.cfg.InstanceDir(), bigtableSavedQueriesFile)}
 		}},
 		{config.ServiceSpanner, func(a string) console.Provider { return spannerProvider{endpoint: a} }},
-		{config.ServiceCloudSQL, func(a string) console.Provider { return cloudSQLProvider{endpoint: a} }},
+		{config.ServiceCloudSQL, func(a string) console.Provider {
+			creds, _ := loadOrCreatePostgresCredentials(d.cfg)
+			return cloudSQLProvider{endpoint: a, password: creds.Password}
+		}},
 		{config.ServiceCloudSQLMySQL, func(a string) console.Provider { return newCloudSQLMySQLProvider(a, d.mysql) }},
 		// Memorystore's Instances page, through the admin API (#1302).
 		{config.ServiceMemorystore, func(a string) console.Provider { return newMemorystoreProvider(d.cfg, a, d.memorystore) }},
@@ -657,7 +662,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}
 		instances := cloudSQLInstancesProvider{
 			endpoint: net.JoinHostPort(host, strconv.Itoa(d.cfg.Endpoints.SQLAdmin)), versions: versions, srv: d.sqlAdmin,
-			metrics: monitoringAdmin{api: monitoringServerOf(d.monitoring)}}
+			metrics:      monitoringAdmin{api: monitoringServerOf(d.monitoring)},
+			savedQueries: filepath.Join(d.cfg.InstanceDir(), cloudSQLSavedQueriesFile),
+			iamPrincipal: metadata.ServiceAccountEmail(d.cfg.DefaultProject())}
 		if enabled[config.ServiceCompute] && d.compute != nil {
 			instances.compute = d.compute.API
 		}

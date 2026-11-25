@@ -15,8 +15,9 @@ import (
 
 // TestCloudSQLFromTheExportedPGVariables.
 //
-// `cloudburrow env` exports PGHOST, PGPORT, PGUSER, PGDATABASE and PGSSLMODE
-// for Cloud SQL for PostgreSQL (#584), the variables libpq and every driver
+// `cloudburrow env` exports PGHOST, PGPORT, PGUSER, PGPASSWORD (#2208: the
+// server checks it), PGDATABASE and PGSSLMODE for Cloud SQL for PostgreSQL
+// (#584), the variables libpq and every driver
 // modelled on it read. A client given those and nothing else — pgx with an
 // empty connection string, so every setting comes from the environment —
 // connects and runs a query. So does one given CLOUDBURROW_CLOUDSQL_URL.
@@ -32,14 +33,14 @@ func TestCloudSQLFromTheExportedPGVariables(t *testing.T) {
 	}
 	var exported map[string]string
 	if err := json.Unmarshal(out, &exported); err != nil {
-		t.Fatalf("env --format json: %v\n%s", err, out)
+		t.Fatalf("env --format json: %v", err)
 	}
 	if _, ok := exported["CLOUDBURROW_CLOUDSQL_URL"]; !ok {
 		t.Skip("the instance does not have cloudsql enabled")
 	}
-	for _, name := range []string{"PGHOST", "PGPORT", "PGUSER", "PGDATABASE", "PGSSLMODE"} {
+	for _, name := range []string{"PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE", "PGSSLMODE"} {
 		if exported[name] == "" {
-			t.Fatalf("env exports CLOUDBURROW_CLOUDSQL_URL but not %s:\n%s", name, out)
+			t.Fatalf("env exports CLOUDBURROW_CLOUDSQL_URL but not %s", name)
 		}
 	}
 	addr := net.JoinHostPort(exported["PGHOST"], exported["PGPORT"])
@@ -61,16 +62,17 @@ func TestCloudSQLFromTheExportedPGVariables(t *testing.T) {
 	}
 
 	ctx := h.Context()
-	for _, dsn := range []string{"", exported["CLOUDBURROW_CLOUDSQL_URL"]} {
+	for i, dsn := range []string{"", exported["CLOUDBURROW_CLOUDSQL_URL"]} {
+		what := [...]string{"the PG* variables", "CLOUDBURROW_CLOUDSQL_URL"}[i]
 		conn, err := pgx.Connect(ctx, dsn)
 		if err != nil {
-			t.Fatalf("pgx.Connect(%q) with env's PG* variables: %v", dsn, err)
+			t.Fatalf("pgx.Connect with %s: %v", what, err)
 		}
 		var one int
 		err = conn.QueryRow(ctx, "SELECT 1").Scan(&one)
 		_ = conn.Close(ctx)
 		if err != nil || one != 1 {
-			t.Errorf("SELECT 1 via %q = %d, %v; want 1", dsn, one, err)
+			t.Errorf("SELECT 1 via %s = %d, %v; want 1", what, one, err)
 		}
 	}
 }

@@ -68,7 +68,7 @@ type haEngine struct {
 var haPostgres = haEngine{version: "POSTGRES_17", short: "pg",
 	register: func(n string, o ...cloudsqlconn.Option) (func() error, error) { return pgxv5.RegisterDriver(n, o...) },
 	dsn: func(_, conn string) string {
-		return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+		return fmt.Sprintf("host=%s user=postgres password=%s dbname=postgres sslmode=disable", conn, pgRootPassword)
 	},
 	setup: []string{"CREATE TABLE t (n int PRIMARY KEY)"}, table: "t", insert: "INSERT INTO t VALUES ($1)",
 	synchronous: "SELECT CASE WHEN current_setting('synchronous_standby_names') = 'cloudsqlstandby' AND " +

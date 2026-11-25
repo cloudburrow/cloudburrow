@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -531,19 +532,22 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 
 	// Cloud SQL for PostgreSQL (#584): the libpq variables, which psql, pgx,
 	// lib/pq, psycopg and node-postgres all read, plus one URL for code that
-	// takes a connection string. No PGPASSWORD: the server trusts every
-	// connection (docs/cloudsql.md), so there is no password to export, as
-	// there is for MySQL. sslmode=disable because the server has no
-	// certificate: there is no TLS to negotiate.
+	// takes a connection string. PGPASSWORD is the user's generated
+	// password, which the server checks (#2208), as MySQL's is.
+	// sslmode=disable because the server has no certificate: there is no
+	// TLS to negotiate.
 	if serviceEnabled(cfg, config.ServiceCloudSQL) && cfg.Endpoints.CloudSQL != 0 {
-		vars = append(vars,
-			envVar{"PGHOST", host, "Cloud SQL for PostgreSQL: a local PostgreSQL; not the Cloud SQL Admin API"},
-			envVar{"PGPORT", fmt.Sprint(cfg.Endpoints.CloudSQL), "Cloud SQL for PostgreSQL port"},
-			envVar{"PGUSER", components.CloudSQLUser, "Cloud SQL for PostgreSQL user; trust auth, no password"},
-			envVar{"PGDATABASE", components.CloudSQLDatabase, "Cloud SQL for PostgreSQL default database"},
-			envVar{"PGSSLMODE", "disable", "the local server has no TLS"},
-			envVar{"CLOUDBURROW_CLOUDSQL_URL", cloudSQLURL(addr(cfg.Endpoints.CloudSQL)),
-				"the same, as one connection string"})
+		if creds, err := loadOrCreatePostgresCredentials(cfg); err == nil {
+			vars = append(vars,
+				envVar{"PGHOST", host, "Cloud SQL for PostgreSQL: a local PostgreSQL; not the Cloud SQL Admin API"},
+				envVar{"PGPORT", fmt.Sprint(cfg.Endpoints.CloudSQL), "Cloud SQL for PostgreSQL port"},
+				envVar{"PGUSER", components.CloudSQLUser, "Cloud SQL for PostgreSQL user"},
+				envVar{"PGPASSWORD", creds.Password, "generated for this instance; local only"},
+				envVar{"PGDATABASE", components.CloudSQLDatabase, "Cloud SQL for PostgreSQL default database"},
+				envVar{"PGSSLMODE", "disable", "the local server has no TLS"},
+				envVar{"CLOUDBURROW_CLOUDSQL_URL", cloudSQLURL(addr(cfg.Endpoints.CloudSQL)),
+					"the same, as one connection string; the password is PGPASSWORD, which libpq and pgx read"})
+		}
 	}
 
 	// The Cloud SQL Admin API (#1301). gcloud sql calls v1beta4 under
@@ -821,11 +825,20 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 // the page shows nothing a credential's holder alone should see.
 var envSecrets = map[string]string{
 	"MYSQL_PASSWORD": "the password generated for this instance's Cloud SQL for MySQL; `cloudburrow env` prints it",
+	"PGPASSWORD":     "the password generated for this instance's Cloud SQL for PostgreSQL; `cloudburrow env` prints it",
 }
 
-// cloudSQLURL is the connection string for the local PostgreSQL at addr.
+// cloudSQLURL is the connection string for the local PostgreSQL at addr,
+// without its password.
 func cloudSQLURL(addr string) string {
 	return fmt.Sprintf("postgres://%s@%s/%s?sslmode=disable", components.CloudSQLUser, addr, components.CloudSQLDatabase)
+}
+
+// cloudSQLURLWithPassword is cloudSQLURL signing in with password.
+func cloudSQLURLWithPassword(addr, password string) string {
+	u := url.URL{Scheme: "postgres", User: url.UserPassword(components.CloudSQLUser, password), Host: addr,
+		Path: "/" + components.CloudSQLDatabase, RawQuery: "sslmode=disable"}
+	return u.String()
 }
 
 // unexportableEmulators names the enabled emulators whose port `env` cannot

@@ -123,8 +123,6 @@ PostgreSQL. Without the opt-in, `TestAlloyDBOmniRefusedWithoutAcceptance` runs i
 
 - `alloydbsuperuser` is an ordinary role, made at a primary's creation, which a cluster's users
   can be granted; as on Google, it is not PostgreSQL's superuser.
-- The server trusts connections from inside the instance, as Cloud SQL's servers here do, so a
-  built-in user's password is set but a wrong one is not refused.
 - An instance's machine (vCPUs, memory) is recorded; the server takes what the machine gives it.
 
 ## Instances and read pools
@@ -158,6 +156,24 @@ the certificate was asked for with `use_metadata_exchange`, the length-prefixed
 `MetadataExchangeRequest` and its response. `AUTO_IAM` (IAM database authentication) checks the
 OAuth 2.0 token against those this instance minted, and needs an IAM user of the cluster for its
 principal.
+
+Every sign-in is checked by password, as on Google (#2208): a built-in user's wrong password is
+refused with PostgreSQL's own `FATAL 28P01 password authentication failed for user "…"`, through
+the connectors, the Auth Proxy, `ExecuteSql` and a direct connection alike, as Cloud SQL's servers
+here are ([cloudsql.md](cloudsql.md#4-authentication-every-sign-in-is-checked-by-password-2208)).
+An IAM user signs in by its token: with `AUTO_IAM` the proxy checks the token from the metadata
+exchange, and without it the token sent as the password, and then signs the role in with a
+password of the role's that only CloudBurrow knows, so the role is refused without a token.
+CloudBurrow's own connections sign in as `alloydbadmin`, a superuser with a generated password kept
+owner-only in the instance directory, which `ListUsers` leaves out. Verified by
+`TestAlloyDBPasswordAuthentication`.
+
+**AlloyDB Studio** (#2208): a cluster's **AlloyDB Studio** tab signs in to its primary as Google's
+does, with a database and a built-in user's password or IAM database authentication (the
+console's principal, once it is an IAM user of the cluster), and serves Cloud SQL Studio's
+Explorer, editor, saved queries and exportable results through `ExecuteSql`
+([cloudsql.md](cloudsql.md#4-authentication-every-sign-in-is-checked-by-password-2208)).
+Verified by `TestAlloyDBStudioThroughThePage` (browser).
 
 On Google each instance has an IP address of its own, where it serves PostgreSQL on 5432 (and its
 pooler on 6432), and the connectors reach it on 5433; they send no TLS server name for an address,
@@ -232,7 +248,8 @@ primary.
 
 An on-demand or automated backup is a dump of the primary, kept with the cluster's users in the
 instance's state directory; restoring it makes a new cluster whose primary, once created, holds
-the data and the users. Continuous backup keeps the primary's write-ahead log from a base taken at
+the data and the users, the `postgres` user with the password it had when the backup was taken
+(a point-in-time restore: the source cluster's), so it signs in as before (#2208). Continuous backup keeps the primary's write-ahead log from a base taken at
 the primary's creation, so a point-in-time restore recovers to any moment from then on within the
 recovery window. Automated backups follow `automated_backup_policy.weekly_schedule` (each minute,
 `up` takes the ones due) and its time- or quantity-based retention.

@@ -39,21 +39,24 @@ It is the only backend here that is not a Google-published component, and
 | Server | PostgreSQL **17.11**, `postgres:17-alpine`, digest-pinned |
 | Address | `127.0.0.1:9019` on the host (`--port-cloudsql`, moved by `--port-base`), plus `cloudsql.cloudburrow.svc.cluster.local:5432` in the cluster |
 | User / database | `cloudburrow` / `cloudburrow` |
-| Authentication | **trust** — see below |
+| Authentication | **password**, checked on every TCP sign-in — see [section 4](#4-authentication-every-sign-in-is-checked-by-password-2208) |
 | Durability | a PersistentVolumeClaim in `--mode persistent`; the only opt-in backend that keeps its data |
 
 ```sh
 cloudburrow up --services cloudsql
-eval "$(cloudburrow env)"      # PGHOST, PGPORT, PGUSER, PGDATABASE, PGSSLMODE, CLOUDBURROW_CLOUDSQL_URL
+eval "$(cloudburrow env)"      # PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE, PGSSLMODE, CLOUDBURROW_CLOUDSQL_URL
 psql -c 'SELECT 1'             # every setting from the PG* variables
 ```
 
 The port is fixed (#584), as MySQL's is, so it is the same after every restart and
 `cloudburrow env` can export it without asking the running instance: `PGHOST`, `PGPORT`,
-`PGUSER` and `PGDATABASE`, read by libpq, `psql`, pgx, lib/pq, psycopg and node-postgres, plus
-`PGSSLMODE=disable` (the server has no TLS) and the same settings as one connection string in
-`CLOUDBURROW_CLOUDSQL_URL`. No `PGPASSWORD` is exported because there is no password; see
-[below](#4-authentication-is-trust-on-purpose). With `--port-cloudsql 0` the port is
+`PGUSER`, `PGPASSWORD` and `PGDATABASE`, read by libpq, `psql`, pgx, lib/pq, psycopg and
+node-postgres, plus `PGSSLMODE=disable` (the server has no TLS) and the same settings, without
+the password, as one connection string in `CLOUDBURROW_CLOUDSQL_URL` (pgx and libpq read
+`PGPASSWORD` beside it). `PGPASSWORD` is the `cloudburrow` user's password, generated for the
+instance and kept owner-only in `cloudsql-postgres.json` in the instance directory, as MySQL's
+is; the server checks it ([section 4](#4-authentication-every-sign-in-is-checked-by-password-2208)).
+With `--port-cloudsql 0` the port is
 OS-assigned again: `up` prints it and `env` reads it from the running instance, while
 `env --offline` leaves the variables out and says so on stderr.
 
@@ -88,8 +91,8 @@ served:
   name `{project}:us-central1:{instance}` and a `PRIMARY` address of `127.0.0.1`. The port is
   `PGPORT` or `MYSQL_PORT`, not 5432 or 3306.
 - `databases.*` and `users.*`: `CREATE`, `ALTER` and `DROP` run in the server, and what is
-  listed is the server's own catalogue. On PostgreSQL a user's password is stored but not
-  checked (see below); a database's encoding cannot be changed after it is created.
+  listed is the server's own catalogue. A user's password is the one the server checks
+  ([section 4](#4-authentication-every-sign-in-is-checked-by-password-2208)); a database's encoding cannot be changed after it is created.
 - `operations.get` and `operations.list`: every method finishes before it answers, so its
   operation is `DONE`. Errors are the HTTP answer, not an operation that carries them.
 
@@ -128,10 +131,9 @@ methods #1462 refuses and why.
   than `rowLimit` is 400 unless `partialResultMode` is `ALLOW_PARTIAL_RESULT`, which returns the
   first `rowLimit` rows marked `partialResult`. A statement the database refuses ends the run,
   and its error is the response's `status` (code 3, or 16 when the server refuses the user's
-  password); the results before it are returned. `autoIamAuthn` is 501 (ADR-0004). PostgreSQL
-  trusts local connections, so there the password is read but not checked, as for every
-  connection (section 4). `gcloud sql instances execute-sql --user --password-secret-version`
-  works.
+  password); the results before it are returned. The password is checked by the server, as on
+  every sign-in (section 4); `autoIamAuthn` is below (#1944).
+  `gcloud sql instances execute-sql --user --password-secret-version` works.
 - **`instances.preCheckMajorVersionUpgrade`** checks the upgrade `instances.patch` would make
   (section "Database versions and major version upgrades"): the operation's
   `preCheckMajorVersionUpgradeContext.preCheckResponse` has an `ERROR` naming what would refuse
@@ -304,7 +306,7 @@ and an address the connectors reach through 3307.
 |---|---|
 | `databaseVersion` | `POSTGRES_9_6` to `POSTGRES_18`, `MYSQL_5_6` and `MYSQL_5_7` (#1524, where the node runs linux/amd64), `MYSQL_8_0` or `MYSQL_8_4` (#1381, #1462): see [Database versions](#database-versions-and-major-version-upgrades-1381). The engine's service must be enabled (412 otherwise). `MYSQL_5_6`, `MYSQL_5_7`, `MYSQL_8_0_*` minor pins and any other `POSTGRES_*` or `MYSQL_*` are 501 saying why; another value is 400. `SQLSERVER_*` (#1916) is 412 FAILED_PRECONDITION until you accept Microsoft's licence, then served where the node runs linux/amd64: see [Cloud SQL for SQL Server](#cloud-sql-for-sql-server). |
 | `region` | Recorded and answered, and in the connection name (`us-central1` when left out). Every server runs in the one cluster. |
-| `rootPassword` | MySQL's `'root'@'%'` password (empty leaves `root` with none, as Cloud SQL does). `root` is yours: change its password or delete it, as the hashicorp/google provider does after every insert; CloudBurrow manages the instance through an account of its own (see [CloudBurrow's MySQL account](#cloudburrows-mysql-account-1993)). PostgreSQL's user is `postgres`, trusted locally like the server `up` runs. |
+| `rootPassword` | MySQL's `'root'@'%'` password (empty leaves `root` with none, as Cloud SQL does). `root` is yours: change its password or delete it, as the hashicorp/google provider does after every insert; CloudBurrow manages the instance through an account of its own (see [CloudBurrow's MySQL account](#cloudburrows-mysql-account-1993)). PostgreSQL's `postgres` signs in with it (#2208); with none it cannot sign in until `users.update` gives it a password, as Google documents ("You must set root passwords before you can connect to PostgreSQL instances"). |
 | `settings.tier` | Required, recorded and answered. The server is not sized by it. |
 | `settings.databaseFlags` | Passed to the server: `-c name=value` to `postgres`, `--name=value` to `mysqld`. A patch that changes them starts the server again with them; a flag the server rejects fails the operation with its words. `cloudsql.*` flags (IAM authentication, Cloud SQL's extensions) are 501. |
 | `settings.userLabels`, `deletionProtectionEnabled` | Recorded and answered. `delete` of a protected instance is 400, as on Cloud SQL. |
@@ -329,7 +331,10 @@ modify, or assign database roles to", and which gcloud and the console cannot di
 `'root'@'%'` is the user's, and may be deleted. A created MySQL instance here is the same:
 
 - CloudBurrow signs in as **`cloudsqladmin`**, at `localhost`, `127.0.0.1` and `::1` only, with
-  every privilege and the password the instance was created with (`rootPassword`). The Admin
+  every privilege and CloudBurrow's management password (#2208): generated for the CloudBurrow
+  instance, kept owner-only in `cloudsql-postgres.json` in its directory, and known to no user, so
+  no user signs in as it through the tunnel (before #2208 it had `rootPassword`; each server's
+  next start gives it the new one, and until then CloudBurrow signs in with the old). The Admin
   API (through the instance's tunnel, a `kubectl port-forward` that arrives from the pod's
   loopback) and every script in the server's container (backups, exports and imports,
   point-in-time recovery, replicas, the standby, major version upgrades) use it. It is a name of
@@ -392,7 +397,7 @@ is the server's own:
 - **PostgreSQL**: `passwordExpirationDuration` is the role's `VALID UNTIL`, set again from each
   password change, and `status.passwordExpirationTime` is it. A role with a policy is a member of
   `cloudsqlpasswordpolicy`, which `pg_hba.conf` holds to its password (`md5`), so the server checks
-  the password and its expiry rather than trusting the connection, as it does other users.
+  the password and its expiry, as it checks every user's (section 4).
   `enablePasswordVerification` is 400 ("supported only for MySQL").
 - **PostgreSQL's lock after failed attempts** (#2014): `allowedFailedAttempts` with
   `enableFailedAttemptsCheck` locks the role once its password has been tried incorrectly that many
@@ -1339,7 +1344,8 @@ making it executable. Pinned for linux/amd64, linux/arm64 and darwin/arm64, it i
 Cloud Run sidecar image is. `TestCloudSQLAuthProxyBinary` reads, through it, the rows a parallel
 import restored (pgx on PostgreSQL, go-sql-driver/mysql on MySQL) and those of a clone to binary
 log coordinates. CI's sql shard installs it and runs the test. Connecting to the server directly, as above, still
-works for built-in users and needs none of this.
+works for built-in users and needs none of this. Every path checks a built-in user's password
+(section 4).
 
 ### IAM database authentication (#1944)
 
@@ -1369,8 +1375,8 @@ As Google documents it for PostgreSQL and MySQL
   the `mysql` client's `--enable-cleartext-plugin`, go-sql-driver's `allowCleartextPasswords`). The
   listener then signs in to the server as the user with a password of the user's own, derived from
   a key kept owner-only in the state directory (`cloudsql-iam-role-key`). PostgreSQL's
-  `pg_hba.conf` requires that password of the two IAM groups ahead of its trust line, so the
-  server's own port refuses an IAM user whatever is sent.
+  `pg_hba.conf` requires that password of the two IAM groups, as it requires every user's
+  (section 4), so the server's own port refuses an IAM user whatever is sent.
 - `executeSql` with `autoIamAuthn` signs in as the caller's IAM user, the account of the request's
   bearer token, checked the same way; `user` and `passwordSecretVersion` are then ignored.
 - A refused sign-in is the server's: PostgreSQL `FATAL 28000 Cloud SQL IAM service account
@@ -1439,19 +1445,84 @@ Verified by `TestRunServiceCloudSQLVolume` and `TestRunJobCloudSQLVolume` (Postg
 `TestRunServiceCloudSQLMySQLVolume` (MySQL) and `TestGcloudRunDeployCloudSQL` (gcloud and the v1
 annotation).
 
-## 4. Authentication is trust, on purpose
+## 4. Authentication: every sign-in is checked by password (#2208)
 
-The server runs with `POSTGRES_HOST_AUTH_METHOD=trust`. Any connection is accepted as the
-`cloudburrow` user with no password.
+As on Cloud SQL, a built-in user's wrong password is refused with the server's own error on
+every path: a direct TCP connection to the server (`up`'s `PGHOST:PGPORT`, an instance's
+tunnel), the connectors' server-side proxy on 3307 (the Go, Java and Python connectors), Google's
+Auth Proxy, `gcloud sql connect` (whose `psql` or `mysql` reaches the server by one of those) and
+the console. PostgreSQL answers `FATAL 28P01 password authentication failed for user "…"`, MySQL
+`ERROR 1045 (28000) Access denied for user '…'@'…' (using password: YES)`.
 
-That is consistent with the rest of CloudBurrow, which authenticates nothing: the metadata
-server's credentials authorise nothing, the emulators accept no credentials, and a password
-here would be a shared secret that implied a guarantee while being printed in the startup
-banner anyway.
+- **PostgreSQL (9.6 to 18).** The image initialises its data directory, and every start of the
+  server then rewrites `pg_hba.conf` before the server listens: every `host` line asks for the
+  password (`md5`, which PostgreSQL 10 and later answer with SCRAM-SHA-256 for a password stored
+  so), and only the Unix socket inside the server's pod trusts. Passwords are stored as Cloud
+  SQL's `password_encryption` flag says by default: `md5` before PostgreSQL 14 and
+  `scram-sha-256` from 14 ([flags](https://docs.cloud.google.com/sql/docs/postgres/flags)); the
+  flag changes it. A read replica's replication user, `cloudsqlreplica`, is held to its password
+  on the pod's loopback, where the tunnel arrives, and replicates from another server's pod as
+  before. A created instance's `postgres` signs in with its `rootPassword`; `up`'s `cloudburrow`
+  with the generated `PGPASSWORD`.
+- **MySQL (5.6 to 8.4)** always checked passwords. A user's plugin is Cloud SQL's default:
+  `mysql_native_password` for 5.6, 5.7 and 8.0 ("Cloud SQL for MySQL 8.0 uses
+  mysql_native_password as the default authentication plugin for new users",
+  [features](https://docs.cloud.google.com/sql/docs/mysql/features)), `caching_sha2_password` for
+  8.4. The `default_authentication_plugin` flag changes it on 8.0. As on Cloud SQL, an 8.4 server
+  still loads `mysql_native_password`, so the accounts an upgrade from 8.0 copies keep signing in.
+- **IAM database authentication** keeps signing in by token (#1944): the connector listener
+  checks the token and signs the role in with a password of its own.
+- **CloudBurrow's own connections** (the Admin API's users, databases, imports, replicas and the
+  rest) sign in as a management role of their own, as Google's do: `cloudsqladmin`, a superuser
+  on PostgreSQL, the account above on MySQL. Its password is generated per CloudBurrow instance,
+  kept owner-only in `cloudsql-postgres.json` in the instance directory, and given to the servers
+  in their pods' environment, so no user knows it; `users.list` leaves it out, `users.get`,
+  `update` and `delete` of it are 404 as of any user not listed, and `users.insert` of its name
+  is 400. The scripts CloudBurrow runs inside a
+  PostgreSQL server's container use its socket.
+- The managed connection pooler (#2141) reads the server's `pg_shadow` as the management role, and
+  checks each client's password against it, as before.
 
-The consequence is the same as for every other endpoint and is not softened: **the port is
-bound to loopback and must not be exposed.** `--allow-remote` is the only way to bind
-anything else, and it says what it does.
+The servers still bind loopback only, and `--allow-remote` is the only way to bind anything
+else. Not served: `cloudsql.allow_passwordless_local_connections` (which lets a socket sign-in
+skip the password; no user reaches a server's socket here).
+
+Verified by `TestCloudSQLPasswordAuthentication` (compat): on `up`'s servers directly, and on an
+instance of each version (PostgreSQL 9.6 to 18, MySQL 5.6 to 8.4 where the node runs their
+images) through `cloud.google.com/go/cloudsqlconn` with pgx and go-sql-driver/mysql, a wrong
+password is refused with the server's error, the right one is accepted, the stored password is in
+the version's default form, and `cloudsqladmin` is no user; where `CLOUDBURROW_TEST_CLOUD_SQL_PROXY`
+names Google's Auth Proxy, the same through it.
+
+**`gcloud sql connect` and the Auth Proxy** (#2208): `TestGcloudSQLConnectInContainer` (compat)
+runs gcloud 593.0.0 and `cloud-sql-proxy` v2.19.0 (both checked by SHA-256) in containers built on
+the official `postgres` and `mysql` images, which ship `psql` and `mysql`, on an internal Docker
+network with no route out. `gcloud sql connect INSTANCE --user U --database D` (GA) starts the
+Auth Proxy on its `--port` (9470), as Google's does, and runs `psql` or `mysql` through it; the
+Auth Proxy on a port of its own (6543), with a client through it. On each, a wrong password is
+refused with the server's error and the right one runs the statements. The proxy dials port
+3307 at the address `connectSettings` names; inside the container that port is relayed to the
+instance's connector listener, wherever `--cloudsql-connector` put it.
+
+**Cloud SQL Studio** (#2208): an instance's **Cloud SQL Studio** tab, as Google's: the sign-in
+dialog takes the database, then **Built-in database authentication** (a user and its password)
+or **IAM database authentication** (as the console's principal, an IAM user of the instance with
+the IAM flag on); the server's refusal shows in the dialog. Signed in, the **Explorer** lists
+the schemas (MySQL: the database) with their tables (columns, indexes and keys, and SELECT,
+INSERT, UPDATE, DELETE and DROP statements to open), views, sequences, functions and
+procedures, and the saved queries; the editor's tabs run a script or its selection
+(Ctrl+Enter), save it as a saved query, and show each query's results, exportable as CSV or JSON
+or copied. Google's documented limits hold: results over 10 MB are truncated with partial
+results, a query runs at most 5 minutes, at most 10 at once on an instance, a script mixing
+statements shows only its queries' results, and MySQL's `root` and empty passwords are refused
+([Cloud SQL Studio](https://cloud.google.com/sql/docs/mysql/manage-data-using-studio)). SQL
+Server instances are not served. Verified by `TestCloudSQLStudioThroughThePage` (browser, on
+PostgreSQL and MySQL, each signed in as a user `users.insert` made; on PostgreSQL that user
+creates and owns its own database, as PostgreSQL 15 and later let only a database's owner create
+in its public schema), `TestCloudSQLStudioIAMSignIn` (browser: a `CLOUD_IAM_USER` is no built-in
+user and is refused a password sign-in; the console's principal, a service account, is refused
+as a `CLOUD_IAM_USER`, then signs in as its `CLOUD_IAM_SERVICE_ACCOUNT` role once it holds
+`roles/cloudsql.instanceUser`) and `TestStudioSQL`, `TestDBStudioSignInAndRun` (unit).
 
 ## 5. The console screen
 
@@ -1761,7 +1832,7 @@ Managed connection pooling's metrics are in Cloud Monitoring (#2163), with Googl
 | `per_database/conn_pool/client_connections_attempts_count` | CUMULATIVE, 1 | `cloudsql_instance_database` | the pooler log's `login attempt` lines |
 | `per_database/conn_pool/client_connections_error_count` | CUMULATIVE, 1 | `cloudsql_instance_database` | the pooler log's `pooler error` lines: the errors PgBouncer sends a client as it disconnects it (a failed sign-in, a server connection that failed, a timeout, a limit reached) |
 
-The thread pool's figures are its page on pod port 13307 (`mysql-thread-pool --status`), read through the API server's pod proxy; no Service publishes it. PgBouncer's are read on its `pgbouncer` console database as `cloudburrow_stats`, its `stats_users`, which signs in only from the pod's loopback (the port-forward the CLI reads through, as the server trusts `postgres` there) and only to that database; every other sign-in is md5 against the server's password, SCRAM where the server keeps SCRAM, as before. The two cumulative counts run from the first time CloudBurrow read the instance's pooler log; each read takes the lines since the last. A database of the server no client has used through the pooler reads zero, with no pools. The console's own reads are not counted.
+The thread pool's figures are its page on pod port 13307 (`mysql-thread-pool --status`), read through the API server's pod proxy; no Service publishes it. PgBouncer's are read on its `pgbouncer` console database as `cloudburrow_stats`, its `stats_users`, which signs in only from the pod's loopback (the port-forward the CLI reads through, as before) and only to that database; the pooler itself reads the server's passwords as CloudBurrow's management role (#2208); every other sign-in is md5 against the server's password, SCRAM where the server keeps SCRAM, as before. The two cumulative counts run from the first time CloudBurrow read the instance's pooler log; each read takes the lines since the last. A database of the server no client has used through the pooler reads zero, with no pools. The console's own reads are not counted.
 
 The instance's Overview offers them in its Chart list while pooling is on: MySQL's Connection pool threads (active), (idle), Connection pool pending connections and Connection pool average wait time; PostgreSQL's Client connections (active), (waiting), Server connections (active), (idle), Number of connection pools, Average wait time (the databases' mean), Client connection attempts count and Error count (both summed over the databases). Metrics explorer lists them under `cloudsql_database` and `cloudsql_instance_database`.
 

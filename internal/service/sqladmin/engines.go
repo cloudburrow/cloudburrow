@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -56,6 +57,13 @@ type Postgres struct {
 	// PoolerHostAddr, when set, is the host address of the instance's
 	// managed connection pooler, "" while it has none (#2141).
 	PoolerHostAddr func() string
+	// AdminUser and AdminPassword are CloudBurrow's management role
+	// (#2208, components.PGAdminUser), which the Admin API signs in as
+	// and then acts as User; UserPassword is User's own, used when there
+	// is no management role (the console's screen of `up`'s server).
+	// Every TCP sign-in is checked by password.
+	AdminUser, AdminPassword string
+	UserPassword             string
 }
 
 // PoolerAddr is the address of the instance's managed connection pooler,
@@ -76,9 +84,23 @@ func (p *Postgres) conn(ctx context.Context) (*pgx.Conn, error) {
 	if err != nil {
 		return nil, Errorf(http.StatusServiceUnavailable, "the PostgreSQL tunnel is not up")
 	}
-	c, err := pgx.Connect(ctx, fmt.Sprintf("postgres://%s@%s:%s/%s?sslmode=disable", p.User, host, port, p.Database))
+	user, password := p.User, p.UserPassword
+	if p.AdminUser != "" && p.AdminPassword != "" {
+		user, password = p.AdminUser, p.AdminPassword
+	}
+	u := url.URL{Scheme: "postgres", User: url.UserPassword(user, password), Host: net.JoinHostPort(host, port),
+		Path: "/" + p.Database, RawQuery: "sslmode=disable"}
+	c, err := pgx.Connect(ctx, u.String())
 	if err != nil {
 		return nil, Errorf(http.StatusServiceUnavailable, "cannot reach PostgreSQL: %v", err)
+	}
+	if user != p.User {
+		// The management role acts as the server's superuser, so what it
+		// makes is owned as before (#2208).
+		if _, err := c.Exec(ctx, "SET SESSION AUTHORIZATION "+pgx.Identifier{p.User}.Sanitize()); err != nil {
+			_ = c.Close(context.Background())
+			return nil, Errorf(http.StatusServiceUnavailable, "cannot act as %s on PostgreSQL: %v", p.User, err)
+		}
 	}
 	return c, nil
 }
@@ -228,7 +250,7 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]User, error) {
 		FROM pg_catalog.pg_roles r
 		WHERE (r.rolcanlogin OR EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting s, unnest(s.setconfig) x
 			WHERE s.setrole = r.oid AND s.setdatabase = 0 AND x = '`+pgFailedCheckSetting+`=on'))
-		AND r.rolname NOT LIKE 'pg\_%' ORDER BY r.rolname`)
+		AND r.rolname NOT LIKE 'pg\_%' AND r.rolname NOT IN ('`+pgAdminUser+`', '`+pgAlloyDBAdminUser+`') ORDER BY r.rolname`)
 	if err != nil {
 		return nil, pgError(err)
 	}
@@ -250,6 +272,13 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]User, error) {
 	}
 	return out, rows.Err()
 }
+
+// CloudBurrow's management roles (#2208, components.PGAdminUser and
+// AlloyDBAdminUser), which users.list leaves out, as Google's are.
+const (
+	pgAdminUser        = "cloudsqladmin"
+	pgAlloyDBAdminUser = "alloydbadmin"
+)
 
 // The roles Cloud SQL for PostgreSQL makes its IAM users members of.
 const (
@@ -334,8 +363,20 @@ func pgEnsureHBA(ctx context.Context, c *pgx.Conn, lines ...string) error {
 // CreateUser creates a login role able to create databases and roles, as
 // Cloud SQL's built-in users are (members of cloudsqlsuperuser, which this
 // server does not have).
+// pgSystem refuses a write to CloudBurrow's management role (#2208), as
+// Cloud SQL refuses one to cloudsqladmin.
+func pgSystem(u User) error {
+	if u.Name == pgAdminUser || u.Name == pgAlloyDBAdminUser {
+		return Errorf(http.StatusBadRequest, "Invalid request: %s is a system user of the instance, which cannot be created, modified or deleted.", u.Name)
+	}
+	return nil
+}
+
 func (p *Postgres) CreateUser(ctx context.Context, u User, password string) error {
 	if err := checkName("user", u.Name); err != nil {
+		return err
+	}
+	if err := pgSystem(u); err != nil {
 		return err
 	}
 	stmt := "CREATE ROLE " + pgx.Identifier{u.Name}.Sanitize() + " LOGIN CREATEDB CREATEROLE"
@@ -346,6 +387,9 @@ func (p *Postgres) CreateUser(ctx context.Context, u User, password string) erro
 }
 
 func (p *Postgres) UpdateUser(ctx context.Context, u User, password string) error {
+	if err := pgSystem(u); err != nil {
+		return err
+	}
 	if password == "" {
 		return nil
 	}
@@ -353,6 +397,9 @@ func (p *Postgres) UpdateUser(ctx context.Context, u User, password string) erro
 }
 
 func (p *Postgres) DeleteUser(ctx context.Context, u User) error {
+	if err := pgSystem(u); err != nil {
+		return err
+	}
 	if u.Name == p.User {
 		return Errorf(http.StatusBadRequest, "Invalid request: %s is the server's own superuser and cannot be deleted.", u.Name)
 	}
@@ -370,11 +417,14 @@ type MySQL struct {
 	AppUser  string // the application's user, granted each new database
 	Database string
 	// RootPassword is the password the instance was created with: root's
-	// then, and its system accounts' for good (MySQLSystemAccountsSQL).
+	// then, and its system accounts' until AdminPassword replaces it.
 	RootPassword string
 	// Admin is the account CloudBurrow signs in as; "" is root.
-	Admin    string
-	HostAddr func() string
+	Admin string
+	// AdminPassword is Admin's password (#2208): CloudBurrow's management
+	// password, which no user knows; "" is RootPassword, as before.
+	AdminPassword string
+	HostAddr      func() string
 }
 
 // MySQLAdminUser is CloudBurrow's own account on a created MySQL
@@ -396,7 +446,8 @@ const MySQLAdminUser = "cloudsqladmin"
 var mysqlAdminHosts = []string{"localhost", "127.0.0.1", "::1"}
 
 // MySQLSystemAccountsSQL creates or refreshes MySQLAdminUser with every
-// privilege, signing in with the instance's creation password, with the
+// privilege, signing in with password (CloudBurrow's management password,
+// #2208, which no user knows), with the
 // binary log off: each server has its own, as a read replica's or a
 // standby's mysql schema is never copied from its primary's binary log,
 // and a logged CREATE USER would stop a replica that has one already.
@@ -445,13 +496,18 @@ func (m *MySQL) db() (*sql.DB, error) {
 	if addr == "" {
 		return nil, Errorf(http.StatusServiceUnavailable, "the MySQL tunnel is not up")
 	}
-	db, err := m.open(addr, m.admin())
+	password := m.RootPassword
+	if m.admin() != "root" && m.AdminPassword != "" {
+		password = m.AdminPassword
+	}
+	db, err := m.open(addr, m.admin(), password)
 	if err != nil || m.admin() == "root" {
 		return db, err
 	}
 	// An instance made before #1993 has no MySQLAdminUser until its next
-	// start makes one (sqlinstances.go); until then, root, which it could
-	// not delete, still signs in.
+	// start makes one (sqlinstances.go), and one made before #2208 has it
+	// with its creation password until then; until then that, or root,
+	// which it could not delete, still signs in.
 	ctx, cancel := context.WithTimeout(context.Background(), engineTimeout)
 	defer cancel()
 	perr := db.PingContext(ctx)
@@ -459,18 +515,23 @@ func (m *MySQL) db() (*sql.DB, error) {
 	if perr == nil || !asMySQL(perr, &me) || me.Number != 1045 {
 		return db, nil
 	}
-	if rdb, rerr := m.open(addr, "root"); rerr == nil && rdb.PingContext(ctx) == nil {
-		db.Close()
-		return rdb, nil
-	} else if rerr == nil {
-		rdb.Close()
+	for _, user := range []string{m.admin(), "root"} {
+		if user == m.admin() && password == m.RootPassword {
+			continue
+		}
+		if rdb, rerr := m.open(addr, user, m.RootPassword); rerr == nil && rdb.PingContext(ctx) == nil {
+			db.Close()
+			return rdb, nil
+		} else if rerr == nil {
+			rdb.Close()
+		}
 	}
 	return db, nil
 }
 
-func (m *MySQL) open(addr, user string) (*sql.DB, error) {
+func (m *MySQL) open(addr, user, password string) (*sql.DB, error) {
 	cfg := mysql.NewConfig()
-	cfg.User, cfg.Passwd, cfg.Net, cfg.Addr = user, m.RootPassword, "tcp", addr
+	cfg.User, cfg.Passwd, cfg.Net, cfg.Addr = user, password, "tcp", addr
 	cfg.Timeout = engineTimeout
 	db, err := sql.Open("mysql", cfg.FormatDSN())
 	if err != nil {

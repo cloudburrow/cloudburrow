@@ -110,7 +110,13 @@ func alloyDBWait(ctx context.Context, s *alloydb.Server, op *longrunningpb.Opera
 
 // ---- Clusters ----
 
-type alloyDBProvider struct{ svc *alloyDBService }
+type alloyDBProvider struct {
+	svc *alloyDBService
+	// savedQueries is AlloyDB Studio's saved queries record, and
+	// iamPrincipal the principal its IAM sign-in is made as (#2208).
+	savedQueries string
+	iamPrincipal string
+}
 
 func (alloyDBProvider) ID() string    { return "alloydb" }
 func (alloyDBProvider) Title() string { return "Clusters" }
@@ -329,6 +335,8 @@ func (p alloyDBProvider) Detail(ctx context.Context, project string, path []stri
 			{Label: "Version", Value: alloyDBVersionLabel(c.GetDatabaseVersion())}},
 		Sections: []console.Section{
 			{ID: "overview", Label: "Overview", Kind: console.KindProperties, Groups: overview, Listing: instances},
+			// AlloyDB Studio (#2208), as Google's cluster menu has it.
+			{ID: "studio", Label: "AlloyDB Studio", Kind: console.KindStudio},
 			{ID: "instances", Label: "Instances", Listing: instances},
 			{ID: "backups", Label: "Backups", Listing: alloyDBBackupListing(ctx, s, c.GetName(), kmsLocation(c.GetName()))},
 			{ID: "users", Label: "Users", Listing: alloyDBUsers(ctx, s, c.GetName())},

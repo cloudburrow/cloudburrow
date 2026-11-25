@@ -274,6 +274,28 @@ func (s *Server) checkIAMLogin(project string, e Engine, u User, hash string) (i
 	if !ok || email == "" {
 		return refused("the access token is not one this instance issued, or it has expired")
 	}
+	return s.checkIAMLoginOf(project, e, u, email)
+}
+
+// checkIAMLoginOf checks a sign-in to project's instance e as the IAM user
+// u by the principal email, whose credentials the caller has checked:
+// the connector's token, or the console's own principal in Cloud SQL
+// Studio (#2208).
+func (s *Server) checkIAMLoginOf(project string, e Engine, u User, email string) (iamLogin, error) {
+	refused := func(why string) (iamLogin, error) {
+		kind := "user"
+		if u.Type == TypeIAMServiceAccount {
+			kind = "service account"
+		}
+		return iamLogin{}, errIAMRefused{msg: "Cloud SQL IAM " + kind + " authentication failed for user \"" + u.Name + "\": " + why}
+	}
+	if !s.iamFlagOn(project, e) {
+		return refused("the instance's " + iamFlag(isMySQLEngine(e)) + " flag is not on")
+	}
+	src := s.iamSource()
+	if src == nil || src.Allowed == nil {
+		return refused("this instance checks no access tokens")
+	}
 	want, err := iamDBName(u.Type, email, isMySQLEngine(e))
 	if err != nil || want != u.Name {
 		return refused("the access token is " + email + "'s, not this user's")

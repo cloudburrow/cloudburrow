@@ -92,7 +92,7 @@ func TestCloudSQLPointInTimeRecovery(t *testing.T) {
 	if os.Getenv(EnvCloudSQL) != "" {
 		cases = append(cases, sqlBackupCase{name: "postgres", version: "POSTGRES_17", instance: "pitr-pg-" + suffix, created: true,
 			table: "pitr_rows", dsn: func(_, conn string) string {
-				return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+				return fmt.Sprintf("host=%s user=postgres password=%s dbname=postgres sslmode=disable", conn, pgRootPassword)
 			}, register: pgRegister})
 	}
 	if os.Getenv(EnvMySQL) != "" {
@@ -122,7 +122,7 @@ func TestCloudSQLPointInTimeRecoveryBeforePostgres12(t *testing.T) {
 		short := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(v, "POSTGRES_"), "_", ""))
 		cases = append(cases, sqlBackupCase{name: v, version: v, instance: "pitr-pg" + short + "-" + suffix, created: true,
 			table: "pitr_rows", dsn: func(_, conn string) string {
-				return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+				return fmt.Sprintf("host=%s user=postgres password=%s dbname=postgres sslmode=disable", conn, pgRootPassword)
 			}, register: pgRegister})
 	}
 	testPointInTimeRecovery(t, h, svc, project, cases)
@@ -233,7 +233,7 @@ func TestGcloudSQLPointInTimeClone(t *testing.T) {
 	svc := sqlAdminService(t, h)
 	waitRecoverable(t, svc, g.project, src)
 	c := sqlBackupCase{version: "POSTGRES_17", table: "gpitr_rows", dsn: func(_, conn string) string {
-		return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+		return fmt.Sprintf("host=%s user=postgres password=%s dbname=postgres sslmode=disable", conn, pgRootPassword)
 	}, register: pgRegister}
 	conn := g.project + ":us-central1:" + src
 	sqlBackupRows(t, h, c, conn, "CREATE TABLE gpitr_rows (id INT PRIMARY KEY, name VARCHAR(20))", "INSERT INTO gpitr_rows VALUES (1, 'a')")
@@ -282,7 +282,7 @@ func TestCloudSQLPointInTimeRetention(t *testing.T) {
 	if os.Getenv(EnvCloudSQL) != "" {
 		cases = append(cases, sqlBackupCase{name: "postgres", version: "POSTGRES_17", instance: "ret-pg-" + suffix, created: true,
 			table: "ret_rows", dsn: func(_, conn string) string {
-				return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+				return fmt.Sprintf("host=%s user=postgres password=%s dbname=postgres sslmode=disable", conn, pgRootPassword)
 			}, register: pgRegister})
 	}
 	if os.Getenv(EnvMySQL) != "" {

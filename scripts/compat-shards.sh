@@ -675,7 +675,8 @@ compat_shard() {
       # RUN_SQLADMIN: the Cloud SQL volume tests (#1346), without the
       # Cloud SQL suite, which the sql shard runs; RUN_MYSQL and
       # MYSQL_PASSWORD for the MySQL one, which logs in as the cloudburrow
-      # user (#1568).
+      # user (#1568); CLOUDSQL_PASSWORD, the PostgreSQL cloudburrow user's
+      # (#2208).
       # --cloudbuild-host-steps (#1382): Cloud Build's arbitrary steps run
       # only with it (ADR-0004), so TestCloudBuildArbitraryStepsFilterAndRetry
       # and TestGcloudBuildsStepsAndList run here; the refusal without it is
@@ -700,7 +701,7 @@ compat_shard() {
       # without a model, for the Document AI and Speech-to-Text
       # customer-managed key tests (with RUN_KMS); LOCALAI, which the
       # generation tests read, is not exported, so they still skip.
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_DATASTORE,RUN_GKE,RUN_MEMORYSTORE_ADMIN,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS,DATAFORM,APPHUB,RUN_TRACE,RUN_COMPUTE
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_DATASTORE,RUN_GKE,RUN_MEMORYSTORE_ADMIN,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,CLOUDSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS,DATAFORM,APPHUB,RUN_TRACE,RUN_COMPUTE
       if [ "$1" = crossservice ]; then
         # The run shard's instance again, for COMPAT_CROSSSERVICE_TESTS only, with
         # the plain names of the services they read: COMPAT_RUN keeps every
@@ -920,7 +921,7 @@ compat_shard() {
       # pooling's metrics; MONITORING is not exported, so the Monitoring
       # suites stay in theirs.
       SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging,compute,monitoring,alloydb
-      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING,SQL_COMPUTE,SQL_MONITORING,ALLOYDB,ALLOYDB_CONNECTOR,ALLOYDB_TLS,ALLOYDB_CA
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,CLOUDSQL_PASSWORD,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING,SQL_COMPUTE,SQL_MONITORING,ALLOYDB,ALLOYDB_CONNECTOR,ALLOYDB_TLS,ALLOYDB_CA
       # The replica tests run in sqlreplicas, against the same instance,
       # and the restart probes in sql.
       if [ "$1" = sqlreplicas ]; then
@@ -930,7 +931,7 @@ compat_shard() {
         # Cloud SQL for PostgreSQL (#701): a table with a row.
         SETUP_TESTS="TestCloudSQLRestartSetup"
         PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"
-        PROBE_VARS=MYSQL,MYSQL_PASSWORD,CLOUDSQL
+        PROBE_VARS=MYSQL,MYSQL_PASSWORD,CLOUDSQL,CLOUDSQL_PASSWORD
       fi ;;
     *) echo "unknown shard $1" >&2; return 1 ;;
   esac

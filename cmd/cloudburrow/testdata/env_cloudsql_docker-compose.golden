@@ -30,6 +30,7 @@ environment:
   GOOGLE_CLOUD_PROJECT: "golden"
   PGDATABASE: "cloudburrow"
   PGHOST: "host.docker.internal"
+  PGPASSWORD: "golden-password"
   PGPORT: "9019"
   PGSSLMODE: "disable"
   PGUSER: "cloudburrow"

@@ -146,7 +146,7 @@ func (x sqlTransferer) ExportParallel(ctx context.Context, t sqladmin.DumpTarget
 		call = "util.dumpSchemas(" + string(names) + ", D, " + opts + ")"
 	}
 	script := mysqlRootEnv + `set -e; d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
-LC_ALL=C mysqlsh --no-wizard --js --uri root@127.0.0.1:3306 --password="$MYSQL_PWD" -e "var D = '$d/dump'; ` + strings.ReplaceAll(call, `"`, `\"`) + `" >&2
+LC_ALL=C mysqlsh --no-wizard --js --uri "$MYSQL_LOCAL_USER@127.0.0.1:3306" --password="$MYSQL_PWD" -e "var D = '$d/dump'; ` + strings.ReplaceAll(call, `"`, `\"`) + `" >&2
 tar -C "$d/dump" -cf - .`
 	return m.exec(ctx, nil, w, "sh", "-c", script)
 }
@@ -178,7 +178,7 @@ trap 'rm -rf "$d"; mysql $MYSQL_LOCAL -e "SET GLOBAL local_infile = $was" || tru
 tar -C "$d" -xf -
 test -f "$d/@.json" || { echo "the folder holds no MySQL Shell dump (@.json)" >&2; exit 1; }
 mysql $MYSQL_LOCAL -e 'SET GLOBAL local_infile = 1'
-LC_ALL=C mysqlsh --no-wizard --js --uri root@127.0.0.1:3306 --password="$MYSQL_PWD" -e "util.loadDump('$d', ` + strings.ReplaceAll(opts, `"`, `\"`) + `)" >&2`
+LC_ALL=C mysqlsh --no-wizard --js --uri "$MYSQL_LOCAL_USER@127.0.0.1:3306" --password="$MYSQL_PWD" -e "util.loadDump('$d', ` + strings.ReplaceAll(opts, `"`, `\"`) + `)" >&2`
 	return m.exec(ctx, r, io.Discard, "sh", "-c", script)
 }
 

@@ -242,7 +242,7 @@ func TestCloudSQLAuthProxyBinary(t *testing.T) {
 		t.Run("pgx", func(t *testing.T) {
 			var got string
 			eventually(t, "read through the proxy", func() error {
-				conn, err := pgx.Connect(ctx, fmt.Sprintf("postgres://cloudburrow@127.0.0.1:%d/cloudburrow?sslmode=disable", ports[c]))
+				conn, err := pgx.Connect(ctx, upPGURL(fmt.Sprintf("127.0.0.1:%d", ports[c]), "cloudburrow"))
 				if err != nil {
 					return err
 				}

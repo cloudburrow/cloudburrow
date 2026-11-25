@@ -23,7 +23,7 @@ func TestCloudSQLConsoleBackupLocation(t *testing.T) {
 	svc := sqlAdminSDK(t)
 	project := servedProject(t)
 	name := fmt.Sprintf("browser-bkloc-%d", time.Now().UnixNano()%1e6)
-	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17",
+	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1",
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840",
 			BackupConfiguration: &sqladmin.BackupConfiguration{Enabled: true, StartTime: "03:00"}}}).Do()
 	if err != nil {

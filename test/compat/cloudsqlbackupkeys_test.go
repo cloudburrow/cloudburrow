@@ -42,7 +42,7 @@ func TestCloudSQLBackupLocationsAndReencryption(t *testing.T) {
 	name := "bkenc-" + suffix
 	c := sqlBackupCase{name: name, version: "POSTGRES_17", instance: name, created: true, table: "bk_rows",
 		dsn: func(_, conn string) string {
-			return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+			return fmt.Sprintf("host=%s user=postgres password=%s dbname=postgres sslmode=disable", conn, pgRootPassword)
 		}, register: pgRegister}
 	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17",
 		RootPassword: "Root-pass1",
@@ -224,6 +224,7 @@ resource "google_sql_database_instance" "i" {
   name                = %[2]q
   region              = "us-central1"
   database_version    = "POSTGRES_17"
+  root_password       = "Root-pass1"
   deletion_protection = false
   settings {
     tier = "db-custom-1-3840"

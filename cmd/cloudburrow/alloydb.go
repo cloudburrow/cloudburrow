@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -113,7 +114,8 @@ func (s *alloyDBService) Start(ctx context.Context) error {
 	}
 	s.engine = newAlloyDBEngine(s.cfg, s.logw)
 	opts := alloydb.Options{Engine: s.engine, BackupsDir: filepath.Join(s.cfg.InstanceDir(), "alloydb-backups"),
-		ConnectorHost: s.cfg.BindAddress, Logf: s.logf}
+		ConnectorHost: s.cfg.BindAddress, Logf: s.logf,
+		AdminUser: components.AlloyDBAdminUser, AdminPassword: postgresAdminPassword(s.cfg)}
 	if net.ParseIP(s.cfg.BindAddress) == nil || net.ParseIP(s.cfg.BindAddress).IsUnspecified() {
 		opts.ConnectorHost = "127.0.0.1"
 	}
@@ -312,7 +314,10 @@ func (e *alloyDBEngine) backend(spec alloydb.ServerSpec) components.Backend {
 		// Cloud SQL's (#2141), with the connectors' pool beside it.
 		b.Sidecars = append(b.Sidecars, components.AlloyDBPoolers(spec.Pooler)...)
 	}
-	return b
+	// Every TCP sign-in is checked by password (#2208); CloudBurrow signs
+	// in as its management role. The initial user's password is set by
+	// the API (setupPrimary).
+	return components.WithPostgresAuth(b, components.AlloyDBAdminUser, postgresAdminPassword(e.cfg), "", "")
 }
 
 func sortedFlagNames(m map[string]string) []string {
@@ -365,7 +370,8 @@ func (e *alloyDBEngine) serves(ctx context.Context, server string) error {
 	for {
 		addr := e.Addr(server)
 		if addr != "" {
-			c, err := pgx.Connect(ctx, "postgres://postgres@"+addr+"/postgres?sslmode=disable&connect_timeout=5")
+			c, err := pgx.Connect(ctx, (&url.URL{Scheme: "postgres", User: url.UserPassword(components.AlloyDBAdminUser, postgresAdminPassword(e.cfg)),
+				Host: addr, Path: "/postgres", RawQuery: "sslmode=disable&connect_timeout=5"}).String())
 			if err == nil {
 				err = c.Ping(ctx)
 				_ = c.Close(ctx)

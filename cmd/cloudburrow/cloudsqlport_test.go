@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 
@@ -36,9 +37,10 @@ func TestEnvOfflineExportsThePostgresVariables(t *testing.T) {
 			t.Errorf("%s = %q, want %q", name, got[name], want)
 		}
 	}
-	// Trust authentication: there is no password, so none is exported.
-	if _, ok := got["PGPASSWORD"]; ok {
-		t.Error("PGPASSWORD is exported, but the server has no password")
+	// The server checks the password (#2208): the generated one is
+	// exported, as MySQL's is, and kept for the next env.
+	if len(got["PGPASSWORD"]) != 24 {
+		t.Errorf("PGPASSWORD = %d characters, want the generated password's 24", len(got["PGPASSWORD"]))
 	}
 	if strings.Contains(stderr.String(), "PGPORT") {
 		t.Errorf("env reported PGPORT as unexportable at a fixed port:\n%s", stderr.String())
@@ -50,6 +52,13 @@ func TestEnvOfflineExportsThePostgresVariables(t *testing.T) {
 // loopback is the container.
 func TestEnvCloudSQLGoldens(t *testing.T) {
 	cfg := formatsConfig(t, "cloudsql")
+	// The generated passwords, fixed for the goldens (#2208).
+	if err := os.MkdirAll(cfg.InstanceDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(postgresCredentialsPath(cfg), []byte(`{"password":"golden-password","adminPassword":"golden-admin"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	vars := envVars(cfg, cfg.DefaultProject(), "/host/only/adc.json")
 
 	var shell bytes.Buffer
