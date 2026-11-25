@@ -6700,9 +6700,9 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Implemented": 3,
-      "Unimplemented": 12,
-      "Verified": 119
+      "Implemented": 5,
+      "Unimplemented": 27,
+      "Verified": 188
     },
     "rows": [
       {
@@ -6724,6 +6724,139 @@
         "status": "Verified",
         "tests": [
           "test/compat/colabexecutions2105_test.go:410 TestColabEnterpriseRuntimeTemplateIAM"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/CreateDataset",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/CreateDatasetVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/DeleteDataset",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/DeleteDatasetVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/DeleteSavedQuery",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/ExportData",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/GetAnnotationSpec",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/GetDataset",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/GetDatasetVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/ImportData",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/ListAnnotations",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/ListDataItems",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/ListDatasetVersions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/ListDatasets",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/ListSavedQueries",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/RestoreDatasetVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/SearchDataItems",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/UpdateDataset",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.DatasetService/UpdateDatasetVersion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datasets2210_test.go:67 TestVertexAIDatasets"
         ]
       },
       {
@@ -6844,6 +6977,211 @@
         "note": "no official-SDK test proves it yet"
       },
       {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelBatchPredictionJob",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelCustomJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelDataLabelingJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelHyperparameterTuningJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/hptuning2210_test.go:65 TestVertexAIHyperparameterTuning"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CancelNasJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateBatchPredictionJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateCustomJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateDataLabelingJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateHyperparameterTuningJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/hptuning2210_test.go:304 TestVertexAIHyperparameterTuningStopping",
+          "test/compat/hptuning2210_test.go:65 TestVertexAIHyperparameterTuning"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateModelDeploymentMonitoringJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/CreateNasJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteBatchPredictionJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteCustomJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteDataLabelingJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteHyperparameterTuningJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/hptuning2210_test.go:65 TestVertexAIHyperparameterTuning"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteModelDeploymentMonitoringJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/DeleteNasJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetBatchPredictionJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetCustomJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetDataLabelingJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetHyperparameterTuningJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/hptuning2210_test.go:304 TestVertexAIHyperparameterTuningStopping",
+          "test/compat/hptuning2210_test.go:65 TestVertexAIHyperparameterTuning"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetModelDeploymentMonitoringJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetNasJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/GetNasTrialDetail",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListBatchPredictionJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListCustomJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListDataLabelingJobs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListHyperparameterTuningJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/hptuning2210_test.go:65 TestVertexAIHyperparameterTuning"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListModelDeploymentMonitoringJobs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListNasJobs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ListNasTrialDetails",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/PauseModelDeploymentMonitoringJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/ResumeModelDeploymentMonitoringJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/SearchModelDeploymentMonitoringStatsAnomalies",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.JobService/UpdateModelDeploymentMonitoringJob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
         "method": "google.cloud.aiplatform.v1.LlmUtilityService/ComputeTokens",
         "status": "Verified",
         "tests": [
@@ -6855,6 +7193,232 @@
         "status": "Verified",
         "tests": [
           "test/compat/generationconversation_test.go:247 TestV1Beta1PredictionClientServesWhatV1Serves"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/AddContextArtifactsAndExecutions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/AddContextChildren",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/AddExecutionEvents",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/CreateArtifact",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata",
+          "test/compat/pipelines2205_test.go:283 TestVertexAIPipelineResolverAndLimits"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/CreateContext",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/CreateExecution",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/CreateMetadataSchema",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/CreateMetadataStore",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/DeleteArtifact",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/DeleteContext",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/DeleteExecution",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/DeleteMetadataStore",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/GetArtifact",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/GetContext",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/GetExecution",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/GetMetadataSchema",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/GetMetadataStore",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/ListArtifacts",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/ListContexts",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/ListExecutions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/ListMetadataSchemas",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/ListMetadataStores",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/PurgeArtifacts",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/PurgeContexts",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/PurgeExecutions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/QueryArtifactLineageSubgraph",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/QueryContextLineageSubgraph",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/QueryExecutionInputsAndOutputs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata",
+          "test/compat/pipelines2205_test.go:283 TestVertexAIPipelineResolverAndLimits"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/RemoveContextChildren",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/UpdateArtifact",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/UpdateContext",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.MetadataService/UpdateExecution",
+        "status": "Verified",
+        "tests": [
+          "test/compat/metadata2205_test.go:43 TestVertexAIMLMetadata"
         ]
       },
       {
@@ -7152,25 +7716,33 @@
         "method": "google.cloud.aiplatform.v1.PipelineService/CancelPipelineJob",
         "status": "Verified",
         "tests": [
-          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs"
+          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs",
+          "test/compat/pipelines2205_test.go:283 TestVertexAIPipelineResolverAndLimits"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/CancelTrainingPipeline",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
+        "status": "Implemented",
+        "note": "no official-SDK test can reach it: Served (#2210): cancels the pipeline and its backing CustomJob, as CancelCustomJob does (TestVertexAICustomTraining verifies CancelCustomJob); no compat test cancels a training pipeline yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/CreatePipelineJob",
         "status": "Verified",
         "tests": [
-          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs"
+          "test/compat/jobs2210_test.go:392 TestPipelineTemplates",
+          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs",
+          "test/compat/pipelines2205_test.go:283 TestVertexAIPipelineResolverAndLimits",
+          "test/compat/pipelines2205_test.go:74 TestPythonKFPControlFlow",
+          "test/compat/pipelines2210_test.go:145 TestPythonGCPC"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/CreateTrainingPipeline",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining",
+          "test/compat/pipelines2210_test.go:145 TestPythonGCPC"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/DeletePipelineJob",
@@ -7181,20 +7753,28 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/DeleteTrainingPipeline",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/GetPipelineJob",
         "status": "Verified",
         "tests": [
-          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs"
+          "test/compat/pipelines2173_test.go:158 TestVertexAIPipelineJobs",
+          "test/compat/pipelines2205_test.go:283 TestVertexAIPipelineResolverAndLimits",
+          "test/compat/pipelines2205_test.go:74 TestPythonKFPControlFlow",
+          "test/compat/pipelines2210_test.go:145 TestPythonGCPC"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/GetTrainingPipeline",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining",
+          "test/compat/pipelines2210_test.go:145 TestPythonGCPC"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/ListPipelineJobs",
@@ -7205,8 +7785,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/ListTrainingPipelines",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): Vertex AI's TrainingPipelines (AutoML and custom training) are not served: CloudBurrow runs no training service; PipelineService's pipeline jobs are (#2173). Answered UNIMPLEMENTED"
+        "status": "Verified",
+        "tests": [
+          "test/compat/jobs2210_test.go:106 TestVertexAICustomTraining"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/DirectPredict",
@@ -12926,6 +13508,8 @@
           "test/compat/bigqueryloadtable_test.go:30 TestBigQueryLoadMakesItsTableWithItsProperties",
           "test/compat/bigqueryloadvariants_test.go:34 TestBigQueryHivePartitionedAndGeoJSONLoads",
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
+          "test/compat/bigquerymlexport_test.go:163 TestBigQueryMLExportModelTransform",
+          "test/compat/bigquerymlexport_test.go:37 TestBigQueryMLExportModel",
           "test/compat/bigquerymlonnx_test.go:48 TestBigQueryMLImportedONNXModel",
           "test/compat/bigquerymlxgb_test.go:38 TestBigQueryMLImportedXGBoostModel",
           "test/compat/bigqueryorcload_test.go:88 TestBigQueryLoadORC",
@@ -13118,6 +13702,8 @@
           "test/compat/bigquerymlarima_test.go:314 TestBigQueryMLArimaPlusETS",
           "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
           "test/compat/bigquerymlexplain_test.go:19 TestBigQueryMLExplain",
+          "test/compat/bigquerymlexport_test.go:163 TestBigQueryMLExportModelTransform",
+          "test/compat/bigquerymlexport_test.go:37 TestBigQueryMLExportModel",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
           "test/compat/bigquerymlimage_test.go:42 TestBigQueryMLImageFunctions",
           "test/compat/bigquerymlmf_test.go:21 TestBigQueryMLMatrixFactorization",
@@ -13397,6 +13983,8 @@
           "test/compat/bigquerymlcontrib_test.go:26 TestBigQueryMLContributionAnalysis",
           "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
           "test/compat/bigquerymlexplain_test.go:19 TestBigQueryMLExplain",
+          "test/compat/bigquerymlexport_test.go:163 TestBigQueryMLExportModelTransform",
+          "test/compat/bigquerymlexport_test.go:37 TestBigQueryMLExportModel",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
           "test/compat/bigquerymlholiday_test.go:34 TestBigQueryMLCustomHolidays",
           "test/compat/bigquerymlholidayregion_test.go:31 TestBigQueryMLHolidayRegion",
@@ -13570,6 +14158,7 @@
           "test/compat/bigquerymlautoml_test.go:29 TestBigQueryMLAutoML",
           "test/compat/bigquerymlcontrib_test.go:26 TestBigQueryMLContributionAnalysis",
           "test/compat/bigquerymldnn_test.go:30 TestBigQueryMLDNN",
+          "test/compat/bigquerymlexport_test.go:37 TestBigQueryMLExportModel",
           "test/compat/bigquerymlforest_test.go:17 TestBigQueryMLRandomForest",
           "test/compat/bigquerymlholiday_test.go:34 TestBigQueryMLCustomHolidays",
           "test/compat/bigquerymlholidayregion_test.go:31 TestBigQueryMLHolidayRegion",

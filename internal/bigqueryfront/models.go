@@ -1735,6 +1735,7 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 	}
 	stmts := splitStatements(toks)
 	var found *modelDDL
+	var export *exportDDL
 	others := 0
 	var code int
 	var msg string
@@ -1742,18 +1743,27 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		if len(stmt) == 0 {
 			continue
 		}
+		if e, is, c, m := parseExportModel(stmt); is {
+			// EXPORT MODEL (modelexport.go, #2210).
+			if found == nil && export == nil {
+				export, code, msg = &e, c, m
+			} else {
+				others++
+			}
+			continue
+		}
 		d, is, c, m := parseModelDDL(stmt, q.Query)
 		if !is {
 			others++
 			continue
 		}
-		if found == nil {
+		if found == nil && export == nil {
 			found, code, msg = &d, c, m
 		} else {
 			others++
 		}
 	}
-	if found == nil {
+	if found == nil && export == nil {
 		return false
 	}
 	fail := func(code int, msg string) {
@@ -1765,11 +1775,15 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
 	}
 	if others > 0 {
-		fail(501, "Not implemented here: CREATE MODEL or DROP MODEL in a script; CloudBurrow carries them out as a query of their own. Nothing was run.")
+		fail(501, "Not implemented here: CREATE MODEL, DROP MODEL or EXPORT MODEL in a script; CloudBurrow carries them out as a query of their own. Nothing was run.")
 		return true
 	}
 	if code != 0 {
 		fail(code, msg)
+		return true
+	}
+	if export != nil {
+		f.exportStatement(w, r, q, insert, *export, fail)
 		return true
 	}
 	d := *found
@@ -1980,7 +1994,22 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return true
 	}
-	client := jobText{query: q.Query}
+	// The job's statistics are a model statement's, as BigQuery answers
+	// them and Google Cloud Pipeline Components' BigqueryCreateModelJobOp
+	// reads them (statementType CREATE_MODEL, ddlTargetTable the model,
+	// #2210).
+	ddl := &ownDDL{statementType: "CREATE_MODEL", operation: "CREATE", target: tableRef{ProjectID: project, DatasetID: dataset, TableID: id}}
+	switch {
+	case d.drop && !had:
+		ddl.statementType, ddl.operation = "DROP_MODEL", "SKIP"
+	case d.drop:
+		ddl.statementType, ddl.operation = "DROP_MODEL", "DROP"
+	case had && d.ifNotExists:
+		ddl.operation = "SKIP"
+	case had:
+		ddl.operation = "REPLACE"
+	}
+	client := jobText{query: q.Query, ddl: ddl}
 	q.Query = noop
 	rec := newRecorder()
 	f.serveQuery(rec, r, q, insert)

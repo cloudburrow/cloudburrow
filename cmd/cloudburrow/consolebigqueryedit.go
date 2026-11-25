@@ -222,7 +222,7 @@ func (p bigqueryProvider) detailActions(ctx context.Context, path []string) []co
 		}
 		if isModelPath(path) { // #1465
 			if md, err := p.modelMetadata(ctx, path[0], path[2]); err == nil {
-				return []console.Action{editModelAction(md), deleteModelAction()}
+				return []console.Action{editModelAction(md), exportModelAction(), deleteModelAction()}
 			}
 			return []console.Action{deleteModelAction()}
 		}
@@ -484,6 +484,8 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 		return p.editModel(ctx, path[0], path[2], values)
 	case action == actDeleteModel && isModelPath(path):
 		return p.deleteModel(ctx, path[0], path[2])
+	case action == actExportModel && isModelPath(path): // #2210
+		return p.exportModel(ctx, path[0], path[2], values)
 	case action == "deletetable" && len(path) == 2:
 		ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 		defer cancel()

@@ -204,6 +204,23 @@ type notebookStore struct {
 	// pipelineRunner.
 	pipelines      map[string]*pipelineEntry
 	pipelineRunner PipelineRunner
+	// md is Vertex ML Metadata (metadata.go, #2205).
+	md *mdStore
+	// pipelineCache are pipeline tasks' cache entries by parent and cache
+	// key (pipelinerun.go, #2205); pipelineSlots the per-project quotas of
+	// concurrent runs and parallel tasks.
+	pipelineCache map[string]json.RawMessage
+	pipelineSlots map[string]chan struct{}
+	// customJobs, batchJobs and trainingPipelines are Vertex AI's custom
+	// training and batch prediction (customjobs.go, batchprediction.go,
+	// trainingpipelines.go, #2210), run on pipelineRunner too.
+	customJobs        map[string]*customJobEntry
+	batchJobs         map[string]*batchJobEntry
+	trainingPipelines map[string]*trainingEntry
+	// hpJobs are hyperparameter tuning jobs (hptuning.go, #2210).
+	hpJobs map[string]*hpJobEntry
+	// ds are Vertex AI managed datasets (datasets.go, #2210).
+	ds *dsStore
 }
 
 // runtimeEntry is a runtime and what its lifecycle needs.
@@ -255,6 +272,10 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 		Policies  map[string]*iampolicy.Stored `json:"policies"`
 		Owners    map[string]string            `json:"scheduleOwners"`
 		Pipelines []json.RawMessage            `json:"pipelineJobs"`
+		Metadata  json.RawMessage              `json:"metadata"`
+		Cache     map[string]json.RawMessage   `json:"pipelineCache"`
+		Training  map[string][]json.RawMessage `json:"trainingJobs"`
+		Datasets  json.RawMessage              `json:"datasets"`
 	}
 	if json.Unmarshal(b, &saved) != nil {
 		return
@@ -280,6 +301,10 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 		st.owners[k] = v
 	}
 	st.loadPipelines(saved.Pipelines)
+	st.loadMetadata(saved.Metadata)
+	st.pipelineCache = saved.Cache
+	st.loadTrainingJobs(saved.Training)
+	st.loadDatasets(saved.Datasets)
 }
 
 // save writes the store; the caller holds st.mu.
@@ -300,7 +325,11 @@ func (st *notebookStore) save() {
 		Policies  map[string]*iampolicy.Stored `json:"policies"`
 		Owners    map[string]string            `json:"scheduleOwners,omitempty"`
 		Pipelines []json.RawMessage            `json:"pipelineJobs,omitempty"`
-	}{Owners: st.owners, Pipelines: st.savedPipelines(), Templates: []json.RawMessage{}, Runtimes: []savedRuntime{}, Defaults: st.defaults, Jobs: []json.RawMessage{}, Schedules: []json.RawMessage{},
+		Metadata  json.RawMessage              `json:"metadata,omitempty"`
+		Cache     map[string]json.RawMessage   `json:"pipelineCache,omitempty"`
+		Training  map[string][]json.RawMessage `json:"trainingJobs,omitempty"`
+		Datasets  json.RawMessage              `json:"datasets,omitempty"`
+	}{Datasets: st.savedDatasets(), Training: st.savedJobs(), Cache: st.pipelineCache, Owners: st.owners, Pipelines: st.savedPipelines(), Metadata: st.savedMetadata(), Templates: []json.RawMessage{}, Runtimes: []savedRuntime{}, Defaults: st.defaults, Jobs: []json.RawMessage{}, Schedules: []json.RawMessage{},
 		Policies: st.policies}
 	for _, n := range sortedNames(st.jobs) {
 		if b, err := protojson.Marshal(st.jobs[n].Job); err == nil {
@@ -1185,6 +1214,9 @@ func (s *Server) registerNotebooks(srv grpc.ServiceRegistrar) {
 	aiplatformpb.RegisterNotebookServiceServer(srv, &notebookService{s: s})
 	aiplatformpb.RegisterScheduleServiceServer(srv, &scheduleService{s: s})
 	aiplatformpb.RegisterPipelineServiceServer(srv, &pipelineService{s: s})
+	aiplatformpb.RegisterJobServiceServer(srv, &jobService{s: s})
+	aiplatformpb.RegisterMetadataServiceServer(srv, &metadataService{s: s})
+	aiplatformpb.RegisterDatasetServiceServer(srv, &datasetService{s: s})
 	nbpb.RegisterNotebookServiceServer(srv, &workbenchService{s: s})
 }
 
@@ -1198,7 +1230,26 @@ func (s *Server) notebookREST() *rest.Transcoder {
 			opRule("/v1/{name=projects/*/locations/*/notebookExecutionJobs/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/schedules/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/pipelineJobs/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/customJobs/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/batchPredictionJobs/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/trainingPipelines/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/hyperparameterTuningJobs/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/datasets/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/datasets/*/savedQueries/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/datasets/*/datasetVersions/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/artifacts/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/contexts/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/executions/*/operations/*}"),
 		}}
+		// The Python SDK (google-cloud-aiplatform) polls under /ui, the
+		// first binding aiplatform_v1.yaml gives GetOperation (#1940): a
+		// dataset's import is polled as /ui/{name=.../datasets/*/operations/*}.
+		for _, m := range append([]*annotations.HttpRule(nil), t.Mixins...) {
+			if g := m.GetGet(); strings.HasPrefix(g, "/v1/{name=projects/*/locations/*/") {
+				t.Mixins = append(t.Mixins, opRule("/ui/"+strings.TrimPrefix(g, "/v1/")))
+			}
+		}
 		t.Mixins = append(t.Mixins, NotebookIAMMixins()...)
 		s.registerNotebooks(t)
 		iampb.RegisterIAMPolicyServer(t, &notebookIAM{s: s})

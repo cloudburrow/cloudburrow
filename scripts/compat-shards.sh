@@ -303,7 +303,8 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # (TestDocumentAI*, TestSpeech*, #1930), served by the local AI
 # endpoint Cloud Run starts, and Workflows' (TestWorkflows*, #1986), whose
 # instance is the run shard's, and Dataform's (TestDataform*, #2105) and Colab Enterprise's (TestColab*, #2105) and Workbench's
-# (TestWorkbench*, #2173), whose
+# (TestWorkbench*, #2173) and Vertex AI Pipelines' and ML Metadata's
+# (TestVertexAIPipeline*, TestVertexAIMetadata*, #2205; TestVertexAITraining*, TestVertexAIDatasets*, #2210), whose
 # invocations run on its BigQuery, and App Hub's (TestAppHub*, #2110) and Developer
 # Connect's (TestDeveloperConnect*, #2105, on the Run port), served
 # only by the run shard's instance; the BigQuery,
@@ -404,8 +405,8 @@ COMPAT_BROWSER_VPCVMS_TEST_NAMES="ComputeA1Screens ComputeA1ScreensMeetWCAG
 COMPAT_BROWSER_VPCVMS_SHARD_TESTS="^Test($(echo "$COMPAT_BROWSER_VPCVMS_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipelines|Workbench|AppHub|DeveloperConnect)'
-COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS='^Test(KMS|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipelines|Workbench|AppHub|DeveloperConnect)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipeline|VertexAIMetadata|VertexAITraining|VertexAIDatasets|Workbench|AppHub|DeveloperConnect)'
+COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS='^Test(KMS|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipeline|VertexAIMetadata|VertexAITraining|VertexAIDatasets|Workbench|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 # Create an image from a Cloud Storage file (#2139) browses a bucket of
 # this instance's Cloud Storage from Compute Engine's Create an image: the

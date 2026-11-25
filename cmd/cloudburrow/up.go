@@ -1552,7 +1552,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		localAISrv.SetNotebookExecutor(colabExec)
 		// Vertex AI pipeline jobs and their schedules (#2173): each task's
 		// container on Docker, its artifacts in Cloud Storage.
-		localAISrv.SetPipelineRunner(colabPipelines{colabExecutor: colabExec, instance: cfg.Name})
+		localAISrv.SetPipelineRunner(colabPipelines{colabExecutor: colabExec, instance: cfg.Name, live: boundAddrs})
 		// Executions, schedules and pipeline jobs run as the identity they
 		// name (#2173), with actAs checked on it.
 		localAISrv.SetIdentity(runIdentity(iamEnforcer, iameval.VertexAI, creds, func() *resourcemanager.Registry { return projectRegistry }))

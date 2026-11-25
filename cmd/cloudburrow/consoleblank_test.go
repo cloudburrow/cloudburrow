@@ -84,11 +84,21 @@ var emulatorOnly = map[string]string{
 	"colab-executions":            "executions are read from the local AI endpoint over gRPC, which this test does not start (TestColabEnterpriseExecutionsThroughThePages drives the page)",
 	"vertex-pipeline-runs":        "pipeline runs are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAIPipelinesThroughThePages drives the page)",
 	"vertex-pipeline-schedules":   "pipeline schedules are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAIPipelinesThroughThePages drives the page)",
+	"vertex-metadata-artifacts":   "ML Metadata is read from the local AI endpoint over gRPC, which this test does not start (TestVertexAIMetadataThroughThePages drives the page)",
+	"vertex-metadata-executions":  "ML Metadata is read from the local AI endpoint over gRPC, which this test does not start (TestVertexAIMetadataThroughThePages drives the page)",
+	"vertex-metadata-contexts":    "ML Metadata is read from the local AI endpoint over gRPC, which this test does not start (TestVertexAIMetadataThroughThePages drives the page)",
+	"vertex-training-pipelines":   "training pipelines are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAITrainingThroughThePages drives the page)",
+	"vertex-custom-jobs":          "custom jobs are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAITrainingThroughThePages drives the page)",
+	"vertex-batch-predictions":    "batch predictions are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAITrainingThroughThePages drives the page)",
+	"vertex-datasets":             "datasets are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAIDatasetsThroughThePages drives the page)",
 	"workbench-instances":         "Workbench instances are read from the local AI endpoint over gRPC, which this test does not start (TestWorkbenchInstancesThroughThePages drives the page)",
 	"colab-schedules":             "schedules are read from the local AI endpoint over gRPC, which this test does not start (TestColabEnterpriseExecutionsThroughThePages drives the page)",
 	"vertex-endpoints":            "Endpoints are read from the local AI endpoint over gRPC, which this test does not start (TestModelRegistryAndEndpointsThroughThePages drives the page)",
 	"run-domains":                 "the Cloud Run Admin API v1's domain mappings, which this test's in-process adapter does not serve over HTTP (TestCloudRunGooglePagesThroughTheBrowser drives the page)",
 	"cloudsql-instances":          "the Cloud SQL Admin API over PostgreSQL and MySQL servers; there is no in-process one",
+
+	// Training's Hyperparameter tuning jobs tab (consolehptuning.go).
+	"vertex-hyperparameter-tuning-jobs": "hyperparameter tuning jobs are read from the local AI endpoint over gRPC, which this test does not start (TestVertexAITrainingHyperparameterTuningThroughThePages drives the page)",
 }
 
 // TestNoDetailShowsABlankProperty enforces console parity §4.4: "Only fields

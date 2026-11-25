@@ -28,7 +28,7 @@ type Engine interface {
 // Server serves POST /v1/convert: a tar of a SavedModel's files in, the
 // bundle out (200, application/x-tar), or a Refusal as JSON (422; 503
 // when the converter cannot run at all); and the TensorFlow runtime of
-// converted models, POST /v1/models and /v1/run (predict.go).
+// converted models, POST /v1/models and /v1/run (predict.go); and POST /v1/export (export.go).
 type Server struct {
 	engine Engine
 	mu     sync.Mutex // one conversion at a time: TensorFlow is large
@@ -42,6 +42,10 @@ type Server struct {
 func NewServer(engine Engine, tmp string) *Server { return &Server{engine: engine, tmp: tmp} }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/v1/export" && r.Method == http.MethodPost {
+		s.serveExport(w, r)
+		return
+	}
 	switch r.URL.Path {
 	case "/v1/models":
 		s.serveLoad(w, r)

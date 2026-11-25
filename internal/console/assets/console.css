@@ -3070,3 +3070,44 @@ tr.log-entry.is-located { outline: 2px solid var(--accent); outline-offset: -2px
 .compute-connect input[type="radio"] { accent-color: var(--accent); margin: 0; }
 .compute-autostop select { margin-right: 8px; }
 .compute-address { margin-top: 8px; }
+
+/* A pipeline run's runtime graph and its Pipeline run analysis pane (#2205). */
+.pl-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 360px); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .pl-split { grid-template-columns: minmax(0, 1fr); } }
+.pl-graph, .pl-pane { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); min-width: 0; }
+.pl-tools { display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.pl-tools-title { margin-right: auto; font-weight: 600; }
+.pl-switch { display: inline-flex; align-items: center; gap: 6px; }
+.pl-scroll { overflow: auto; padding: 16px; max-height: 70vh; }
+.pl-level { position: relative; display: flex; flex-direction: column; align-items: center; gap: 28px; padding: 4px; }
+.pl-edges { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.pl-edges path { fill: none; stroke: var(--field-border); stroke-width: 1.5; }
+.pl-row { display: flex; flex-wrap: nowrap; justify-content: center; gap: 16px; position: relative; }
+.pl-node-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.pl-node { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; min-width: 168px; max-width: 260px;
+  padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); text-align: left; cursor: pointer; }
+.pl-node:hover { background: var(--state-hover); }
+.pl-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pl-node[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pl-node.is-artifact { border-style: dashed; }
+.pl-node .pl-dot { grid-row: 1 / span 2; }
+.pl-node-name { font-weight: 500; overflow-wrap: anywhere; }
+.pl-node-state { font-size: var(--text-caption-size); color: var(--text-muted); }
+.pl-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--text-muted); }
+.pl-dot.is-succeeded { background: var(--ok); }
+.pl-dot.is-failed { background: var(--error); }
+.pl-dot.is-running, .pl-dot.is-pending { background: var(--accent); }
+.pl-dot.is-cached { background: var(--ok); box-shadow: inset 0 0 0 2px var(--surface); border: 1px solid var(--ok); }
+.pl-dot.is-skipped, .pl-dot.is-not-triggered, .pl-dot.is-cancelled { background: transparent; border: 2px solid var(--text-muted); }
+.pl-group { margin-top: 6px; padding: 12px; border: 1px dashed var(--field-border); border-radius: var(--radius); background: var(--surface-alt); }
+.pl-expand { font-size: var(--text-caption-size); }
+.pl-pane h2 { margin: 0; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: var(--text-heading-size); }
+.pl-pane-body { padding: 8px 12px 12px; }
+.pl-pane-group h3 { margin: 12px 0 4px; font-size: var(--text-body-size); }
+.pl-pane-group dl { display: grid; grid-template-columns: minmax(96px, auto) minmax(0, 1fr); gap: 4px 12px; margin: 0; }
+.pl-pane-group dt { color: var(--text-muted); }
+.pl-pane-group dd { margin: 0; overflow-wrap: anywhere; }
+.pl-pane-node { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.pl-pane-back { margin-top: 12px; }
+.pl-pane-group dd.has-copy { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.pl-pane-group dd.has-copy > * { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }

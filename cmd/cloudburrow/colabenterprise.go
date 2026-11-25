@@ -191,6 +191,9 @@ type colabPipelines struct {
 	colabExecutor
 	instance string
 	docker   string
+	// live is the instance's bound addresses (Artifact Registry's Run
+	// port, BigQuery), vertexjobs.go.
+	live func() map[string]string
 }
 
 func (p colabPipelines) bin() string {
@@ -201,10 +204,13 @@ func (p colabPipelines) bin() string {
 }
 
 func (p colabPipelines) RunContainer(ctx context.Context, c vertexai.PipelineContainer) error {
-	if out, err := exec.CommandContext(ctx, p.bin(), "image", "inspect", "--format", "{{.Id}}", c.Image).CombinedOutput(); err != nil {
-		return fmt.Errorf("the image %s is not on this machine: CloudBurrow runs a pipeline task's image only when it is already here (docker pull or build it first; nothing is pulled from a Google registry): %s",
-			c.Image, strings.TrimSpace(string(out)))
+	// The image: here, from the instance's Artifact Registry, or pulled
+	// from a public registry (vertexjobs.go, #2210).
+	image, err := p.ensureImage(ctx, c.Image)
+	if err != nil {
+		return err
 	}
+	c.Image = image
 	name := "cb-pl-" + strings.Trim(pipelineContainerSafe.ReplaceAllString(strings.ToLower(c.Key), "-"), "-")
 	if len(name) > 120 {
 		name = name[:120]
