@@ -111,7 +111,19 @@ func TestVertexAITrainingThroughThePages(t *testing.T) {
 				}
 			}
 			if it.Status == "Failed" || time.Now().After(deadline) {
-				t.Fatalf("%s %q = %+v, want %v", service, value, it, want)
+				// Why, from the API: the list shows only the state.
+				why := ""
+				switch service {
+				case "vertex-batch-predictions":
+					if j, err := jobs.GetBatchPredictionJob(ctx, &aiplatformpb.GetBatchPredictionJobRequest{Name: parent + "/batchPredictionJobs/" + it.Name}); err == nil {
+						why = fmt.Sprintf("; error %v", j.GetError())
+					}
+				case "vertex-custom-jobs":
+					if j, err := jobs.GetCustomJob(ctx, &aiplatformpb.GetCustomJobRequest{Name: parent + "/customJobs/" + it.Fields["ID"]}); err == nil {
+						why = fmt.Sprintf("; error %v", j.GetError())
+					}
+				}
+				t.Fatalf("%s %q = %+v, want %v%s", service, value, it, want, why)
 			}
 		}
 	}
