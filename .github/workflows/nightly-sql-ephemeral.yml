@@ -241,6 +241,15 @@ jobs:
           df -h /
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift
           df -h /
+          # TestDataprocOnGKE's Kubernetes Engine cluster (#2245) adds node
+          # containers beside the instance's and the Dataproc clusters':
+          # their systemd, containerd and kubelets take inotify instances from
+          # root's per-host allowance, 128 on the runner image, and the pool's
+          # node never joined ("inotify_init: too many open files", run
+          # 45651965247, #2248). ci.yml's Kubernetes Engine shards set
+          # kind's known-issues values the same way.
+          sysctl fs.inotify.max_user_instances fs.inotify.max_user_watches
+          sudo sysctl -w fs.inotify.max_user_instances=512 fs.inotify.max_user_watches=524288
 
       - name: Install kubectl
         run: |
