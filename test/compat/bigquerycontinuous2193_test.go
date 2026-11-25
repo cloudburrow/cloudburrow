@@ -30,6 +30,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // BigQuery continuous queries and the Reservation API (#2193), through
@@ -643,7 +645,7 @@ func TestBigQueryContinuousQueryBigtableAndSpanner(t *testing.T) {
 		t.Errorf("bigtable row 7: %v", cells)
 	}
 
-	sc, err := spanner.NewClient(ctx, "projects/"+h.Project()+"/instances/"+inst+"/databases/"+db, spannerOpts(spAddr)...)
+	sc, err := localclient.Spanner(ctx, "projects/"+h.Project()+"/instances/"+inst+"/databases/"+db, spannerOpts(spAddr)...)
 	if err != nil {
 		t.Fatal(err)
 	}

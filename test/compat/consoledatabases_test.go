@@ -21,6 +21,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // consoleError is the error the console returned for a refused request.
@@ -226,7 +228,7 @@ func TestConsoleSpannerDML(t *testing.T) {
 		_ = instAdmin.DeleteInstance(context.Background(), &instancepb.DeleteInstanceRequest{Name: instName})
 	})
 
-	client, err := spanner.NewClient(ctx, dbName, opts...)
+	client, err := localclient.Spanner(ctx, dbName, opts...)
 	if err != nil {
 		t.Fatalf("spanner.NewClient: %v", err)
 	}

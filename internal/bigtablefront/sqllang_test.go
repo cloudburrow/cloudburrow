@@ -11,6 +11,8 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestSQLLanguage runs the GoogleSQL for Bigtable #1511 adds through the
@@ -26,7 +28,7 @@ func TestSQLLanguage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := bigtable.NewClient(ctx, "p", "sql-inst", opt)
+	c, err := localclient.Bigtable(ctx, "p", "sql-inst", opt)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,9 +2,10 @@ package main
 
 import (
 	"context"
-	"os"
 
 	"cloud.google.com/go/spanner"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // newConsoleSpannerClient is a Spanner data client on database at endpoint,
@@ -30,16 +31,12 @@ import (
 // that address) are what localOpts passes after them.
 func newConsoleSpannerClient(ctx context.Context, endpoint, database string) (*spanner.Client, error) {
 	spannerLocalOnly(endpoint)
-	return spanner.NewClientWithConfig(ctx, database, spanner.ClientConfig{
+	return localclient.SpannerWithConfig(ctx, database, spanner.ClientConfig{
 		SessionPoolConfig:    spanner.DefaultSessionPoolConfig,
 		DisableNativeMetrics: true,
 	}, localOpts(endpoint)...)
 }
 
 // spannerLocalOnly sets SPANNER_EMULATOR_HOST to endpoint when it is unset.
-// See newConsoleSpannerClient.
-func spannerLocalOnly(endpoint string) {
-	if os.Getenv("SPANNER_EMULATOR_HOST") == "" && endpoint != "" {
-		_ = os.Setenv("SPANNER_EMULATOR_HOST", endpoint)
-	}
-}
+// See newConsoleSpannerClient and localclient.SpannerLocalOnly.
+func spannerLocalOnly(endpoint string) { localclient.SpannerLocalOnly(endpoint) }

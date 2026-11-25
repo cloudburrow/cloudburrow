@@ -22,6 +22,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // waitEvents polls /admin/events until every method in want is recorded for
@@ -171,7 +173,7 @@ func TestSpannerCallsReachMetricsAndTheRequestLog(t *testing.T) {
 	since := time.Now().Add(-time.Second)
 	db := spannerDatabase(t, ctx, addr, h.Project(), "cb-metrics", fmt.Sprintf("m%d", time.Now().UnixNano()%1e9),
 		`CREATE TABLE T (Id INT64 NOT NULL) PRIMARY KEY (Id)`)
-	c, err := spanner.NewClient(ctx, db, spannerOpts(addr)...)
+	c, err := localclient.Spanner(ctx, db, spannerOpts(addr)...)
 	if err != nil {
 		t.Fatalf("spanner.NewClient: %v", err)
 	}

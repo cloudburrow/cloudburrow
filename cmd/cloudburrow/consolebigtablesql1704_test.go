@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigtable"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestConsoleBigtableSQLUnpackAndTypedValues (#1704) runs, in the table's
@@ -30,7 +32,7 @@ func TestConsoleBigtableSQLUnpackAndTypedValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = admin.Close() })
-	client, err := bigtable.NewClient(ctx, "demo", "series-inst", localOpts(addr)...)
+	client, err := localclient.Bigtable(ctx, "demo", "series-inst", localOpts(addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}

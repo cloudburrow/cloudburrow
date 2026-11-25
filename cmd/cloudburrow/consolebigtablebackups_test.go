@@ -14,6 +14,8 @@ import (
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestConsoleBigtableBackupsAndViews (#1499): a table page's Create backup,
@@ -27,7 +29,7 @@ func TestConsoleBigtableBackupsAndViews(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = admin.Close() })
-	client, err := bigtable.NewClient(ctx, "demo", bigtableInstance, localOpts(addr)...)
+	client, err := localclient.Bigtable(ctx, "demo", bigtableInstance, localOpts(addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +104,7 @@ func TestConsoleBigtableSQLSnapshotsBundlesAndViews(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = admin.Close() })
-	client, err := bigtable.NewClient(ctx, "demo", "shop-inst", localOpts(addr)...)
+	client, err := localclient.Bigtable(ctx, "demo", "shop-inst", localOpts(addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}

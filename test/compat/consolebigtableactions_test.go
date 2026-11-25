@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigtable"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestConsoleBigtableTableAndCellActions.
@@ -47,7 +49,7 @@ func TestConsoleBigtableTableAndCellActions(t *testing.T) {
 		t.Fatalf("NewAdminClient: %v", err)
 	}
 	defer admin.Close()
-	client, err := bigtable.NewClient(ctx, project, "cloudburrow")
+	client, err := localclient.Bigtable(ctx, project, "cloudburrow")
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

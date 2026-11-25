@@ -15,6 +15,8 @@ import (
 	"cloud.google.com/go/bigtable"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // The Bigtable table and cell actions of #1198, and Firestore's Count only,
@@ -44,7 +46,7 @@ func bigtableClients(t *testing.T, project string) (*bigtable.AdminClient, *bigt
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := bigtable.NewClient(ctx, project, bigtableInstanceID)
+	client, err := localclient.Bigtable(ctx, project, bigtableInstanceID)
 	if err != nil {
 		t.Fatal(err)
 	}
