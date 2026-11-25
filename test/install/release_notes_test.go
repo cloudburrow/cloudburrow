@@ -145,3 +145,37 @@ func TestTheChangelogHasAnUnreleasedSectionAndV010(t *testing.T) {
 		t.Errorf("the v0.1.0 notes run past their section:\n%s", got)
 	}
 }
+
+// TestTheChangelogHasV070AndAnEmptyUnreleased: v0.7.0's generated notes were
+// rewritten by hand into a ## [0.7.0] section, and Unreleased starts empty
+// for the entries of the next release.
+func TestTheChangelogHasV070AndAnEmptyUnreleased(t *testing.T) {
+	p, err := filepath.Abs(filepath.Join("..", "..", "CHANGELOG.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, stderr, err := notes(t, nil, "v0.7.0", p)
+	if err != nil {
+		t.Fatalf("no v0.7.0 notes: %v\n%s", err, stderr)
+	}
+	for _, want := range []string{"### New services\n", "- **AlloyDB for PostgreSQL**: ", "(#2191)", "### Install script\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the v0.7.0 section lacks %q", want)
+		}
+	}
+	for _, banned := range []string{"feat/", "not served", "what is still refused", "Fix main CI", "Landing 168"} {
+		if strings.Contains(got, banned) {
+			t.Errorf("the v0.7.0 section holds %q", banned)
+		}
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "\n## [Unreleased]\n\n## [0.7.0] - ") {
+		t.Error("CHANGELOG.md's Unreleased section is not empty and followed by 0.7.0")
+	}
+	if !strings.Contains(string(b), "\n[Unreleased]: https://github.com/cloudburrow/cloudburrow/compare/v0.7.0...HEAD\n[0.7.0]: ") {
+		t.Error("CHANGELOG.md's link references do not start at v0.7.0")
+	}
+}

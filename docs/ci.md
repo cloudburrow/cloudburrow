@@ -345,22 +345,23 @@ from cloudburrow/feat/...`, or `Merge branch 'feat/...'`. The rule reads branch 
 in every merge, so it needs no API, label or issue lookup; name a branch `fix/...` when it only
 corrects behaviour. The major version never moves on its own.
 
-**Release notes.** Nothing is committed to `main`. The notes are generated from the merges since the
-last tag (a section per kind for the `feat/` and `fix/` branches each landing merged, then the
-landings themselves) and stored as the annotated tag's message. `scripts/release-notes.sh` uses a
-tag's `## [X.Y.Z]` section of `CHANGELOG.md` when there is one, and otherwise the tag message, if it
-starts with the generated-notes marker. To publish hand-written notes instead, add the section to
-`CHANGELOG.md` on `main` first, or tag by hand.
+**Release notes.** Nothing is committed to `main`. The notes are what `CHANGELOG.md` says at the
+release's commit: its `## [X.Y.Z]` section for the version when one was written, else the entries
+added under **Unreleased** since the last tag (`scripts/release-notes.sh --unreleased`), under their
+`###` headings. They are stored as the annotated tag's message, after a line linking the commit and
+the full diff, and before a collapsed list of the pull requests that leaves out the ones that only
+fix CI or the tests (titles starting "Fix main CI" or "CI:", or naming "Landing N", "round N",
+"flaky" or "main run N"). Branch names, merge subjects and issue titles are never used: they name
+work in progress and problems, not what a release does. `scripts/release-notes.sh` uses a tag's
+`## [X.Y.Z]` section of `CHANGELOG.md` when there is one, and otherwise the tag message, if it
+starts with the generated-notes marker and holds at least one entry.
 
-Generated notes open with a **What's new** section. It holds the `CHANGELOG.md` entries added under
-**Unreleased** between the previous tag and this one, then the issues the landings closed that no
-entry names: the issue of each `feat/N-...` and `fix/N-...` branch merged (not `fix/main-ci...`),
-and each `Closes #N` in a merge message. The issues are grouped by area, the part of the title
-before its first colon, with titles read through `gh` (`RELEASE_NOTES_REPO`, with `issues: read`).
-Issues labelled `workflow-red` and titles starting `CI:` are left out. The landing list, "Fix main
-CI" pull requests included, is folded into a collapsed **All landings** block. So the notes are only
-as good as the entries landings add ([CONTRIBUTING.md](../CONTRIBUTING.md#landings)). The jobs that
-render them check out the full history, so the previous tag is there.
+**An empty Unreleased blocks the release.** With no entry added under **Unreleased** since the last
+tag, nothing is tagged: the plan job fails with "CHANGELOG Unreleased is empty", in a dry run too,
+so dispatching with **dry run** ticked first shows whether the entries are there. Write them in a
+pull request to `main` (for users, one per feature or fix, naming the issue), land it, and run the
+release again. So the notes are only as good as the entries landings add
+([CONTRIBUTING.md](../CONTRIBUTING.md#landings)).
 
 **Starting a release without the schedule.** Actions › Scheduled release › Run workflow:
 
