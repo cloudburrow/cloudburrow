@@ -106,6 +106,9 @@ func Load(opts Options) (Config, error) {
 		fileKeys = keys
 		cfg.Source.File, _ = filepath.Abs(path)
 		cfg.Source.Discovered = !explicit
+		if cfg.AlloyDB.AcceptOmniTerms {
+			cfg.Source.OmniTerms = "file"
+		}
 	}
 
 	// Environment.
@@ -188,6 +191,7 @@ type rawFlags struct {
 	cbHostSteps      bool
 	allowUnconfined  bool
 	acceptMSSQLEULA  bool
+	acceptOmniTerms  bool
 	appEngineURL     string
 	emulatorHeapMiB  int
 	bigQueryHeapMiB  int
@@ -368,6 +372,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.logLevel, "log-level", "", "log level: trace, debug, info, warn, error")
 	fs.StringVar(&r.iamEnforcement, "iam-enforcement", "", "IAM enforcement: off (policies are stored, never checked) or on (mapped API methods check the caller's permissions, as on Google) (default off)")
 	fs.BoolVar(&r.acceptMSSQLEULA, "accept-mssql-eula", false, "accept Microsoft's End-User Licensing Agreement for SQL Server ("+MSSQLEULAURL+") yourself, for the Cloud SQL for SQL Server instances this instance creates: their servers run Microsoft's SQL Server image, which starts only once it is accepted; who accepted and when is recorded on each instance (also CLOUDBURROW_ACCEPT_MSSQL_EULA=Y)")
+	fs.BoolVar(&r.acceptOmniTerms, "accept-alloydb-omni-terms", false, "accept Google's AlloyDB Omni licence terms ("+OmniTermsURL+") yourself, for the AlloyDB clusters this instance creates: their instances then run Google's AlloyDB Omni image instead of PostgreSQL; who accepted and when is recorded with each cluster (also CLOUDBURROW_ACCEPT_ALLOYDB_OMNI_TERMS=Y)")
 	fs.BoolVar(&r.cbHostSteps, "cloudbuild-host-steps", false, "let Cloud Build run steps other than docker build, docker push and pack, for builds submitted from this machine's loopback only; each runs as a container with the host's Docker socket, which gives it control of the host (unsafe)")
 	fs.BoolVar(&r.allowUnconfined, "allow-unconfined-containers", false, "let the Dataproc DOCKER optional component run each node's Docker daemon with seccomp, AppArmor and the /proc and /sys masks unconfined, which weakens the isolation between those containers and this machine (unsafe; also CLOUDBURROW_ALLOW_UNCONFINED_CONTAINERS=true)")
 	fs.StringVar(&r.appEngineURL, "appengine-url", "", "base URL of a local HTTP server standing in for the App Engine app, such as http://localhost:8080: Cloud Tasks and Cloud Scheduler deliver App Engine targets there (default: none, and every App Engine attempt fails 404)")
@@ -470,6 +475,11 @@ func refuseFileExposure(cfg *Config, path string, explicit bool, keys map[string
 		return fmt.Errorf("config file %s, found in the working directory, sets storage.corsAllowOrigins; "+
 			"a discovered file cannot let other web sites call the emulator (#677): pass --cors-allow-origin "+
 			"(or %sCORS_ALLOW_ORIGIN, or name the file with --config), and remove the key", path, EnvPrefix)
+	}
+	if !explicit && cfg.AlloyDB.AcceptOmniTerms {
+		return fmt.Errorf("config file %s, found in the working directory, sets alloydb.acceptOmniTerms; "+
+			"a discovered file cannot accept Google's AlloyDB Omni licence terms (%s) on your behalf (#2207): pass "+
+			"--accept-alloydb-omni-terms (or %sACCEPT_ALLOYDB_OMNI_TERMS=Y, or name the file with --config), and remove the key", path, OmniTermsURL, EnvPrefix)
 	}
 	if !explicit && cfg.CloudBuildHostSteps {
 		return fmt.Errorf("config file %s, found in the working directory, sets cloudbuildHostSteps; "+
@@ -659,6 +669,13 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		}
 		cfg.AcceptMSSQLEULA, cfg.Source.MSSQLEULA = true, "env"
 	}
+	// Google's AlloyDB Omni terms (#2207): exactly Y, as Microsoft's.
+	if v := getenv(EnvPrefix + "ACCEPT_ALLOYDB_OMNI_TERMS"); v != "" {
+		if v != "Y" {
+			return fmt.Errorf("%sACCEPT_ALLOYDB_OMNI_TERMS: must be Y, which accepts Google's AlloyDB Omni licence terms (%s) (got %q)", EnvPrefix, OmniTermsURL, v)
+		}
+		cfg.AlloyDB.AcceptOmniTerms, cfg.Source.OmniTerms = true, "env"
+	}
 	if v := getenv(EnvPrefix + "CLOUDBUILD_HOST_STEPS"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -827,6 +844,13 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["allow-unconfined-containers"] {
 		cfg.AllowUnconfinedContainers = raw.allowUnconfined
+	}
+	if set["accept-alloydb-omni-terms"] {
+		cfg.AlloyDB.AcceptOmniTerms = raw.acceptOmniTerms
+		cfg.Source.OmniTerms = ""
+		if raw.acceptOmniTerms {
+			cfg.Source.OmniTerms = "flag"
+		}
 	}
 	if set["accept-mssql-eula"] {
 		cfg.AcceptMSSQLEULA = raw.acceptMSSQLEULA

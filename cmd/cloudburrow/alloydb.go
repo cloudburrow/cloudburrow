@@ -144,6 +144,17 @@ func (s *alloyDBService) Start(ctx context.Context) error {
 		return err
 	}
 	s.api = api
+	// Google's AlloyDB Omni terms (#2207), when the user accepted them for
+	// every new cluster; recorded for `status`.
+	terms := omniTermsOf(s.cfg, time.Now().UTC().Format(time.RFC3339))
+	api.AcceptOmniTerms(terms)
+	if err := recordOmniTerms(s.cfg, terms); err != nil {
+		s.logf("AlloyDB: recording the AlloyDB Omni terms' acceptance: %v", err)
+	}
+	if terms != nil {
+		s.logf("AlloyDB: new clusters of POSTGRES_15, 16 and 17 run AlloyDB Omni, its terms (%s) accepted by %s via %s",
+			alloydb.OmniTermsURL, terms.AcceptedBy, terms.Via)
+	}
 	s.server = grpctransport.New(net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.AlloyDB)))
 	s.server.Observe(s.calls)
 	if s.tracing != nil {
@@ -281,6 +292,12 @@ func (e *alloyDBEngine) backend(spec alloydb.ServerSpec) components.Backend {
 	}
 	b := components.CloudSQLInstanceBackend(spec.Server, spec.Version, true, "", flags)
 	b.Name = spec.Server
+	if spec.Omni.Accepted() {
+		// Google's AlloyDB Omni image (#2207), only for a cluster whose
+		// record says who accepted its terms; a version Google publishes
+		// none of (POSTGRES_14) stays PostgreSQL, as the API decides too.
+		b, _ = components.AlloyDBOmniBackend(b, spec.Version, flags)
+	}
 	if spec.PITR {
 		if len(b.Args) == 0 {
 			b.Args = []string{"postgres"}

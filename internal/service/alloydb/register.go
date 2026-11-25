@@ -291,5 +291,6 @@ func Transcoder() *rest.Transcoder {
 func NewRESTHandler(s *Server) http.Handler {
 	t := Transcoder()
 	s.Register(t)
-	return t
+	// The opt-in's headers (#2207) reach the methods as gRPC metadata does.
+	return restHeaders(t)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -1411,4 +1412,73 @@ func CloudSQLServerBackend(name, version, pid, saPassword string, eulaAccepted b
 		b.Env["ACCEPT_EULA"] = "Y"
 	}
 	return b
+}
+
+// Google's AlloyDB Omni images (#2207), google/alloydbomni of each major
+// version Google publishes on Docker Hub, pinned by the multi-arch index
+// digest (linux/amd64 and linux/arm64, arm64 in preview), read from the
+// registry's manifest API without pulling anything (2026-11-24): the
+// 15, 16 and 17 tags were then 15.18.0, 16.14.0 and 17.10.0. Its use is
+// governed by Google's AlloyDB Omni licence terms, so a node pulls one only
+// for an AlloyDB cluster whose user accepted them.
+const (
+	AlloyDBOmni15Image = "google/alloydbomni:15.18.0@sha256:8d626c5540b7c8eda0635fb62005833cd44d9c9aff588a509cbe9223a5cf9120"
+	AlloyDBOmni16Image = "google/alloydbomni:16.14.0@sha256:6f9f2a87354dac2eed5e3a84fb1e6ccfce0429d4176623a3396a6012e6fc5e47"
+	AlloyDBOmni17Image = "google/alloydbomni:17.10.0@sha256:ee3a5ed22fe0d239db05c990b2e0bdee6af9a40e6b7f3566fc2be4c1d4947a3e"
+)
+
+// AlloyDBOmniImage is the Omni image of an AlloyDB database version
+// (POSTGRES_15 ...), "" for a version Google publishes none of.
+func AlloyDBOmniImage(version string) string {
+	switch version {
+	case "POSTGRES_15":
+		return AlloyDBOmni15Image
+	case "POSTGRES_16":
+		return AlloyDBOmni16Image
+	case "POSTGRES_17":
+		return AlloyDBOmni17Image
+	}
+	return ""
+}
+
+// alloyDBOmniColumnarMiB is google_columnar_engine.memory_size_in_mb's
+// default (docs.cloud.google.com/alloydb/omni/containers/current/docs/columnar-engine/configure).
+const alloyDBOmniColumnarMiB = 1024
+
+// AlloyDBOmniBackend makes b, an AlloyDB instance's PostgreSQL server of
+// version (CloudSQLInstanceBackend), run Google's AlloyDB Omni image of
+// that version instead: the image takes the official PostgreSQL image's
+// environment (POSTGRES_*, PGDATA) and arguments, as its Docker Hub page
+// documents. Its own shared_preload_libraries (the columnar engine, the
+// index advisor and the rest) are kept, so the server is given none; its
+// shared memory is sized for the columnar engine's store (Google's fix for
+// "insufficient shared memory" is the container's shared memory); and it
+// asks for the 2 GB of memory Google's requirements name. ok is false, and
+// b is unchanged, for a version Google publishes no Omni image of.
+func AlloyDBOmniBackend(b Backend, version string, flags []SQLInstanceFlag) (Backend, bool) {
+	img := AlloyDBOmniImage(version)
+	if img == "" {
+		return b, false
+	}
+	b.Image = img
+	var args []string
+	for i := 0; i < len(b.Args); i++ {
+		if b.Args[i] == "-c" && i+1 < len(b.Args) && b.Args[i+1] == pgPreload {
+			i++
+			continue
+		}
+		args = append(args, b.Args[i])
+	}
+	b.Args = args
+	columnar := alloyDBOmniColumnarMiB
+	for _, f := range flags {
+		if f.Name == "google_columnar_engine.memory_size_in_mb" {
+			if n, err := strconv.Atoi(f.Value); err == nil && n > 0 {
+				columnar = n
+			}
+		}
+	}
+	b.ShmSize = fmt.Sprintf("%dMi", columnar+256)
+	b.MemoryRequest = "2Gi"
+	return b, true
 }

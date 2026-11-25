@@ -6,6 +6,8 @@ sets), and record that you trust them as they are now. The record is a hash in
 trust.json in the state directory; a change to any of them asks again.
 
 Flags:
+  -accept-alloydb-omni-terms
+    	accept Google's AlloyDB Omni licence terms (https://cloud.google.com/terms/alloydb-omni-marketplace-terms) yourself, for the AlloyDB clusters this instance creates: their instances then run Google's AlloyDB Omni image instead of PostgreSQL; who accepted and when is recorded with each cluster (also CLOUDBURROW_ACCEPT_ALLOYDB_OMNI_TERMS=Y)
   -accept-mssql-eula
     	accept Microsoft's End-User Licensing Agreement for SQL Server (https://go.microsoft.com/fwlink/?LinkId=746388) yourself, for the Cloud SQL for SQL Server instances this instance creates: their servers run Microsoft's SQL Server image, which starts only once it is accepted; who accepted and when is recorded on each instance (also CLOUDBURROW_ACCEPT_MSSQL_EULA=Y)
   -allow-remote

@@ -2257,6 +2257,10 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 	for _, l := range mssqlEULALines(readMSSQLEULAStatus(cfg)) {
 		fmt.Fprintln(stdout, l)
 	}
+	// Google's AlloyDB Omni terms (#2207): who accepted them, when, how.
+	for _, l := range omniTermsLines(readOmniTermsStatus(cfg)) {
+		fmt.Fprintln(stdout, l)
+	}
 	fmt.Fprintln(stdout, "\nservice persistence:")
 	for _, s := range cfg.EnabledServices() {
 		note := "survives restart in persistent mode"

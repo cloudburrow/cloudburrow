@@ -3020,6 +3020,60 @@
         "updateFeed": "mcr-tags",
         "skipDiscovery": "Microsoft Container Registry tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://mcr.microsoft.com/v2/mssql/server/manifests/2025-latest."
       },
+      "alloyDBOmni15": {
+        "$comment": "AlloyDB Omni 15.18.0 (PostgreSQL 15), Google's AlloyDB engine, the server of an AlloyDB for PostgreSQL cluster of POSTGRES_15 whose user accepted Google's AlloyDB Omni licence terms (#2207); pulled by a node only for such a cluster, and never by CloudBurrow's tests or CI. The digest is the 15 and 15.18.0 tags' multi-arch OCI index, read from the registry's manifest API without pulling (2026-11-24).",
+        "image": "google/alloydbomni:15.18.0",
+        "version": "15.18.0",
+        "digest": "sha256:8d626c5540b7c8eda0635fb62005833cd44d9c9aff588a509cbe9223a5cf9120",
+        "source": "https://hub.docker.com/r/google/alloydbomni",
+        "license": "Proprietary: Google's AlloyDB Omni License Terms (https://cloud.google.com/terms/alloydb-omni-marketplace-terms), free for development, evaluation and non-commercial use; the user who provisions a cluster accepts them, and CloudBurrow never does",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time, and started only with the user's own acceptance of the terms.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "Google's AlloyDB Omni engine (columnar engine, google_ml_integration, alloydb_scann, query plan cache, index advisor) for an opted-in AlloyDB cluster. NOT the AlloyDB Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://registry-1.docker.io/v2/google/alloydbomni/manifests/15 (the index), never by pulling."
+      },
+      "alloyDBOmni16": {
+        "$comment": "AlloyDB Omni 16.14.0 (PostgreSQL 16), Google's AlloyDB engine, the server of an AlloyDB for PostgreSQL cluster of POSTGRES_16 whose user accepted Google's AlloyDB Omni licence terms (#2207); pulled by a node only for such a cluster, and never by CloudBurrow's tests or CI. The digest is the 16 and 16.14.0 tags' multi-arch OCI index, read from the registry's manifest API without pulling (2026-11-24).",
+        "image": "google/alloydbomni:16.14.0",
+        "version": "16.14.0",
+        "digest": "sha256:6f9f2a87354dac2eed5e3a84fb1e6ccfce0429d4176623a3396a6012e6fc5e47",
+        "source": "https://hub.docker.com/r/google/alloydbomni",
+        "license": "Proprietary: Google's AlloyDB Omni License Terms (https://cloud.google.com/terms/alloydb-omni-marketplace-terms), free for development, evaluation and non-commercial use; the user who provisions a cluster accepts them, and CloudBurrow never does",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time, and started only with the user's own acceptance of the terms.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "Google's AlloyDB Omni engine (columnar engine, google_ml_integration, alloydb_scann, query plan cache, index advisor) for an opted-in AlloyDB cluster. NOT the AlloyDB Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://registry-1.docker.io/v2/google/alloydbomni/manifests/16 (the index), never by pulling."
+      },
+      "alloyDBOmni17": {
+        "$comment": "AlloyDB Omni 17.10.0 (PostgreSQL 17), Google's AlloyDB engine, the server of an AlloyDB for PostgreSQL cluster of POSTGRES_17 whose user accepted Google's AlloyDB Omni licence terms (#2207); pulled by a node only for such a cluster, and never by CloudBurrow's tests or CI. The digest is the 17 and 17.10.0 tags' multi-arch OCI index, read from the registry's manifest API without pulling (2026-11-24).",
+        "image": "google/alloydbomni:17.10.0",
+        "version": "17.10.0",
+        "digest": "sha256:ee3a5ed22fe0d239db05c990b2e0bdee6af9a40e6b7f3566fc2be4c1d4947a3e",
+        "source": "https://hub.docker.com/r/google/alloydbomni",
+        "license": "Proprietary: Google's AlloyDB Omni License Terms (https://cloud.google.com/terms/alloydb-omni-marketplace-terms), free for development, evaluation and non-commercial use; the user who provisions a cluster accepts them, and CloudBurrow never does",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time, and started only with the user's own acceptance of the terms.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "Google's AlloyDB Omni engine (columnar engine, google_ml_integration, alloydb_scann, query plan cache, index advisor) for an opted-in AlloyDB cluster. NOT the AlloyDB Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://registry-1.docker.io/v2/google/alloydbomni/manifests/17 (the index), never by pulling."
+      },
       "cloudSQLMySQL80": {
         "$comment": "MySQL 8.0.46, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1381); pulled by a node only when one is created. NOT a Google-published component.",
         "image": "mysql:8.0",
