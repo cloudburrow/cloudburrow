@@ -19,6 +19,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // storageGRPCClient returns the official Go client on its gRPC transport
@@ -34,7 +36,7 @@ func storageGRPCClient(t *testing.T, h *Harness, bidi bool) *storage.Client {
 	if bidi {
 		opts = append(opts, storage.WithGRPCBidiReads())
 	}
-	c, err := storage.NewGRPCClient(h.Context(), opts...)
+	c, err := localclient.StorageGRPC(h.Context(), opts...)
 	if err != nil {
 		t.Fatalf("storage.NewGRPCClient: %v", err)
 	}

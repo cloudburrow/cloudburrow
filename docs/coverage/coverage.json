@@ -9601,7 +9601,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:326 TestConsolePermissionsOnABucket",
-          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
+          "test/compat/iamenforcementstorage1879_test.go:104 TestIAMEnforcementStorage",
           "test/compat/storageiam_test.go:34 TestStorageBucketIAMRoundTrip",
           "test/compat/storageiam_test.go:94 TestStorageBucketIAMConditions",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
@@ -9794,7 +9794,7 @@
         "tests": [
           "test/compat/consolepermissions_test.go:326 TestConsolePermissionsOnABucket",
           "test/compat/iamconditions1745_test.go:197 TestConsoleIAMConditionsOnServicePolicies",
-          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
+          "test/compat/iamenforcementstorage1879_test.go:104 TestIAMEnforcementStorage",
           "test/compat/orgpolicy1890_test.go:334 TestOrgPolicyEnforcementStorage",
           "test/compat/storageiam_test.go:34 TestStorageBucketIAMRoundTrip",
           "test/compat/storageiam_test.go:63 TestStorageBucketIAMStaleEtag",
@@ -9826,7 +9826,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:326 TestConsolePermissionsOnABucket",
-          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
+          "test/compat/iamenforcementstorage1879_test.go:104 TestIAMEnforcementStorage",
           "test/compat/storageiam_test.go:34 TestStorageBucketIAMRoundTrip"
         ]
       },
@@ -10122,7 +10122,7 @@
         "method": "storage.objectAccessControls.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
+          "test/compat/iamenforcementstorage1879_test.go:104 TestIAMEnforcementStorage",
           "test/compat/storageacl_test.go:217 TestStorageACLMethods",
           "test/compat/terraform_iam_more_test.go:169 TestTerraformStorageACLLists",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
@@ -10197,7 +10197,7 @@
         "tests": [
           "test/compat/cloudbuilddefaultlogs_test.go:132 TestGcloudBuildsSubmitDefaultLogsBucket",
           "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
-          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
+          "test/compat/iamenforcementstorage1879_test.go:104 TestIAMEnforcementStorage",
           "test/compat/iamworkforceidentity2056_test.go:375 TestWorkforceIdentityFederationStorage",
           "test/compat/iamworkforcesaml2065_test.go:44 TestWorkforceIdentityFederationSAML",
           "test/compat/iamworkloadidentity1941_test.go:496 TestWorkloadIdentityFederationStorage",
@@ -10230,7 +10230,7 @@
         "method": "storage.objects.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
+          "test/compat/iamenforcementstorage1879_test.go:104 TestIAMEnforcementStorage",
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storagecmek1938_test.go:137 TestStorageCMEK",
@@ -10254,7 +10254,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
-          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
+          "test/compat/iamenforcementstorage1879_test.go:104 TestIAMEnforcementStorage",
           "test/compat/storage_test.go:136 TestStorageListWithPrefix",
           "test/compat/storagechannels_test.go:177 TestStorageObjectChangeChannelSelection",
           "test/compat/storagecontexts_test.go:224 TestGcloudStorageObjectContexts",
@@ -10482,7 +10482,7 @@
         "method": "google.storage.v2.Storage/BidiReadObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
+          "test/compat/storagegrpc_test.go:155 TestStorageGRPCObjects",
           "test/compat/storagegrpcread_test.go:31 TestStorageGRPCReadObjectMessagesHandleAndRange"
         ]
       },
@@ -10490,10 +10490,10 @@
         "method": "google.storage.v2.Storage/BidiWriteObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
+          "test/compat/storagegrpc_test.go:155 TestStorageGRPCObjects",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
           "test/compat/storagegrpcappend_test.go:28 TestStorageGRPCAppendableObjects",
-          "test/compat/storagegrpcresume1530_test.go:59 TestStorageGRPCResumesABrokenWrite"
+          "test/compat/storagegrpcresume1530_test.go:61 TestStorageGRPCResumesABrokenWrite"
         ]
       },
       {
@@ -10506,7 +10506,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagecontexts_test.go:37 TestStorageObjectContexts",
-          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
+          "test/compat/storagegrpc_test.go:155 TestStorageGRPCObjects",
           "test/compat/storagegrpccompose_test.go:20 TestStorageGRPCComposeDeletesSources",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
@@ -10515,7 +10515,7 @@
         "method": "google.storage.v2.Storage/CreateBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets",
+          "test/compat/storagegrpc_test.go:51 TestStorageGRPCBuckets",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
           "test/compat/storagegrpcappend_test.go:28 TestStorageGRPCAppendableObjects"
         ]
@@ -10524,21 +10524,21 @@
         "method": "google.storage.v2.Storage/DeleteBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+          "test/compat/storagegrpc_test.go:51 TestStorageGRPCBuckets"
         ]
       },
       {
         "method": "google.storage.v2.Storage/DeleteObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:155 TestStorageGRPCObjects"
         ]
       },
       {
         "method": "google.storage.v2.Storage/GetBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets",
+          "test/compat/storagegrpc_test.go:51 TestStorageGRPCBuckets",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
           "test/compat/storagegrpcappend_test.go:28 TestStorageGRPCAppendableObjects"
         ]
@@ -10547,7 +10547,7 @@
         "method": "google.storage.v2.Storage/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+          "test/compat/storagegrpc_test.go:51 TestStorageGRPCBuckets"
         ]
       },
       {
@@ -10556,7 +10556,7 @@
         "tests": [
           "test/compat/storagecmek1938_test.go:137 TestStorageCMEK",
           "test/compat/storagecontexts_test.go:37 TestStorageObjectContexts",
-          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
+          "test/compat/storagegrpc_test.go:155 TestStorageGRPCObjects",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
@@ -10565,7 +10565,7 @@
         "method": "google.storage.v2.Storage/ListBuckets",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+          "test/compat/storagegrpc_test.go:51 TestStorageGRPCBuckets"
         ]
       },
       {
@@ -10573,37 +10573,37 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagecontexts_test.go:37 TestStorageObjectContexts",
-          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:155 TestStorageGRPCObjects"
         ]
       },
       {
         "method": "google.storage.v2.Storage/LockBucketRetentionPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+          "test/compat/storagegrpc_test.go:51 TestStorageGRPCBuckets"
         ]
       },
       {
         "method": "google.storage.v2.Storage/MoveObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:155 TestStorageGRPCObjects"
         ]
       },
       {
         "method": "google.storage.v2.Storage/QueryWriteStatus",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpcresume1530_test.go:59 TestStorageGRPCResumesABrokenWrite"
+          "test/compat/storagegrpcresume1530_test.go:61 TestStorageGRPCResumesABrokenWrite"
         ]
       },
       {
         "method": "google.storage.v2.Storage/ReadObject",
         "status": "Verified",
         "tests": [
-          "test/compat/iamenforcementstorage1879_test.go:102 TestIAMEnforcementStorage",
+          "test/compat/iamenforcementstorage1879_test.go:104 TestIAMEnforcementStorage",
           "test/compat/storagecmek1938_test.go:137 TestStorageCMEK",
-          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
+          "test/compat/storagegrpc_test.go:155 TestStorageGRPCObjects",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
           "test/compat/storagegrpcread_test.go:31 TestStorageGRPCReadObjectMessagesHandleAndRange"
         ]
@@ -10612,7 +10612,7 @@
         "method": "google.storage.v2.Storage/RestoreObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:155 TestStorageGRPCObjects"
         ]
       },
       {
@@ -10620,7 +10620,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagecontexts_test.go:37 TestStorageObjectContexts",
-          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
+          "test/compat/storagegrpc_test.go:155 TestStorageGRPCObjects",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
       },
@@ -10628,7 +10628,7 @@
         "method": "google.storage.v2.Storage/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets",
+          "test/compat/storagegrpc_test.go:51 TestStorageGRPCBuckets",
           "test/compat/storagegrpcappend_test.go:132 TestStorageGRPCSetIamPolicyUpdateMask"
         ]
       },
@@ -10636,22 +10636,22 @@
         "method": "google.storage.v2.Storage/StartResumableWrite",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
-          "test/compat/storagegrpcresume1530_test.go:59 TestStorageGRPCResumesABrokenWrite"
+          "test/compat/storagegrpc_test.go:155 TestStorageGRPCObjects",
+          "test/compat/storagegrpcresume1530_test.go:61 TestStorageGRPCResumesABrokenWrite"
         ]
       },
       {
         "method": "google.storage.v2.Storage/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+          "test/compat/storagegrpc_test.go:51 TestStorageGRPCBuckets"
         ]
       },
       {
         "method": "google.storage.v2.Storage/UpdateBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets",
+          "test/compat/storagegrpc_test.go:51 TestStorageGRPCBuckets",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
           "test/compat/storagegrpcappend_test.go:132 TestStorageGRPCSetIamPolicyUpdateMask"
         ]
@@ -10661,7 +10661,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagecontexts_test.go:37 TestStorageObjectContexts",
-          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
+          "test/compat/storagegrpc_test.go:155 TestStorageGRPCObjects",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
         ]
       },
@@ -10756,7 +10756,7 @@
           "test/compat/firestorepersist1615_test.go:165 TestFirestoreAcrossRestart",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
           "test/compat/firestorepitrreads1942_test.go:51 TestFirestorePointInTimeReadsThroughEveryReadMethod",
-          "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
+          "test/compat/optional_test.go:45 TestFirestoreDocumentCRUD"
         ]
       },
       {
@@ -10771,7 +10771,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/firestorepitrreads1942_test.go:51 TestFirestorePointInTimeReadsThroughEveryReadMethod",
-          "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
+          "test/compat/optional_test.go:45 TestFirestoreDocumentCRUD"
         ]
       },
       {
@@ -10784,8 +10784,8 @@
           "test/compat/firestorepersist1615_test.go:120 TestFirestoreRestartSetup",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
           "test/compat/iamenforcementfirestorerules_test.go:30 TestIAMEnforcementFirestoreClientSDKRules",
-          "test/compat/iamenforcementround9_1879_test.go:64 TestIAMEnforcementFirestore",
-          "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
+          "test/compat/iamenforcementround9_1879_test.go:66 TestIAMEnforcementFirestore",
+          "test/compat/optional_test.go:45 TestFirestoreDocumentCRUD"
         ]
       },
       {
@@ -10819,7 +10819,7 @@
         "tests": [
           "test/compat/firestoremethods_test.go:59 TestFirestoreDocumentRPCs",
           "test/compat/iamenforcementfirestorerules_test.go:30 TestIAMEnforcementFirestoreClientSDKRules",
-          "test/compat/iamenforcementround9_1879_test.go:64 TestIAMEnforcementFirestore"
+          "test/compat/iamenforcementround9_1879_test.go:66 TestIAMEnforcementFirestore"
         ]
       },
       {
@@ -10877,8 +10877,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledocs_test.go:108 TestConsoleFirestoreDocumentCreateEditDelete",
-          "test/compat/iamenforcementround9_1879_test.go:64 TestIAMEnforcementFirestore",
-          "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
+          "test/compat/iamenforcementround9_1879_test.go:66 TestIAMEnforcementFirestore",
+          "test/compat/optional_test.go:45 TestFirestoreDocumentCRUD"
         ]
       },
       {
@@ -11040,8 +11040,8 @@
         "tests": [
           "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminBackupSchedules",
-          "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
-          "test/compat/frontstate1514_test.go:415 TestResetClearsTheFrontsState"
+          "test/compat/frontstate1514_test.go:312 TestFirestoreFrontRestartKeepsItsState",
+          "test/compat/frontstate1514_test.go:417 TestResetClearsTheFrontsState"
         ]
       },
       {
@@ -11058,7 +11058,7 @@
           "test/compat/firestorepersist1615_test.go:165 TestFirestoreAcrossRestart",
           "test/compat/firestorepersist1615_test.go:64 TestFirestoreSurvivesAPodRestart",
           "test/compat/firestorepitr1942_test.go:29 TestFirestorePointInTimeRecovery",
-          "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState"
+          "test/compat/frontstate1514_test.go:312 TestFirestoreFrontRestartKeepsItsState"
         ]
       },
       {
@@ -11075,7 +11075,7 @@
         "tests": [
           "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoreadmin_test.go:145 TestFirestoreAdminIndexes",
-          "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState"
+          "test/compat/frontstate1514_test.go:312 TestFirestoreFrontRestartKeepsItsState"
         ]
       },
       {
@@ -11110,7 +11110,7 @@
           "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
           "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
-          "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
+          "test/compat/frontstate1514_test.go:312 TestFirestoreFrontRestartKeepsItsState",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
         ]
       },
@@ -11136,7 +11136,7 @@
         "tests": [
           "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
           "test/compat/firestoreadmin_test.go:145 TestFirestoreAdminIndexes",
-          "test/compat/iamenforcementround9_1879_test.go:64 TestIAMEnforcementFirestore"
+          "test/compat/iamenforcementround9_1879_test.go:66 TestIAMEnforcementFirestore"
         ]
       },
       {
@@ -11160,7 +11160,7 @@
           "test/compat/datastoreadmin1884_test.go:275 TestFirestoreAdminCopiesADatastoreModeDatabase",
           "test/compat/emulatorkill1611_test.go:111 TestFirestoreAfterTheEmulatorIsKilled",
           "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
-          "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
+          "test/compat/frontstate1514_test.go:312 TestFirestoreFrontRestartKeepsItsState",
           "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
         ]
       },
@@ -11211,7 +11211,7 @@
         "tests": [
           "test/compat/datastoredatabases1885_test.go:49 TestDatastoreNamedDatabasesKeepTheirEntitiesApart",
           "test/compat/datastorepitr1967_test.go:39 TestDatastorePointInTimeReads",
-          "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
+          "test/compat/optional_test.go:132 TestDatastoreEntityCRUD"
         ]
       },
       {
@@ -11221,8 +11221,8 @@
           "test/compat/datastoredatabases1885_test.go:49 TestDatastoreNamedDatabasesKeepTheirEntitiesApart",
           "test/compat/emulatorkill1611_test.go:281 TestDatastoreAfterTheEmulatorIsKilled",
           "test/compat/iamenforcementround10_1879_test.go:67 TestIAMEnforcementDatastore",
-          "test/compat/optional_test.go:105 TestDatastoreQueriesSeeAFreshWrite",
-          "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
+          "test/compat/optional_test.go:107 TestDatastoreQueriesSeeAFreshWrite",
+          "test/compat/optional_test.go:132 TestDatastoreEntityCRUD"
         ]
       },
       {
@@ -11235,7 +11235,7 @@
           "test/compat/datastoreupgrade1885_test.go:90 TestDatastoreNamedDatabaseEntitiesSurviveTheUpgrade",
           "test/compat/emulatorkill1611_test.go:281 TestDatastoreAfterTheEmulatorIsKilled",
           "test/compat/iamenforcementround10_1879_test.go:67 TestIAMEnforcementDatastore",
-          "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
+          "test/compat/optional_test.go:132 TestDatastoreEntityCRUD"
         ]
       },
       {
@@ -11277,8 +11277,8 @@
           "test/compat/datastorepitr1967_test.go:39 TestDatastorePointInTimeReads",
           "test/compat/datastoreupgrade1885_test.go:90 TestDatastoreNamedDatabaseEntitiesSurviveTheUpgrade",
           "test/compat/iamenforcementround10_1879_test.go:67 TestIAMEnforcementDatastore",
-          "test/compat/optional_test.go:105 TestDatastoreQueriesSeeAFreshWrite",
-          "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
+          "test/compat/optional_test.go:107 TestDatastoreQueriesSeeAFreshWrite",
+          "test/compat/optional_test.go:132 TestDatastoreEntityCRUD"
         ]
       }
     ]
@@ -11378,7 +11378,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews",
-          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
+          "test/compat/bigtablesql1511_test.go:31 TestBigtableSQLLanguage",
           "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews"
         ]
       },
@@ -11387,7 +11387,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews",
-          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
+          "test/compat/bigtablesql1511_test.go:31 TestBigtableSQLLanguage",
           "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews"
         ]
       },
@@ -11464,8 +11464,8 @@
         "tests": [
           "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters",
           "test/compat/consolebigtableinstances_test.go:74 TestConsoleBigtableInstanceAdmin",
-          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState",
-          "test/compat/frontstate1514_test.go:415 TestResetClearsTheFrontsState"
+          "test/compat/frontstate1514_test.go:187 TestBigtableFrontRestartKeepsItsState",
+          "test/compat/frontstate1514_test.go:417 TestResetClearsTheFrontsState"
         ]
       },
       {
@@ -11474,7 +11474,7 @@
         "tests": [
           "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews",
           "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews",
-          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState"
+          "test/compat/frontstate1514_test.go:187 TestBigtableFrontRestartKeepsItsState"
         ]
       },
       {
@@ -11622,7 +11622,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CheckConsistency",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:164 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:166 TestBigtableTableMaintenance"
         ]
       },
       {
@@ -11660,8 +11660,8 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateTable",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
-          "test/compat/optional_test.go:197 TestBigtableTableAndRows",
+          "test/compat/bigtablerowkeyschema_test.go:32 TestBigtableRowKeySchemas",
+          "test/compat/optional_test.go:199 TestBigtableTableAndRows",
           "test/compat/orgpolicycustom1895_bigtable_test.go:32 TestOrgPolicyCustomConstraintsBigtable"
         ]
       },
@@ -11707,7 +11707,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteTable",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:164 TestBigtableTableMaintenance",
+          "test/compat/bigtablemethods_test.go:166 TestBigtableTableMaintenance",
           "test/compat/storediam_test.go:220 TestBigtableTableIAM"
         ]
       },
@@ -11715,14 +11715,14 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DropRowRange",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:164 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:166 TestBigtableTableMaintenance"
         ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GenerateConsistencyToken",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:164 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:166 TestBigtableTableMaintenance"
         ]
       },
       {
@@ -11731,7 +11731,7 @@
         "tests": [
           "test/compat/bigtablebackups_test.go:156 TestBigtableAuthorizedViews",
           "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews",
-          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState"
+          "test/compat/frontstate1514_test.go:187 TestBigtableFrontRestartKeepsItsState"
         ]
       },
       {
@@ -11740,14 +11740,14 @@
         "tests": [
           "test/compat/bigtablebackups_test.go:32 TestBigtableBackups",
           "test/compat/bigtableviewstools_test.go:114 TestGcloudBigtableBackups",
-          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState"
+          "test/compat/frontstate1514_test.go:187 TestBigtableFrontRestartKeepsItsState"
         ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState",
+          "test/compat/frontstate1514_test.go:187 TestBigtableFrontRestartKeepsItsState",
           "test/compat/iamconditions1748_test.go:35 TestBigtableIAMConditions",
           "test/compat/storediam_test.go:220 TestBigtableTableIAM",
           "test/compat/storediam_test.go:244 TestTerraformBigtableTableIAM",
@@ -11769,7 +11769,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablebackups_test.go:115 TestBigtableSnapshots",
-          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState"
+          "test/compat/frontstate1514_test.go:187 TestBigtableFrontRestartKeepsItsState"
         ]
       },
       {
@@ -11777,12 +11777,12 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtableclusterstates_test.go:27 TestBigtableTableClusterStates",
-          "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
-          "test/compat/consolebigtableactions_test.go:37 TestConsoleBigtableTableAndCellActions",
-          "test/compat/consolebigtableedit_test.go:103 TestConsoleBigtableFamiliesAndRowWrites",
-          "test/compat/consolebigtablepicker_test.go:33 TestConsoleBigtableInstancePicker",
-          "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable",
-          "test/compat/iamenforcementround9_1879_test.go:290 TestIAMEnforcementBigtable",
+          "test/compat/bigtablerowkeyschema_test.go:32 TestBigtableRowKeySchemas",
+          "test/compat/consolebigtableactions_test.go:39 TestConsoleBigtableTableAndCellActions",
+          "test/compat/consolebigtableedit_test.go:105 TestConsoleBigtableFamiliesAndRowWrites",
+          "test/compat/consolebigtablepicker_test.go:35 TestConsoleBigtableInstancePicker",
+          "test/compat/consoledatabases_test.go:49 TestConsoleBigtableCreateAndDeleteTable",
+          "test/compat/iamenforcementround9_1879_test.go:292 TestIAMEnforcementBigtable",
           "test/compat/terraform_batch5_test.go:267 TestTerraformBigtableGCPolicy"
         ]
       },
@@ -11822,17 +11822,17 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtableclusterstates_test.go:27 TestBigtableTableClusterStates",
-          "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
-          "test/compat/consolebigtablepicker_test.go:33 TestConsoleBigtableInstancePicker",
-          "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable"
+          "test/compat/bigtablerowkeyschema_test.go:32 TestBigtableRowKeySchemas",
+          "test/compat/consolebigtablepicker_test.go:35 TestConsoleBigtableInstancePicker",
+          "test/compat/consoledatabases_test.go:49 TestConsoleBigtableCreateAndDeleteTable"
         ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ModifyColumnFamilies",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
-          "test/compat/optional_test.go:197 TestBigtableTableAndRows",
+          "test/compat/bigtablerowkeyschema_test.go:32 TestBigtableRowKeySchemas",
+          "test/compat/optional_test.go:199 TestBigtableTableAndRows",
           "test/compat/terraform_batch5_test.go:267 TestTerraformBigtableGCPolicy"
         ]
       },
@@ -11842,7 +11842,7 @@
         "tests": [
           "test/compat/bigtablebackups_test.go:32 TestBigtableBackups",
           "test/compat/bigtableviewstools_test.go:114 TestGcloudBigtableBackups",
-          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState"
+          "test/compat/frontstate1514_test.go:187 TestBigtableFrontRestartKeepsItsState"
         ]
       },
       {
@@ -11876,8 +11876,8 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UndeleteTable",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablesql1511_test.go:241 TestBigtableUndeleteTable",
-          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState"
+          "test/compat/bigtablesql1511_test.go:243 TestBigtableUndeleteTable",
+          "test/compat/frontstate1514_test.go:187 TestBigtableFrontRestartKeepsItsState"
         ]
       },
       {
@@ -11906,15 +11906,15 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateTable",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:164 TestBigtableTableMaintenance",
-          "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas"
+          "test/compat/bigtablemethods_test.go:166 TestBigtableTableMaintenance",
+          "test/compat/bigtablerowkeyschema_test.go:32 TestBigtableRowKeySchemas"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/CheckAndMutateRow",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:88 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:90 TestBigtableBulkAndConditionalWrites"
         ]
       },
       {
@@ -11922,17 +11922,17 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablebackups_test.go:288 TestBigtableSQL",
-          "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
-          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
-          "test/compat/bigtablesql1704_test.go:34 TestBigtableSQLUnpackFunctionsAndAggregates",
-          "test/compat/bigtablesqlgeo_test.go:32 TestBigtableSQLGeography"
+          "test/compat/bigtablerowkeyschema_test.go:32 TestBigtableRowKeySchemas",
+          "test/compat/bigtablesql1511_test.go:31 TestBigtableSQLLanguage",
+          "test/compat/bigtablesql1704_test.go:36 TestBigtableSQLUnpackFunctionsAndAggregates",
+          "test/compat/bigtablesqlgeo_test.go:34 TestBigtableSQLGeography"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/GenerateInitialChangeStreamPartitions",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablechangestreams_test.go:128 TestBigtableChangeStreams",
+          "test/compat/bigtablechangestreams_test.go:130 TestBigtableChangeStreams",
           "test/compat/iamenforcementround10_1879_test.go:350 TestIAMEnforcementBigtableAdmin"
         ]
       },
@@ -11940,36 +11940,36 @@
         "method": "google.bigtable.v2.Bigtable/GetClientConfiguration",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:260 TestBigtableSessions"
+          "test/compat/bigtablemethods_test.go:262 TestBigtableSessions"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/MutateRow",
         "status": "Verified",
         "tests": [
-          "test/compat/iamenforcementround9_1879_test.go:290 TestIAMEnforcementBigtable",
-          "test/compat/optional_test.go:197 TestBigtableTableAndRows"
+          "test/compat/iamenforcementround9_1879_test.go:292 TestIAMEnforcementBigtable",
+          "test/compat/optional_test.go:199 TestBigtableTableAndRows"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/MutateRows",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:88 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:90 TestBigtableBulkAndConditionalWrites"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/OpenAuthorizedView",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:260 TestBigtableSessions"
+          "test/compat/bigtablemethods_test.go:262 TestBigtableSessions"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/OpenMaterializedView",
         "status": "Refused",
         "tests": [
-          "test/compat/bigtablemethods_test.go:260 TestBigtableSessions"
+          "test/compat/bigtablemethods_test.go:262 TestBigtableSessions"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -11977,14 +11977,14 @@
         "method": "google.bigtable.v2.Bigtable/OpenTable",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:260 TestBigtableSessions"
+          "test/compat/bigtablemethods_test.go:262 TestBigtableSessions"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/PingAndWarm",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:224 TestBigtablePingAndWarm"
+          "test/compat/bigtablemethods_test.go:226 TestBigtablePingAndWarm"
         ]
       },
       {
@@ -11992,44 +11992,44 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablebackups_test.go:288 TestBigtableSQL",
-          "test/compat/bigtablerowkeyschema_test.go:30 TestBigtableRowKeySchemas",
-          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
-          "test/compat/bigtablesql1704_test.go:34 TestBigtableSQLUnpackFunctionsAndAggregates",
-          "test/compat/bigtablesqlgeo_test.go:32 TestBigtableSQLGeography"
+          "test/compat/bigtablerowkeyschema_test.go:32 TestBigtableRowKeySchemas",
+          "test/compat/bigtablesql1511_test.go:31 TestBigtableSQLLanguage",
+          "test/compat/bigtablesql1704_test.go:36 TestBigtableSQLUnpackFunctionsAndAggregates",
+          "test/compat/bigtablesqlgeo_test.go:34 TestBigtableSQLGeography"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/ReadChangeStream",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablechangestreams_test.go:128 TestBigtableChangeStreams",
-          "test/compat/bigtablechangestreams_test.go:293 TestBigtableChangeStreamGarbageCollectionAndDropRowRange",
-          "test/compat/bigtablechangestreams_test.go:399 TestBigtableChangeLogSurvivesAFrontRestart"
+          "test/compat/bigtablechangestreams_test.go:130 TestBigtableChangeStreams",
+          "test/compat/bigtablechangestreams_test.go:295 TestBigtableChangeStreamGarbageCollectionAndDropRowRange",
+          "test/compat/bigtablechangestreams_test.go:401 TestBigtableChangeLogSurvivesAFrontRestart"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/ReadModifyWriteRow",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:88 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:90 TestBigtableBulkAndConditionalWrites"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/ReadRows",
         "status": "Verified",
         "tests": [
-          "test/compat/consolebigtableactions_test.go:37 TestConsoleBigtableTableAndCellActions",
-          "test/compat/consolebigtableedit_test.go:103 TestConsoleBigtableFamiliesAndRowWrites",
-          "test/compat/consolebigtablepicker_test.go:33 TestConsoleBigtableInstancePicker",
-          "test/compat/iamenforcementround9_1879_test.go:290 TestIAMEnforcementBigtable",
-          "test/compat/optional_test.go:197 TestBigtableTableAndRows"
+          "test/compat/consolebigtableactions_test.go:39 TestConsoleBigtableTableAndCellActions",
+          "test/compat/consolebigtableedit_test.go:105 TestConsoleBigtableFamiliesAndRowWrites",
+          "test/compat/consolebigtablepicker_test.go:35 TestConsoleBigtableInstancePicker",
+          "test/compat/iamenforcementround9_1879_test.go:292 TestIAMEnforcementBigtable",
+          "test/compat/optional_test.go:199 TestBigtableTableAndRows"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/SampleRowKeys",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:88 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:90 TestBigtableBulkAndConditionalWrites"
         ]
       }
     ]
@@ -12046,15 +12046,15 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/AddSplitPoints",
         "status": "Verified",
         "tests": [
-          "test/compat/spannersplitpoints_test.go:28 TestSpannerAddSplitPoints"
+          "test/compat/spannersplitpoints_test.go:30 TestSpannerAddSplitPoints"
         ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CopyBackup",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
-          "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK"
+          "test/compat/spannerbackups_test.go:69 TestSpannerBackupAndRestore",
+          "test/compat/spannercmek1950_test.go:63 TestSpannerCMEK"
         ]
       },
       {
@@ -12062,16 +12062,16 @@
         "status": "Verified",
         "tests": [
           "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
-          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
+          "test/compat/spannerbackups_test.go:69 TestSpannerBackupAndRestore",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups",
-          "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK"
+          "test/compat/spannercmek1950_test.go:63 TestSpannerCMEK"
         ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateBackupSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules",
+          "test/compat/spannerbackups_test.go:248 TestSpannerBackupSchedules",
           "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig",
           "test/compat/spannereditions1949_test.go:207 TestGcloudSpannerEditions",
           "test/compat/spannereditions1949_test.go:78 TestSpannerEditionsAutoscalingAndSchedules"
@@ -12081,11 +12081,11 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
+          "test/compat/optional_test.go:266 TestSpannerSchemaAndQuery",
           "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
-          "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
-          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated",
-          "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK",
+          "test/compat/spanner_test.go:106 TestSpannerReadWriteTransactionIsAtomic",
+          "test/compat/spanner_test.go:204 TestSpannerDatabasesAreIsolated",
+          "test/compat/spannercmek1950_test.go:63 TestSpannerCMEK",
           "test/compat/spannereditions1949_test.go:78 TestSpannerEditionsAutoscalingAndSchedules",
           "test/compat/spannerproto2017_test.go:59 TestSpannerProtoBundleColumns"
         ]
@@ -12094,7 +12094,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackup",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
+          "test/compat/spannerbackups_test.go:69 TestSpannerBackupAndRestore",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
         ]
       },
@@ -12102,7 +12102,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackupSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules",
+          "test/compat/spannerbackups_test.go:248 TestSpannerBackupSchedules",
           "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
         ]
       },
@@ -12117,18 +12117,18 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetBackup",
         "status": "Verified",
         "tests": [
-          "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
-          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
+          "test/compat/frontstate1514_test.go:52 TestSpannerFrontRestartKeepsItsState",
+          "test/compat/spannerbackups_test.go:69 TestSpannerBackupAndRestore",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups",
-          "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK"
+          "test/compat/spannercmek1950_test.go:63 TestSpannerCMEK"
         ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetBackupSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
-          "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules",
+          "test/compat/frontstate1514_test.go:52 TestSpannerFrontRestartKeepsItsState",
+          "test/compat/spannerbackups_test.go:248 TestSpannerBackupSchedules",
           "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig",
           "test/compat/spannereditions1949_test.go:78 TestSpannerEditionsAutoscalingAndSchedules"
         ]
@@ -12137,18 +12137,18 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
-          "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK"
+          "test/compat/consoledatabases_test.go:122 TestConsoleSpannerCreateAndDropDatabase",
+          "test/compat/spannercmek1950_test.go:63 TestSpannerCMEK"
         ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetDatabaseDdl",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
-          "test/compat/consoledatabases_test.go:208 TestConsoleSpannerDML",
+          "test/compat/consoledatabases_test.go:122 TestConsoleSpannerCreateAndDropDatabase",
+          "test/compat/consoledatabases_test.go:210 TestConsoleSpannerDML",
           "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
-          "test/compat/iamenforcementround9_1879_test.go:159 TestIAMEnforcementSpanner",
+          "test/compat/iamenforcementround9_1879_test.go:161 TestIAMEnforcementSpanner",
           "test/compat/spannerproto2017_test.go:59 TestSpannerProtoBundleColumns"
         ]
       },
@@ -12156,7 +12156,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
+          "test/compat/frontstate1514_test.go:52 TestSpannerFrontRestartKeepsItsState",
           "test/compat/storediam_test.go:109 TestTerraformSpannerIAM",
           "test/compat/storediam_test.go:158 TestGcloudSpannerIAM",
           "test/compat/storediam_test.go:182 TestConsoleSpannerPermissions",
@@ -12176,7 +12176,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackupOperations",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore"
+          "test/compat/spannerbackups_test.go:69 TestSpannerBackupAndRestore"
         ]
       },
       {
@@ -12184,7 +12184,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamenforcementround10_1879_test.go:240 TestIAMEnforcementSpannerOperations",
-          "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules",
+          "test/compat/spannerbackups_test.go:248 TestSpannerBackupSchedules",
           "test/compat/spannereditions1949_test.go:207 TestGcloudSpannerEditions",
           "test/compat/spannereditions1949_test.go:78 TestSpannerEditionsAutoscalingAndSchedules"
         ]
@@ -12193,7 +12193,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackups",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
+          "test/compat/spannerbackups_test.go:69 TestSpannerBackupAndRestore",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
         ]
       },
@@ -12202,15 +12202,15 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamenforcementround10_1879_test.go:240 TestIAMEnforcementSpannerOperations",
-          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore"
+          "test/compat/spannerbackups_test.go:69 TestSpannerBackupAndRestore"
         ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseRoles",
         "status": "Verified",
         "tests": [
-          "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
-          "test/compat/spannerbackups_test.go:481 TestSpannerDatabaseRoles"
+          "test/compat/frontstate1514_test.go:52 TestSpannerFrontRestartKeepsItsState",
+          "test/compat/spannerbackups_test.go:483 TestSpannerDatabaseRoles"
         ]
       },
       {
@@ -12224,10 +12224,10 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/RestoreDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
-          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
+          "test/compat/frontstate1514_test.go:52 TestSpannerFrontRestartKeepsItsState",
+          "test/compat/spannerbackups_test.go:69 TestSpannerBackupAndRestore",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups",
-          "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK"
+          "test/compat/spannercmek1950_test.go:63 TestSpannerCMEK"
         ]
       },
       {
@@ -12235,7 +12235,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/iamconditions1745_test.go:120 TestSpannerIAMConditions",
-          "test/compat/iamenforcementround9_1879_test.go:159 TestIAMEnforcementSpanner",
+          "test/compat/iamenforcementround9_1879_test.go:161 TestIAMEnforcementSpanner",
           "test/compat/storediam_test.go:109 TestTerraformSpannerIAM",
           "test/compat/storediam_test.go:182 TestConsoleSpannerPermissions",
           "test/compat/storediam_test.go:94 TestSpannerIAM"
@@ -12255,7 +12255,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
-          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
+          "test/compat/spannerbackups_test.go:69 TestSpannerBackupAndRestore",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
         ]
       },
@@ -12263,7 +12263,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackupSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules"
+          "test/compat/spannerbackups_test.go:248 TestSpannerBackupSchedules"
         ]
       },
       {
@@ -12287,11 +12287,11 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
+          "test/compat/optional_test.go:266 TestSpannerSchemaAndQuery",
           "test/compat/orgpolicycustom1895_spanner_test.go:38 TestOrgPolicyCustomConstraintsSpanner",
           "test/compat/orgpolicylocations1890_test.go:83 TestOrgPolicyEnforcementSpanner",
-          "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
-          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated",
+          "test/compat/spanner_test.go:106 TestSpannerReadWriteTransactionIsAtomic",
+          "test/compat/spanner_test.go:204 TestSpannerDatabasesAreIsolated",
           "test/compat/spannereditions1949_test.go:207 TestGcloudSpannerEditions",
           "test/compat/spannereditions1949_test.go:253 TestTerraformSpannerInstanceEdition",
           "test/compat/spannereditions1949_test.go:78 TestSpannerEditionsAutoscalingAndSchedules"
@@ -12301,7 +12301,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstanceConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
+          "test/compat/spannerbackups_test.go:307 TestSpannerInstanceConfigs",
           "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
         ]
       },
@@ -12326,7 +12326,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstanceConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
+          "test/compat/spannerbackups_test.go:307 TestSpannerInstanceConfigs",
           "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
         ]
       },
@@ -12354,8 +12354,8 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
-          "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
+          "test/compat/consoledatabases_test.go:122 TestConsoleSpannerCreateAndDropDatabase",
+          "test/compat/frontstate1514_test.go:52 TestSpannerFrontRestartKeepsItsState",
           "test/compat/gcloudspannerfirestore_test.go:53 TestGcloudSpannerInstances",
           "test/compat/spannereditions1949_test.go:253 TestTerraformSpannerInstanceEdition",
           "test/compat/spannereditions1949_test.go:78 TestSpannerEditionsAutoscalingAndSchedules"
@@ -12366,10 +12366,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
-          "test/compat/frontstate1514_test.go:415 TestResetClearsTheFrontsState",
-          "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
+          "test/compat/frontstate1514_test.go:417 TestResetClearsTheFrontsState",
+          "test/compat/frontstate1514_test.go:52 TestSpannerFrontRestartKeepsItsState",
           "test/compat/spanneradmin_test.go:88 TestSpannerInstanceAdminListsAndDeletes",
-          "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
+          "test/compat/spannerbackups_test.go:307 TestSpannerInstanceConfigs",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups",
           "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
         ]
@@ -12387,7 +12387,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstanceConfigOperations",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs"
+          "test/compat/spannerbackups_test.go:307 TestSpannerInstanceConfigs"
         ]
       },
       {
@@ -12396,7 +12396,7 @@
         "tests": [
           "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
           "test/compat/spanneradmin_test.go:88 TestSpannerInstanceAdminListsAndDeletes",
-          "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
+          "test/compat/spannerbackups_test.go:307 TestSpannerInstanceConfigs",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
         ]
       },
@@ -12428,7 +12428,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/MoveInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs"
+          "test/compat/spannerbackups_test.go:307 TestSpannerInstanceConfigs"
         ]
       },
       {
@@ -12467,14 +12467,14 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstanceConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs"
+          "test/compat/spannerbackups_test.go:307 TestSpannerInstanceConfigs"
         ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstancePartition",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerbackups_test.go:419 TestSpannerUpdateInstancePartition",
+          "test/compat/spannerbackups_test.go:421 TestSpannerUpdateInstancePartition",
           "test/compat/terraform_batch11_test.go:347 TestTerraformSpannerInstancePartition"
         ]
       },
@@ -12496,30 +12496,30 @@
         "method": "google.spanner.v1.Spanner/BeginTransaction",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
-          "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
-          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
+          "test/compat/optional_test.go:266 TestSpannerSchemaAndQuery",
+          "test/compat/spanner_test.go:106 TestSpannerReadWriteTransactionIsAtomic",
+          "test/compat/spanner_test.go:204 TestSpannerDatabasesAreIsolated"
         ]
       },
       {
         "method": "google.spanner.v1.Spanner/Commit",
         "status": "Verified",
         "tests": [
-          "test/compat/iamenforcementround9_1879_test.go:159 TestIAMEnforcementSpanner",
-          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
-          "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
-          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
+          "test/compat/iamenforcementround9_1879_test.go:161 TestIAMEnforcementSpanner",
+          "test/compat/optional_test.go:266 TestSpannerSchemaAndQuery",
+          "test/compat/spanner_test.go:106 TestSpannerReadWriteTransactionIsAtomic",
+          "test/compat/spanner_test.go:204 TestSpannerDatabasesAreIsolated"
         ]
       },
       {
         "method": "google.spanner.v1.Spanner/CreateSession",
         "status": "Verified",
         "tests": [
-          "test/compat/iamenforcementround9_1879_test.go:159 TestIAMEnforcementSpanner",
-          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
-          "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
-          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated",
-          "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK"
+          "test/compat/iamenforcementround9_1879_test.go:161 TestIAMEnforcementSpanner",
+          "test/compat/optional_test.go:266 TestSpannerSchemaAndQuery",
+          "test/compat/spanner_test.go:106 TestSpannerReadWriteTransactionIsAtomic",
+          "test/compat/spanner_test.go:204 TestSpannerDatabasesAreIsolated",
+          "test/compat/spannercmek1950_test.go:63 TestSpannerCMEK"
         ]
       },
       {
@@ -12540,11 +12540,11 @@
         "method": "google.spanner.v1.Spanner/ExecuteSql",
         "status": "Verified",
         "tests": [
-          "test/compat/spannercmek1950_test.go:61 TestSpannerCMEK",
+          "test/compat/spannercmek1950_test.go:63 TestSpannerCMEK",
           "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback",
-          "test/compat/spannerplans2029_test.go:228 TestSpannerQueryPlans",
-          "test/compat/spannerplans2029b_test.go:180 TestSpannerQueryPlansForEveryShape",
-          "test/compat/spannerplans2029b_test.go:321 TestSpannerGraphQueryPlans",
+          "test/compat/spannerplans2029_test.go:230 TestSpannerQueryPlans",
+          "test/compat/spannerplans2029b_test.go:182 TestSpannerQueryPlansForEveryShape",
+          "test/compat/spannerplans2029b_test.go:323 TestSpannerGraphQueryPlans",
           "test/compat/spannerprofile_test.go:28 TestSpannerQueryModes",
           "test/compat/spannerproto2017_test.go:59 TestSpannerProtoBundleColumns"
         ]
@@ -12553,11 +12553,11 @@
         "method": "google.spanner.v1.Spanner/ExecuteStreamingSql",
         "status": "Verified",
         "tests": [
-          "test/compat/iamenforcementround9_1879_test.go:159 TestIAMEnforcementSpanner",
-          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
-          "test/compat/spannerplans2029_test.go:228 TestSpannerQueryPlans",
-          "test/compat/spannerplans2029b_test.go:180 TestSpannerQueryPlansForEveryShape",
-          "test/compat/spannerplans2029b_test.go:321 TestSpannerGraphQueryPlans",
+          "test/compat/iamenforcementround9_1879_test.go:161 TestIAMEnforcementSpanner",
+          "test/compat/optional_test.go:266 TestSpannerSchemaAndQuery",
+          "test/compat/spannerplans2029_test.go:230 TestSpannerQueryPlans",
+          "test/compat/spannerplans2029b_test.go:182 TestSpannerQueryPlansForEveryShape",
+          "test/compat/spannerplans2029b_test.go:323 TestSpannerGraphQueryPlans",
           "test/compat/spannerprofile_test.go:28 TestSpannerQueryModes"
         ]
       },
@@ -12614,10 +12614,10 @@
         "method": "google.spanner.v1.Spanner/StreamingRead",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:208 TestConsoleSpannerDML",
-          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
-          "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
-          "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
+          "test/compat/consoledatabases_test.go:210 TestConsoleSpannerDML",
+          "test/compat/optional_test.go:266 TestSpannerSchemaAndQuery",
+          "test/compat/spanner_test.go:106 TestSpannerReadWriteTransactionIsAtomic",
+          "test/compat/spanner_test.go:204 TestSpannerDatabasesAreIsolated"
         ]
       }
     ]
@@ -12753,7 +12753,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryasyncjobs_test.go:60 TestBigQueryAsyncJobs",
-          "test/compat/bigquerycontinuous2193_test.go:392 TestBigQueryContinuousQueryPubSub",
+          "test/compat/bigquerycontinuous2193_test.go:394 TestBigQueryContinuousQueryPubSub",
           "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
         ]
@@ -12898,9 +12898,9 @@
           "test/compat/bigquerycolumns1490_test.go:29 TestBigQueryColumnsOfEveryType",
           "test/compat/bigquerycolumntypes_test.go:267 TestBigQueryParameterizedColumnsByDDL",
           "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
-          "test/compat/bigquerycontinuous2193_test.go:392 TestBigQueryContinuousQueryPubSub",
-          "test/compat/bigquerycontinuous2193_test.go:523 TestBigQueryContinuousQueryInsert",
-          "test/compat/bigquerycontinuous2193_test.go:587 TestBigQueryContinuousQueryBigtableAndSpanner",
+          "test/compat/bigquerycontinuous2193_test.go:394 TestBigQueryContinuousQueryPubSub",
+          "test/compat/bigquerycontinuous2193_test.go:525 TestBigQueryContinuousQueryInsert",
+          "test/compat/bigquerycontinuous2193_test.go:589 TestBigQueryContinuousQueryBigtableAndSpanner",
           "test/compat/bigquerycopykey1762_test.go:33 TestBigQueryCopyKey1762",
           "test/compat/bigquerycopykey1822_test.go:35 TestBigQueryCopyKeyPartition1822",
           "test/compat/bigquerycopylayout1759_test.go:43 TestBigQueryCopyLayout1759",
@@ -13411,7 +13411,7 @@
           "test/compat/consolebigqueryorc_test.go:17 TestConsoleBigQueryLoadORCThroughTheForm",
           "test/compat/consolebigquerywrites_test.go:398 TestConsoleBigQueryReadWriteEditorRunsDML",
           "test/compat/documentai_test.go:205 TestBigQueryMLProcessDocument",
-          "test/compat/iamenforcementround9_1879_test.go:367 TestIAMEnforcementBigQueryMLRemote",
+          "test/compat/iamenforcementround9_1879_test.go:369 TestIAMEnforcementBigQueryMLRemote",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginganalyticsviews_test.go:191 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/logginganalyticsviews_test.go:269 TestLoggingLinkedDatasetAcrossRestarts",
@@ -14030,7 +14030,7 @@
           "test/compat/bigqueryconnection_test.go:36 TestBigQueryConnectionAPI",
           "test/compat/bigqueryconnectiongroups1812_test.go:27 TestBigQueryConnectionGroupMembers1812",
           "test/compat/bigquerymlremoteiam_test.go:164 TestBigQueryMLRemoteConnectionPermissions",
-          "test/compat/iamenforcementround9_1879_test.go:367 TestIAMEnforcementBigQueryMLRemote"
+          "test/compat/iamenforcementround9_1879_test.go:369 TestIAMEnforcementBigQueryMLRemote"
         ]
       },
       {
@@ -14044,238 +14044,238 @@
         "method": "bigqueryreservation.projects.locations.capacityCommitments.create",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.capacityCommitments.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.capacityCommitments.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.capacityCommitments.list",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.capacityCommitments.merge",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.capacityCommitments.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.capacityCommitments.split",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.getBiReservation",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservationGroups.create",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+          "test/compat/bigquerycontinuous2193_test.go:700 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservationGroups.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+          "test/compat/bigquerycontinuous2193_test.go:700 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservationGroups.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+          "test/compat/bigquerycontinuous2193_test.go:700 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservationGroups.list",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+          "test/compat/bigquerycontinuous2193_test.go:700 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservationGroups.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+          "test/compat/bigquerycontinuous2193_test.go:700 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.assignments.create",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.assignments.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.assignments.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+          "test/compat/bigquerycontinuous2193_test.go:700 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.assignments.list",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.assignments.move",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.assignments.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.assignments.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+          "test/compat/bigquerycontinuous2193_test.go:700 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.assignments.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+          "test/compat/bigquerycontinuous2193_test.go:700 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.create",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.failoverReservation",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+          "test/compat/bigquerycontinuous2193_test.go:700 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+          "test/compat/bigquerycontinuous2193_test.go:700 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+          "test/compat/bigquerycontinuous2193_test.go:700 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.reservations.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+          "test/compat/bigquerycontinuous2193_test.go:700 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.searchAllAssignments",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.searchAssignments",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.updateBiReservation",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:103 TestBigQueryReservationAPI"
+          "test/compat/bigquerycontinuous2193_test.go:105 TestBigQueryReservationAPI"
         ]
       },
       {
         "method": "bigqueryreservation.projects.locations.upgradeEdition",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycontinuous2193_test.go:698 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
+          "test/compat/bigquerycontinuous2193_test.go:700 TestBigQueryReservationGroupsFailoverIAMAndUpgrade"
         ]
       }
     ]

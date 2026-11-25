@@ -11,6 +11,8 @@ import (
 	"cloud.google.com/go/bigtable"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestBigtableSQLGeography (#1720) runs GoogleSQL for Bigtable's geography
@@ -44,7 +46,7 @@ func TestBigtableSQLGeography(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ac.Close() })
-	c, err := bigtable.NewClient(ctx, h.Project(), id)
+	c, err := localclient.Bigtable(ctx, h.Project(), id)
 	if err != nil {
 		t.Fatal(err)
 	}

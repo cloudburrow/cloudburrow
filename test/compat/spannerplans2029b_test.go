@@ -19,6 +19,8 @@ import (
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // planTxn is what a shape runs in: a single-use read-only transaction or
@@ -358,7 +360,7 @@ func TestSpannerGraphQueryPlans(t *testing.T) {
 	}
 	db := instName + "/databases/graphplans"
 	t.Cleanup(func() { _ = da.DropDatabase(context.Background(), &databasepb.DropDatabaseRequest{Database: db}) })
-	client, err := spanner.NewClient(ctx, db, spannerOpts(addr)...)
+	client, err := localclient.Spanner(ctx, db, spannerOpts(addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}

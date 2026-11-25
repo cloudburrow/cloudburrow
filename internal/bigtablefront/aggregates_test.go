@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigtable"
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 	"github.com/cloudburrow/cloudburrow/third_party/zetasketch"
 	"google.golang.org/api/option"
 )
@@ -25,7 +26,7 @@ func TestAggregateFamiliesMinMaxAndHLL(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ac.Close()
-	c, err := bigtable.NewClient(ctx, "p", "i", option.WithGRPCConn(dial(t, addr)))
+	c, err := localclient.Bigtable(ctx, "p", "i", option.WithGRPCConn(dial(t, addr)))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -404,6 +404,17 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			vars = append(vars, envVar{"CLOUDBURROW_FIRESTORE_MONGODB_CA_FILE", filepath.Join(cfg.InstanceDir(), firestoreadmin.MongoCAFile),
 				"Firestore with MongoDB compatibility's CA certificate; put it in the connection string as tlsCAFile"})
 		}
+		// Spanner's client libraries export built-in metrics to Cloud
+		// Monitoring (monitoring.googleapis.com), whatever endpoint they
+		// dial, unless this is "true": read by the Go (spanner v1.96.1
+		// client.go), Java (SpannerOptions, 6.128.0), Python (spanner_v1
+		// client.py, 3.71.0) and Node (index.js configureMetrics_, 9.1.1)
+		// clients. SPANNER_EMULATOR_HOST also stops them, but only in a
+		// client that reads it; one given an endpoint of its own does not.
+		if s == config.ServiceSpanner {
+			vars = append(vars, envVar{"SPANNER_DISABLE_BUILTIN_METRICS", "true",
+				"read by the official Spanner clients: keeps their built-in metrics from exporting to Google's Cloud Monitoring"})
+		}
 		// Spanner's REST API, a second port of the same emulator (#1331):
 		// the Terraform provider's instance and database admin calls use
 		// it, as spanner_custom_endpoint. The client libraries do not.

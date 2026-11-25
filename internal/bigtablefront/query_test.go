@@ -11,6 +11,8 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestSQL runs GoogleSQL for Bigtable through the official client's
@@ -24,7 +26,7 @@ func TestSQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := bigtable.NewClient(ctx, "p", "i", opt)
+	c, err := localclient.Bigtable(ctx, "p", "i", opt)
 	if err != nil {
 		t.Fatal(err)
 	}
