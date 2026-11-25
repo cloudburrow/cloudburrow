@@ -130,6 +130,11 @@ func TestConsoleComputeParity2139(t *testing.T) {
 	if f := vpcField(df, "location"); len(f.UnavailableOptions) != 0 || vpcField(df, "replicaZone").VisibleWhen["location"] != "Regional" {
 		t.Errorf("Create a disk's location = %+v", f)
 	}
+	// The form's default, no schedule, makes a disk with no policy (a
+	// merge once sent the choice's label as a policy name).
+	if _, err := disks.Create(ctx, project, map[string]string{"name": "plain", "zone": "us-central1-a", "sizeGb": "10", "snapshotSchedule": noBackups}); err != nil {
+		t.Fatalf("a disk with no snapshot schedule: %v", err)
+	}
 	if _, err := disks.Create(ctx, project, map[string]string{"name": "data", "zone": "us-central1-a", "sizeGb": "20", "snapshotSchedule": "us-central1/nightly"}); err != nil {
 		t.Fatal(err)
 	}

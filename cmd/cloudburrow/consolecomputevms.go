@@ -1340,10 +1340,6 @@ func (p computeDisksProvider) Create(ctx context.Context, project string, values
 		}
 		b["diskEncryptionKey"] = map[string]any{"rawKey": k}
 	}
-	if s := strings.TrimSpace(values["snapshotSchedule"]); s != "" {
-		region := zone[:strings.LastIndex(zone, "-")]
-		b["resourcePolicies"] = []any{"regions/" + region + "/resourcePolicies/" + s}
-	}
 	switch values["source"] {
 	case "Cloud Storage file":
 		src := strings.TrimSpace(values["rawSource"])
