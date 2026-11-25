@@ -49,7 +49,8 @@ const (
 
 // ProvidedNames are the Google-provided classic templates CloudBurrow
 // builds, by name (their @Template name in DataflowTemplates' v1 module).
-var ProvidedNames = []string{"GCS_Text_to_BigQuery", "PubSub_Subscription_to_BigQuery", "PubSub_to_BigQuery", "Word_Count"}
+var ProvidedNames = []string{"Bulk_Compress_GCS_Files", "Bulk_Decompress_GCS_Files", "Cloud_PubSub_to_GCS_Text", "GCS_Text_to_BigQuery",
+	"GCS_Text_to_Cloud_PubSub", "PubSub_Subscription_to_BigQuery", "PubSub_to_BigQuery", "Spanner_to_GCS_Text", "Word_Count"}
 
 // ProvidedTemplate is one built template: its generated metadata (the
 // TEMPLATE_metadata file, as Google's plugin writes it) and what its

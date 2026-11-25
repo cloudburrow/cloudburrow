@@ -112,3 +112,71 @@ func TestPythonDataflowBigtableRead(t *testing.T) {
 		t.Errorf("the job wrote %q; want %s", got, want)
 	}
 }
+
+// covers: google.dataflow.v1beta3.JobsV1Beta3/CreateJob
+//
+// TestPythonDataflowBeamYAMLJavaProvider (#2215): a Beam YAML pipeline
+// (docs: Dataflow's Beam YAML) whose read is a Java provider's transform:
+// ReadFromBigTable, Beam YAML's standard Bigtable read, which Beam's Java
+// expansion service for Google Cloud I/O expands
+// (beam:schematransform:org.apache.beam:bigtable_read:v1). It is run with
+// apache_beam.yaml.main and the DataflowRunner, the expansion service
+// given by --beam_services as the YAML provider's gradle target, as Beam
+// documents for a service already running; the rest of the pipeline is
+// Beam YAML's Python MapToFields and WriteToText. The job runs the read in
+// the Java SDK's harness, against the instance's Bigtable, and writes one
+// line per cell.
+func TestPythonDataflowBeamYAMLJavaProvider(t *testing.T) {
+	h, _, c := dataflowEnv(t)
+	storageAddr := h.Endpoint(EnvStorage)
+	dfAddr := h.Endpoint(EnvDataflow)
+	btAddr := h.Endpoint(EnvBigtable)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
+	defer cancel()
+	sc := storageClient(t, h)
+	project := h.Project()
+	suffix := fmt.Sprint(time.Now().UnixNano() % 1e6)
+	bucket := fmt.Sprintf("%s-dataflow-yaml-%s", project, suffix)
+	dataflowBucket(t, ctx, sc, project, bucket)
+	table := "dfyaml" + suffix
+	_, bt := bigtableTable(t, h, table)
+	tbl := bt.Open(table)
+	for k, v := range map[string]string{"apple": "red", "kiwi": "green"} {
+		m := bigtable.NewMutation()
+		m.Set("info", "color", bigtable.Timestamp(0), []byte(v))
+		if err := tbl.Apply(ctx, k, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	network := beamNetwork(t, ctx, map[int]string{9000: storageAddr, 80: dfAddr, 9004: btAddr})
+	submit, expansion := beamExpansionService(t, ctx, network)
+	yaml := fmt.Sprintf(`pipeline:
+  type: chain
+  transforms:
+    - type: ReadFromBigTable
+      config:
+        project: %s
+        instance: %s
+        table: %s
+    - type: MapToFields
+      config:
+        language: python
+        fields:
+          line: "key.decode() + ' ' + family_name + ':' + column_qualifier.decode() + '=' + cells[0].value.decode()"
+    - type: WriteToText
+      config:
+        path: gs://%s/out/rows
+`, project, bigtableInstance, table, bucket)
+	name := "py-yaml-java-" + suffix
+	args := append([]string{"-m", "apache_beam.yaml.main", "--yaml_pipeline=" + yaml,
+		`--beam_services={"sdks:java:io:google-cloud-platform:expansion-service:shadowJar": "` + expansion + `"}`},
+		dataflowRunnerArgs(project, bucket, name)...)
+	id := jobIDOf(t, runBeamPython(t, ctx, submit, project, args...))
+	if j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DONE, dataflowpb.JobState_JOB_STATE_FAILED); j.CurrentState != dataflowpb.JobState_JOB_STATE_DONE {
+		t.Fatalf("job %s is %s:\n%s", id, j.CurrentState, jobMessages(t, ctx, c, project, id))
+	}
+	got := readPrefix(t, ctx, sc, bucket, "out/rows")
+	if want := "apple info:color=red,kiwi info:color=green"; strings.Join(got, ",") != want {
+		t.Errorf("the job wrote %q; want %s", got, want)
+	}
+}

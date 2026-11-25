@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/dataflow/apiv1beta3/dataflowpb"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"cloud.google.com/go/spanner"
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
@@ -203,6 +205,195 @@ func TestDataflowProvidedTemplates(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDataflowProvidedTemplatesMore (#2215): more of Google's commonly
+// used classic templates, from the same DataflowTemplates build and paths
+// as TestDataflowProvidedTemplates:
+//   - GCS_Text_to_Cloud_PubSub (templates/provided/cloud-storage-to-pubsub)
+//     publishes each line of a Cloud Storage file to a topic;
+//   - Cloud_PubSub_to_GCS_Text (templates/provided/pubsub-to-cloud-storage-text)
+//     windows a topic's messages into text files, written when the
+//     drained job closes its window;
+//   - Bulk_Compress_GCS_Files and Bulk_Decompress_GCS_Files
+//     (templates/provided/bulk-compress-cloud-storage, ...-decompress-...)
+//     gzip a bucket's files and back;
+//   - Spanner_to_GCS_Text (templates/provided/cloud-spanner-to-cloud-storage)
+//     exports a Spanner table as CSV, from the instance's Spanner.
+func TestDataflowProvidedTemplatesMore(t *testing.T) {
+	h, _, c := dataflowEnv(t)
+	h.Endpoint(EnvStorage)
+	h.Endpoint(EnvPubSub)
+	spannerAddr := h.Endpoint(EnvSpanner)
+	project := h.Project()
+	ps := pubsubClient(t, h)
+	sc := storageClient(t, h)
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Minute)
+	defer cancel()
+	const base = "gs://dataflow-templates-us-central1/latest/"
+	suffix := fmt.Sprint(time.Now().UnixNano() % 1e6)
+	bucket := fmt.Sprintf("%s-dataflow-prov2-%s", project, suffix)
+	dataflowBucket(t, ctx, sc, project, bucket)
+	put := func(object, text string) {
+		t.Helper()
+		w := sc.Bucket(bucket).Object(object).NewWriter(ctx)
+		if _, err := io.WriteString(w, text); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	launch := func(t *testing.T, name, job string, params map[string]string) string {
+		t.Helper()
+		resp, err := c.tmpl.LaunchTemplate(ctx, &dataflowpb.LaunchTemplateRequest{ProjectId: project, Location: "us-central1",
+			Template: &dataflowpb.LaunchTemplateRequest_GcsPath{GcsPath: base + name},
+			LaunchParameters: &dataflowpb.LaunchTemplateParameters{JobName: job + "-" + suffix, Parameters: params,
+				Environment: &dataflowpb.RuntimeEnvironment{TempLocation: "gs://" + bucket + "/tmp"}}})
+		if err != nil {
+			t.Fatalf("LaunchTemplate(%s): %v", name, err)
+		}
+		return resp.GetJob().GetId()
+	}
+	done := func(t *testing.T, name, id string) {
+		t.Helper()
+		if j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DONE, dataflowpb.JobState_JOB_STATE_FAILED); j.CurrentState != dataflowpb.JobState_JOB_STATE_DONE {
+			t.Fatalf("%s's job is %s:\n%s", name, j.CurrentState, jobMessages(t, ctx, c, project, id))
+		}
+	}
+	topicSub := func(t *testing.T, id string) (string, string) {
+		t.Helper()
+		topic, sub := fmt.Sprintf("projects/%s/topics/%s-%s", project, id, suffix), fmt.Sprintf("projects/%s/subscriptions/%s-%s", project, id, suffix)
+		if _, err := ps.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topic}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ps.SubscriptionAdminClient.CreateSubscription(ctx, &pubsubpb.Subscription{Name: sub, Topic: topic}); err != nil {
+			t.Fatal(err)
+		}
+		return topic, sub
+	}
+
+	t.Run("GCS_Text_to_Cloud_PubSub", func(t *testing.T) {
+		put("topubsub/lines.txt", "alpha\nbeta\n")
+		topic, sub := topicSub(t, "prov-text-ps")
+		done(t, "GCS_Text_to_Cloud_PubSub", launch(t, "GCS_Text_to_Cloud_PubSub", "provided-text-ps", map[string]string{
+			"inputFilePattern": "gs://" + bucket + "/topubsub/*.txt", "outputTopic": topic}))
+		var got []string
+		for deadline := time.Now().Add(time.Minute); len(got) < 2 && time.Now().Before(deadline); {
+			r, err := ps.SubscriptionAdminClient.Pull(ctx, &pubsubpb.PullRequest{Subscription: sub, MaxMessages: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range r.ReceivedMessages {
+				got = append(got, string(m.Message.Data))
+			}
+		}
+		sort.Strings(got)
+		if strings.Join(got, ",") != "alpha,beta" {
+			t.Errorf("the topic received %v; want alpha, beta", got)
+		}
+	})
+
+	t.Run("Cloud_PubSub_to_GCS_Text", func(t *testing.T) {
+		topic, _ := topicSub(t, "prov-ps-text")
+		id := launch(t, "Cloud_PubSub_to_GCS_Text", "provided-ps-text", map[string]string{
+			"inputTopic": topic, "outputDirectory": "gs://" + bucket + "/pstext/", "outputFilenamePrefix": "messages-",
+			"userTempLocation": "gs://" + bucket + "/pstexttmp/"})
+		j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_RUNNING, dataflowpb.JobState_JOB_STATE_FAILED)
+		if j.CurrentState != dataflowpb.JobState_JOB_STATE_RUNNING || j.Type != dataflowpb.JobType_JOB_TYPE_STREAMING {
+			t.Fatalf("the job is %s %s:\n%s", j.CurrentState, j.Type, jobMessages(t, ctx, c, project, id))
+		}
+		// The job's subscription to the topic is made as it starts reading:
+		// publish until its read has counted one.
+		for deadline := time.Now().Add(5 * time.Minute); ; {
+			if _, err := ps.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: topic, Messages: []*pubsubpb.PubsubMessage{{Data: []byte("kiwi")}}}); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(10 * time.Second)
+			if read(t, ctx, c, project, id) > 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the job read none of the messages:\n%s", jobMessages(t, ctx, c, project, id))
+			}
+		}
+		if _, err := c.jobs.UpdateJob(ctx, &dataflowpb.UpdateJobRequest{ProjectId: project, Location: "us-central1", JobId: id,
+			Job: &dataflowpb.Job{RequestedState: dataflowpb.JobState_JOB_STATE_DRAINED}}); err != nil {
+			t.Fatalf("drain: %v", err)
+		}
+		if j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DRAINED, dataflowpb.JobState_JOB_STATE_FAILED, dataflowpb.JobState_JOB_STATE_CANCELLED); j.CurrentState != dataflowpb.JobState_JOB_STATE_DRAINED {
+			t.Fatalf("the job ended %s:\n%s", j.CurrentState, jobMessages(t, ctx, c, project, id))
+		}
+		got := readPrefix(t, ctx, sc, bucket, "pstext/messages-")
+		if len(got) == 0 || got[0] != "kiwi" {
+			t.Errorf("the windowed files hold %v; want the kiwi messages", got)
+		}
+	})
+
+	t.Run("Bulk_Compress_and_Decompress_GCS_Files", func(t *testing.T) {
+		put("bulk/in/a.txt", "the cat sat\n")
+		put("bulk/in/b.txt", "on the mat\n")
+		done(t, "Bulk_Compress_GCS_Files", launch(t, "Bulk_Compress_GCS_Files", "provided-compress", map[string]string{
+			"inputFilePattern": "gs://" + bucket + "/bulk/in/*.txt", "outputDirectory": "gs://" + bucket + "/bulk/gz",
+			"outputFailureFile": "gs://" + bucket + "/bulk/compress-failed.csv", "compression": "GZIP"}))
+		r, err := sc.Bucket(bucket).Object("bulk/gz/a.txt.gz").NewReader(ctx)
+		if err != nil {
+			t.Fatalf("the compressed a.txt.gz: %v", err)
+		}
+		gz, err := gzip.NewReader(r)
+		if err != nil {
+			t.Fatalf("a.txt.gz is not gzip: %v", err)
+		}
+		b, _ := io.ReadAll(gz)
+		r.Close()
+		if string(b) != "the cat sat\n" {
+			t.Errorf("a.txt.gz holds %q", b)
+		}
+		done(t, "Bulk_Decompress_GCS_Files", launch(t, "Bulk_Decompress_GCS_Files", "provided-decompress", map[string]string{
+			"inputFilePattern": "gs://" + bucket + "/bulk/gz/*.gz", "outputDirectory": "gs://" + bucket + "/bulk/out",
+			"outputFailureFile": "gs://" + bucket + "/bulk/decompress-failed.csv"}))
+		if got := readPrefix(t, ctx, sc, bucket, "bulk/out/"); strings.Join(got, ",") != "on the mat,the cat sat" {
+			t.Errorf("the decompressed files hold %v", got)
+		}
+	})
+
+	t.Run("Spanner_to_GCS_Text", func(t *testing.T) {
+		spInstance, spDB := "provided-"+suffix, "fruit"
+		db := spannerDatabase(t, ctx, spannerAddr, project, spInstance, spDB, "CREATE TABLE Fruit (Name STRING(64) NOT NULL, N INT64) PRIMARY KEY (Name)")
+		sp, err := spanner.NewClient(ctx, db, spannerOpts(spannerAddr)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer sp.Close()
+		if _, err := sp.Apply(ctx, []*spanner.Mutation{spanner.Insert("Fruit", []string{"Name", "N"}, []any{"apple", 3}),
+			spanner.Insert("Fruit", []string{"Name", "N"}, []any{"kiwi", 2})}); err != nil {
+			t.Fatal(err)
+		}
+		done(t, "Spanner_to_GCS_Text", launch(t, "Spanner_to_GCS_Text", "provided-spanner-text", map[string]string{
+			"spannerProjectId": project, "spannerInstanceId": spInstance, "spannerDatabaseId": spDB, "spannerTable": "Fruit",
+			"textWritePrefix": "gs://" + bucket + "/spanner/fruit"}))
+		if got := readPrefix(t, ctx, sc, bucket, "spanner/fruit"); strings.Join(got, ",") != `"apple",3,"kiwi",2` &&
+			strings.Join(got, ",") != "apple,3,kiwi,2" {
+			t.Errorf("the export holds %q; want the table's two rows as CSV", got)
+		}
+	})
+}
+
+// read is the count of elements a job's first step has output so far
+// (its largest ElementCount), 0 for none.
+func read(t *testing.T, ctx context.Context, c dataflowClients, project, id string) float64 {
+	t.Helper()
+	m, err := c.metrics.GetJobMetrics(ctx, &dataflowpb.GetJobMetricsRequest{ProjectId: project, Location: "us-central1", JobId: id})
+	if err != nil {
+		return 0
+	}
+	n := 0.0
+	for _, u := range m.Metrics {
+		if u.GetName().GetName() == "ElementCount" && u.GetScalar().GetNumberValue() > n {
+			n = u.GetScalar().GetNumberValue()
+		}
+	}
+	return n
 }
 
 // readPrefix is the lines of the bucket's objects under prefix, sorted.
