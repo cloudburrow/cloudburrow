@@ -178,6 +178,7 @@ func (s *Server) CreateMigrationJob(_ context.Context, req *dmspb.CreateMigratio
 	if j.GetConnectivity() == nil {
 		// UNVERIFIED: Google's console asks for one; a job without one
 		// reaches the source as a static IP job does.
+		// Docs re-read 2026-11-25, still unanswered: https://docs.cloud.google.com/database-migration/docs/postgres/create-migration-job
 		j.Connectivity = &dmspb.MigrationJob_StaticIpConnectivity{StaticIpConnectivity: &dmspb.StaticIpConnectivity{}}
 	}
 	s.jobs[name] = j
@@ -546,6 +547,7 @@ func (s *Server) copyJob(ctx context.Context, jc jobContext) error {
 		// UNVERIFIED: a one-time job is "Completed after the full dump";
 		// its destination is left standalone, which is what it is once
 		// nothing replicates to it.
+		// Docs re-read 2026-11-25, still unanswered: https://docs.cloud.google.com/database-migration/docs/postgres/migration-job-statuses
 		return s.promoteTarget(ctx, jc, dbs)
 	}
 	return nil
@@ -802,6 +804,7 @@ func (s *Server) DeleteMigrationJob(_ context.Context, req *dmspb.DeleteMigratio
 			// UNVERIFIED: an AlloyDB destination left mid-migration stops
 			// replicating, so the source's replication slots are freed; its
 			// data stays.
+			// Docs re-read 2026-11-25, still unanswered: https://docs.cloud.google.com/database-migration/docs/reference/rest/v1/projects.locations.migrationJobs/delete
 			err = s.opts.Backend.Promote(ctx, t)
 		}
 		s.mu.Lock()
@@ -829,24 +832,12 @@ func (s *Server) DeleteMigrationJob(_ context.Context, req *dmspb.DeleteMigratio
 	return clone(op), nil
 }
 
-func (s *Server) GenerateSshScript(_ context.Context, req *dmspb.GenerateSshScriptRequest) (*dmspb.SshScript, error) {
-	s.mu.Lock()
-	_, err := s.jobLocked(req.GetMigrationJob())
-	s.mu.Unlock()
-	if err != nil {
-		return nil, err
-	}
+func (s *Server) GenerateSshScript(context.Context, *dmspb.GenerateSshScriptRequest) (*dmspb.SshScript, error) {
 	return nil, unimplemented("migrationJobs.generateSshScript",
 		"reverse SSH connectivity through a bastion VM is not run: the destinations' servers reach a source directly, on the instance's network (docs/gaps.md)")
 }
 
-func (s *Server) GenerateTcpProxyScript(_ context.Context, req *dmspb.GenerateTcpProxyScriptRequest) (*dmspb.TcpProxyScript, error) {
-	s.mu.Lock()
-	_, err := s.jobLocked(req.GetMigrationJob())
-	s.mu.Unlock()
-	if err != nil {
-		return nil, err
-	}
+func (s *Server) GenerateTcpProxyScript(context.Context, *dmspb.GenerateTcpProxyScriptRequest) (*dmspb.TcpProxyScript, error) {
 	return nil, unimplemented("migrationJobs.generateTcpProxyScript",
 		"a TCP proxy VM in front of a Private Service Connect source is not run (docs/gaps.md)")
 }

@@ -50,6 +50,7 @@
 // UNIMPLEMENTED and is listed in docs/gaps.md.
 //
 // What the docs leave unsaid is marked UNVERIFIED where it is decided.
+// Docs re-read 2026-11-25, still unanswered: https://docs.cloud.google.com/database-migration/docs/reference/rest
 package datamigration
 
 import (
@@ -265,6 +266,7 @@ var (
 	// starting with a letter, at most 63 (UNVERIFIED: the reference gives
 	// no rule; the console asks for this, and a Cloud SQL destination's
 	// instance takes its profile's ID).
+	// Docs re-read 2026-11-25, still unanswered: https://docs.cloud.google.com/database-migration/docs/reference/rest/v1/projects.locations.migrationJobs/create
 	idRE = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 	// requestRE is a request ID: "letters (a-z, A-Z), numbers (0-9),
 	// underscores (_), and hyphens (-)", at most 40 (the create pages).

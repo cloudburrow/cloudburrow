@@ -18,6 +18,7 @@ import (
 // code the reference names for it; where none fits (a privilege, the
 // binary log) it is ERROR_RDBMS (UNVERIFIED: Google publishes no table of
 // which code each check answers).
+// Docs re-read 2026-11-25, still unanswered: https://docs.cloud.google.com/database-migration/docs/reference/rest/v1/MigrationJobVerificationError
 
 type code = dmspb.MigrationJobVerificationError_ErrorCode
 

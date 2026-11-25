@@ -116,6 +116,18 @@ type alloyDBProvider struct {
 	// iamPrincipal the principal its IAM sign-in is made as (#2208).
 	savedQueries string
 	iamPrincipal string
+	// migrate is whether Database Migration Service is served (#2252):
+	// the Clusters page then has Google's Migrate button.
+	migrate bool
+}
+
+// ListActions is the Clusters page's Migrate button (#2252), which opens
+// Database Migration Service's migration jobs.
+func (p alloyDBProvider) ListActions(context.Context, string) []console.Action {
+	if !p.migrate {
+		return nil
+	}
+	return []console.Action{dmsMigrateAction()}
 }
 
 func (alloyDBProvider) ID() string    { return "alloydb" }

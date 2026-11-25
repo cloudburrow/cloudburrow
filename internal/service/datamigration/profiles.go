@@ -56,7 +56,9 @@ func cloudSQLVersion(s *dmspb.CloudSqlSettings) string {
 }
 
 // isSource is a profile a migration job reads from.
-func isSource(p *dmspb.ConnectionProfile) bool { return p.GetMysql() != nil || p.GetPostgresql() != nil }
+func isSource(p *dmspb.ConnectionProfile) bool {
+	return p.GetMysql() != nil || p.GetPostgresql() != nil
+}
 
 // redact is p as it is answered: input-only fields cleared, their *Set
 // flags raised.

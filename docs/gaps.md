@@ -416,6 +416,28 @@ Create job from template; the Go SDK's pipelines, with BigQuery through the cros
 | Workers are one local Flink cluster per job: machine types, zones, networks, disk sizes and service accounts are recorded, not used; `maxNumWorkers` bounds the job's parallelism | no emulator support | S |
 | Error texts Google publishes nowhere (searched 2026-11-24: Dataflow's guides, the v1b3 REST reference, gcloud's reference, Apache Beam's sources and issues): an invalid job name's message (the rule itself is Job.name's), a missing required template parameter, cancelling or draining a job in a terminal state, the update (`replaceJobId`) refusals, snapshot refusals, an unknown stage, and the `updateMask` checks; each is marked `UNVERIFIED` where it is made. Found and now used (#2215 round 8): an unknown template parameter's "The workflow could not be created. Causes: Found unexpected parameters: [...]" (Beam issue BEAM-2470), a duplicate active job's "There is already an active job named ..." (BEAM-12673), and for a drain of a batch job the stopping guide's "Draining a job is not supported for batch pipelines." | not documented by Google | S |
 
+## Database Migration Service
+
+Built (#2252): the Database Migration Service v1 API over gRPC and JSON: connection profiles for
+PostgreSQL and MySQL sources and Cloud SQL and AlloyDB destinations (created with their instance or
+cluster), one-time and continuous migration jobs that really copy and replicate the source into
+the destination (Cloud SQL's external-primary replicas; AlloyDB subscriptions), verify with
+Google's error codes, start, stop, resume, promote, restart and delete; VPC peering private
+connections and fetchStaticIps; operations, locations and IAM; gcloud `database-migration` and
+the console's Migration jobs, Connection profiles and Private connectivity pages, with Migrate on
+AlloyDB's and Cloud SQL's pages.
+
+| Gap | Why open | Size |
+|---|---|---|
+| Conversion workspaces and mapping rules (every `conversionWorkspaces.*` method, `DescribeDatabaseEntities`, `SearchBackgroundJobs`), and Oracle and SQL Server sources, answer UNIMPLEMENTED: they need Google's schema conversion engine, which is not published | no emulator support | L |
+| `generateSshScript` and `generateTcpProxyScript`, reverse-SSH and forward-SSH connectivity, and Private Service Connect connectivity answer UNIMPLEMENTED | not built yet | M |
+| `demoteDestination`, `fetchSourceObjects` and `objects.*`, a migration into an existing AlloyDB cluster or Cloud SQL instance (a profile without settings), `dumpPath`/`dumpFlags` and `PHYSICAL` dumps, and selected-objects filters answer UNIMPLEMENTED | not built yet | M |
+| pglogical is not run (CloudBurrow's PostgreSQL images do not have it): a standard PostgreSQL migration is checked for it, as Google checks, and replicates with PostgreSQL's built-in logical replication; DDL is not replicated, as with Google's native migrations | no emulator support | M |
+| Continuous MySQL migrations need `gtid_mode=ON` on the source; Google also replicates by binary log position | not built yet | S |
+| SSL `SERVER_ONLY` and `SERVER_CLIENT` (certificate-verified) sources, IAM database authentication to a source, `REGIONAL` and customer-managed-key destinations and a job's CMEK key are refused or answer UNIMPLEMENTED | not built yet | M |
+| Cancelling a running operation answers UNIMPLEMENTED; VPC peering private connections are recorded and route nothing (the instance's network already reaches the source) | no emulator support | S |
+| The source representation instance's name (`<id>-master`), a one-time job promoting itself to COMPLETED, an AlloyDB destination promoted when its job is deleted mid-migration, the error texts and the IAM refusal wording are CloudBurrow's choices (UNVERIFIED in compatibility.md's section) | not documented by Google | S |
+
 ## Dataform
 
 Built (#2105): Dataform v1 and v1beta1, Dataform core compiling in a container, invocations on

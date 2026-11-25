@@ -18,6 +18,7 @@ import (
 	"cloud.google.com/go/billing/apiv1/billingpb"
 	"cloud.google.com/go/billing/budgets/apiv1/budgetspb"
 	"cloud.google.com/go/certificatemanager/apiv1/certificatemanagerpb"
+	dmspb "cloud.google.com/go/clouddms/apiv1/clouddmspb"
 	"cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	dfpb "cloud.google.com/go/dataform/apiv1/dataformpb"
 	dataprocpb "cloud.google.com/go/dataproc/v2/apiv1/dataprocpb"
@@ -56,6 +57,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
 	dataflowsvc "github.com/cloudburrow/cloudburrow/internal/service/dataflow"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
+	"github.com/cloudburrow/cloudburrow/internal/service/datamigration"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataproc"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/filestore"
@@ -153,6 +155,13 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	dfl.Register(srv)
+	// Database Migration Service alone (#2252), with no destinations: its
+	// mixins are other services' rows.
+	dms, err := datamigration.NewServer("", datamigration.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dmspb.RegisterDataMigrationServiceServer(srv, dms)
 	// App Hub alone (#2110): its mixins are other services' rows.
 	ah, err := apphub.NewServer("", apphub.Options{})
 	if err != nil {

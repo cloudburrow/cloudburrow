@@ -68,6 +68,8 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	"tags": unverified,
 	// UNVERIFIED: Google's Analytics Hub docs describe no dialog for deleting a data exchange (docs re-read 2026-11-20: https://docs.cloud.google.com/bigquery/docs/analytics-hub-manage-exchanges)
 	"bigquery-sharing": unverified,
+	// UNVERIFIED: Database Migration Service's private connectivity docs give no console steps for deleting a private connection (docs re-read 2026-11-25: https://docs.cloud.google.com/database-migration/docs/postgres/create-private-connectivity-configuration)
+	"datamigration-private": unverified,
 	// More actions > Delete, then enter delete to confirm (docs read 2026-11-21).
 	"bigquery-clean-rooms": {Style: DeleteConfirmWord, Source: "https://docs.cloud.google.com/bigquery/docs/data-clean-rooms", Verified: true},
 	// Capacity management and BI Engine (#2193): Google's reservations,

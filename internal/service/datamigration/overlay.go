@@ -1,6 +1,9 @@
 package datamigration
 
 import (
+	"encoding/json"
+
+	dmspb "cloud.google.com/go/clouddms/apiv1/clouddmspb"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -170,3 +173,38 @@ const (
 	SSLRequired = 3
 	SSLNone     = 4
 )
+
+// CloudSQLVersionName is a Cloud SQL destination's database version:
+// databaseVersionName, or the enum's name.
+func CloudSQLVersionName(s *dmspb.CloudSqlSettings) string { return cloudSQLVersion(s) }
+
+// SetCloudSQLVersionName sets databaseVersionName, which clouddmspb
+// v1.16.1 does not have.
+func SetCloudSQLVersionName(s *dmspb.CloudSqlSettings, v string) {
+	setStr(s, "database_version_name", v)
+}
+
+// SetAlloyDBVersion sets an AlloyDB destination's databaseVersion.
+func SetAlloyDBVersion(s *dmspb.AlloyDbSettings, v string) { setStr(s, "database_version", v) }
+
+// NativeLogical reports whether a job migrates with PostgreSQL's native
+// logical replication (postgresHomogeneousConfig.isNativeLogical).
+func NativeLogical(j *dmspb.MigrationJob) bool { return nativeLogical(j) }
+
+// SetNativeLogical sets postgresHomogeneousConfig.isNativeLogical.
+func SetNativeLogical(j *dmspb.MigrationJob, on bool) error {
+	b, err := overlay.Marshal(j)
+	if err != nil {
+		return err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	m["postgresHomogeneousConfig"] = map[string]any{"isNativeLogical": on}
+	if b, err = json.Marshal(m); err != nil {
+		return err
+	}
+	proto.Reset(j)
+	return overlay.Unmarshal(b, j)
+}

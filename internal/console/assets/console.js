@@ -456,6 +456,17 @@ const ROUTES = [
   // Snapshots (#2215): a project's snapshots of streaming jobs.
   { path: "/dataflow/snapshots", service: "dataflow-snapshots", icon: "dataflow", title: "Snapshots", kind: "Snapshot",
     section: "Databases", product: "dataflow", productTitle: "Dataflow" },
+  // Database Migration Service (#2252), Google's menu in its order:
+  // Migration jobs, Conversion workspaces, Connection profiles, Private
+  // connectivity configurations.
+  { path: "/dbmigrate/migrations", service: "datamigration", title: "Migration jobs", kind: "Migration job",
+    section: "Databases", product: "datamigration", productTitle: "Database Migration Service" },
+  { path: "/dbmigrate/conversion-workspaces", service: "datamigration-conversion", icon: "datamigration", title: "Conversion workspaces", kind: "Conversion workspace",
+    section: "Databases", product: "datamigration", productTitle: "Database Migration Service" },
+  { path: "/dbmigrate/connection-profiles", service: "datamigration-profiles", icon: "datamigration", title: "Connection profiles", kind: "Connection profile",
+    section: "Databases", product: "datamigration", productTitle: "Database Migration Service" },
+  { path: "/dbmigrate/private-connections", service: "datamigration-private", icon: "datamigration", title: "Private connectivity configurations", kind: "Private connectivity configuration",
+    section: "Databases", product: "datamigration", productTitle: "Database Migration Service" },
 
   // Storage Transfer Service (#1957), Google's Data Transfer pages: Transfer
   // jobs, with each job's run history, and Agent pools for POSIX file
@@ -1300,6 +1311,8 @@ const ICONS = {
   // Filestore: a file folder over a server's drive.
   filestore: '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v4H3z"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 17h2"/>',
   // Dataflow: a pipeline's steps joined top to bottom.
+  // Database Migration Service (#2252): a source database, an arrow, a destination.
+  datamigration: '<ellipse cx="6" cy="6" rx="3.5" ry="1.5"/><path d="M2.5 6v7c0 .8 1.6 1.5 3.5 1.5s3.5-.7 3.5-1.5V6"/><ellipse cx="18" cy="11" rx="3.5" ry="1.5"/><path d="M14.5 11v7c0 .8 1.6 1.5 3.5 1.5s3.5-.7 3.5-1.5v-7M8 18.5h4l-1.5-1.5M12 18.5l-1.5 1.5"/>',
   dataflow: '<rect x="4" y="3" width="7" height="5" rx="1"/><rect x="13" y="10" width="7" height="5" rx="1"/><rect x="4" y="16" width="7" height="5" rx="1"/><path d="M7.5 8v8M11 12.5h2"/>',
   // App Hub: three components grouped in one application.
   apphub: '<rect x="3" y="3" width="18" height="18" rx="3"/><rect x="6" y="6" width="5" height="5" rx="1"/><rect x="13" y="6" width="5" height="5" rx="1"/><rect x="6" y="13" width="12" height="5" rx="1"/>',

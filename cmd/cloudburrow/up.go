@@ -528,6 +528,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		dataflowSvc.live = boundAddrs
 	}
 	dataflowSvc.register(coord)
+	// Database Migration Service (#2252), in process; its destinations are
+	// the instance's Cloud SQL instances and AlloyDB clusters, given below
+	// once they exist, and it is registered after them.
+	dataMigrationSvc := newDataMigrationService(cfg)
 	if gkeSvc != nil && runSvc != nil && runSvc.events != nil {
 		// Eventarc's GKE destinations (#1877) reach its clusters' services.
 		runSvc.events.gke = gkeSvc.clusterAccess
@@ -781,6 +785,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		alloyDB:          alloyDBSvc,
 		filestore:        filestoreSvc,
 		dataflow:         dataflowSvc,
+		dataMigration:    dataMigrationSvc,
 		trace:            traceSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
@@ -890,6 +895,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		appHubSvc.calls = callEvents(recorder, requestMetrics, "apphub")
 		appHubSvc.interpose = append(appHubSvc.interpose, grpctransport.LogInterceptor(logger, "apphub"), faults.Interceptor("apphub"))
 		appHubSvc.requests = requestEvents(recorder, requestMetrics, "apphub")
+	}
+	if dataMigrationSvc != nil {
+		dataMigrationSvc.tracing = tracing
+		dataMigrationSvc.calls = callEvents(recorder, requestMetrics, "datamigration")
+		dataMigrationSvc.interpose = append(dataMigrationSvc.interpose, grpctransport.LogInterceptor(logger, "datamigration"), faults.Interceptor("datamigration"))
+		dataMigrationSvc.requests = requestEvents(recorder, requestMetrics, "datamigration")
 	}
 	if dataflowSvc != nil {
 		dataflowSvc.tracing = tracing
@@ -1071,6 +1082,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// App Hub (#2110): each method's documented permissions, and the
 	// policies of its applications.
 	useIAMEnforcementAppHub(iamEnforcer, appHubSvc)
+	useIAMEnforcementDataMigration(iamEnforcer, dataMigrationSvc)
 	// Log buckets' customer-managed keys (#1950).
 	if loggingSvc != nil {
 		keys := cmekKeys(kmsSvc, iamEnforcer)
@@ -1442,6 +1454,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		coord.Register(backupDRSrv)
 	}
+	if dataMigrationSvc != nil {
+		// Its Cloud SQL destinations are external replicas through the
+		// Admin API, its AlloyDB ones clusters through AlloyDB's, both in
+		// process.
+		dataMigrationSvc.sql = sqlAdminSrv
+		dataMigrationSvc.alloy = alloyDBSvc
+		dataMigrationSvc.register(coord)
+	}
 	// Disabled APIs are enforced as Google enforces them (#1914): every
 	// API is enabled in every project until someone disables it.
 	useAPIEnablement(serviceUsageSrv, rmSrv, apiGated{tasks: tasksSvc, run: runSvc, scheduler: schedulerSvc,
@@ -1638,6 +1658,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		alloyDB:          alloyDBSvc,
 		filestore:        filestoreSvc,
 		dataflow:         dataflowSvc,
+		dataMigration:    dataMigrationSvc,
 		trace:            traceSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
@@ -1785,6 +1806,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := dataflowSvc.Addr(); a != "" {
 			live["dataflow"] = a
+		}
+		if a := dataMigrationSvc.Addr(); a != "" {
+			live["datamigration"] = a
 		}
 		if a := traceSvc.Addr(); a != "" {
 			live["trace"] = a

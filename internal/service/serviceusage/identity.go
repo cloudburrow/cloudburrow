@@ -58,6 +58,10 @@ var serviceAgents = map[string]string{
 	// App Hub Service Account, the primary agent of apphub.googleapis.com
 	// (docs.cloud.google.com/iam/docs/service-agents, read 2026-11-21).
 	"apphub.googleapis.com": "gcp-sa-apphub.iam.gserviceaccount.com",
+	// The Database Migration Service Agent,
+	// service-NUMBER@gcp-sa-datamigration (#2252; docs.cloud.google.com/
+	// iam/docs/service-agents, read 2026-11-25).
+	"datamigration.googleapis.com": "gcp-sa-datamigration.iam.gserviceaccount.com",
 	// Serverless VPC Access Service Agent (#2140).
 	"vpcaccess.googleapis.com": "gcp-sa-vpcaccess.iam.gserviceaccount.com",
 	// Certificate Manager's and Identity-Aware Proxy's primary agents

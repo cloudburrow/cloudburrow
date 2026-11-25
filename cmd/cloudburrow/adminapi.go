@@ -105,6 +105,9 @@ type adminDeps struct {
 	filestore *filestoreService
 	// dataflow is Dataflow (#2215), nil unless enabled.
 	dataflow *dataflowService
+	// dataMigration is Database Migration Service (#2252), nil unless
+	// enabled.
+	dataMigration *dataMigrationService
 	// trace is Cloud Trace (#2118), nil unless enabled.
 	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
@@ -267,6 +270,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.dataflow != nil {
 		api.RegisterResetter(&dataflowResetter{svc: d.dataflow})
+	}
+	if d.dataMigration != nil {
+		api.RegisterResetter(&dataMigrationResetter{svc: d.dataMigration})
 	}
 	if d.trace != nil {
 		api.RegisterResetter(&traceResetter{svc: d.trace})

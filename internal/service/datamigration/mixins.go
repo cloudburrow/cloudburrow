@@ -115,6 +115,7 @@ func (o *operations) DeleteOperation(_ context.Context, req *longrunningpb.Delet
 // CancelOperation is accepted for a done operation, which it leaves as it
 // is; a running one (a destination being created, a job's step against
 // the servers) cannot be stopped part-way and is refused (UNVERIFIED).
+// Docs re-read 2026-11-25, still unanswered: https://docs.cloud.google.com/database-migration/docs/reference/rest/v1/projects.locations.operations/cancel
 func (o *operations) CancelOperation(_ context.Context, req *longrunningpb.CancelOperationRequest) (*emptypb.Empty, error) {
 	o.s.mu.Lock()
 	defer o.s.mu.Unlock()
@@ -295,4 +296,9 @@ func NewRESTHandler(s *Server) http.Handler {
 	t := Transcoder()
 	s.Register(t)
 	return t
+}
+
+// Operation is the operation named name, for the console.
+func (s *Server) Operation(name string) (*longrunningpb.Operation, error) {
+	return (&operations{s: s}).GetOperation(context.Background(), &longrunningpb.GetOperationRequest{Name: name})
 }
