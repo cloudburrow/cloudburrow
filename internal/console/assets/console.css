@@ -2498,6 +2498,10 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .spanner-editor { width: 100%; box-sizing: border-box; min-height: 160px; }
 .spanner-editor-tab { display: inline-flex; align-items: center; }
 .spanner-editor-actions { margin: 8px 0; }
+/* Run and its drop-down, one split button as Google's Spanner Studio draws it (#2029) */
+.spanner-run-split { display: inline-flex; align-items: stretch; position: relative; }
+.spanner-run-split > #spanner-run { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.spanner-run-split .spanner-run-options { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 1px solid color-mix(in srgb, var(--surface) 40%, transparent); padding: 0 8px; min-width: 0; }
 /* The query plan visualizer (#2029). */
 /* the panel sits beside the plan when there is room for both, else below it */
 .spanner-plan-layout { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
@@ -2531,6 +2535,10 @@ svg.bq-chart { display: block; border: 1px solid var(--border); border-radius: v
 .spanner-query-summary h3, .spanner-iterator-info h3 { margin: 0 0 8px; font-size: var(--text-heading-size); font-weight: 400; }
 .spanner-query-summary h4, .spanner-iterator-info h4 { margin: 12px 0 4px; font-size: var(--text-body-size); font-weight: 500; }
 .spanner-explanation { min-width: 0; }
+.spanner-timeline-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.spanner-timeline-row { display: grid; grid-template-columns: max-content minmax(60px, 1fr); gap: 2px 12px; align-items: center; font-size: var(--text-caption-size); }
+.spanner-timeline-track { display: block; background: var(--surface-alt); }
+.spanner-timeline-span { grid-column: 2; color: var(--text-muted); }
 .spanner-plan-info .resource-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; align-items: baseline; }
 .spanner-plan-info .resource-summary dd { margin: 0; }
 .form-templates { margin: 6px 0; }

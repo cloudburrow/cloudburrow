@@ -32,7 +32,7 @@ tracks it; a closed issue is named only where it says what was built.
 | IAM custom roles | 9 | 0 | 1 | 8 | 0 |
 | Vertex AI | 3 | 2 | 1 | 0 | 0 |
 | BigQuery | 26 | 4 | 7 | 15 | 0 |
-| Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 1 | 3 | 1 |
+| Spanner, Bigtable, Firestore, Datastore | 7 | 1 | 2 | 3 | 1 |
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | App Hub | 5 | 1 | 1 | 3 | 0 |
@@ -42,7 +42,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Console | 11 | 5 | 5 | 1 | 0 |
 | Remote compute | 0 | 0 | 0 | 0 | 0 |
 | Bring your own cloud | 2 | 1 | 0 | 0 | 1 |
-| **Total** | **106** | **15** | **36** | **48** | **7** |
+| **Total** | **108** | **16** | **37** | **48** | **7** |
 
 ## Cloud Storage
 
@@ -290,6 +290,8 @@ Closed: Datastore structured aggregations and Firestore `PartitionQuery` (#1405)
 | Gap | Why open | Size |
 |---|---|---|
 | Whether production reorders an array's excluded values after its indexed ones, as the emulator does (#941) | needs live GCP | S |
+| Spanner Graph plans (#2029): PLAN and PROFILE plan Google's documented GQL statements (label expressions, either-way edges, OPTIONAL MATCH, NEXT, LET, FOR, WITH, path modes, ANY and ANY SHORTEST, `{0,n}` quantifiers, [compatibility.md](compatibility.md)); left, refused by name in those two modes while NORMAL runs them: a quantified path pattern of more than one edge (`((a)-[]->(b)){1,3}`), and a path variable as a value (`TO_JSON(p)`) | not built yet | M |
+| Spanner Graph in the emulator (#2029): Google's documented examples the emulator does not run in any mode: `PROPERTY_EXISTS`, `COUNT` of a group variable, `ANY CHEAPEST` with `COST`; and it does not keep a GQL `RETURN ... ORDER BY`'s order (the first two rows of FinGraph's `ORDER BY name` come back swapped) | no emulator support | M |
 | Firestore: `ExecutePipeline` runs on Enterprise edition databases since #1500, its stages and functions since #1523 and #1613 ([compatibility.md](compatibility.md)); left: full-text search (`document_matches`, `score`) is `UNIMPLEMENTED`, Google's reference defining neither its tokenization nor its score, and the explain stats' text is CloudBurrow's own; rechecked 2026-11-18: https://docs.cloud.google.com/firestore/native/docs/text-search documents `documentMatches`' query syntax (phrases, AND, exclusion) and `score()` sorting, still in preview, but neither the text index's tokenization nor how the score is computed (#1577) | not documented by Google | M |
 | Spanner: 1 RPC refused, naming why: `InternalUpdateGraphOperation`, which Google documents as "an internal API called by Spanner Graph jobs. You should never need to call this API directly", every field "Internal field, do not use directly", so there is no behaviour to serve ([spanner.md](coverage/spanner.md)). `AddSplitPoints` is a stored no-op of the call front since #1523 (the emulator never splits), and `FetchCacheUpdate` answers an empty location-aware routing cache since #1523 (one server, nothing to route). Backups and restores, backup schedules, instance configurations (Google's and custom), `MoveInstance`, partition updates, database roles, the operation listings and IAM on backups and roles are served by the call front since #1498; rechecked 2026-11-18, the reference unchanged (#1577) | not documented by Google | S |
 | Bigtable: `OpenMaterializedView`'s sessions open but their `ReadRow` is refused `UNIMPLEMENTED`, as `ReadRows` of a materialized view is: Google documents reading a continuous materialized view with `ReadRows`, but neither the column family its aggregate columns are stored in nor how its row key is encoded without a `_key` column (docs re-read 2026-11-17 and 2026-11-18: <https://docs.cloud.google.com/bigtable/docs/continuous-materialized-view-queries>), so its rows are read with SQL and the client falls back to the classic path ([bigtable.md](coverage/bigtable.md)). Change streams (since #1523) have one partition, which the API allows, and a collected cell's `GARBAGE_COLLECTION` record names the cell's millisecond as its time range, UNVERIFIED (docs re-read 2026-11-17 and 2026-11-18: <https://docs.cloud.google.com/bigtable/docs/change-streams-overview> names none) (#1577) | not documented by Google | M |

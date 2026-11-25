@@ -29959,7 +29959,7 @@ function btSaveDialog({ title, label, value, regions, submit }) {
 // scan", "Stream aggregate", "Distributed union".
 function spannerOpName(n) {
   const m = n.meta || {};
-  if (n.name === "Scan") return { TableScan: "Table scan", IndexScan: "Index scan", BatchScan: "Batch scan" }[m.scan_type] || "Scan";
+  if (n.name === "Scan") return { TableScan: "Table scan", IndexScan: "Index scan", BatchScan: "Batch scan", RecursiveSpoolScan: "Recursive spool scan" }[m.scan_type] || "Scan";
   if (n.name === "Aggregate" && m.iterator_type) return `${m.iterator_type} aggregate`;
   return n.name.charAt(0) + n.name.slice(1).toLowerCase();
 }
@@ -30033,6 +30033,25 @@ function spannerExplanation(r) {
       kids.length ? el("ul", { role: "group" }, ...kids.map((k) => subtree(k.node, k.type))) : null);
   };
   const st = r.stats || {};
+  // Query execution timeline: how long each machine group ran its part of
+  // the query, from the start of its first run to the end of its last
+  // (Google's visualizer page). A machine group is the root server and each
+  // remote call's servers; the engine runs every table in one split, so a
+  // Distributed union makes only its local call and the root group runs the
+  // whole query, for the query's elapsed time.
+  const timeline = () => {
+    if (!st.elapsedTime) return null;
+    const total = num(st.elapsedTime);
+    const ms = (v) => (v < 1 ? "<1 ms" : `${v.toFixed(2)} ms`);
+    const groups = [{ name: "Root", start: 0, end: total }];
+    return el("section", { class: "spanner-query-timeline", id: "spanner-query-timeline", "aria-label": "Query execution timeline" },
+      el("h4", { text: "Query execution timeline" }),
+      el("ol", { class: "spanner-timeline-rows" }, ...groups.map((g) => el("li", { class: "spanner-timeline-row" },
+        el("span", { class: "spanner-timeline-name", text: g.name }),
+        el("span", { class: "spanner-timeline-track", "aria-hidden": "true" },
+          el("span", { class: "spanner-plan-bar", style: `margin-left:${total ? Math.round(100 * g.start / total) : 0}%;width:${Math.max(4, total ? Math.round(100 * (g.end - g.start) / total) : 100)}%` })),
+        el("span", { class: "mono spanner-timeline-span", text: `${ms(g.start)} to ${ms(g.end)}` })))));
+  };
   const summary = () => el("section", { class: "spanner-query-summary", id: "spanner-query-summary", "aria-label": "Query summary" },
     el("h3", { text: "Query summary" }),
     el("dl", { class: "resource-summary" },
@@ -30047,6 +30066,7 @@ function spannerExplanation(r) {
         ["Highest row count", top.rows, (n) => n.stats.rows]].filter(([, n]) => n)
         .flatMap(([k, n, v]) => [el("dt", { text: k }), el("dd", {}, el("button", { type: "button", class: "link-button",
           "aria-label": `${k}: ${spannerOpName(n)}`, text: `${v(n)} (${spannerOpName(n)})`, onclick: () => select(n) }))])) : null,
+    timeline(),
     r.planNote ? el("p", { class: "unavailable", id: "spanner-plan-note", text: r.planNote }) : null);
   const iterator = (n) => {
     const m = n.meta || {};
@@ -30122,6 +30142,29 @@ function renderSpannerStudio(panel, route, segments, project) {
   const editor = el("textarea", { class: "mono spanner-editor", id: "spanner-editor", rows: "10", spellcheck: "false",
     "aria-label": "Query editor", placeholder: "SELECT * FROM ..." });
   const run = el("button", { class: "primary", id: "spanner-run", type: "button", text: "Run" });
+  // Run's drop-down, as Google's Spanner Studio has it: Run produces the
+  // results and the explanation (PROFILE mode) unless it is changed to
+  // Results only (NORMAL mode) or Explanation only (PLAN mode).
+  const modeKey = `cb.spanner.studio.runmode.${project}`;
+  let runMode = "both";
+  try { runMode = sessionStorage.getItem(modeKey) || "both"; } catch { /* per-page only */ }
+  const runModes = [["both", "Results and explanation"], ["results", "Results only"], ["explanation", "Explanation only"]];
+  if (!runModes.some(([id]) => id === runMode)) runMode = "both";
+  const setRunMode = (m) => {
+    runMode = m;
+    try { sessionStorage.setItem(modeKey, m); } catch { /* per-page only */ }
+    run.textContent = m === "both" ? "Run" : `Run (${runModes.find(([id]) => id === m)[1].toLowerCase()})`;
+  };
+  const runMenu = bqMenu("Run options", runModes.map(([id, label]) => ({ label, checked: () => runMode === id, run: () => setRunMode(id) })));
+  {
+    const b = runMenu.querySelector("button");
+    b.classList.remove("icon-button", "bq-node-menu");
+    b.classList.add("primary", "spanner-run-options");
+    b.id = "spanner-run-options";
+    b.setAttribute("title", "Run options");
+    b.textContent = "▾";
+  }
+  setRunMode(runMode);
   const explain = el("button", { class: "secondary", id: "spanner-explain", type: "button", text: "Explain" });
   const clear = el("button", { class: "secondary", id: "spanner-clear", type: "button", text: "Clear" });
   const resultTabs = el("div", { class: "tab-strip spanner-result-tabs", role: "tablist", "aria-label": "Query results" });
@@ -30177,11 +30220,12 @@ function renderSpannerStudio(panel, route, segments, project) {
   const execute = async (write = false) => {
     const sql = editor.value.trim();
     if (!sql) return;
+    if (runMode === "explanation" && !write) { last.results = null; return explainQuery(run); }
     setBusy(run, true);
     resultTab = "results"; drawResultTabs();
     setChildren(results, el("p", { class: "unavailable" }, spinner("Running"), " Running…"));
     try {
-      const res = await call("run", { sql, write });
+      const res = await call("run", { sql, write, mode: runMode === "results" ? "results" : "" });
       if (res.confirm) {
         setBusy(run, false);
         setChildren(results);
@@ -30192,7 +30236,7 @@ function renderSpannerStudio(panel, route, segments, project) {
       last.results = res;
       // Run is PROFILE mode: its plan and statistics are the Explanation
       // tab's.
-      if (res.kind === "query") last.explanation = res;
+      if (res.kind === "query") last.explanation = runMode === "results" ? null : res;
       if (res.kind !== "query") loadExplorer();
       announce(res.kind === "query" ? `Query complete: ${(res.rows || []).length} rows` : (res.message || "Done"));
     } catch (err) {
@@ -30203,19 +30247,23 @@ function renderSpannerStudio(panel, route, segments, project) {
     drawResults();
   };
   run.addEventListener("click", () => execute());
-  explain.addEventListener("click", async () => {
+  // Explain, and Run set to Explanation only: the query's plan (PLAN
+  // mode), on the Explanation tab.
+  const explainQuery = async (button) => {
     const sql = editor.value.trim();
     if (!sql) return;
-    setBusy(explain, true);
+    setBusy(button, true);
     try {
       last.explanation = await call("explain", { sql });
+      announce("Explanation ready");
     } catch (err) {
       last.explanation = { error: err.message };
     } finally {
-      setBusy(explain, false);
+      setBusy(button, false);
     }
     resultTab = "explanation"; drawResultTabs(); drawResults();
-  });
+  };
+  explain.addEventListener("click", () => explainQuery(explain));
   clear.addEventListener("click", () => { editor.value = ""; tabs[current].sql = ""; save(); editor.focus(); });
 
   const quote = (dialect, n) => (dialect === "POSTGRESQL" ? `"${n.replaceAll('"', '""')}"` : `\`${n.replaceAll("`", "\\`")}\``);
@@ -30263,7 +30311,7 @@ function renderSpannerStudio(panel, route, segments, project) {
     el("div", { class: "spanner-workspace" },
       strip,
       editor,
-      el("div", { class: "action-bar spanner-editor-actions" }, run, explain, clear),
+      el("div", { class: "action-bar spanner-editor-actions" }, el("span", { class: "spanner-run-split" }, run, runMenu), explain, clear),
       resultTabs,
       results)));
   loadExplorer();
