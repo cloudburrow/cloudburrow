@@ -308,6 +308,19 @@ func applyMask(dst, src proto.Message, mask *fieldmaskpb.FieldMask, allowed ...s
 	return nil
 }
 
+// impliedMask is AIP-134's mask for an update that names none: the fields
+// of allowed that src populates.
+func impliedMask(src proto.Message, allowed ...string) *fieldmaskpb.FieldMask {
+	r := src.ProtoReflect()
+	m := &fieldmaskpb.FieldMask{}
+	for _, a := range allowed {
+		if f := r.Descriptor().Fields().ByName(protoreflect.Name(a)); f != nil && r.Has(f) {
+			m.Paths = append(m.Paths, a)
+		}
+	}
+	return m
+}
+
 func camelToSnake(s string) string {
 	var b strings.Builder
 	for _, r := range s {

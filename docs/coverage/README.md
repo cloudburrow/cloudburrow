@@ -71,7 +71,7 @@ Do not edit these files by hand.
 | [Filestore (v1beta1)](filestorev1beta1.md) | 23 | 10 | 0 | 0 | 13 | 0 | 0 | 0 |
 | [Cloud Trace API (v1 and v2)](trace.md) | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Serverless VPC Access (v1)](vpcaccess.md) | 4 | 4 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Certificate Manager (v1)](certificatemanager.md) | 30 | 25 | 0 | 0 | 5 | 0 | 0 | 0 |
+| [Certificate Manager (v1)](certificatemanager.md) | 30 | 28 | 0 | 0 | 2 | 0 | 0 | 0 |
 | [Network Security (v1)](networksecurity.md) | 63 | 54 | 0 | 0 | 9 | 0 | 0 | 0 |
 | [Network Services (v1)](networkservices.md) | 83 | 15 | 0 | 68 | 0 | 0 | 0 | 0 |
 | [Identity-Aware Proxy (v1)](iap.md) | 19 | 13 | 0 | 0 | 6 | 0 | 0 | 0 |

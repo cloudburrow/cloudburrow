@@ -1,7 +1,9 @@
 package networksecurity
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"regexp"
 	"sort"
@@ -178,11 +180,85 @@ func Transcoder() *rest.Transcoder {
 // Routes is every bound route.
 func Routes() []rest.Route { return Transcoder().Routes() }
 
-// NewRESTHandler is the JSON API over s.
+// NewRESTHandler is the JSON API over s. A TLS inspection policy's JSON
+// names its minTlsVersion and tlsFeatureProfile even when they are unset
+// (tlsInspectionDefaults).
 func NewRESTHandler(s *Server) http.Handler {
 	t := Transcoder()
 	s.Register(t)
-	return t
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/"+collTLSInspect) && !strings.Contains(r.URL.Path, "/operations/") {
+			t.ServeHTTP(w, r)
+			return
+		}
+		rec := &bufferedWriter{h: http.Header{}, code: http.StatusOK}
+		t.ServeHTTP(rec, r)
+		body := rec.buf.Bytes()
+		if rec.code == http.StatusOK {
+			body = tlsInspectionDefaults(body)
+		}
+		for k, v := range rec.h {
+			w.Header()[k] = v
+		}
+		w.Header().Del("Content-Length")
+		w.WriteHeader(rec.code)
+		_, _ = w.Write(body)
+	})
+}
+
+type bufferedWriter struct {
+	h    http.Header
+	code int
+	buf  bytes.Buffer
+}
+
+func (b *bufferedWriter) Header() http.Header         { return b.h }
+func (b *bufferedWriter) WriteHeader(c int)           { b.code = c }
+func (b *bufferedWriter) Write(p []byte) (int, error) { return b.buf.Write(p) }
+
+// tlsInspectionDefaults writes an unset minTlsVersion and
+// tlsFeatureProfile of every TLS inspection policy in body (one, a list,
+// or an operation's response) as TLS_VERSION_UNSPECIFIED and
+// PROFILE_UNSPECIFIED, which proto3 JSON leaves out. Google's JSON names
+// them: hashicorp/google's google_network_security_tls_inspection_policy
+// gives both those defaults (not computed), so it plans clean after a
+// read only if the API returns them (8.12.0, #1578).
+func tlsInspectionDefaults(body []byte) []byte {
+	var m map[string]any
+	if json.Unmarshal(body, &m) != nil {
+		return body
+	}
+	changed := false
+	fix := func(v any) {
+		p, ok := v.(map[string]any)
+		if !ok {
+			return
+		}
+		if name, _ := p["name"].(string); !strings.Contains(name, "/"+collTLSInspect+"/") {
+			return
+		}
+		for k, d := range map[string]string{"minTlsVersion": "TLS_VERSION_UNSPECIFIED", "tlsFeatureProfile": "PROFILE_UNSPECIFIED"} {
+			if _, ok := p[k]; !ok {
+				p[k] = d
+				changed = true
+			}
+		}
+	}
+	fix(m)
+	fix(m["response"])
+	if l, ok := m[collTLSInspect].([]any); ok {
+		for _, it := range l {
+			fix(it)
+		}
+	}
+	if !changed {
+		return body
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return out
 }
 
 // Handles is whether a request on the Compute Engine port is this API's:
