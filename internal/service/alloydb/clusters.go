@@ -257,6 +257,7 @@ func (s *Server) clusterView(c *alloydbpb.Cluster) *alloydbpb.Cluster {
 			info.EarliestRestorableTime = timestamppb.New(t)
 		}
 	}
+	s.bdrView(out)
 	return out
 }
 
@@ -387,7 +388,7 @@ func (s *Server) UpdateCluster(_ context.Context, req *alloydbpb.UpdateClusterRe
 			cb.RecoveryWindowDays = defaultRecoveryWindowDays
 		}
 	}
-	wasPITR := c.GetContinuousBackupConfig().GetEnabled()
+	wasPITR := s.pitrOn(c)
 	s.stampContinuous(next)
 	if p := next.GetAutomatedBackupPolicy(); p != nil && p.Location == "" {
 		p.Location = m[2]
@@ -404,7 +405,7 @@ func (s *Server) UpdateCluster(_ context.Context, req *alloydbpb.UpdateClusterRe
 	// Turning continuous backup on or off changes the primary's WAL
 	// archiving, which a restart applies.
 	primary := s.primaryOf(c.GetName())
-	if primary != nil && wasPITR != next.GetContinuousBackupConfig().GetEnabled() && s.opts.Engine != nil {
+	if primary != nil && wasPITR != s.pitrOn(next) && s.opts.Engine != nil {
 		spec, _ := s.specOf(primary)
 		pitr := spec.PITR
 		s.background(op.Name, func(ctx context.Context) error {
@@ -561,8 +562,29 @@ func (s *Server) RestoreCluster(ctx context.Context, req *alloydbpb.RestoreClust
 		at        time.Time
 		dir       string
 		password  string // the postgres user's, which the restored data keeps
+		srcUsers  []*alloydbpb.User
 	)
+	bdr, isBDR, err := s.bdrRestoreSource(req, c)
+	if err != nil {
+		return nil, err
+	}
 	switch {
+	case isBDR:
+		// A Backup and DR backup or data source (#1524): a new cluster,
+		// whose primary is created next.
+		c.DatabaseVersion = bdr.version
+		dir, srcServer, at = bdr.dir, bdr.server, bdr.at
+		if srcServer != "" {
+			srcUsers = s.usersOf(bdr.fromCluster)
+		}
+		// Password authentication (#2208): the restored data keeps the
+		// source cluster's postgres password.
+		password = s.passwords[bdr.fromCluster]
+		if c.NetworkConfig == nil && c.Network == "" && !c.GetPscConfig().GetPscEnabled() {
+			if src, ok := s.clusters[bdr.fromCluster]; ok {
+				c.NetworkConfig = clone(src.GetNetworkConfig())
+			}
+		}
 	case req.GetBackupSource() != nil:
 		b, ok := s.backups[req.GetBackupSource().GetBackupName()]
 		if !ok {
@@ -630,9 +652,19 @@ func (s *Server) RestoreCluster(ctx context.Context, req *alloydbpb.RestoreClust
 	if err != nil {
 		return nil, err
 	}
-	var srcUsers []*alloydbpb.User
-	if srcServer != "" {
+	bdrDone := func(error) {}
+	if srcServer != "" && !isBDR {
 		srcUsers = s.usersOf(req.GetContinuousBackupSource().GetCluster())
+	}
+	if isBDR {
+		if bdr.category == "RESTORE" {
+			if err := setOverlayJSON(c, fieldBDRBackupSource, map[string]any{"backup": bdr.source}); err != nil {
+				return nil, err
+			}
+		}
+		job := s.bdrAPI.RestoreStarted(bdr.category, bdr.source, strings.Split(name, "/")[1], name, bdr.recoveryPoint)
+		api := s.bdrAPI
+		bdrDone = func(err error) { api.RestoreFinished(job, err) }
 	}
 	s.background(op.Name, func(ctx context.Context) error {
 		if srcServer == "" {
@@ -649,6 +681,7 @@ func (s *Server) RestoreCluster(ctx context.Context, req *alloydbpb.RestoreClust
 		}
 		return s.opts.Engine.RecoverTo(ctx, srcServer, at, dir)
 	}, func(err error) (proto.Message, error) {
+		bdrDone(err)
 		c, ok := s.clusters[name]
 		if !ok {
 			return nil, err

@@ -37,6 +37,18 @@ func (s *Server) instanceTemplates(c call, scope string) (obj, error) {
 	rel := coll + "/" + p[base]
 	o, ok := s.res[rel]
 	if !ok {
+		// A template is also named by its numeric ID, as Google's API
+		// takes it (Terraform reads one by self_link_unique's uniqueId).
+		if id := p[base]; id != "" && strings.Trim(id, "0123456789") == "" {
+			for k, t := range s.res {
+				if strings.HasPrefix(k, coll+"/") && !strings.Contains(k[len(coll)+1:], "/") && str(t, "id") == id {
+					rel, o, ok = k, t, true
+					break
+				}
+			}
+		}
+	}
+	if !ok {
 		return nil, notFound(rel)
 	}
 	switch c.method {

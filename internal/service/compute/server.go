@@ -20,6 +20,7 @@ package compute
 import (
 	"context"
 	"crypto/rand"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -177,9 +178,19 @@ type Server struct {
 	xdsOnce sync.Once
 	xdsGRPC *grpc.Server
 
-	mu  sync.Mutex
-	res map[string]obj // by relative name: projects/P/global/networks/N
-	ops map[string]obj // by relative name: projects/P/global/operations/O
+	mu sync.Mutex
+	// kms is Cloud KMS, for disks' customer-managed keys (#2206).
+	kms KeyService
+	// openKeys are the unwrapped data keys of encrypted disks and
+	// snapshots this process has opened, by wrapped key (diskkeys.go);
+	// never saved.
+	openKeys map[string][]byte
+	// csekPEM is the CSEK ingress key (PKCS #8 PEM), kept in the state
+	// file; csekPriv is it parsed.
+	csekPEM  string
+	csekPriv *rsa.PrivateKey
+	res      map[string]obj // by relative name: projects/P/global/networks/N
+	ops      map[string]obj // by relative name: projects/P/global/operations/O
 	// defaultDeleted are the projects whose default network was deleted,
 	// so it is not made again.
 	defaultDeleted map[string]bool
@@ -261,7 +272,7 @@ func (s *Server) Start(context.Context) error {
 		ctx, cancel := context.WithCancel(context.Background())
 		s.stopLoop = cancel
 		s.loops.Add(3)
-		go func() { defer s.loops.Done(); s.scheduleLoop(ctx) }()
+		go func() { defer s.loops.Done(); s.RunSnapshotSchedules(ctx) }()
 		go func() { defer s.loops.Done(); s.autoscaleLoop(ctx) }()
 		go func() { defer s.loops.Done(); s.rollLoop(ctx) }()
 	}
@@ -313,6 +324,9 @@ type state struct {
 	// Automated are the Private Service Connect endpoints service
 	// connectivity automation made (#2141, autoendpoints.go).
 	Automated map[string]bool `json:"automated,omitempty"`
+	// CSEKIngress is the key rsaEncryptedKey is unwrapped with
+	// (diskkeys.go).
+	CSEKIngress string `json:"csekIngress,omitempty"`
 }
 
 func (s *Server) restore() error {
@@ -345,6 +359,7 @@ func (s *Server) restore() error {
 	if st.Seeded != nil {
 		s.seeded = st.Seeded
 	}
+	s.csekPEM = st.CSEKIngress
 	return nil
 }
 
@@ -353,7 +368,7 @@ func (s *Server) saveLocked() error {
 	if s.opts.State == "" {
 		return nil
 	}
-	b, err := json.Marshal(state{Resources: s.res, Operations: s.ops, DefaultDeleted: s.defaultDeleted, Seeded: s.seeded, Automated: s.automated})
+	b, err := json.Marshal(state{Resources: s.res, Operations: s.ops, DefaultDeleted: s.defaultDeleted, Seeded: s.seeded, Automated: s.automated, CSEKIngress: s.csekPEM})
 	if err != nil {
 		return err
 	}
@@ -484,7 +499,11 @@ var linkKeys = map[string]bool{"selfLink": true, "network": true, "subnetwork": 
 	"sourceInstanceTemplate": true, "sourceMachineImage": true, "instanceTemplate": true, "instanceGroup": true,
 	"sourceSnapshotSchedulePolicy": true, "instance": true, "replacement": true, "replicaZones": true,
 	// Private Service Connect (#2140, psc.go).
-	"target": true, "targetService": true, "natSubnets": true, "endpoint": true, "consumerNetwork": true}
+	"target": true, "targetService": true, "natSubnets": true, "endpoint": true, "consumerNetwork": true,
+	// Regional disks and consistency groups (#2206).
+	"disk": true, "consistencyGroupPolicy": true, "sourceConsistencyGroupPolicy": true,
+	// Workload policies on managed instance groups (#2206).
+	"workloadPolicy": true}
 
 // renderNested makes the link fields of objects inside lists and objects
 // absolute (an instance's disks and network interfaces).

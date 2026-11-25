@@ -13,10 +13,13 @@ import (
 type fakeVMs struct{ free uint64 }
 
 func (fakeVMs) CreateDisk(context.Context, DiskSpec) error           { return nil }
+func (fakeVMs) CopyDisk(context.Context, DiskSpec, DiskSpec) error   { return nil }
 func (fakeVMs) DeleteDisk(context.Context, DiskSpec) error           { return nil }
 func (fakeVMs) ResizeDisk(context.Context, DiskSpec) error           { return nil }
 func (fakeVMs) Snapshot(context.Context, DiskSpec, string) error     { return nil }
 func (fakeVMs) DeleteSnapshot(context.Context, string) error         { return nil }
+func (fakeVMs) SealDisk(context.Context, DiskSpec) error             { return nil }
+func (fakeVMs) UnsealDisk(context.Context, DiskSpec) error           { return nil }
 func (fakeVMs) Start(context.Context, VMSpec) error                  { return nil }
 func (fakeVMs) Stop(context.Context, VMSpec) error                   { return nil }
 func (fakeVMs) Suspend(context.Context, VMSpec) error                { return nil }

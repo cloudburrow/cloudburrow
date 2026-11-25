@@ -24,6 +24,12 @@ func (m *memVMs) CreateDisk(_ context.Context, d compute.DiskSpec) error {
 	m.data[d.Key] = m.data[d.SourceSnapshot]
 	return nil
 }
+func (m *memVMs) CopyDisk(_ context.Context, src, dst compute.DiskSpec) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.data[dst.Key] = m.data[src.Key]
+	return nil
+}
 func (m *memVMs) DeleteDisk(_ context.Context, d compute.DiskSpec) error { return nil }
 func (m *memVMs) ResizeDisk(context.Context, compute.DiskSpec) error     { return nil }
 func (m *memVMs) Snapshot(_ context.Context, d compute.DiskSpec, key string) error {
@@ -38,6 +44,8 @@ func (m *memVMs) DeleteSnapshot(_ context.Context, key string) error {
 	delete(m.data, key)
 	return nil
 }
+func (m *memVMs) SealDisk(context.Context, compute.DiskSpec) error             { return nil }
+func (m *memVMs) UnsealDisk(context.Context, compute.DiskSpec) error           { return nil }
 func (m *memVMs) Start(context.Context, compute.VMSpec) error                  { return nil }
 func (m *memVMs) Stop(context.Context, compute.VMSpec) error                   { return nil }
 func (m *memVMs) Suspend(context.Context, compute.VMSpec) error                { return nil }
@@ -108,13 +116,14 @@ func TestComputeBackupAndRestore(t *testing.T) {
 		t.Fatalf("vault: %d %v", code, out)
 	}
 	for _, typ := range []string{"Instance", "Disk"} {
-		body := strings.Replace(planBody, "sqladmin.googleapis.com/Instance", "compute.googleapis.com/"+typ, 1)
+		// No logRetentionDays: it applies to Cloud SQL and AlloyDB only.
+		body := strings.Replace(strings.Replace(planBody, "sqladmin.googleapis.com/Instance", "compute.googleapis.com/"+typ, 1), `,"logRetentionDays":"7"`, "", 1)
 		if code, out := call(t, s, "POST", loc+"/backupPlans?backupPlanId="+strings.ToLower(typ), body); code != 200 {
 			t.Fatalf("%s plan: %d %v", typ, code, out)
 		}
 	}
-	hourly := strings.Replace(strings.Replace(planBody, "sqladmin.googleapis.com/Instance", "compute.googleapis.com/Disk", 1),
-		`"recurrenceType":"DAILY"`, `"recurrenceType":"HOURLY","hourlyFrequency":1`, 1)
+	hourly := strings.Replace(strings.Replace(strings.Replace(planBody, "sqladmin.googleapis.com/Instance", "compute.googleapis.com/Disk", 1),
+		`"recurrenceType":"DAILY"`, `"recurrenceType":"HOURLY","hourlyFrequency":1`, 1), `,"logRetentionDays":"7"`, "", 1)
 	if code, out := call(t, s, "POST", loc+"/backupPlans?backupPlanId=hourly", hourly); code != 200 {
 		t.Errorf("an hourly frequency of 1 for a disk: %d %v", code, out)
 	}
@@ -227,7 +236,7 @@ func TestComputeBackupAndRestore(t *testing.T) {
 	for body, want := range map[string]int{
 		`{"diskTargetEnvironment":{"project":"p","zone":"us-central1-a"},"diskRestoreProperties":{}}`:                                  http.StatusBadRequest,
 		`{"computeInstanceTargetEnvironment":{"project":"p","zone":"us-central1-a"},"computeInstanceRestoreProperties":{"name":"x"}}`:  http.StatusBadRequest,
-		`{"regionDiskTargetEnvironment":{"project":"p","region":"us-central1"}}`:                                                       http.StatusNotImplemented,
+		`{"regionDiskTargetEnvironment":{"project":"p","region":"us-central1"},"diskRestoreProperties":{"name":"r"}}`:                  http.StatusBadRequest,
 		`{"diskTargetEnvironment":{"project":"p","zone":"us-central1-a"},"diskRestoreProperties":{"name":"data2x","storagePool":"x"}}`: http.StatusNotImplemented,
 		`{"diskTargetEnvironment":{"project":"p","zone":"us-central1-b"},"diskRestoreProperties":{"name":"data2"}}`:                    http.StatusConflict,
 	} {
@@ -251,5 +260,104 @@ func TestComputeBackupAndRestore(t *testing.T) {
 	mem.mu.Unlock()
 	if left != 2 {
 		t.Errorf("snapshots left after deleting the disk's backup: %d, want the VM backup's 2", left)
+	}
+}
+
+// TestRegionalDiskBackupAndRestore (#2206): a plan and association for a
+// regional disk (compute.googleapis.com/RegionDisk), its backup
+// (diskBackupProperties with region and replicaZones), and restores into
+// a regional disk (regionDiskTargetEnvironment, replica zones checked) and
+// into a zonal one, the data read back.
+func TestRegionalDiskBackupAndRestore(t *testing.T) {
+	mem := &memVMs{data: map[string]string{}}
+	api, err := compute.New(compute.Options{VMs: mem})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer("", &fakeSQL{runs: map[string]Run{}}, "")
+	s.SetCompute(func() Compute { return api })
+	op, err := api.Call("POST", "p", "regions/us-central1/disks", nil, map[string]any{"name": "rd", "sizeGb": "10",
+		"replicaZones": []any{"zones/us-central1-a", "zones/us-central1-f"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := api.Call("POST", "p", "regions/us-central1/operations/"+op["name"].(string)+"/wait", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	rd, _ := api.Call("GET", "p", "regions/us-central1/disks/rd", nil, nil)
+	mem.mu.Lock()
+	mem.data["disk-"+rd["id"].(string)] = "regional data"
+	mem.mu.Unlock()
+	if code, out := call(t, s, "POST", loc+"/backupVaults?backupVaultId=v", `{"backupMinimumEnforcedRetentionDuration":"86400s"}`); code != 200 {
+		t.Fatalf("vault: %d %v", code, out)
+	}
+	body := strings.Replace(strings.Replace(planBody, "sqladmin.googleapis.com/Instance", ComputeRegionDiskResourceType, 1), `,"logRetentionDays":"7"`, "", 1)
+	if code, out := call(t, s, "POST", loc+"/backupPlans?backupPlanId=rd", body); code != 200 {
+		t.Fatalf("regional disk plan: %d %v", code, out)
+	}
+	for res, want := range map[string]int{
+		"projects/p/zones/us-central1-a/disks/rd":   http.StatusBadRequest, // a zonal path for a RegionDisk
+		"projects/p/regions/us-central1/disks/nope": http.StatusNotFound,
+	} {
+		if code, out := call(t, s, "POST", loc+"/backupPlanAssociations?backupPlanAssociationId=bad",
+			`{"backupPlan":"projects/p/locations/us-central1/backupPlans/rd","resourceType":"`+ComputeRegionDiskResourceType+`","resource":"`+res+`"}`); code != want {
+			t.Errorf("association of %s: %d %v, want %d", res, code, out, want)
+		}
+	}
+	if code, out := call(t, s, "POST", "/v1/projects/p/locations/us-east1/backupPlanAssociations?backupPlanAssociationId=bad",
+		`{"backupPlan":"projects/p/locations/us-central1/backupPlans/rd","resourceType":"`+ComputeRegionDiskResourceType+`","resource":"projects/p/regions/us-central1/disks/rd"}`); code != 400 {
+		t.Errorf("an association outside the disk's region: %d %v", code, out)
+	}
+	if code, out := call(t, s, "POST", loc+"/backupPlanAssociations?backupPlanAssociationId=rd",
+		`{"backupPlan":"projects/p/locations/us-central1/backupPlans/rd","resourceType":"`+ComputeRegionDiskResourceType+`","resource":"//compute.googleapis.com/projects/p/regions/us-central1/disks/rd"}`); code != 200 {
+		t.Fatalf("regional disk association: %d %v", code, out)
+	}
+	code, bop := call(t, s, "POST", loc+"/backupPlanAssociations/rd:triggerBackup", `{"ruleId":"daily"}`)
+	if code != 200 {
+		t.Fatalf("triggerBackup: %d %v", code, bop)
+	}
+	if out := waitOp(t, s, bop); out["error"] != nil {
+		t.Fatalf("backup: %v", out["error"])
+	}
+	_, a := call(t, s, "GET", loc+"/backupPlanAssociations/rd", "")
+	_, list := call(t, s, "GET", "/v1/"+a["dataSource"].(string)+"/backups", "")
+	b := list["backups"].([]any)[0].(map[string]any)
+	dp := b["diskBackupProperties"].(map[string]any)
+	if dp["region"] != "projects/p/regions/us-central1" || dp["zone"] != nil || len(dp["replicaZones"].([]any)) != 2 ||
+		dp["sourceDisk"] != "projects/p/regions/us-central1/disks/rd" || b["gcpResource"].(map[string]any)["type"] != ComputeRegionDiskResourceType {
+		t.Fatalf("regional disk backup: %v", b)
+	}
+	mem.mu.Lock()
+	mem.data["disk-"+rd["id"].(string)] = "changed"
+	mem.mu.Unlock()
+	for body, want := range map[string]int{
+		`{"regionDiskTargetEnvironment":{"project":"p","region":"us-central1","replicaZones":["zones/us-central1-a"]},"diskRestoreProperties":{"name":"x"}}`:                    http.StatusBadRequest,
+		`{"regionDiskTargetEnvironment":{"project":"p","region":"us-central1","replicaZones":["zones/us-central1-a","zones/us-east1-b"]},"diskRestoreProperties":{"name":"x"}}`: http.StatusBadRequest,
+		`{"computeInstanceTargetEnvironment":{"project":"p","zone":"us-central1-a"},"computeInstanceRestoreProperties":{"name":"x"}}`:                                           http.StatusBadRequest,
+	} {
+		if code, out := call(t, s, "POST", "/v1/"+b["name"].(string)+":restore", body); code != want {
+			t.Errorf("restore %s: %d %v, want %d", body, code, out, want)
+		}
+	}
+	restore := func(body string) {
+		t.Helper()
+		code, op := call(t, s, "POST", "/v1/"+b["name"].(string)+":restore", body)
+		if code != 200 {
+			t.Fatalf("restore: %d %v", code, op)
+		}
+		if out := waitOp(t, s, op); out["error"] != nil {
+			t.Fatalf("restore: %v", out["error"])
+		}
+	}
+	restore(`{"regionDiskTargetEnvironment":{"project":"p","region":"us-central1","replicaZones":["https://www.googleapis.com/compute/v1/projects/p/zones/us-central1-b","zones/us-central1-c"]},
+		"diskRestoreProperties":{"name":"rd2","sizeGb":"10","type":"pd-ssd"}}`)
+	rd2, err := api.Call("GET", "p", "regions/us-central1/disks/rd2", nil, nil)
+	if err != nil || !strings.HasSuffix(rd2["type"].(string), "regions/us-central1/diskTypes/pd-ssd") || len(rd2["replicaZones"].([]any)) != 2 ||
+		mem.data["disk-"+rd2["id"].(string)] != "regional data" {
+		t.Fatalf("the restored regional disk: %v %v", rd2, err)
+	}
+	restore(`{"diskTargetEnvironment":{"project":"p","zone":"us-central1-a"},"diskRestoreProperties":{"name":"zd","sizeGb":"10","type":"pd-balanced"}}`)
+	if zd, err := api.Call("GET", "p", "zones/us-central1-a/disks/zd", nil, nil); err != nil || mem.data["disk-"+zd["id"].(string)] != "regional data" {
+		t.Errorf("the regional disk's backup restored as a zonal disk: %v %v", zd, err)
 	}
 }

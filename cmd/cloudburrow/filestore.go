@@ -51,7 +51,13 @@ type filestoreService struct {
 	csiStop context.CancelFunc
 	csiDone chan struct{}
 	logf    func(format string, args ...any)
-	server  *grpctransport.Server
+	// backupDR resolves the Backup and DR backups a new instance is
+	// restored from (#1524); nil without backupdr.
+	backupDR filestore.BackupDR
+	server   *grpctransport.Server
+	// rest is the JSON API, in process, for Backup and DR's console
+	// pages (#1524); nil until started.
+	rest    http.Handler
 	api     *filestore.Server
 	backend *filestoreserver.Docker
 }
@@ -84,6 +90,14 @@ func (s *filestoreService) API() *filestore.Server {
 	return s.api
 }
 
+// REST is the JSON API in process, nil until started.
+func (s *filestoreService) REST() http.Handler {
+	if s == nil {
+		return nil
+	}
+	return s.rest
+}
+
 // Addr is the bound address.
 func (s *filestoreService) Addr() string {
 	if s == nil || s.server == nil {
@@ -110,6 +124,10 @@ func (s *filestoreService) Start(ctx context.Context) error {
 		}
 	}
 	api, err := filestore.NewServer(state, opts)
+	if err == nil && s.backupDR != nil {
+		// Backup and DR backups restored into new instances (#1524).
+		api.SetBackupDR(s.backupDR)
+	}
 	if err != nil {
 		return err
 	}
@@ -123,6 +141,7 @@ func (s *filestoreService) Start(ctx context.Context) error {
 		s.server.Interpose(i)
 	}
 	var jsonAPI http.Handler = filestore.NewRESTHandler(api)
+	s.rest = jsonAPI
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}

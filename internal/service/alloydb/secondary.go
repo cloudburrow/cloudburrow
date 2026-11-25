@@ -248,7 +248,7 @@ func (s *Server) PromoteCluster(_ context.Context, req *alloydbpb.PromoteCluster
 // promotion makes it; the caller holds mu.
 func (s *Server) primarySpec(in *alloydbpb.Instance, c *alloydbpb.Cluster) ServerSpec {
 	spec := ServerSpec{Server: serverName(in.GetName()), Version: c.GetDatabaseVersion().String(), Flags: map[string]string{},
-		Password: s.passwords[c.GetName()], PITR: c.GetContinuousBackupConfig().GetEnabled(), Pooler: poolerOf(in),
+		Password: s.passwords[c.GetName()], PITR: s.pitrOn(c), Pooler: poolerOf(in),
 		Omni: s.omniSpec(c.GetName())}
 	for k, v := range in.GetDatabaseFlags() {
 		spec.Flags[k] = v

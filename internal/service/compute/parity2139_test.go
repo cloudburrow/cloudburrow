@@ -108,7 +108,9 @@ func TestCustomImagesAndCloneDisk(t *testing.T) {
 	cl := s.res["projects/p2139/zones/us-central1-a/disks/clone"]
 	cspec := s.diskSpecLocked(cl)
 	s.mu.Unlock()
-	if cl["sizeGb"] != "20" || !strings.HasPrefix(cspec.SourceSnapshot, "disk-") || cspec.Image == nil {
+	// Its storage is copied from the source's (CopyDisk, #2206), and it
+	// runs the source's image.
+	if cl["sizeGb"] != "20" || str(cl, "sourceDisk") == "" || cspec.Image == nil {
 		t.Fatalf("clone = %v %+v", cl, cspec)
 	}
 	if _, err := s.Call("POST", "p2139", "zones/us-central1-a/disks", nil, obj{"name": "far", "sourceDisk": "projects/p2139/zones/us-east1-b/disks/src"}); err == nil {
@@ -152,7 +154,9 @@ func TestSnapshotSchedulesRun(t *testing.T) {
 		s.mu.Lock()
 		from := *now
 		*now = to
-		s.runSchedulesLocked(from, to)
+		_ = from
+		s.runSchedulesLocked()
+		s.runInstanceSchedulesLocked(to)
 		s.mu.Unlock()
 		s.waitOp(context.Background(), "")
 		waitIdle(t, s)
@@ -204,7 +208,9 @@ func TestInstanceSchedulesStartAndStop(t *testing.T) {
 		s.mu.Lock()
 		from := *now
 		*now = to
-		s.runSchedulesLocked(from, to)
+		_ = from
+		s.runSchedulesLocked()
+		s.runInstanceSchedulesLocked(to)
 		s.mu.Unlock()
 		s.waitOp(context.Background(), "")
 		waitIdle(t, s)

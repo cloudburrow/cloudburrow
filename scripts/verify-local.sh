@@ -496,7 +496,7 @@ browser_suite() {  # <shard> <dir> <flags...>
   # and DR Service and Secret Manager, which holds Run SQL's password, and
   # the Compute Engine API for Backup and DR's VM and disk pages, and Cloud
   # Storage, which AlloyDB's Export writes to (#2191).
-  if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE; fi
+  if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE,ALLOYDB; fi
   # The served shard's: the Kubernetes Engine API and the kubeconfig (#1913).
   if [ "$shard" = served ]; then BROWSER_VARS+=,GKE,KUBECONFIG,TRACE,LOGGING; fi
   # The vpcvms shard's: the Compute Engine API, which the load balancer,

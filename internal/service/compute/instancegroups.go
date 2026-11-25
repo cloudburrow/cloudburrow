@@ -405,6 +405,11 @@ func (s *Server) instanceGroupManagers(c call, l igLoc) (obj, error) {
 		}
 		// A zonal group's autoscaler sets its size again at its next
 		// pass, as Google's does.
+		if workloadPolicyOf(m) != "" {
+			if err := s.checkWorkloadTemplatesLocked(l.project, l.region, managerTemplates(m), size); err != nil {
+				return nil, err
+			}
+		}
 		m["targetSize"] = float64(size)
 		return s.reconcileManagerLocked(l, rel, m, "resize")
 	case post && verb == "setInstanceTemplate":
@@ -417,6 +422,11 @@ func (s *Server) instanceGroupManagers(c call, l igLoc) (obj, error) {
 		}
 		if r := lastSeg(str(s.res[t], "region")); r != "" && r != l.region {
 			return nil, invalid("Invalid value for field 'resource.instanceTemplate': '%s'. A regional instance template makes VMs of its region only.", str(c.body, "instanceTemplate"))
+		}
+		if workloadPolicyOf(m) != "" {
+			if err := s.checkWorkloadTemplatesLocked(l.project, l.region, []string{t}, int(m["targetSize"].(float64))); err != nil {
+				return nil, err
+			}
 		}
 		m["instanceTemplate"] = t
 		m["versions"] = []any{obj{"instanceTemplate": t, "targetSize": obj{"calculated": m["targetSize"]}}}
@@ -604,6 +614,14 @@ func (s *Server) insertManager(c call, l igLoc) (obj, error) {
 	}
 	if d := str(b, "description"); d != "" {
 		m["description"] = d
+	}
+	if wp, ok, err := s.checkManagerWorkloadLocked(l, b, m, false, 0); err != nil {
+		return nil, err
+	} else if ok {
+		if err := s.checkWorkloadTemplatesLocked(l.project, l.region, managerTemplates(m), int(size)); err != nil {
+			return nil, err
+		}
+		m["resourcePolicies"] = obj{"workloadPolicy": wp}
 	}
 	g := obj{"kind": "compute#instanceGroup", "id": newID(), "name": name, locKey: locVal, "selfLink": group,
 		"creationTimestamp": s.stamp(), "size": size, "fingerprint": newFingerprint(), "_manager": rel}

@@ -479,6 +479,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// A VM's metadata server mints its service account's tokens (#2177).
 		computeSvc.tokens = creds
 		computeSvc.gke = gkeSvc
+		computeSvc.kms = kmsSvc
 		// Secure Web Proxy's TLS inspection issues its leaves from a CA
 		// pool of Certificate Authority Service (#2160).
 		computeSvc.privateca = privateCASvc
@@ -1396,6 +1397,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			}
 			return nil
 		})
+		// AlloyDB clusters and Filestore instances (#1524), through
+		// their services in process.
+		useBackupDRWorkloads(backupDRSrv, alloyDBSvc, filestoreSvc)
 		if kmsSvc != nil {
 			// A vault's encryptionConfig (#1501) wraps its data key with
 			// this instance's Cloud KMS, in process.

@@ -254,7 +254,16 @@ the primary's creation, so a point-in-time restore recovers to any moment from t
 recovery window. Automated backups follow `automated_backup_policy.weekly_schedule` (each minute,
 `up` takes the ones due) and its time- or quantity-based retention.
 
+## Backup and DR (#1524)
+
+A Backup and DR plan of `resourceType` `alloydb.googleapis.com/Cluster` protects a cluster: its
+own automated and continuous backups are turned off while the plan applies, `backupdrInfo` reports
+the protection windows, and `clusters.restore` with `backupdrBackupSource` or `backupdrPitrSource`
+makes a new cluster from a vault's backup or at a point in time inside a window. Those fields are
+served over JSON (they are in AlloyDB's REST discovery document, not in the published
+`alloydbpb`). See [backupdr.md](backupdr.md#alloydb-clusters-and-filestore-instances-1524).
+
 ## Not served
 
-Backup and DR protection of AlloyDB clusters is #1524. [gaps.md](gaps.md) lists what is open;
+[gaps.md](gaps.md) lists what is open;
 [compatibility.md](compatibility.md) has the per-method evidence.

@@ -167,7 +167,7 @@ func TestBackupDRComputeRestoresThroughThePages(t *testing.T) {
 		plan, assoc := fmt.Sprintf("bb-%s-%d", kind, n), fmt.Sprintf("bb-%s-%d", kind, n)
 		op, err = bdr.Projects.Locations.BackupPlans.Create(loc, &backupdr.BackupPlan{BackupVault: loc + "/backupVaults/" + vault, ResourceType: res[0],
 			BackupRules: []*backupdr.BackupRule{{RuleId: "daily", BackupRetentionDays: 7, StandardSchedule: &backupdr.StandardSchedule{
-				RecurrenceType: "DAILY", TimeZone: "UTC", BackupWindow: &backupdr.BackupWindow{StartHourOfDay: 1, EndHourOfDay: 5}}}}}).BackupPlanId(plan).Do()
+				RecurrenceType: "DAILY", TimeZone: "UTC", BackupWindow: &backupdr.BackupWindow{StartHourOfDay: 1, EndHourOfDay: 7}}}}}).BackupPlanId(plan).Do()
 		wait("backupPlans.create", op, err)
 		op, err = bdr.Projects.Locations.BackupPlanAssociations.Create(loc, &backupdr.BackupPlanAssociation{BackupPlan: loc + "/backupPlans/" + plan,
 			ResourceType: res[0], Resource: res[1]}).BackupPlanAssociationId(assoc).Do()

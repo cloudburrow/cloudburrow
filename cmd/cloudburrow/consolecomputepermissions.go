@@ -181,7 +181,14 @@ func (p computeInstancesProvider) TestPermissions(_ context.Context, project str
 
 // Disks.
 
-var diskIAM = zonalIAMBase("disks")
+// diskIAM is a disk's, at [zone, name], or a regional disk's, at
+// [region, name] (#2206).
+func diskIAM(path []string) string {
+	if len(path) != 2 || path[0] == "" || path[1] == "" {
+		return ""
+	}
+	return diskBase(path)
+}
 
 func (p computeDisksProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
 	if diskIAM(path) == "" {

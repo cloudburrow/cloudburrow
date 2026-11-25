@@ -2,6 +2,7 @@ package rest
 
 import (
 	"fmt"
+	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -33,33 +34,48 @@ type Overlay struct {
 // NewOverlay copies the descriptors of every file in pkg, lets edit add to
 // each, and builds the copy. edit is called once per file of the package.
 func NewOverlay(pkg string, edit func(*descriptorpb.FileDescriptorProto)) (*Overlay, error) {
+	return NewOverlays([]string{pkg}, edit)
+}
+
+// NewOverlays is NewOverlay over several packages (an API's versions, as
+// AlloyDB's v1, v1beta and v1alpha, #1524): edit is called once per file
+// of each, and reads the file's package to tell them apart.
+func NewOverlays(pkgs []string, edit func(*descriptorpb.FileDescriptorProto)) (*Overlay, error) {
 	set := &descriptorpb.FileDescriptorSet{}
 	seen := map[string]bool{}
-	var add func(f protoreflect.FileDescriptor, own bool)
-	add = func(f protoreflect.FileDescriptor, own bool) {
+	own := map[protoreflect.FullName]bool{}
+	for _, p := range pkgs {
+		own[protoreflect.FullName(p)] = true
+	}
+	var add func(f protoreflect.FileDescriptor)
+	add = func(f protoreflect.FileDescriptor) {
 		if seen[f.Path()] {
 			return
 		}
 		seen[f.Path()] = true
 		for i := 0; i < f.Imports().Len(); i++ {
-			add(f.Imports().Get(i).FileDescriptor, false)
+			add(f.Imports().Get(i).FileDescriptor)
 		}
 		fdp := protodesc.ToFileDescriptorProto(f)
-		if own || f.Package() == protoreflect.FullName(pkg) {
+		if own[f.Package()] {
 			edit(fdp)
 		}
 		set.File = append(set.File, fdp)
 	}
-	protoregistry.GlobalFiles.RangeFilesByPackage(protoreflect.FullName(pkg), func(f protoreflect.FileDescriptor) bool {
-		add(f, true)
-		return true
-	})
-	if len(set.File) == 0 {
-		return nil, fmt.Errorf("rest: overlay: no files in package %s", pkg)
+	for _, pkg := range pkgs {
+		n := 0
+		protoregistry.GlobalFiles.RangeFilesByPackage(protoreflect.FullName(pkg), func(f protoreflect.FileDescriptor) bool {
+			add(f)
+			n++
+			return true
+		})
+		if n == 0 {
+			return nil, fmt.Errorf("rest: overlay: no files in package %s", pkg)
+		}
 	}
 	files, err := protodesc.NewFiles(set)
 	if err != nil {
-		return nil, fmt.Errorf("rest: overlay of %s: %w", pkg, err)
+		return nil, fmt.Errorf("rest: overlay of %s: %w", strings.Join(pkgs, ", "), err)
 	}
 	o := &Overlay{files: files, types: &protoregistry.Types{}}
 	var regMsgs func(protoreflect.MessageDescriptors) error
@@ -74,14 +90,25 @@ func NewOverlay(pkg string, edit func(*descriptorpb.FileDescriptorProto)) (*Over
 		}
 		return nil
 	}
-	files.RangeFilesByPackage(protoreflect.FullName(pkg), func(f protoreflect.FileDescriptor) bool {
-		err = regMsgs(f.Messages())
-		return err == nil
-	})
-	if err != nil {
-		return nil, err
+	for _, pkg := range pkgs {
+		files.RangeFilesByPackage(protoreflect.FullName(pkg), func(f protoreflect.FileDescriptor) bool {
+			err = regMsgs(f.Messages())
+			return err == nil
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	return o, nil
+}
+
+// MustOverlays is NewOverlays, panicking on an error.
+func MustOverlays(pkgs []string, edit func(*descriptorpb.FileDescriptorProto)) *Overlay {
+	o, err := NewOverlays(pkgs, edit)
+	if err != nil {
+		panic(err)
+	}
+	return o
 }
 
 // MustOverlay is NewOverlay, panicking on an error, for package variables.

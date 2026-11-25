@@ -55,7 +55,10 @@ type computeService struct {
 	// privateca is Certificate Authority Service, when served: Secure Web
 	// Proxy's TLS inspection leaves (#2160); nil inspects nothing.
 	privateca *privateCAService
-	api       *compute.Server
+	// kms is this instance's Cloud KMS: disks' customer-managed
+	// encryption keys (#2206); nil when kms is not in --services.
+	kms *kmsService
+	api *compute.Server
 	// vpcAccess is Serverless VPC Access (vpcaccess.googleapis.com,
 	// #2140), served on this port beside /compute/v1/, as its connectors
 	// live in the networks served here.
@@ -266,6 +269,11 @@ func (s *computeService) Start(ctx context.Context) error {
 		return err
 	}
 	s.api = api
+	// diskEncryptionKey.kmsKeyName (#2206) wraps a disk's data key with
+	// this instance's Cloud KMS, in process.
+	if s.kms != nil {
+		api.UseKMS(sqlAdminKMS{svc: s.kms})
+	}
 	api.UseRelayAddress(func() string {
 		if s.relayAt == nil {
 			return ""

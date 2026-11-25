@@ -499,7 +499,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			// Compute Engine (#1965): VM instances, disks, snapshots,
 			// images and machine types, over the same API.
 			computeInstancesProvider{screen}, computeDisksProvider{screen}, computeSnapshotsProvider{screen},
-			computeImagesProvider{screen}, computeMachineTypesProvider{screen}, computeMetadataProvider{screen})
+			computeImagesProvider{screen}, computeMachineTypesProvider{screen}, computeMetadataProvider{screen},
+			// Asynchronous replication and consistency groups (#2206).
+			computeAsyncReplicationProvider{screen}, computeConsistencyGroupsProvider{screen},
+			// Snapshot schedules and instance schedules (#2206).
+			computeSnapshotSchedulesProvider{screen}, computeInstanceSchedulesProvider{screen})
 	}
 	// BigQuery's Data transfers and Scheduled queries pages (#1948).
 	if d.dataTransfer != nil {
@@ -518,7 +522,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if d.serviceUsage != nil {
 		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, history: d.requestHistory, apiKeys: d.apiKeys, quotas: d.cloudQuotas, sites: d.siteVerify, auth: d.authPlatform, metaAddr: d.metaAddr}, serviceUsageOperationsProvider{api: d.serviceUsage})
 	}
-	// Backup and DR (#1433), in process, restoring through Cloud SQL.
+	// Backup and DR (#1433), in process, restoring through Cloud SQL,
+	// Compute Engine, AlloyDB and Filestore.
 	if enabled[config.ServiceBackupDR] && d.backupdr != nil {
 		p := backupDRProvider{bdr: d.backupdr}
 		if d.sqlAdmin != nil {
@@ -527,6 +532,14 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		if enabled[config.ServiceCompute] && d.compute != nil {
 			// Compute Engine VMs and disks (#2075).
 			p.compute = d.compute.API
+		}
+		// AlloyDB clusters and Filestore instances (#1524), restored by
+		// their own APIs.
+		if enabled[config.ServiceAlloyDB] && d.alloyDB != nil {
+			p.alloydb = d.alloyDB.REST
+		}
+		if enabled[config.ServiceFilestore] && d.filestore != nil {
+			p.filestore = d.filestore.REST
 		}
 		// Google's menu (#1844): Overview, Vaulted backups, Backup plans,
 		// Backup plan associations, Backup vaults (p) and Jobs.

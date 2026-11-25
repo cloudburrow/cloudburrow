@@ -574,7 +574,7 @@ compat_shard() {
     served|gke|gkeupgrade|computevms|vpcvms)
       # Cloud Trace (#2118), beside the Cloud Logging its spans' log
       # entries are correlated with.
-      SERVICES=kms,logging,privateca,gke,monitoring,compute,trace,filestore
+      SERVICES=kms,logging,privateca,gke,monitoring,compute,trace,filestore,backupdr
       # The Kubernetes Engine API (#1913): its clusters are kind clusters
       # beside the instance's. Service Usage as GKE_SERVICEUSAGE, which
       # `gcloud container clusters create` asks whether
@@ -602,7 +602,10 @@ compat_shard() {
       # folder with it too.
       # Filestore (#2192), in process: its NFS servers are mounted from
       # Kubernetes Engine clusters' pods (TestGKEFilestore*, gke shard).
-      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE,MONITORING,COMPUTE,TRACE,FILESTORE
+      # Backup and DR (#1524) as FILESTORE_BACKUPDR, which protects its
+      # instances (TestGKEFilestoreBackupDRRoundTrip), so the Backup and DR
+      # suites stay in sql.
+      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER,PRIVATECA,GKE,GKE_SERVICEUSAGE,MONITORING,COMPUTE,TRACE,FILESTORE,FILESTORE_BACKUPDR
       if [ "$1" = computevms ]; then
         # The served shard's instance again, for the Compute Engine tests
         # that boot VMs (COMPAT_COMPUTE_VM_TESTS).

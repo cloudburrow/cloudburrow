@@ -26,16 +26,29 @@ import (
 // sources and backups. Nil unless backupdr is enabled with a Cloud SQL
 // service.
 func newBackupDRServer(cfg config.Config, sql *sqladmin.Server) *backupdr.Server {
-	if !serviceEnabled(cfg, config.ServiceBackupDR) || cfg.Endpoints.BackupDR < 0 || sql == nil {
+	if !backupDREnabled(cfg) || (sql == nil && !backupDRWorkloadsEnabled(cfg)) {
 		return nil
 	}
 	state := ""
 	if cfg.Mode == config.ModePersistent {
 		state = filepath.Join(cfg.InstanceDir(), "backupdr.json")
 	}
-	srv := backupdr.NewServer(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.BackupDR)), backupDRSQL{sql}, state)
-	sql.SetBackupDR(srv)
+	// Without Cloud SQL it protects the other workloads alone (#1524).
+	var csql backupdr.CloudSQL
+	if sql != nil {
+		csql = backupDRSQL{sql}
+	}
+	srv := backupdr.NewServer(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.BackupDR)), csql, state)
+	if sql != nil {
+		sql.SetBackupDR(srv)
+	}
 	return srv
+}
+
+// backupDRWorkloadsEnabled is whether a workload Backup and DR protects
+// other than Cloud SQL's is served: Compute Engine, AlloyDB or Filestore.
+func backupDRWorkloadsEnabled(cfg config.Config) bool {
+	return computeEnabled(cfg) || alloyDBEnabled(cfg) || filestoreEnabled(cfg)
 }
 
 // backupDRSQL is the Cloud SQL Admin API as the Backup and DR Service
@@ -67,7 +80,7 @@ func (b backupDRSQL) DeleteRun(id string) error { return b.s.DeleteBackupDRRun(i
 
 // backupDREnabled is whether `up` binds the Backup and DR port.
 func backupDREnabled(cfg config.Config) bool {
-	return serviceEnabled(cfg, config.ServiceBackupDR) && sqlAdminEnabled(cfg) && cfg.Endpoints.BackupDR >= 0
+	return serviceEnabled(cfg, config.ServiceBackupDR) && (sqlAdminEnabled(cfg) || backupDRWorkloadsEnabled(cfg)) && cfg.Endpoints.BackupDR >= 0
 }
 
 // backupDRHierarchy is backupdr.Hierarchy over Resource Manager's registry

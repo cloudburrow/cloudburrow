@@ -383,7 +383,23 @@ func (p computeInstancesProvider) instanceActions(o map[string]any, onPage bool)
 		acts = append(acts, console.Action{ID: "ssh", Label: "SSH", Button: true})
 	}
 	if status == "TERMINATED" || status == "SUSPENDED" {
-		acts = append(acts, console.Action{ID: "start", Label: "Start / Resume", ConfirmStyle: console.DeleteConfirmClick, Confirm: "Start or resume " + name + "?"})
+		start := console.Action{ID: "start", Label: "Start / Resume", ConfirmStyle: console.DeleteConfirmClick, Confirm: "Start or resume " + name + "?"}
+		// A VM with customer-supplied keys is started with each disk's key
+		// (instances.startWithEncryptionKey), as Google's Start dialog
+		// asks for them.
+		l, _ := o["disks"].([]any)
+		for _, x := range l {
+			e, _ := x.(map[string]any)
+			if vpcStr(vmMap(e, "diskEncryptionKey"), "sha256") != "" {
+				dn := vpcLast(vpcStr(e, "source"))
+				start.Fields = append(start.Fields, console.Field{Name: "csek:" + vpcStr(e, "source"), Label: "Key for " + dn,
+					Type: "text", Required: true, Pattern: `^[A-Za-z0-9+\/]{43}=$`, Help: "The disk's customer-supplied key, base64."})
+			}
+		}
+		if len(start.Fields) > 0 {
+			start.Label, start.Submit, start.ConfirmStyle, start.Confirm = "Start with encryption key", "Start", "", ""
+		}
+		acts = append(acts, start)
 	}
 	if status == "RUNNING" || status == "SUSPENDED" {
 		acts = append(acts, gracefulAction("stop", "Stop", "Stop "+name+"?", "Its processes end; its disks keep what they hold."))
@@ -411,6 +427,7 @@ func (p computeInstancesProvider) diskActions(o map[string]any) []console.Action
 		project = strings.SplitN(project[i+len("projects/"):], "/", 2)[0]
 	}
 	var free []string
+	labels := map[string]string{}
 	if l, err := p.list(project, "zones/"+zone+"/disks"); err == nil {
 		for _, d := range l {
 			if len(vpcStrs(d, "users")) == 0 {
@@ -418,14 +435,35 @@ func (p computeInstancesProvider) diskActions(o map[string]any) []console.Action
 			}
 		}
 	}
-	free = append(free, p.freeRegionalDisks(project, zone)...)
+	// Regional disks replicated in the VM's zone (#2206), attached ones
+	// too: a regional disk is force-attached for failover.
+	region := zone
+	if i := strings.LastIndex(zone, "-"); i > 0 {
+		region = zone[:i]
+	}
+	regional := false
+	if l, err := p.list(project, "regions/"+region+"/disks"); err == nil {
+		for _, d := range l {
+			for _, z := range vpcStrs(d, "replicaZones") {
+				if vpcLast(z) == zone {
+					free = append(free, "regions/"+region+"/disks/"+vpcStr(d, "name"))
+					labels["regions/"+region+"/disks/"+vpcStr(d, "name")] = vpcStr(d, "name") + " (regional)"
+					regional = true
+				}
+			}
+		}
+	}
 	var acts []console.Action
 	attach := console.Action{ID: "attachdisk", Label: "Attach existing disk", Submit: "Save", Fields: []console.Field{
-		{Name: "disk", Label: "Disk", Type: "select", Required: true, Options: free},
+		{Name: "disk", Label: "Disk", Type: "select", Required: true, Options: free, OptionLabels: labels},
 		{Name: "deviceName", Label: "Device name", Type: "text", Pattern: `^$|` + computeNamePattern,
 			Help: "Optional: the disk is mounted at /mnt/disks/DEVICE in the guest; empty uses the disk's name."},
 		{Name: "mode", Label: "Mode", Type: "radio", Default: "Read/write", Options: []string{"Read/write", "Read only"}},
 	}}
+	if regional {
+		attach.Fields = append(attach.Fields, console.Field{Name: "forceAttach", Label: "Force-attach disk", Type: "checkbox",
+			Help: "For a regional disk attached to a VM in its other replica zone (failover): that VM can no longer write to it."})
+	}
 	if len(free) == 0 {
 		attach.Unavailable = "No disk in " + zone + " is free to attach: create one on the Disks page."
 		attach.Fields = nil
@@ -766,6 +804,13 @@ func (p computeInstancesProvider) Detail(ctx context.Context, project string, pa
 			{Label: "Machine type", Value: vpcLast(vpcStr(o, "machineType"))}, {Label: "CPU platform", Value: vpcStr(o, "cpuPlatform")},
 			{Label: "Architecture", Value: vpcDash(vpcStr(o, "cpuPlatform"))},
 		}},
+		// Google's VM details: its resource policies (instance schedule,
+		// placement policy) and where the placement put it (#2206).
+		{Heading: "Management", Properties: []console.Property{
+			{Label: "Resource policies", Value: vpcDash(strings.Join(vmPolicyNames(o), ", "))},
+			{Label: "Availability domain", Value: vpcDash(vmAvailabilityDomain(o))},
+			{Label: "Physical host topology", Value: vpcDash(vmTopology(o))},
+		}},
 		{Heading: "Networking", Properties: []console.Property{
 			{Label: "Internal IP", Value: vpcDash(vmInternalIP(o))}, {Label: "External IP", Value: vpcDash(vmExternalIP(o))},
 			{Label: "Network tags", Value: vpcDash(strings.Join(vpcStrs(vmMap(o, "tags"), "items"), ", "))},
@@ -983,7 +1028,17 @@ func (p computeInstancesProvider) ActAtResult(ctx context.Context, project strin
 		if vpcStr(o, "status") == "SUSPENDED" {
 			verb = "resume"
 		}
-		_, err = p.call("POST", project, base+"/"+verb, nil, nil)
+		var body map[string]any
+		var keyed []any
+		for k, v := range values {
+			if src, ok := strings.CutPrefix(k, "csek:"); ok {
+				keyed = append(keyed, map[string]any{"source": src, "diskEncryptionKey": map[string]any{"rawKey": strings.TrimSpace(v)}})
+			}
+		}
+		if len(keyed) > 0 && verb == "start" {
+			verb, body = "startWithEncryptionKey", map[string]any{"disks": keyed}
+		}
+		_, err = p.call("POST", project, base+"/"+verb, nil, body)
 	case "stop":
 		_, err = p.call("POST", project, base+"/stop", gracefulQuery(values), nil)
 	case "suspend", "reset":
@@ -993,15 +1048,18 @@ func (p computeInstancesProvider) ActAtResult(ctx context.Context, project strin
 	case "attachdisk":
 		d := strings.TrimSpace(values["disk"])
 		src := "zones/" + path[0] + "/disks/" + d
-		if region, name, ok := strings.Cut(d, "/"); ok {
-			// A regional disk, REGION/NAME (consolecomputea1.go).
-			src, d = "regions/"+region+"/disks/"+name, name
+		if strings.HasPrefix(d, "regions/") {
+			src = d
 		}
-		b := map[string]any{"source": src, "deviceName": vpcOr(strings.TrimSpace(values["deviceName"]), d)}
+		b := map[string]any{"source": src, "deviceName": vpcOr(strings.TrimSpace(values["deviceName"]), vpcLast(d))}
 		if values["mode"] == "Read only" {
 			b["mode"] = "READ_ONLY"
 		}
-		_, err = p.call("POST", project, base+"/attachDisk", nil, b)
+		var q url.Values
+		if checkboxOn(values["forceAttach"]) {
+			q = url.Values{"forceAttach": {"true"}}
+		}
+		_, err = p.call("POST", project, base+"/attachDisk", q, b)
 	case "detachdisk":
 		_, err = p.call("POST", project, base+"/detachDisk", url.Values{"deviceName": {strings.TrimSpace(values["deviceName"])}}, nil)
 	default:
@@ -1084,8 +1142,18 @@ func (p computeDisksProvider) List(ctx context.Context, project string) (console
 		return listing, err
 	}
 	for _, d := range aggregatedItems(m, "disks") {
-		zone := diskZoneText(d)
-		target := []string{diskLoc(d), vpcStr(d, "name")}
+		zone := zoneOf(vpcStr(d, "zone"))
+		target := []string{zone, vpcStr(d, "name")}
+		if r := vpcStr(d, "region"); r != "" {
+			// A regional disk: its replica zones, as Google's list shows
+			// them, opened at [region, name].
+			var zs []string
+			for _, z := range vpcStrs(d, "replicaZones") {
+				zs = append(zs, vpcLast(z))
+			}
+			zone = strings.Join(zs, ", ")
+			target = []string{vpcLast(r), vpcStr(d, "name")}
+		}
 		var users []string
 		for _, u := range vpcStrs(d, "users") {
 			users = append(users, vpcLast(u))
@@ -1109,7 +1177,25 @@ func (p computeDisksProvider) diskActions(d map[string]any, onPage bool) []conso
 			{Name: "sizeGb", Label: "Size (GB)", Type: "text", Required: true, Default: vpcStr(d, "sizeGb"), Pattern: `^[0-9]{1,5}$`,
 				Help: "A disk can be made larger, never smaller."}}},
 	}
-	acts = append(acts, labelsAction(d),
+	if vpcLast(vpcStr(d, "type")) == haDiskType {
+		// Google's Edit disk: performance and access mode, by disks.update.
+		edit := console.Action{ID: "edit", Label: "Edit performance", Submit: "Save", Fields: []console.Field{
+			{Name: "provisionedIops", Label: "Provisioned IOPS", Type: "text", Required: true, Default: vpcStr(d, "provisionedIops"), Pattern: `^[0-9]{1,6}$`, Help: haIopsHelp},
+			{Name: "provisionedThroughput", Label: "Provisioned throughput (MiB/s)", Type: "text", Required: true, Default: vpcStr(d, "provisionedThroughput"), Pattern: `^[0-9]{1,4}$`, Help: haTputHelp},
+			{Name: "accessMode", Label: "Access mode", Type: "select", Default: vpcStr(d, "accessMode"), Options: []string{"READ_WRITE_SINGLE", "READ_WRITE_MANY"},
+				OptionLabels: haModeLabels, Help: "The access mode changes only while the disk is detached from every instance."}}}
+		acts = append(acts, edit)
+	}
+	if k := vpcStr(vmMap(d, "diskEncryptionKey"), "kmsKeyName"); k != "" {
+		// disks.updateKmsKey (#2206): rotate to the primary version, or
+		// change the key.
+		acts = append(acts, console.Action{ID: "updatekmskey", Label: "Update KMS key", Submit: "Update", Fields: []console.Field{
+			{Name: "kmsKeyName", Label: "Cloud KMS key", Type: "text", Pattern: `^(projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+)?$`,
+				Help: "Empty rotates the disk to its key's primary version (" + k + "); a key name changes the key."}}})
+	}
+	acts = append(acts, labelsAction(d))
+	acts = append(acts, asyncActions(d)...)
+	acts = append(acts,
 		console.Action{ID: "clone", Label: "Clone disk", Submit: "Create", Fields: []console.Field{
 			{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Default: name + "-clone", Help: computeNameHelp},
 			{Name: "description", Label: "Description", Type: "text"}}},
@@ -1175,13 +1261,39 @@ func (p computeDisksProvider) diskFields(snapshots, disks, images, schedules []s
 			snapshots, "The name of a snapshot: none exists yet."),
 		selectOrText(console.Field{Name: "sourceDisk", Label: "Source disk", Section: "Source", VisibleWhen: map[string]string{"source": "Disk"}},
 			disks, "ZONE/NAME of a disk of the zone: none exists yet."),
-		{Name: "type", Label: "Disk type", Type: "select", Section: "Disk settings", Default: "pd-balanced", Options: diskTypeNames()},
+		{Name: "type", Label: "Disk type", Type: "select", Section: "Disk settings", Default: "pd-balanced", Options: append(diskTypeNames(), haDiskType),
+			Help: "A regional disk is pd-balanced, pd-ssd, pd-standard (200 GB or more) or hyperdisk-balanced-high-availability."},
 		{Name: "sizeGb", Label: "Size (GB)", Type: "text", Section: "Disk settings", Default: "10", Pattern: `^[0-9]{1,5}$`},
+		{Name: "provisionedIops", Label: "Provisioned IOPS", Type: "text", Section: "Disk settings", Pattern: `^[0-9]{0,6}$`,
+			VisibleWhen: map[string]string{"type": haDiskType}, Help: haIopsHelp},
+		{Name: "provisionedThroughput", Label: "Provisioned throughput (MiB/s)", Type: "text", Section: "Disk settings", Pattern: `^[0-9]{0,4}$`,
+			VisibleWhen: map[string]string{"type": haDiskType}, Help: haTputHelp},
+		{Name: "accessMode", Label: "Access mode", Type: "select", Section: "Disk settings", Default: "READ_WRITE_SINGLE",
+			Options: []string{"READ_WRITE_SINGLE", "READ_WRITE_MANY"}, OptionLabels: haModeLabels,
+			VisibleWhen: map[string]string{"type": haDiskType}, Help: "Multi-writer volumes attach read-write to up to 8 C3, C3D, C4, C4A, M3, N4, N4A, N4D or Z3 instances."},
+		{Name: "encryption", Label: "Encryption", Type: "radio", Section: "Encryption", Default: "Google-managed encryption key",
+			Options: []string{"Google-managed encryption key", "Cloud KMS key", "Customer-supplied encryption key"}},
+		{Name: "rawKey", Label: "Customer-supplied key", Type: "text", Section: "Encryption", VisibleWhen: map[string]string{"encryption": "Customer-supplied encryption key"},
+			Pattern: `^([A-Za-z0-9+\/]{43}=)?$`,
+			Help:    "A 256-bit key in RFC 4648 standard base64 (44 characters). Keep it: the disk can't be attached, its VM started or snapshotted without it."},
+		{Name: "kmsKeyName", Label: "Cloud KMS key", Type: "text", Section: "Encryption", VisibleWhen: map[string]string{"encryption": "Cloud KMS key"},
+			Pattern: `^(projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+)?$`,
+			Help:    "projects/PROJECT/locations/LOCATION/keyRings/RING/cryptoKeys/KEY: in the disk's region, a multi-region that contains it, or global."},
 		{Name: "snapshotSchedule", Label: "Snapshot schedule", Type: "select", Section: "Snapshot schedule", Default: noBackups,
 			Options: append([]string{noBackups}, schedules...), Help: "A schedule of the disk's region, as REGION/NAME."},
 		vmLabelsField(nil, "Labels"),
 	}
 }
+
+// Hyperdisk Balanced High Availability's performance and access mode
+// (#2206), as Google's Create disk and Edit disk pages show them.
+const (
+	haDiskType = "hyperdisk-balanced-high-availability"
+	haIopsHelp = "3,000 to 100,000, at most 500 per GiB (4 GiB: 2,000; 5 GiB: 2,500). Empty: the default for the size."
+	haTputHelp = "At least 140 and IOPS/256, at most 2,400 and IOPS/4. Empty: the default for the size."
+)
+
+var haModeLabels = map[string]string{"READ_WRITE_SINGLE": "Single VM read-write", "READ_WRITE_MANY": "Multiple VMs read-write"}
 
 func (p computeDisksProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
 	name := strings.TrimSpace(values["name"])
@@ -1201,8 +1313,36 @@ func (p computeDisksProvider) Create(ctx context.Context, project string, values
 	if s := strings.TrimSpace(values["sizeGb"]); s != "" {
 		b["sizeGb"] = s
 	}
+	if vpcOr(values["type"], "pd-balanced") == haDiskType {
+		for _, k := range []string{"provisionedIops", "provisionedThroughput"} {
+			if v := strings.TrimSpace(values[k]); v != "" {
+				b[k] = v
+			}
+		}
+		if m := values["accessMode"]; m != "" {
+			b["accessMode"] = m
+		}
+	}
 	if d := strings.TrimSpace(values["description"]); d != "" {
 		b["description"] = d
+	}
+	if values["encryption"] == "Cloud KMS key" {
+		k := strings.TrimSpace(values["kmsKeyName"])
+		if k == "" {
+			return "", errors.New("kmsKeyName: choose a Cloud KMS key")
+		}
+		b["diskEncryptionKey"] = map[string]any{"kmsKeyName": k}
+	}
+	if values["encryption"] == "Customer-supplied encryption key" {
+		k := strings.TrimSpace(values["rawKey"])
+		if k == "" {
+			return "", errors.New("rawKey: give the customer-supplied key")
+		}
+		b["diskEncryptionKey"] = map[string]any{"rawKey": k}
+	}
+	if s := strings.TrimSpace(values["snapshotSchedule"]); s != "" {
+		region := zone[:strings.LastIndex(zone, "-")]
+		b["resourcePolicies"] = []any{"regions/" + region + "/resourcePolicies/" + s}
 	}
 	switch values["source"] {
 	case "Cloud Storage file":
@@ -1258,7 +1398,7 @@ func (p computeDisksProvider) Detail(ctx context.Context, project string, path [
 	if len(path) != 2 {
 		return console.DeeperThan(2, path), nil
 	}
-	d, err := p.call("GET", project, diskPath(path[0], path[1]), nil, nil)
+	d, err := p.call("GET", project, diskBase(path), nil, nil)
 	if err != nil {
 		return console.Detail{Unavailable: err.Error()}, nil
 	}
@@ -1273,7 +1413,7 @@ func (p computeDisksProvider) Detail(ctx context.Context, project string, path [
 	if s := vpcStr(d, "sourceDisk"); s != "" {
 		src = "Disk " + vpcLast(s)
 	}
-	return console.Detail{Title: path[1],
+	det := console.Detail{Title: path[1],
 		Sections: []console.Section{{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: []console.Property{
 			{Label: "Status", Value: vpcStr(d, "status")}, {Label: "Type", Value: vpcLast(vpcStr(d, "type"))},
 			{Label: "Size", Value: vpcStr(d, "sizeGb") + " GB"}, diskLocationProperty(d),
@@ -1286,16 +1426,27 @@ func (p computeDisksProvider) Detail(ctx context.Context, project string, path [
 				return out
 			}(), ", "))},
 			{Label: "Labels", Value: vpcDash(vmLabelsText(d))}, {Label: "Description", Value: vpcDash(vpcStr(d, "description"))},
+			{Label: "Encryption", Value: diskEncryptionText(d)}, {Label: "Resource policies", Value: vpcDash(diskSchedulesText(d))},
 			{Label: "Creation time", Value: vpcStr(d, "creationTimestamp")},
 		}}}}},
-	}, nil
+	}
+	if vpcStr(d, "provisionedIops") != "" {
+		det.Sections[0].Groups = append(det.Sections[0].Groups, console.PropertyGroup{Heading: "Performance", Properties: []console.Property{
+			{Label: "Provisioned IOPS", Value: vpcStr(d, "provisionedIops")},
+			{Label: "Provisioned throughput", Value: vpcStr(d, "provisionedThroughput") + " MiB/s"},
+			{Label: "Access mode", Value: vpcOr(haModeLabels[vpcStr(d, "accessMode")], vpcDash(vpcStr(d, "accessMode")))}}})
+	}
+	if props := asyncProperties(d); len(props) > 0 {
+		det.Sections[0].Groups = append(det.Sections[0].Groups, console.PropertyGroup{Heading: "Asynchronous replication", Properties: props})
+	}
+	return det, nil
 }
 
 func (p computeDisksProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	if p.api() == nil || len(path) != 2 {
 		return nil
 	}
-	d, err := p.call("GET", project, diskPath(path[0], path[1]), nil, nil)
+	d, err := p.call("GET", project, diskBase(path), nil, nil)
 	if err != nil {
 		return nil
 	}
@@ -1306,7 +1457,10 @@ func (p computeDisksProvider) ActAt(ctx context.Context, project string, path []
 	if len(path) != 2 {
 		return fmt.Errorf("%s is not available here", action)
 	}
-	base := diskPath(path[0], path[1])
+	if ok, err := p.asyncAct(project, path, action, values); ok {
+		return err
+	}
+	base := diskBase(path)
 	var err error
 	switch action {
 	case "snapshot":
@@ -1319,6 +1473,14 @@ func (p computeDisksProvider) ActAt(ctx context.Context, project string, path []
 		_, err = p.call("POST", project, base+"/resize", nil, map[string]any{"sizeGb": strings.TrimSpace(values["sizeGb"])})
 	case "labels":
 		err = p.setLabels(project, base, values)
+	case "edit":
+		err = p.editDisk(project, base, values)
+	case "updatekmskey":
+		b := map[string]any{}
+		if k := strings.TrimSpace(values["kmsKeyName"]); k != "" {
+			b["kmsKeyName"] = k
+		}
+		_, err = p.call("POST", project, base+"/updateKmsKey", nil, b)
 	case "delete":
 		_, err = p.call("DELETE", project, base, nil, nil)
 	case "clone":
@@ -1340,6 +1502,28 @@ func (p computeDisksProvider) ActAt(ctx context.Context, project string, path []
 	default:
 		err = fmt.Errorf("%s is not available on this resource", action)
 	}
+	return err
+}
+
+// editDisk sends disks.update (regionDisks.update) with the fields that
+// changed in its update mask.
+func (p computeDisksProvider) editDisk(project, base string, values map[string]string) error {
+	d, err := p.call("GET", project, base, nil, nil)
+	if err != nil {
+		return err
+	}
+	b := map[string]any{"name": vpcStr(d, "name")}
+	var paths []string
+	for _, k := range []string{"provisionedIops", "provisionedThroughput", "accessMode"} {
+		if v := strings.TrimSpace(values[k]); v != "" && v != vpcStr(d, k) {
+			b[k] = v
+			paths = append(paths, k)
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	_, err = p.call("PATCH", project, base, url.Values{"paths": paths}, b)
 	return err
 }
 
@@ -1870,4 +2054,75 @@ func (p computeMetadataProvider) ActAt(ctx context.Context, project string, path
 	}
 	_, err = p.call("POST", project, "setCommonInstanceMetadata", nil, map[string]any{"items": items, "fingerprint": values["fingerprint"]})
 	return err
+}
+
+// diskBase is a disk page's API path: [zone, name], or [region, name] for
+// a regional disk (#2206).
+func diskBase(path []string) string {
+	if compute.IsRegion(path[0]) {
+		return "regions/" + path[0] + "/disks/" + path[1]
+	}
+	return "zones/" + path[0] + "/disks/" + path[1]
+}
+
+// locationProp is a disk's Zone, or a regional disk's Region and replica
+// zones.
+func locationProp(d map[string]any, path []string) console.Property {
+	if !compute.IsRegion(path[0]) {
+		return console.Property{Label: "Zone", Value: path[0]}
+	}
+	var zs []string
+	for _, z := range vpcStrs(d, "replicaZones") {
+		zs = append(zs, vpcLast(z))
+	}
+	return console.Property{Label: "Replica zones", Value: path[0] + " (" + strings.Join(zs, ", ") + ")"}
+}
+
+// diskEncryptionText is a disk's Encryption as Google's disk page shows it
+// (#2206).
+func diskEncryptionText(d map[string]any) string {
+	if k := vpcStr(vmMap(d, "diskEncryptionKey"), "kmsKeyName"); k != "" {
+		return "Customer-managed (" + k + ")"
+	}
+	if h := vpcStr(vmMap(d, "diskEncryptionKey"), "sha256"); h != "" {
+		return "Customer-supplied (SHA-256 " + h + ")"
+	}
+	return "Google-managed"
+}
+
+// diskSchedulesText names the disk's resource policies: its snapshot
+// schedules and consistency group.
+func diskSchedulesText(d map[string]any) string {
+	var out []string
+	for _, rp := range vpcStrs(d, "resourcePolicies") {
+		out = append(out, vpcLast(rp))
+	}
+	return strings.Join(out, ", ")
+}
+
+// vmPolicyNames are an instance's resource policies' names.
+func vmPolicyNames(o map[string]any) []string {
+	var out []string
+	for _, p := range vpcStrs(o, "resourcePolicies") {
+		out = append(out, vpcLast(p))
+	}
+	return out
+}
+
+func vmAvailabilityDomain(o map[string]any) string {
+	if v := vmMap(o, "scheduling")["availabilityDomain"]; v != nil {
+		return fmt.Sprint(v)
+	}
+	return ""
+}
+
+func vmTopology(o map[string]any) string {
+	t := vmMap(vmMap(o, "resourceStatus"), "physicalHostTopology")
+	var parts []string
+	for _, k := range []string{"cluster", "block", "subblock", "host"} {
+		if v := vpcStr(t, k); v != "" {
+			parts = append(parts, v)
+		}
+	}
+	return strings.Join(parts, " / ")
 }

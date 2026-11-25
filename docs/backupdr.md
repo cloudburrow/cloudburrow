@@ -6,18 +6,22 @@ backup plan associations that enroll a Cloud SQL instance, a Compute Engine VM o
 sources they make in the plan's vault, and the backups taken of them. Cloud SQL restores its
 backups, and recovers a data source's instance to a point in time (`instances.pointInTimeRestore`,
 #1425); `backups.restore` restores a VM's or a disk's backup to a new VM or disk
-([Compute Engine VMs and disks](#compute-engine-vms-and-disks-2075)).
+([Compute Engine VMs and disks](#compute-engine-vms-and-disks-2075)). AlloyDB clusters and
+Filestore instances are protected too, and restored by their own APIs
+([AlloyDB clusters and Filestore instances](#alloydb-clusters-and-filestore-instances-1524)).
 
-It is opt-in, beside a Cloud SQL service:
+It is opt-in, beside a Cloud SQL, Compute Engine, AlloyDB or Filestore service:
 
 ```sh
 cloudburrow up --services cloudsql,cloudsql-mysql,storage,backupdr
 ```
 
-Add `compute` to back up Compute Engine VMs and disks.
+Add `compute` to back up Compute Engine VMs and disks, `alloydb` for AlloyDB clusters and
+`filestore` for Filestore instances.
 
 It runs in the CLI process on `--port-backupdr` (default `9024`, moved by `--port-base`), bound
-only when `backupdr` and `cloudsql` or `cloudsql-mysql` are enabled. `cloudburrow env` exports
+only when `backupdr` and one of `cloudsql`, `cloudsql-mysql`, `compute`, `alloydb` or `filestore`
+are enabled. `cloudburrow env` exports
 `CLOUDBURROW_BACKUPDR_ENDPOINT` and `CLOUDSDK_API_ENDPOINT_OVERRIDES_BACKUPDR`, `cloudburrow
 gcloud-setup` writes the `backupdr` override for `gcloud backup-dr`, and `cloudburrow terraform`
 sets the provider's `backup_dr_custom_endpoint`. No client library reads the variable, so pass
@@ -40,7 +44,7 @@ the regions CloudBurrow lists, and `-` lists every location's vaults, plans and 
 | Resource | Methods | What it does |
 |---|---|---|
 | `backupVaults` | `create`, `get`, `list`, `delete` | `backupMinimumEnforcedRetentionDuration` is required (`"86400s"`), `accessRestriction` defaults to `WITHIN_ORGANIZATION`. `backupCount` and `deletable` are read from what the vault holds. Deleting a vault a plan uses is FAILED_PRECONDITION; one holding data sources needs `force=true`, which deletes their backups too. `allowMissing=true` makes a missing vault a done delete. |
-| `backupPlans` | `create`, `get`, `list`, `delete` | `resourceType` must be `sqladmin.googleapis.com/Instance`; `backupVault` must exist; at least one rule, each with a unique `ruleId`, a positive `backupRetentionDays` and a `standardSchedule` (`recurrenceType` HOURLY, DAILY, WEEKLY, MONTHLY or YEARLY, an IANA `timeZone`, `hourlyFrequency` for HOURLY, an optional `backupWindow`). `logRetentionDays` is kept and reported. A plan an association applies cannot be deleted. |
+| `backupPlans` | `create`, `get`, `list`, `delete` | `resourceType` is `sqladmin.googleapis.com/Instance`, `compute.googleapis.com/Instance` or `Disk`, `alloydb.googleapis.com/Cluster` or `file.googleapis.com/Instance`, each checked against its documented limits ([below](#alloydb-clusters-and-filestore-instances-1524)); `backupVault` must exist; at least one rule, each with a unique `ruleId`, a positive `backupRetentionDays` and a `standardSchedule` (`recurrenceType` HOURLY, DAILY, WEEKLY, MONTHLY or YEARLY, an IANA `timeZone`, `hourlyFrequency` for HOURLY, an optional `backupWindow`). `logRetentionDays` is kept and reported. A plan an association applies cannot be deleted. |
 | `backupPlanAssociations` | `create`, `get`, `list`, `delete`, `triggerBackup` | `resource` is `projects/{project}/instances/{instance}` (with or without `//sqladmin.googleapis.com/`), `resourceType` `sqladmin.googleapis.com/Instance`; the instance must exist. An instance is protected by one association at a time. Creating it makes a data source in the plan's vault (or reuses the one an earlier association left there); `rulesConfigInfo` reports each rule's last backup. Deleting it stops protection; the data source and its backups stay. `triggerBackup` with a `ruleId` takes an on-demand backup, kept for the rule's retention or `customRetentionDays`. |
 | `backupVaults.dataSources` | `get`, `list` | The instance protected (`dataSourceGcpResource.cloudSqlInstanceDatasourceProperties`: name, version, tier, create time), `backupCount`, and `backupConfigInfo` (last backup state and consistency time, the plan and association). `configState` is ACTIVE while an association applies, PASSIVE after. |
 | `backupVaults.dataSources.backups` | `get`, `list`, `delete` | `state` CREATING, ACTIVE or ERROR from the Cloud SQL backup underneath, `backupType` SCHEDULED or ON_DEMAND, `consistencyTime` when it finished, `expireTime` from the retention, `cloudSqlInstanceBackupProperties` and `gcpBackupPlanInfo`. `-` as the data source lists a vault's every backup. `delete` inside the backup's `enforcedRetentionEndTime` is FAILED_PRECONDITION: "you can delete a backup only after it has exceeded its minimum enforced retention period" (#1844). |
@@ -164,15 +168,73 @@ The restored disks hold the backup's data. A disk's backup into a VM, or a Cloud
 page documents an in-place restore of a vaulted backup, so none is offered. The restore is logged
 as a RESTORE job.
 
+## AlloyDB clusters and Filestore instances (#1524)
+
+A plan of `resourceType` `alloydb.googleapis.com/Cluster` or `file.googleapis.com/Instance`
+protects a cluster or an instance of this instance's AlloyDB or Filestore, in process, as Google's
+guides lay it out
+([AlloyDB](https://docs.cloud.google.com/backup-disaster-recovery/docs/cloud-console/alloydb/alloydb-backup),
+[Filestore](https://docs.cloud.google.com/backup-disaster-recovery/docs/cloud-console/filestore/filestore-instance-backup)):
+
+- **The association** names the cluster (`projects/P/locations/L/clusters/C`) or the instance
+  (`projects/P/locations/L/instances/I`, a zonal one also as `projects/P/zones/Z/instances/I`), in
+  the plan's region; a Filestore instance must be Zonal, Regional or Enterprise ("enhanced
+  backups" are not offered for the basic tiers). It carries
+  `alloydbClusterBackupPlanAssociationProperties.clusterUid` or
+  `filestoreInstanceBackupPlanAssociationProperties.instanceCreateTime`, and the data source
+  `alloyDbClusterDatasourceProperties` (`name`, `clusterUid`, `pitrWindows`) or
+  `filestoreInstanceDatasourceProperties`.
+- **Attaching a plan to a cluster** turns its own automated and continuous backups off, as Google
+  does, and records them in the cluster's `backupdrInfo.currentWindow` (the association, the data
+  source, the log retention, and what was on before); removing the association moves that to
+  `previousWindows` and gives the cluster its settings back. A plan with `logRetentionDays` keeps
+  the primary's WAL, so the data source can be recovered to any time inside its window. A plan
+  change must keep the vault ("The new plan must use the same backup vault"); the cluster is
+  protected again with the new plan's log retention.
+- **A backup** of a cluster is a dump of its primary's databases and users (and, with log
+  retention, a base backup the WAL replays onto), with `alloyDbBackupProperties` (`storedBytes`,
+  `chainId`, `databaseVersion`); of an instance, a copy of its share's files, with
+  `filestoreInstanceBackupProperties.sourceInstance`. Each is kept apart from the project's own
+  AlloyDB and Filestore backups and outlives the resource. "You can only run one backup job at a
+  time": a second while one runs is FAILED_PRECONDITION, "Unable to queue the operation".
+- **Restoring** always makes a new resource, as Google's do. AlloyDB's `clusters.restore` takes
+  `backupdrBackupSource.backup` (a vault's backup) or `backupdrPitrSource` (`dataSource` and
+  `pointInTime`, inside a window); the new cluster carries `backupdrBackupSource`, and a primary
+  is then created on it. Filestore's `instances.create` takes `fileShares[].sourceBackupdrBackup`;
+  the new instance's capacity must be at least the source's, and its tier not basic.
+  `backups.restore` of either is 400 naming that call. Each restore is logged as a RESTORE job.
+
+Those fields are in AlloyDB's and Filestore's REST discovery documents
+(`google.golang.org/api/alloydb/v1`, `file/v1`) but in no published `alloydbpb` or `filestorepb`,
+so they are served over JSON; gRPC sees the messages as published.
+
+Plans enforce the limits the [backup plans overview](https://docs.cloud.google.com/backup-disaster-recovery/docs/concepts/backup-plan)
+gives each type: an HOURLY rule repeats every 1 to 23 hours (6 to 23 for Cloud SQL); a rule's
+retention is within its type's range for its recurrence (AlloyDB: hourly 1-90, daily 1-186, weekly
+7-365, monthly 30-365 days; Filestore, Cloud SQL and disks: 1-90, 1-186, 7-366, 30-732; Compute
+Engine VMs: 1-366, 1-1827, 7-1827, 30-3653); a backup window must be at least six hours long; and
+`logRetentionDays` is "valid only for AlloyDB and Cloud SQL".
+
+## Regional disks (#2206)
+
+A plan for `compute.googleapis.com/RegionDisk` protects a Compute Engine regional disk
+(`projects/P/regions/R/disks/D`; a zonal path is refused). Its backup snapshots the disk as a
+zonal disk's does, and `diskBackupProperties` carries `region` and `replicaZones` in place of
+`zone`. `backups.restore` with `regionDiskTargetEnvironment` (project, region and exactly two
+replica zones of that region) makes a new regional disk; with `diskTargetEnvironment` a zonal
+one. A VM's backup keeps which of its disks are regional and restores them regional, in the
+target zone and the next zone of its region. The six-hour minimum backup window is Google's rule
+for every vaulted backup plan ("It must be at least six hours long", backup plan concepts,
+re-read 2026-11-24), so it applies to regional disks too.
+
 ## What is refused
 
 Each answers 501 UNIMPLEMENTED with the reason:
 
-- **Other workload types.** A plan or association for a `resourceType` other than Cloud SQL's and
-  Compute Engine's (AlloyDB, Filestore) needs a server of that type, which CloudBurrow does not
-  run. (A Compute Engine one without `compute` is FAILED_PRECONDITION, naming `--services`.)
-- **Restore settings Compute Engine here does not serve**: `regionDiskTargetEnvironment`,
-  `clearOverridesFieldMask`, and restore properties such as customer-managed disk keys, storage
+- **A resource type Backup and DR does not protect here**, such as a bucket: 501 naming the
+  workload types served. (A Compute Engine, AlloyDB or Filestore plan or association without its
+  service is FAILED_PRECONDITION, naming `--services`.)
+- **Restore settings Compute Engine here does not serve**: `clearOverridesFieldMask`, and restore properties such as customer-managed disk keys, storage
   pools, provisioned IOPS, reservations, confidential VMs and GPUs.
 - **`pointInTimeRestore` into another project** than the data source's instance's: call it with
   that project as the parent.
@@ -267,4 +329,10 @@ creates and deletes them, takes an on-demand backup, and restores a backup into 
 a data source to a point in time. Create Backup plan's and Schedule backup's Resource Type, and
 Vaulted backups' Filter table, offer Compute Engine and Disk; a VM's or a disk's page restores a
 backup to a new VM (Restore scope Entire instance, project, zone, name, machine type) or a new disk
-(`TestBackupDRComputeRestoresThroughThePages`).
+(`TestBackupDRComputeRestoresThroughThePages`). They offer AlloyDB and Filestore too while those
+are served (drawn disabled with the reason otherwise): Schedule backup lists the project's clusters
+under Clusters and its instances under Instances; a cluster's page shows its UID and recovery
+windows, and restores a backup, or the cluster at a point in time, into a new cluster (project,
+region, cluster ID, network); an instance's page restores a backup into a new instance (location,
+ID, service tier, capacity, file share, network), pre-filled from the source
+(`TestBackupDRAlloyDBRestoresThroughThePages`, `TestConsoleBackupDRFilestore`).

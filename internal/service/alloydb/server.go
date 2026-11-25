@@ -196,6 +196,10 @@ type Server struct {
 	// omniTerms is the acceptance `up` was given for every new cluster;
 	// nil accepts nothing.
 	omniTerms *OmniAcceptance
+	// bdr is each cluster's Backup and DR protection (#1524), and bdrAPI
+	// the service that resolves its backups and data sources.
+	bdr    map[string]*bdrState
+	bdrAPI BackupDR
 
 	ca *authority
 	// conn is the listeners, once ServeConnector runs.
@@ -236,6 +240,7 @@ func (s *Server) clear() {
 	s.bases = map[string]time.Time{}
 	s.epochs = map[string]int64{}
 	s.omni = map[string]*OmniAcceptance{}
+	s.bdr = map[string]*bdrState{}
 }
 
 // Wait waits for the background operations started so far.
@@ -485,7 +490,8 @@ type diskState struct {
 	Bases     map[string]time.Time `json:"bases,omitempty"`
 	Epochs    map[string]int64     `json:"epochs,omitempty"`
 	// Omni is read by `cloudburrow status` too (cmd/cloudburrow).
-	Omni map[string]*OmniAcceptance `json:"omni,omitempty"`
+	Omni     map[string]*OmniAcceptance `json:"omni,omitempty"`
+	BackupDR map[string]*bdrState       `json:"backupdr,omitempty"`
 }
 
 func marshalAll[T proto.Message](m map[string]T) ([]json.RawMessage, error) {
@@ -536,6 +542,7 @@ func (s *Server) save() error {
 	st.Requests, st.Restores, st.Passwords, st.Versions, st.LastAuto, st.Bases = s.requests, s.restores, s.passwords, s.versions, s.lastAuto, s.bases
 	st.Epochs = s.epochs
 	st.Omni = s.omni
+	st.BackupDR = s.bdr
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
@@ -595,6 +602,9 @@ func (s *Server) load() error {
 	}
 	for k, v := range st.Omni {
 		s.omni[k] = v
+	}
+	for k, v := range st.BackupDR {
+		s.bdr[k] = v
 	}
 	// An operation a restart interrupted ends in error, and its resource
 	// is left as it was recorded. UNVERIFIED: Google's operations survive

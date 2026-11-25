@@ -87,28 +87,25 @@ func TestConsoleComputeParity2139(t *testing.T) {
 		t.Fatalf("after Stop over the selection web is %s", vpcStr(o, "status"))
 	}
 
-	// Instance schedules.
+	// Instance schedules (the provider's own test is
+	// TestConsoleComputeInstanceSchedules).
 	sch := computeInstanceSchedulesProvider{s}
-	if _, err := sch.Create(ctx, project, map[string]string{"name": "office", "region": "us-central1", "startTime": "09:00", "stopTime": "18:30",
-		"timeZone": "America/New_York", "frequency": "Weekdays"}); err != nil {
+	if _, err := sch.Create(ctx, project, map[string]string{"name": "office", "region": "us-central1", "startSchedule": "0 9 * * 1-5",
+		"stopSchedule": "30 18 * * 1-5", "timeZone": "America/New_York"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sch.Create(ctx, project, map[string]string{"name": "bad", "region": "us-central1", "startTime": "25:00", "timeZone": "UTC"}); err == nil {
-		t.Error("a start time of 25:00 was accepted")
+	if _, err := sch.Create(ctx, project, map[string]string{"name": "bad", "region": "us-central1", "startSchedule": "0 25 * * *", "timeZone": "UTC"}); err == nil {
+		t.Error("a start hour of 25 was accepted")
 	}
 	sl, _ := sch.List(ctx, project)
 	r := vpcRow(sl, "office")
-	if r == nil || r.Fields["Start"] != "0 9 * * 1-5" || r.Fields["Stop"] != "30 18 * * 1-5" || r.Fields["Time zone"] != "America/New_York" {
+	if r == nil || r.Fields["Start schedule"] != "0 9 * * 1-5" || r.Fields["Stop schedule"] != "30 18 * * 1-5" || r.Fields["Time zone"] != "America/New_York" {
 		t.Fatalf("office = %+v", r)
 	}
-	if err := sch.ActAt(ctx, project, r.Target, "addinstances", map[string]string{"instances": "us-central1-a/web"}); err != nil {
+	if err := sch.ActAt(ctx, project, r.Target, "add", map[string]string{"instance": "zones/us-central1-a/instances/web"}); err != nil {
 		t.Fatal(err)
 	}
-	sl, _ = sch.List(ctx, project)
-	if r := vpcRow(sl, "office"); r.Fields["In use by"] != "web" || r.Actions[len(r.Actions)-1].Unavailable == "" {
-		t.Fatalf("office in use = %+v", r)
-	}
-	if err := sch.ActAt(ctx, project, r.Target, "removeinstances", map[string]string{"instances": "web"}); err != nil {
+	if err := sch.ActAt(ctx, project, r.Target, "remove", map[string]string{"instance": "zones/us-central1-a/instances/web"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := sch.ActAt(ctx, project, r.Target, "delete", nil); err != nil {
@@ -117,12 +114,12 @@ func TestConsoleComputeParity2139(t *testing.T) {
 
 	// Snapshot schedules, a disk given one, Create a snapshot.
 	ss := computeSnapshotSchedulesProvider{s}
-	if _, err := ss.Create(ctx, project, map[string]string{"name": "nightly", "region": "us-central1", "frequency": "Weekly", "day": "Friday",
-		"startTime": "03:00", "retention": "7", "location": "Regional"}); err != nil {
+	if _, err := ss.Create(ctx, project, map[string]string{"name": "nightly", "region": "us-central1", "frequency": "Weekly", "day": "FRIDAY",
+		"startTime": "03:00", "retentionDays": "7"}); err != nil {
 		t.Fatal(err)
 	}
 	ssl, _ := ss.List(ctx, project)
-	if r := vpcRow(ssl, "nightly"); r == nil || r.Fields["Frequency"] != "Weekly on Friday" || r.Fields["Start time (UTC)"] != "03:00" || r.Fields["Autodelete after"] != "7 days" {
+	if r := vpcRow(ssl, "nightly"); r == nil || r.Fields["Auto-delete snapshots after"] != "7 days" {
 		t.Fatalf("nightly = %+v", ssl.Items)
 	}
 	disks := computeDisksProvider{s}
@@ -141,7 +138,7 @@ func TestConsoleComputeParity2139(t *testing.T) {
 		t.Errorf("data's page = %s", c2139Props(d))
 	}
 	ssl, _ = ss.List(ctx, project)
-	if r := vpcRow(ssl, "nightly"); r.Fields["In use by"] != "data" || r.Actions[0].Unavailable == "" {
+	if r := vpcRow(ssl, "nightly"); r.Fields["Disks"] != "1" {
 		t.Fatalf("nightly in use = %+v", r)
 	}
 	if err := disks.ActAt(ctx, project, []string{"us-central1-a", "data"}, "schedule", map[string]string{"schedule": ""}); err != nil {

@@ -150,6 +150,10 @@ func (s *Server) createInstance(ctx context.Context, req *filestorepb.CreateInst
 		}
 		source = b
 	}
+	bdrSrc, bdrName, err := s.bdrSourceLocked(in)
+	if err != nil {
+		return nil, err
+	}
 	now := s.now()
 	in.Name = name
 	in.State = filestorepb.Instance_CREATING
@@ -175,6 +179,13 @@ func (s *Server) createInstance(ctx context.Context, req *filestorepb.CreateInst
 	if source != nil {
 		backupKey, backupName, sealed = source.Key, source.B.GetName(), source.Sealed
 	}
+	bdrDone := func(error) {}
+	if bdrSrc != nil {
+		backupKey = bdrSrc.Key
+		job := s.bdrAPI.RestoreStarted("RESTORE", bdrName, m[1], name, "")
+		api := s.bdrAPI
+		bdrDone = func(err error) { api.RestoreFinished(job, err) }
+	}
 	var activeKey string
 	if active != nil {
 		activeKey = active.Key
@@ -195,9 +206,12 @@ func (s *Server) createInstance(ctx context.Context, req *filestorepb.CreateInst
 		rec.IP = ip
 		s.mu.Unlock()
 		if backupKey != "" {
-			dek, err := s.openKey(ctx, projectOf(backupName), backupName, sealed)
-			if err != nil {
-				return err
+			var dek []byte
+			if backupName != "" {
+				var err error
+				if dek, err = s.openKey(ctx, projectOf(backupName), backupName, sealed); err != nil {
+					return err
+				}
 			}
 			if err := b.Restore(ctx, key, share, backupKey, dek); err != nil {
 				return apierror.Internal(err, "Restoring the backup failed: %v", err)
@@ -211,6 +225,7 @@ func (s *Server) createInstance(ctx context.Context, req *filestorepb.CreateInst
 		}
 		return nil
 	}, func(err error) proto.Message {
+		bdrDone(err)
 		if active != nil {
 			delete(s.busy, active.I.GetName())
 		}

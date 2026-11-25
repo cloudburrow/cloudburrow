@@ -284,7 +284,7 @@ func mixins() []*annotations.HttpRule {
 // Transcoder is the JSON API's configuration, with nothing registered.
 func Transcoder() *rest.Transcoder {
 	return &rest.Transcoder{Packages: []string{"google.cloud.alloydb.v1", "google.cloud.alloydb.v1beta", "google.cloud.alloydb.v1alpha"},
-		Mixins: mixins(), SnakeCaseMasks: true}
+		Mixins: mixins(), SnakeCaseMasks: true, Overlay: alloydbOverlay}
 }
 
 // NewRESTHandler is the JSON API over s, on the gRPC port.

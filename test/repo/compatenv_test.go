@@ -455,6 +455,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"SQL_PRIVATECA":            "127.0.0.1:9028",
 		"SQL_COMPUTE":              "127.0.0.1:9031",
 		"MEMORYSTORE_COMPUTE":      "127.0.0.1:9031",
+		"FILESTORE_BACKUPDR":       "127.0.0.1:9024",
 		"RUN_COMPUTE":              "127.0.0.1:9031",
 		"MEMORYSTORE_PRIVATECA":    "127.0.0.1:9028",
 		"CLOUDSQL_SECRETS":         "127.0.0.1:9006",
@@ -575,7 +576,7 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
 		`if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,KUBECONFIG,MONITORING; fi`,
 		`if [ "$SHARD" = run ] || [ "$SHARD" = crossservice ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi`,
-		`if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE; fi`,
+		`if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE,ALLOYDB; fi`,
 		`scripts/compat-env.sh --strict --only "$BROWSER_VARS"`,
 	} {
 		if !strings.Contains(ci["compat"], want) {
@@ -592,7 +593,7 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`if [ "$shard" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
 		`if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,KUBECONFIG,MONITORING; fi`,
 		`if [ "$shard" = run ] || [ "$shard" = crossservice ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi`,
-		`if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE; fi`,
+		`if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE,ALLOYDB; fi`,
 		`scripts/compat-env.sh --only "$BROWSER_VARS"`,
 	} {
 		if !strings.Contains(string(verify), want) {

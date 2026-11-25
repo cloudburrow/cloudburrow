@@ -12,9 +12,10 @@ import (
 // workloadWhy is why a resource type other than a Cloud SQL instance is
 // refused.
 func workloadWhy(typ string) string {
-	return "CloudBurrow's Backup and DR Service protects Cloud SQL instances (" + CloudSQLResourceType + ") and Compute Engine " +
-		"instances and disks (" + ComputeInstanceResourceType + ", " + ComputeDiskResourceType + "); " + typ +
-		" is another workload type (AlloyDB, Filestore, regional disks), whose servers CloudBurrow does not run (docs/backupdr.md)"
+	return "CloudBurrow's Backup and DR Service protects Cloud SQL instances (" + CloudSQLResourceType + "), Compute Engine " +
+		"instances, disks and regional disks (" + ComputeInstanceResourceType + ", " + ComputeDiskResourceType + ", " +
+		ComputeRegionDiskResourceType + "), AlloyDB clusters (" + AlloyDBResourceType + ") and Filestore instances (" +
+		FilestoreResourceType + "); " + typ + " is another workload type (docs/backupdr.md)"
 }
 
 var recurrences = map[string]bool{"HOURLY": true, "DAILY": true, "WEEKLY": true, "MONTHLY": true, "YEARLY": true}
@@ -71,6 +72,9 @@ func (s *Server) createPlan(r *http.Request, loc string) (any, error) {
 	logDays, err := parseLogDays(body.LogRetentionDays)
 	if err != nil {
 		return nil, err
+	}
+	if logDays > 0 && !logRetentionType(body.ResourceType) {
+		return nil, invalid("backupPlan.logRetentionDays applies to Cloud SQL and AlloyDB plans only, not %s.", body.ResourceType)
 	}
 	name := loc + "/backupPlans/" + id
 	s.mu.Lock()
@@ -192,6 +196,9 @@ func checkRules(rules []rule, typ string) error {
 		if err := checkSchedule(i, ru.Schedule, typ); err != nil {
 			return err
 		}
+		if err := checkRuleRetention(i, ru, typ); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -233,6 +240,10 @@ func checkSchedule(i int, sch map[string]any, typ string) error {
 		en, _ := w["endHourOfDay"].(float64)
 		if st < 0 || st > 23 || en < 1 || en > 24 || en <= st {
 			return invalid("backupPlan.backupRules[%d].standardSchedule.backupWindow must start at hour 0 to 23 and end after it, by hour 24.", i)
+		}
+		// "It must be at least six hours long" (backup plans overview).
+		if en-st < 6 {
+			return invalid("backupPlan.backupRules[%d].standardSchedule.backupWindow from %v to %v is too short: it must be at least six hours long.", i, st, en)
 		}
 	}
 	return nil
@@ -323,6 +334,12 @@ func (s *Server) associationJSON(a *association) map[string]any {
 			"instanceCreateTime": s.st.DataSources[a.DataSource].info().CreateTime,
 		}
 	}
+	switch a.ResourceType {
+	case AlloyDBResourceType:
+		out["alloydbClusterBackupPlanAssociationProperties"] = a.Props
+	case FilestoreResourceType:
+		out["filestoreInstanceBackupPlanAssociationProperties"] = a.Props
+	}
 	return out
 }
 
@@ -355,8 +372,12 @@ func (s *Server) createAssociation(r *http.Request, loc string) (any, error) {
 		return nil, invalid("backupPlanAssociation.resource is required.")
 	case body.Plan == "":
 		return nil, invalid("backupPlanAssociation.backupPlan is required.")
+	case isWorkload(body.ResourceType):
+		return s.createWorkloadAssociation(loc, id, body.Plan, body.Resource, body.ResourceType)
 	case body.ResourceType != CloudSQLResourceType:
 		return s.createComputeAssociation(loc, id, body.Plan, body.Resource, body.ResourceType)
+	case s.sql == nil:
+		return nil, precondition("Cloud SQL is not served by this instance: run up with cloudsql or cloudsql-mysql in --services to protect its instances.")
 	}
 	project, instance, ok := sqlResource(body.Resource)
 	if !ok {
@@ -454,6 +475,9 @@ func (s *Server) deleteAssociation(name string) (any, error) {
 	delete(s.st.Associations, name)
 	err := s.saveLocked()
 	s.mu.Unlock()
+	if isWorkload(a.ResourceType) {
+		s.unprotectWorkload(a.ResourceType, a.Resource)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -495,7 +519,7 @@ func (s *Server) dataSourceJSON(d *dataSource) map[string]any {
 			"name": res, "databaseInstalledVersion": d.Info.DatabaseVersion, "instanceCreateTime": d.Info.CreateTime,
 			"instanceTier": d.Info.Tier}}
 	if d.Kind != "" {
-		gcp = d.computeGcpResource()
+		gcp = d.gcpResource()
 	}
 	out := map[string]any{"name": d.Name, "state": "ACTIVE", "configState": state, "backupCount": strconv.Itoa(count),
 		"createTime": d.CreateTime, "updateTime": d.UpdateTime, "etag": strconv.Quote(d.UpdateTime),
@@ -569,7 +593,10 @@ func (s *Server) backupJSON(b *backup) map[string]any {
 			"backupPlanRevisionId": b.revision(), "backupPlanRevisionName": b.Plan + "/revisions/" + b.revision()},
 		"gcpResource": map[string]any{"gcpResourcename": "//sqladmin.googleapis.com/" + res, "location": info.Region,
 			"type": CloudSQLResourceType}, "resourceSizeBytes": strconv.FormatInt(size, 10)}
-	if d != nil && d.Kind != "" {
+	switch {
+	case d != nil && isWorkload(d.Kind):
+		s.workloadBackupJSON(b, d, out)
+	case d != nil && d.Kind != "":
 		s.computeBackupJSON(b, d, out)
 	}
 	if consistency != "" {
@@ -656,6 +683,9 @@ func (s *Server) restoreBackup(r *http.Request, name string) (any, error) {
 	s.mu.Unlock()
 	if b == nil {
 		return nil, notFound("Backup %s does not exist.", name)
+	}
+	if d != nil && isWorkload(d.Kind) {
+		return nil, workloadRestoreHint(name, d.Kind)
 	}
 	if d != nil && d.Kind != "" {
 		return s.restoreCompute(name, body)
@@ -745,6 +775,9 @@ func (s *Server) backup(assocName, ruleID string, onDemand bool, retentionDays i
 	if err := s.checkVaultKeyFor(d.Name); err != nil {
 		return "", nil, err
 	}
+	if isWorkload(d.Kind) {
+		return s.workloadBackup(assocName, a.Plan, ruleID, onDemand, retentionDays, labels, rev, d, vlt)
+	}
 	if d.Kind != "" {
 		return s.computeBackup(assocName, a.Plan, ruleID, onDemand, retentionDays, labels, rev, d, vlt)
 	}
@@ -758,6 +791,9 @@ func (s *Server) backup(assocName, ruleID string, onDemand bool, retentionDays i
 	desc := "Backup and DR " + assocName + " rule " + ruleID
 	if ruleID == "" {
 		desc = "Backup and DR " + assocName + " on demand"
+	}
+	if s.sql == nil {
+		return "", nil, precondition("Cloud SQL is not served by this instance: run up with cloudsql or cloudsql-mysql in --services to back up its instances.")
 	}
 	runID, done, err := s.sql.Backup(d.Project, d.Instance, desc)
 	if err != nil {
@@ -867,6 +903,9 @@ func (s *Server) BackupRunID(name string) (string, error) {
 	if strings.HasPrefix(b.RunID, computeRunPrefix) {
 		return "", fmt.Errorf("The Backup and DR backup %s is a Compute Engine backup, not a Cloud SQL one: restore it with backups.restore.", name)
 	}
+	if strings.HasPrefix(b.RunID, workloadRunPrefix) {
+		return "", fmt.Errorf("The Backup and DR backup %s is not a Cloud SQL backup: its own service restores it.", name)
+	}
 	return b.RunID, nil
 }
 
@@ -896,7 +935,8 @@ func checkScheduleDays(i int, rt string, sch map[string]any, typ string) error {
 		// "compute.googleapis.com/Instance: 1-23 ... compute.googleapis.com/Disk:
 		// 1-23 ... sqladmin.googleapis.com/Instance: 6-23" (StandardSchedule).
 		lo := 6.0
-		if typ == ComputeInstanceResourceType || typ == ComputeDiskResourceType {
+		if isCompute(typ) || isWorkload(typ) {
+			// AlloyDB clusters and Filestore instances: 1-23 too (#1524).
 			lo = 1
 		}
 		if typ == "" {

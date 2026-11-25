@@ -82,7 +82,8 @@ func wantBackupDRCode(t *testing.T, what string, err error, code int, contains s
 //
 // Both are read with a database client through the official connector.
 // backups.restore of a Cloud SQL backup is refused (Cloud SQL restores it),
-// and a plan for an AlloyDB cluster with the reason.
+// and a plan for a resource type it does not protect (a bucket) with the
+// reason.
 // covers: backupdr.projects.locations.backupVaults.create, backupdr.projects.locations.backupVaults.get, backupdr.projects.locations.backupVaults.list, backupdr.projects.locations.backupVaults.delete, backupdr.projects.locations.backupPlans.create, backupdr.projects.locations.backupPlans.get, backupdr.projects.locations.backupPlans.list, backupdr.projects.locations.backupPlans.delete, backupdr.projects.locations.backupPlanAssociations.create, backupdr.projects.locations.backupPlanAssociations.get, backupdr.projects.locations.backupPlanAssociations.list, backupdr.projects.locations.backupPlanAssociations.delete, backupdr.projects.locations.backupPlanAssociations.triggerBackup, backupdr.projects.locations.backupVaults.dataSources.list, backupdr.projects.locations.backupVaults.dataSources.get, backupdr.projects.locations.backupVaults.dataSources.backups.list, backupdr.projects.locations.backupVaults.dataSources.backups.get, backupdr.projects.locations.backupVaults.dataSources.backups.delete, backupdr.projects.locations.operations.get, backupdr.projects.locations.operations.list, backupdr.projects.locations.list, backupdr.projects.locations.get, sql.instances.restoreBackup, sql.instances.pointInTimeRestore, sql.instances.insert, sql.instances.get, sql.operations.get
 func TestBackupDRCloudSQLRestore(t *testing.T) {
 	h := New(t)
@@ -129,8 +130,8 @@ func TestBackupDRCloudSQLRestore(t *testing.T) {
 	}
 
 	_, err = bdr.Projects.Locations.BackupPlans.Create(loc, &backupdr.BackupPlan{BackupVault: vaultName,
-		ResourceType: "alloydb.googleapis.com/Cluster", BackupRules: dailyRule()}).BackupPlanId("adb-" + suffix).Do()
-	wantBackupDRCode(t, "a plan for an AlloyDB cluster", err, http.StatusNotImplemented, "AlloyDB")
+		ResourceType: "storage.googleapis.com/Bucket", BackupRules: dailyRule()}).BackupPlanId("rd-" + suffix).Do()
+	wantBackupDRCode(t, "a plan for a bucket", err, http.StatusNotImplemented, "another workload type")
 
 	planID := "plan-" + suffix
 	wait(bdr.Projects.Locations.BackupPlans.Create(loc, &backupdr.BackupPlan{BackupVault: vaultName,
@@ -322,17 +323,17 @@ func dailyRule() []*backupdr.BackupRule {
 }
 
 // idleBackupWindow is a daily backup window, in UTC hours, that the test
-// cannot run into: 01:00 to 05:00, or 13:00 to 17:00 when it is before
-// 07:00 UTC. Inside its window a DAILY rule takes its scheduled backup at
+// cannot run into: 01:00 to 07:00, or 13:00 to 19:00 when it is before
+// 09:00 UTC (a window "must be at least six hours long", #1524). Inside its window a DAILY rule takes its scheduled backup at
 // the instance's next once-a-minute check, as Backup and DR does, and a
 // test's on-demand backup does not stand in for it; a test that counts
 // backups then saw one more than it took (#1871: main run 44438624783, at
 // 02:50 UTC).
 func idleBackupWindow() (start, end int64) {
-	if time.Now().UTC().Hour() < 7 {
-		return 13, 17
+	if time.Now().UTC().Hour() < 9 {
+		return 13, 19
 	}
-	return 1, 5
+	return 1, 7
 }
 
 func hasDataSource(ds []*backupdr.DataSource, name string) bool {

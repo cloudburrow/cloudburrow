@@ -192,6 +192,10 @@ type Server struct {
 	ops       map[string]*opRecord
 	// busy names the resources with an operation running.
 	busy map[string]string
+	// bdrBackups are the Backup and DR vault's backups, by run ID, and
+	// bdrAPI the service that resolves them (#1524).
+	bdrBackups map[string]*bdrBackup
+	bdrAPI     BackupDR
 }
 
 type instRecord struct {
@@ -331,6 +335,8 @@ type stateFile struct {
 	Instances []stateInst   `json:"instances"`
 	Snapshots []stateSnap   `json:"snapshots"`
 	Backups   []stateBackup `json:"backups"`
+	// BackupDR are the Backup and DR vault's backups (#1524).
+	BackupDR map[string]*bdrBackup `json:"backupdr,omitempty"`
 }
 
 type stateInst struct {
@@ -387,6 +393,7 @@ func (s *Server) load() error {
 		}
 		s.backups[bk.GetName()] = &backupRecord{B: bk, Key: x.Key, Sealed: x.Sealed}
 	}
+	s.bdrBackups = f.BackupDR
 	return nil
 }
 
@@ -419,6 +426,7 @@ func (s *Server) saveLocked() error {
 		}
 		f.Backups = append(f.Backups, stateBackup{Backup: b, Key: r.Key, Sealed: r.Sealed})
 	}
+	f.BackupDR = s.bdrBackups
 	b, err := json.MarshalIndent(f, "", " ")
 	if err != nil {
 		return err

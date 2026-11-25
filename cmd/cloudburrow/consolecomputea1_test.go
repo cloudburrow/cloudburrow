@@ -109,10 +109,10 @@ func TestConsoleComputeA1(t *testing.T) {
 			attach = a.Fields[0].Options
 		}
 	}
-	if !strings.Contains(strings.Join(attach, ","), "us-central1/ha") {
+	if !strings.Contains(strings.Join(attach, ","), "regions/us-central1/disks/ha") {
 		t.Fatalf("attach options = %v", attach)
 	}
-	if err := vms.ActAt(ctx, project, []string{"us-central1-a", "app"}, "attachdisk", map[string]string{"disk": "us-central1/ha"}); err != nil {
+	if err := vms.ActAt(ctx, project, []string{"us-central1-a", "app"}, "attachdisk", map[string]string{"disk": "regions/us-central1/disks/ha"}); err != nil {
 		t.Fatal(err)
 	}
 	settle(t, s, project)
