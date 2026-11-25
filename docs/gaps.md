@@ -40,7 +40,9 @@ tracks it; a closed issue is named only where it says what was built.
 | Filestore | 7 | 2 | 4 | 1 | 0 |
 | Dataform | 7 | 0 | 3 | 4 | 0 |
 | Console | 11 | 5 | 5 | 1 | 0 |
-| **Total** | **105** | **16** | **36** | **47** | **6** |
+| Remote compute | 0 | 0 | 0 | 0 | 0 |
+| Bring your own cloud | 2 | 1 | 0 | 0 | 1 |
+| **Total** | **107** | **17** | **36** | **47** | **7** |
 
 ## Cloud Storage
 
@@ -431,10 +433,58 @@ addresses (#2139, #2140).
 | Secure Web Proxy (#2160): a gateway is an explicit forward proxy on this machine, reached from this machine at its host address (`cloudburrowAddress`) and from a VM of its network at its `addresses` IP (relayed with the VM's identity), and `NEXT_HOP_ROUTING_MODE` and Private Service Connect service attachments route nothing to it (no routes carry traffic here); `allPorts` listens on 80 and 443 only; TLS inspection decrypts a CONNECT whose first session match has `tlsInspectionEnabled`, with a leaf per host requested from the TLS inspection policy's CA pool in this instance's Certificate Authority Service (direct leaf provisioning, so it needs `privateca` in `--services`; without it such a tunnel is refused with 403), valid for 24 hours (Google documents no lifetime), and the local intermediate CA signing mode is not offered (this API version has no `certificateIssuanceMode`); the inspected server's certificate is checked against this machine's system roots, standing in for Google's Mozilla-based public CA set, and, as the reference says of each, the policy's `trustConfig`, `excludePublicCaSet`, `minTlsVersion`, `tlsFeatureProfile` and `customTlsFeatures` are kept but not honoured, so an origin with a private CA's certificate gets 502 (Google documents no status); an inspected tunnel speaks HTTP/1.1 to the client (no HTTP/2); a Cloud Run container reaches a gateway only at `host.docker.internal:PORT` (Docker Desktop), so its connection arrives from the host's address and `source.matchServiceAccount`, `source.matchTag` and `inIpRange(source.ip, ...)` never match it (a VM's do, through the relay); a gateway's `serverTlsPolicy` (frontend mutual TLS), authorization policies and rate limiting policies on a gateway, Agent Gateway, and Cloud Logging and Cloud Trace of its requests are not served; a denied request's 403 body (`Forbidden`) is ours (Google documents the status for authorization policies only); a request to a Google host is answered 502 Bad Gateway, as CloudBurrow never connects to Google (a plain HTTP request to a googleapis.com API served here goes to this instance) | no emulator support (routing modes; Google does not yet honour the TLS inspection policy's trust and TLS settings) | M |
 | Serverless VPC Access and Cloud Run VPC egress (#2140): traffic is carried through one gateway pod per connector or Direct VPC egress setting, not by connector VMs that scale between `minInstances` and `maxInstances` (the counts are recorded), and Direct VPC egress gives every instance of a revision the one gateway address rather than an address each; only IPv4 is carried; a connector's custom IP range makes no hidden `aet-` subnet in the network, so a subnet created later may overlap it; the nodes' routes are set for a kind cluster's nodes only (GKE clusters' pods have no VPC egress); the Monitoring charts are not served | no emulator support | M |
 
+## Remote compute
+
+Phase 1 of #2209, `up --compute ssh://user@host`, is built, and a VM made by [Bring your own cloud](#bring-your-own-cloud) becomes the instance's compute through it ([remote-compute.md](remote-compute.md)):
+the instance's Docker on a remote Linux host over one supervised SSH connection, with the
+console, the APIs and the metadata server staying on this machine.
+
+Closed: containers that mount a path of this machine (Model Garden, the LiteRT-LM runner, the
+TensorFlow converter and predictor, the video decoder, Spark procedures, Dataform) get it as a
+volume on the host (`internal/hostmount`), and a running instance moves onto a VM with its state
+(`cloudburrow cloud move`, the console's Move) (#2209); and it moves in every direction, from one
+VM to another (across clouds too) and back to this machine, each move resumable from its journal
+after an interruption, or rolled back (`--resume`, `--rollback`, the console's Resume and Roll
+back) (#2209).
+
+## Bring your own cloud
+
+#2209 phases 2 and 3 ([byoc.md](byoc.md)): connect AWS or Azure, create, resize, start, stop and
+delete the VM, from the console and `cloudburrow cloud`, tested against local fakes of each
+cloud's API.
+
+Closed: AWS connects through SSM Session Manager port forwarding, the data channel's WebSocket
+protocol in Go (`internal/byoc/awsprov/ssmtunnel`, no plugin), with nothing inbound, and SSH from
+the user's address stays as `--connect ssh`; the SSH firewall (Azure, and AWS in SSH mode) follows
+the user's public address, before each connection and every few minutes, with
+`cloudburrow cloud allow-my-ip` and the console's Allow my address; auto-stop changes after create
+(`cloudburrow cloud set --auto-stop`, Compute capacity), on a running VM at once and on a stopped
+one at its next start (#2209).
+
+A change to or from a GPU size, which no cloud resizes in place (cloud-init installs NVIDIA's
+driver and container toolkit at create), is one guided action: a new VM of the size, the instance
+moved onto it, the old VM deleted, with the plan and the price difference shown first (`cloud
+scale <vm> --size gpu`, Compute capacity's Change VM) (#2209).
+
+Closed: a move from a VM back to this machine closes what is left of the instance's connection
+to the VM and waits, bounded, until every port it forwarded is free here before the instance
+starts here (a port still taken fails the move, named, and it rolls back to the VM, its data
+kept); a VM an instance runs on is never deleted from under it (refused from the console, the CLI
+and the API, unless the instance moves off first or the user chooses the typed *Delete VM and
+this instance's data*); and the first-run walk-through, `TestByocFirstRunWalkThrough`, passes end
+to end (#2209).
+
+| Gap | Why open | Size |
+|---|---|---|
+| **Not yet tested against real AWS or Azure** (#2209): every flow runs against `awsfake` and `azurefake`, recorded from the clouds' API references, and the stand-in hosts; the user runs the first real-cloud check, [byoc.md's Test it on your account](byoc.md#test-it-on-your-account) | needs live AWS/Azure (nothing here signs in to them) | M |
+
 ## Excluded on purpose
 
 Not gaps to close; each stays until its decision is amended.
 
+- **Several VMs as nodes of one instance** (multi-node over the tunnel): not part of #2209. The
+  coordinator's decision of 2026-11-24 left it for later, if needed; one instance runs on one VM
+  (or this machine), and several instances each run on their own.
 - **Cloud Storage object IAM** (`objects.getIamPolicy`, `setIamPolicy`, `testIamPermissions`):
   501 by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #504. The ACL methods
   (`bucketAccessControls.*`, `objectAccessControls.*`, `defaultObjectAccessControls.*`) are

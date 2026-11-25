@@ -49,6 +49,8 @@ Flags:
     	host:port the Cloud SQL connectors' TLS listener binds; they dial port 3307, so a second instance takes another loopback address (default: bind address, port 3307)
   -cluster-provider string
     	cluster provider (only kind is supported)
+  -compute string
+    	where the instance's Docker (its kind cluster and every container) runs: empty for this machine, or ssh://[user@]host[:port] for a remote Linux host reached over SSH (docs/remote-compute.md)
   -config string
     	path to a JSON configuration file
   -cors-allow-origin value

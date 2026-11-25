@@ -62,11 +62,21 @@ type runtimeInfo struct {
 	// ones the instance never started pointed at another instance's default
 	// ports (#652). Absent in runtime files written before it.
 	Services []config.Service `json:"services,omitempty"`
+	// Args are the arguments up ran with (after `up`, --offline apart), and
+	// Offline whether it was --offline: what `cloud move` starts again with.
+	Args    []string `json:"args,omitempty"`
+	Offline bool     `json:"offline,omitempty"`
 	// IAMEnforcement is this up's --iam-enforcement, "off" or "on" (#1879).
 	IAMEnforcement string `json:"iamEnforcement,omitempty"`
 	// AllowUnconfinedContainers is this up's --allow-unconfined-containers
 	// (#2162).
 	AllowUnconfinedContainers bool `json:"allowUnconfinedContainers,omitempty"`
+	// Compute and DockerHost are the compute host and the DOCKER_HOST that
+	// reaches its Docker through this up's SSH connection (#2209), which
+	// `env` exports so the developer's docker and kind reach it too.
+	// Absent for an instance on this machine's Docker.
+	Compute    string `json:"compute,omitempty"`
+	DockerHost string `json:"dockerHost,omitempty"`
 }
 
 func runtimePath(cfg config.Config) string { return filepath.Join(cfg.InstanceDir(), "up.json") }
@@ -141,13 +151,20 @@ type runtimeFile struct {
 	// token is the admin token (#553), written beside the runtime file for
 	// the instance's life and never into it.
 	token string
+	// args are up's own arguments, so `cloud move` starts the instance
+	// again as it was started (#2209).
+	args    []string
+	offline bool
 }
 
 func (r *runtimeFile) Name() string { return "runtime-file" }
 
 func (r *runtimeFile) Start(context.Context) error {
 	r.info = runtimeInfo{PID: os.Getpid(), Control: r.control.Addr(), Detached: r.detached, Started: time.Now().UTC(),
-		Services: r.cfg.EnabledServices(), IAMEnforcement: iamEnforcementMode(r.cfg), AllowUnconfinedContainers: r.cfg.AllowUnconfinedContainers}
+		Services: r.cfg.EnabledServices(), IAMEnforcement: iamEnforcementMode(r.cfg), AllowUnconfinedContainers: r.cfg.AllowUnconfinedContainers, Args: r.args, Offline: r.offline}
+	if c := currentCompute(); c != nil {
+		r.info.Compute, r.info.DockerHost = c.record.Target.String(), c.session.DockerHost()
+	}
 	// Unreadable only where the platform does not expose it; the file is
 	// then identified by the process's name, as before #820.
 	r.info.ProcStart, _ = procStartTime(r.info.PID)

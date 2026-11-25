@@ -150,7 +150,15 @@ func exportedEnv(cfg config.Config, info runtimeInfo, live bool) (config.Config,
 		return cfg, nil, err
 	}
 
-	return cfg, envVars(cfg, proj, adcPath), nil
+	vars := envVars(cfg, proj, adcPath)
+	if live && info.DockerHost != "" {
+		// Remote compute (#2209): the developer's docker and kind (a `kind
+		// load`, a `docker ps`) reach the instance's Docker on the host
+		// through the running up's connection, as CloudBurrow's own do.
+		vars = append(vars, envVar{"DOCKER_HOST", info.DockerHost,
+			"the instance's Docker on " + info.Compute + ", through the running up's SSH connection"})
+	}
+	return cfg, vars, nil
 }
 
 // gcloudOverridePrefix heads the variable gcloud reads each

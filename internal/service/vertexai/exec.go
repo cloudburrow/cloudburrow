@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostmount"
 )
 
 // ContainerLabel marks runtime containers CloudBurrow started.
@@ -47,20 +49,25 @@ const ContainerLabel = "cloudburrow.localai=1"
 func NewDockerGenerator(image, modelDir, modelFile, modelID string) *ExecGenerator {
 	return &ExecGenerator{
 		Command: "docker",
-		ArgsFor: func(id string) []string {
-			return []string{
-				"run", "--rm", "-i",
-				"--name", id,
-				"--label", ContainerLabel,
-				"-v", modelDir + ":/models",
+		ArgsFor: func(ctx context.Context, id string) ([]string, error) {
+			// On a remote compute host the model directory is carried
+			// into a volume there, and the XNNPACK cache the runtime
+			// writes stays in it (internal/hostmount).
+			models, err := hostmount.Bind(ctx, modelDir, "/models", hostmount.Cache)
+			if err != nil {
+				return nil, err
+			}
+			args := []string{"run", "--rm", "-i", "--name", id, "--label", ContainerLabel}
+			args = append(args, models.Args()...)
+			return append(args,
 				// cloudburrow_generate rather than the image's
 				// litert_lm_main: the same engine, with the sampler and
 				// the token limit set per request (#1797).
 				"--entrypoint", RunnerPath,
 				image,
 				"--backend=cpu",
-				"--model_path=/models/" + modelFile,
-			}
+				"--model_path=/models/"+modelFile,
+			), nil
 		},
 		OnCancel: func(id string) {
 			// Detached from the cancelled context on purpose: the cleanup
@@ -116,7 +123,7 @@ type ExecGenerator struct {
 	Args    []string
 	// ArgsFor, when set, replaces Args and receives the request's ID, for
 	// commands that need to name the work so it can be stopped later.
-	ArgsFor func(id string) []string
+	ArgsFor func(ctx context.Context, id string) ([]string, error)
 	// OnCancel, when set, runs if the context is cancelled before the process
 	// exits. It exists for commands that are clients for work happening
 	// elsewhere, where killing the client leaves the work running.
@@ -287,7 +294,10 @@ func (g *ExecGenerator) Generate(ctx context.Context, req Request) (<-chan Chunk
 	id := requestID()
 	args := append([]string(nil), g.Args...)
 	if g.ArgsFor != nil {
-		args = g.ArgsFor(id)
+		var err error
+		if args, err = g.ArgsFor(ctx, id); err != nil {
+			return nil, nil, err
+		}
 	}
 	conversation := g.Runner && req.Conversation != nil
 	if !g.Runner {
@@ -516,7 +526,10 @@ func (g *ExecGenerator) runOnce(ctx context.Context, rr *RunnerRequest, vision b
 	id := requestID()
 	args := append([]string(nil), g.Args...)
 	if g.ArgsFor != nil {
-		args = g.ArgsFor(id)
+		var err error
+		if args, err = g.ArgsFor(ctx, id); err != nil {
+			return nil, err
+		}
 	}
 	args = append(args, runnerFlags(Request{Conversation: rr, Vision: vision})...)
 	body, err := json.Marshal(rr)

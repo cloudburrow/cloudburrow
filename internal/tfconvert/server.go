@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostmount"
 )
 
 // Engine converts the SavedModel in dir to a bundle (bundle.go).
@@ -297,12 +299,28 @@ func (d *Docker) Convert(ctx context.Context, dir string) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, d.bin(), "run", "--rm", "--network", Network, "--read-only", "--tmpfs", "/tmp",
-		"-e", "HOME=/tmp", "-e", "TF_CPP_MIN_LOG_LEVEL=2",
-		"-v", dir+":/model:ro", "-v", out+":/out", d.Image, "convert")
+	// On a remote compute host the model and the output directory are
+	// volumes there (internal/hostmount), the output copied back after.
+	model, err := hostmount.Scratch(ctx, dir, "/model", hostmount.ReadOnly)
+	if err != nil {
+		return nil, &Refusal{Kind: "unavailable", Message: err.Error()}
+	}
+	defer model.Release()
+	output, err := hostmount.Scratch(ctx, out, "/out", hostmount.ReadWrite)
+	if err != nil {
+		return nil, &Refusal{Kind: "unavailable", Message: err.Error()}
+	}
+	defer output.Release()
+	args := []string{"run", "--rm", "--network", Network, "--read-only", "--tmpfs", "/tmp", "-e", "HOME=/tmp", "-e", "TF_CPP_MIN_LOG_LEVEL=2"}
+	args = append(append(args, model.Args()...), output.Args()...)
+	cmd := exec.CommandContext(ctx, d.bin(), append(args, d.Image, "convert")...)
 	var log bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &log, &log
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+	if err := output.Collect(ctx); err != nil && runErr == nil {
+		return nil, &Refusal{Kind: "unavailable", Message: err.Error()}
+	}
+	if err := runErr; err != nil {
 		tail := log.String()
 		if len(tail) > 2000 {
 			tail = tail[len(tail)-2000:]

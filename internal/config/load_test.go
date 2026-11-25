@@ -623,6 +623,55 @@ func TestAllowUnconfinedContainers(t *testing.T) {
 	}
 }
 
+// TestCompute (#2209): where the instance's Docker runs. Empty is this
+// machine's; ssh://[user@]host[:port] by flag, variable or a named file;
+// anything else is refused, and a discovered ./cloudburrow.json cannot
+// choose a host, since the host is handed the instance's Docker and
+// reverse forwards to this machine's endpoints.
+func TestCompute(t *testing.T) {
+	t.Parallel()
+	named := writeFile(t, t.TempDir(), "cb.json", `{"compute":"ssh://dev@box:2222"}`)
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		env     map[string]string
+		file    string // discovered
+		want    string
+		wantErr string
+	}{
+		{name: "default is this machine"},
+		{name: "flag", args: []string{"--compute", "ssh://dev@box.example"}, want: "ssh://dev@box.example"},
+		{name: "env", env: map[string]string{EnvPrefix + "COMPUTE": "ssh://box:2200"}, want: "ssh://box:2200"},
+		{name: "flag beats env", args: []string{"--compute=ssh://a"}, env: map[string]string{EnvPrefix + "COMPUTE": "ssh://b"}, want: "ssh://a"},
+		{name: "named file", env: map[string]string{EnvPrefix + "CONFIG": named}, want: "ssh://dev@box:2222"},
+		{name: "discovered file", file: `{"compute":"ssh://dev@box"}`, wantErr: "a discovered file cannot send the instance's Docker"},
+		{name: "not ssh", args: []string{"--compute", "tcp://box:2375"}, wantErr: "compute target must be ssh://"},
+		{name: "a password", args: []string{"--compute", "ssh://dev:secret@box"}, wantErr: "never a password"},
+		{name: "an option for a host", args: []string{"--compute", "ssh://-oProxyCommand=x"}, wantErr: "compute target must be ssh://"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if tc.file != "" {
+				writeFile(t, dir, DefaultFileName, tc.file)
+			}
+			cfg, err := Load(Options{Args: tc.args, Getenv: envMap(tc.env), WorkDir: dir})
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Load = %v; want an error containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Compute != tc.want {
+				t.Errorf("Compute = %q, want %q", cfg.Compute, tc.want)
+			}
+		})
+	}
+}
+
 // TestEmulatorHeap: the Java emulators' heap bound (#1603) defaults to
 // DefaultEmulatorHeapMiB, is set by flag, environment or file, 0 turns it
 // off, and a value the emulators cannot run in, or that bounds nothing, is

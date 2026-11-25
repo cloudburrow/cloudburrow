@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/cloudburrow/cloudburrow/internal/byoc"
 	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
@@ -2173,6 +2174,18 @@ type Server struct {
 	// offers no page. instanceTokenFile is where the token is, not the token.
 	instanceSrc       InstanceSource
 	instanceTokenFile string
+	// computeSrc is where the instance's compute runs (#2209); nil is this
+	// machine's Docker.
+	computeSrc ComputeSource
+
+	// cloud is bring your own cloud (#2209): Settings > Compute and
+	// Compute capacity; nil offers no page. cloudAuth checks the admin
+	// token; nil uses instanceSrc's.
+	cloud         *byoc.Manager
+	cloudInstance string
+	cloudAuth     ComputeAuthorizer
+	// mover runs Compute capacity's Move (cloudmove.go); nil offers none.
+	mover ComputeMover
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -2251,10 +2264,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/logs", s.handleDeleteLog)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/instance", s.handleInstance)
+	mux.HandleFunc("GET /api/instance/compute", s.handleCompute)
+	mux.HandleFunc("POST /api/instance/compute/reconnect", s.handleComputeReconnect)
 	mux.HandleFunc("POST /api/instance/save", s.handleStateSave)
 	mux.HandleFunc("POST /api/instance/load", s.handleStateLoad)
 	mux.HandleFunc("POST /api/instance/reset", s.handleInstanceReset)
 	mux.HandleFunc("POST /api/instance/seed", s.handleInstanceSeed)
+	s.cloudRoutes(mux)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/metrics/series", s.handleSeries)
 	mux.HandleFunc("GET /api/metrics/requests", s.handleRequestMetrics)

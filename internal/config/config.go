@@ -10,6 +10,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/remotecompute"
 	"net"
 	"net/url"
 	"os"
@@ -779,6 +780,13 @@ type Config struct {
 	// (docs/cloudsql.md).
 	CloudSQLConnector string `json:"cloudsqlConnector,omitempty"`
 
+	// Compute is where the instance's Docker runs (#2209): empty for this
+	// machine's, or ssh://[user@]host[:port] for a remote Linux host, whose
+	// Docker CloudBurrow reaches over one supervised SSH connection while
+	// the CLI, the console and every endpoint stay here. `up` records it in
+	// the instance directory, so the other commands reach the same host.
+	Compute string `json:"compute,omitempty"`
+
 	Endpoints Endpoints `json:"endpoints"`
 	Cluster   Cluster   `json:"cluster"`
 	LocalAI   LocalAI   `json:"localAI"`
@@ -1375,6 +1383,12 @@ func (c *Config) Validate() error {
 		add("bindAddress", c.BindAddress,
 			"binds a non-loopback address, which exposes an unauthenticated emulator "+
 				"to the network; pass --allow-remote to confirm")
+	}
+
+	if c.Compute != "" {
+		if _, err := remotecompute.ParseTarget(c.Compute); err != nil {
+			add("compute", c.Compute, "must be empty (this machine's Docker) or ssh://[user@]host[:port] (#2209): "+err.Error())
+		}
 	}
 
 	// The Cloud SQL connector listener (#1364): an IP literal and a port,

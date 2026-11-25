@@ -1123,6 +1123,13 @@ const ROUTES = [
   // cloudburrow commands of those names. Also reached from Settings and
   // utilities.
   { path: "/instance", service: null, screen: "instance", title: "Instance", section: "Management tools" },
+  // Settings > Compute and Compute capacity (#2209): this instance's compute
+  // on a VM in the user's own AWS account or Azure subscription. Reached
+  // from Settings and utilities.
+  { path: "/settings/compute", service: null, screen: "compute-settings", title: "Compute", section: "Management tools" },
+  { path: "/settings/compute/create", service: null, screen: "compute-create", title: "Create VM" },
+  { path: "/settings/compute/operation", service: null, screen: "compute-operation", title: "Operation" },
+  { path: "/compute-capacity", service: null, screen: "compute-capacity", title: "Compute capacity", section: "Management tools" },
   // Billing (#2109), Google's Billing menu: Manage billing accounts, the
   // projects' Account management, Budgets & alerts and Pricing. Every
   // account is local: nothing asks for or shows payment details.
@@ -1290,6 +1297,10 @@ const ICONS = {
   activity:  '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
   // Connect: a plug.
   connect:   '<path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>',
+  // Compute (#2209): a cloud with a server under it, for a VM in your own cloud.
+  "compute-settings": '<path d="M7 11a4 4 0 0 1 .6-7.9A5 5 0 0 1 17 5a3 3 0 0 1 0 6z"/><rect x="5" y="14" width="14" height="6" rx="1"/><path d="M8 17h.01M12 11v3"/>',
+  // Compute capacity (#2209): a gauge, for a VM's size.
+  "compute-capacity": '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/><path d="M4 20h16"/>',
   dashboard: '<rect x="3" y="3" width="8" height="10" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="15" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="10" rx="1"/>',
 };
 
@@ -12160,6 +12171,10 @@ function dispatch(view) {
   if (match.screen === "not-served") return renderNotServed(view, match);
   if (match.screen === "ap-overview") return renderAgentPlatformOverview(view);
   if (match.screen === "instance") return renderInstance(view);
+  if (match.screen === "compute-settings") return renderComputeSettings(view);
+  if (match.screen === "compute-create") return renderComputeCreate(view);
+  if (match.screen === "compute-operation") return renderComputeOperation(view);
+  if (match.screen === "compute-capacity") return renderComputeCapacity(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "metrics-explorer") return renderMetricsExplorer(view, match);
   if (match.screen === "trace-explorer") return renderTraceExplorer(view, match);
@@ -12241,6 +12256,1044 @@ const INSTANCE_TOKEN_KEY = "cb-admin-token";
 let INSTANCE_TOKEN = "";
 // A save or a load streams the whole archive; the server bounds either at
 // ten minutes.
+// --- Compute: bring your own cloud (#2209) ------------------------------
+//
+// Settings > Compute connects an AWS account (IAM Identity Center's device
+// sign-in, or an access key) or an Azure subscription (Microsoft's own
+// sign-in page), and creates the VM that runs this instance's compute
+// there. Compute capacity resizes, starts, stops and deletes it. Every
+// request carries the admin token, as the Instance page's do: these act on
+// the user's own cloud account.
+
+const COMPUTE_TITLE = "Compute";
+const COMPUTE_SUBTITLE = "Run this instance's compute (its cluster and containers) on a VM in your own AWS account or Azure subscription. " +
+  "The APIs, this console and every endpoint stay on this machine.";
+const CAPACITY_TITLE = "Compute capacity";
+const CAPACITY_SUBTITLE = "The VMs CloudBurrow made in your clouds: their size, price and state.";
+const CLOUD_TITLES = { aws: "AWS", azure: "Azure" };
+const PRESET_TITLES = { small: "Small", medium: "Medium", large: "Large", gpu: "GPU" };
+const AUTO_STOP_CHOICES = [[0, "Never"], [30, "After 30 minutes idle"], [60, "After 1 hour idle"], [120, "After 2 hours idle"],
+  [240, "After 4 hours idle"], [480, "After 8 hours idle"]];
+const COMPUTE_DEADLINE_MS = 70000;
+const HOURS_PER_MONTH = 730;
+const COMPUTE_TRANSITIONAL = ["provisioning", "starting", "stopping", "resizing", "deleting"];
+
+const usdFormat = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 3 });
+const usdMonthly = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+async function computeJSON(path, { method = "GET", body } = {}) {
+  const res = await instanceFetch(path, {
+    method, deadline: COMPUTE_DEADLINE_MS,
+    body: body === undefined ? undefined : JSON.stringify(body),
+    contentType: body === undefined ? undefined : "application/json",
+  });
+  return res.json();
+}
+
+function closeSettingsPanel() {
+  const settings = document.getElementById("settings-panel");
+  const button = document.getElementById("settings");
+  // Open is read from the button too: is-open lands a frame after it.
+  if (settings && (overlayOpen(settings) || (button && button.getAttribute("aria-expanded") === "true"))) {
+    hideOverlay(settings);
+    document.getElementById("settings").setAttribute("aria-expanded", "false");
+  }
+}
+
+// computeTokenForm asks for the admin token, then draws the page again.
+function computeTokenForm(view, err, title, subtitle, redraw) {
+  const hadToken = !!instanceToken();
+  setInstanceToken("");
+  const file = err.body && err.body.token_file;
+  const input = el("input", { id: "compute-token", type: "password", autocomplete: "off", spellcheck: "false" });
+  const error = el("p", { class: "form-error", role: "alert", id: "compute-token-error", hidden: !hadToken,
+    text: hadToken ? `The admin API refused that token: ${err.message}` : "" });
+  const submit = (e) => {
+    e.preventDefault();
+    const value = input.value.trim();
+    if (!value) {
+      error.textContent = "Paste the instance's admin token.";
+      error.hidden = false;
+      input.focus();
+      return;
+    }
+    setInstanceToken(value);
+    redraw();
+  };
+  setChildren(view, pageHeader(title, subtitle),
+    el("form", { class: "card", id: "compute-token-form", novalidate: true, onsubmit: submit },
+      el("h2", { text: "Admin token required" }),
+      el("p", { text: "Connecting a cloud and managing its VMs need the instance's admin token, as /admin does: " +
+        "a workload in the cluster can reach this console, and these pages act on your own cloud account." }),
+      file ? el("p", {}, el("span", { text: "The token is the contents of " }), el("code", { text: file }), el("span", { text: "." })) : null,
+      error,
+      el("div", { class: "form-row" },
+        el("label", { for: "compute-token", text: "Admin token" }),
+        input,
+        el("p", { class: "form-help", text: "Kept for this tab only, and sent with each request this page makes." })),
+      el("div", { class: "form-actions" }, el("button", { type: "submit", class: "primary", text: "Use token" }))));
+  input.focus();
+  announce("Admin token required");
+}
+
+// computeLoad reads /api/compute, or draws the token form or the error.
+async function computeLoad(view, path, title, subtitle, redraw) {
+  try {
+    return await computeJSON("/api/compute");
+  } catch (err) {
+    if (location.pathname !== path) return null;
+    if (err.status === 401) computeTokenForm(view, err, title, subtitle, redraw);
+    else setChildren(view, pageHeader(title, subtitle), errorState(`${title} unavailable`, err.message, redraw));
+    return null;
+  }
+}
+
+function sizeSummary(s) {
+  const parts = [`${s.vcpus} vCPU`, `${s.memory_gib} GB memory`];
+  if (s.gpus) parts.push(`${s.gpus} × ${s.gpu}`);
+  return parts.join(", ");
+}
+
+function hourly(s) {
+  return s && s.hourly_usd ? `${usdFormat.format(s.hourly_usd)}/hour` : "price unavailable";
+}
+
+function connectionLabel(c) {
+  const name = c.account_name ? `${c.account_name} (${c.account_id})` : c.account_id;
+  return `${CLOUD_TITLES[c.cloud] || c.cloud}: ${name}`;
+}
+
+// ---- Settings > Compute ----
+
+async function renderComputeSettings(view) {
+  closeSettingsPanel();
+  const path = location.pathname;
+  const redraw = () => renderComputeSettings(view);
+  setChildren(view, pageHeader(COMPUTE_TITLE, COMPUTE_SUBTITLE), loadingState(4));
+  const data = await computeLoad(view, path, COMPUTE_TITLE, COMPUTE_SUBTITLE, redraw);
+  if (!data || location.pathname !== path) return;
+  const create = el("button", { type: "button", class: "primary header-button", id: "compute-create", text: "Create VM",
+    disabled: !data.connections.length, onclick: () => navigate("/settings/compute/create") });
+  const capacity = el("button", { type: "button", class: "header-button", id: "compute-capacity-link", text: "Compute capacity",
+    onclick: () => navigate("/compute-capacity") });
+  const clouds = data.clouds || [];
+  setChildren(view,
+    pageHeader(COMPUTE_TITLE, COMPUTE_SUBTITLE, { actions: [create, capacity] }),
+    el("div", { class: "cards", id: "compute-connect-cards" },
+      clouds.includes("aws") ? computeConnectCard("aws", data, redraw) : null,
+      clouds.includes("azure") ? computeConnectCard("azure", data, redraw) : null),
+    computeMachinesCard(data),
+    el("section", { class: "card", id: "compute-security", "aria-labelledby": "compute-security-title" },
+      el("h2", { id: "compute-security-title", text: "What CloudBurrow does in your account" }),
+      el("ul", {},
+        el("li", { text: "Signs in through your cloud's own page; the credentials stay in this machine's keychain and Disconnect removes them." }),
+        el("li", { text: "Creates one network, a firewall that lets SSH in from your address only, one VM and its disk, each tagged cloudburrow-instance=<name>." }),
+        el("li", { text: "Delete removes everything with that tag, then checks that nothing is left." }),
+        el("li", { text: "Nothing is sent to Google Cloud, and no service is opened to the internet." }))),
+    data.engine && data.engine.message
+      ? el("p", { class: "form-help", id: "compute-engine-note", text: data.engine.message }) : null);
+}
+
+function computeConnectCard(cloud, data, redraw) {
+  const title = cloud === "aws" ? "Connect AWS" : "Connect Azure";
+  const conns = data.connections.filter((c) => c.cloud === cloud);
+  const status = el("div", { id: `compute-${cloud}-status`, role: "status" });
+  const error = el("p", { class: "form-error", role: "alert", id: `compute-${cloud}-error`, hidden: true });
+  const showError = (msg) => { error.textContent = msg; error.hidden = !msg; };
+
+  const list = conns.length
+    ? el("ul", { class: "compute-connections", id: `compute-${cloud}-connections` },
+        ...conns.map((c) => el("li", { "data-connection": c.id },
+          el("strong", { text: c.account_name || c.account_id }),
+          el("span", { class: "muted", text: ` ${c.account_id} · ${c.method === "access-key" ? "access key" : c.method === "sso" ? "IAM Identity Center" : "Microsoft sign-in"}` +
+            (c.principal ? ` · ${c.principal}` : "") }),
+          el("button", { type: "button", class: "link-button", "aria-label": `Disconnect ${c.account_id}`, text: "Disconnect",
+            onclick: () => computeDisconnect(c, data, redraw, showError) }))))
+    : el("p", { class: "muted", id: `compute-${cloud}-none`, text: `No ${CLOUD_TITLES[cloud]} account is connected.` });
+
+  let form;
+  if (cloud === "aws") {
+    const startURL = el("input", { id: "compute-aws-start-url", type: "url", placeholder: "https://d-1234567890.awsapps.com/start", autocomplete: "off" });
+    const region = el("input", { id: "compute-aws-sso-region", type: "text", value: "us-east-1", autocomplete: "off" });
+    form = el("form", { id: "compute-aws-sso", novalidate: true, onsubmit: (e) => {
+      e.preventDefault();
+      computeSignIn("aws", { cloud: "aws", start_url: startURL.value.trim(), region: region.value.trim() }, status, showError, redraw, e.submitter || e.target.querySelector("button"));
+    } },
+      el("div", { class: "form-row" },
+        el("label", { for: "compute-aws-start-url", text: "AWS access portal URL" }), startURL,
+        el("p", { class: "form-help", text: "IAM Identity Center > Settings > AWS access portal URL." })),
+      el("div", { class: "form-row" },
+        el("label", { for: "compute-aws-sso-region", text: "IAM Identity Center region" }), region),
+      el("div", { class: "form-actions" }, el("button", { type: "submit", class: "primary", id: "compute-aws-signin", text: "Sign in with IAM Identity Center" })));
+    form = el("div", {}, form, computeAccessKeyForm(showError, redraw));
+  } else {
+    const tenant = el("input", { id: "compute-azure-tenant", type: "text", autocomplete: "off", placeholder: "organizations" });
+    form = el("form", { id: "compute-azure-signin-form", novalidate: true, onsubmit: (e) => {
+      e.preventDefault();
+      computeSignIn("azure", { cloud: "azure", tenant: tenant.value.trim() }, status, showError, redraw, e.submitter || e.target.querySelector("button"));
+    } },
+      el("div", { class: "form-row" },
+        el("label", { for: "compute-azure-tenant", text: "Tenant (optional)" }), tenant,
+        el("p", { class: "form-help", text: "Your Microsoft Entra tenant ID or domain; leave empty for your account's home tenant." })),
+      el("div", { class: "form-actions" }, el("button", { type: "submit", class: "primary", id: "compute-azure-signin", text: "Sign in with Microsoft" })));
+  }
+  return el("section", { class: "card", id: `compute-${cloud}-card`, "aria-labelledby": `compute-${cloud}-title` },
+    el("h2", { id: `compute-${cloud}-title`, text: title }),
+    el("p", { text: cloud === "aws"
+      ? "Sign in through your AWS access portal. You confirm a code on AWS's own page; CloudBurrow never sees your password."
+      : "Sign in on Microsoft's own page, then pick the subscription the VM is billed to." }),
+    list, error, form, status);
+}
+
+function computeAccessKeyForm(showError, redraw) {
+  const id = el("input", { id: "compute-aws-key-id", type: "text", autocomplete: "off", spellcheck: "false" });
+  const secret = el("input", { id: "compute-aws-key-secret", type: "password", autocomplete: "off", spellcheck: "false" });
+  const token = el("input", { id: "compute-aws-key-token", type: "password", autocomplete: "off", spellcheck: "false" });
+  const button = el("button", { type: "submit", class: "secondary", id: "compute-aws-key-connect", text: "Connect with access key" });
+  const form = el("form", { id: "compute-aws-key-form", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    showError("");
+    if (!id.value.trim() || !secret.value.trim()) {
+      showError("Paste both the access key ID and the secret access key.");
+      return;
+    }
+    setBusy(button, true);
+    const op = recordOperation("Connect AWS");
+    try {
+      const conn = await computeJSON("/api/compute/accesskey", { method: "POST",
+        body: { access_key_id: id.value, secret_access_key: secret.value, session_token: token.value } });
+      secret.value = "";
+      token.value = "";
+      op.succeeded(conn.account_id);
+      notify(`Connected AWS account ${conn.account_id}`);
+      redraw();
+    } catch (err) {
+      op.failed(err.message);
+      showError(`The access key was not accepted: ${err.message}`);
+    } finally {
+      setBusy(button, false);
+    }
+  } },
+    el("div", { class: "form-row" }, el("label", { for: "compute-aws-key-id", text: "Access key ID" }), id),
+    el("div", { class: "form-row" }, el("label", { for: "compute-aws-key-secret", text: "Secret access key" }), secret),
+    el("div", { class: "form-row" }, el("label", { for: "compute-aws-key-token", text: "Session token (optional)" }), token,
+      el("p", { class: "form-help", text: "For accounts without IAM Identity Center. The key goes to this machine's keychain, never to a file." })),
+    el("div", { class: "form-actions" }, button));
+  // A disclosure button rather than <details>: a closed form's fields are
+  // out of the Tab order until it is opened.
+  form.hidden = true;
+  const toggle = el("button", { type: "button", class: "link-button", id: "compute-aws-key-toggle", "aria-expanded": "false",
+    "aria-controls": "compute-aws-key-form", text: "Use an access key instead", onclick: () => {
+      form.hidden = !form.hidden;
+      toggle.setAttribute("aria-expanded", String(!form.hidden));
+      if (!form.hidden) id.focus();
+    } });
+  return el("div", { id: "compute-aws-key" }, toggle, form);
+}
+
+async function computeSignIn(cloud, body, status, showError, redraw, button) {
+  showError("");
+  if (cloud === "aws" && !/^https:\/\//.test(body.start_url)) {
+    showError("Paste your AWS access portal URL; it starts with https://.");
+    document.getElementById("compute-aws-start-url").focus();
+    return;
+  }
+  setBusy(button, true);
+  let st;
+  try {
+    st = await computeJSON("/api/compute/signin", { method: "POST", body });
+  } catch (err) {
+    setBusy(button, false);
+    showError(`The sign-in did not start: ${err.message}`);
+    return;
+  }
+  const path = location.pathname;
+  const cancel = el("button", { type: "button", class: "secondary", id: `compute-${cloud}-cancel`, text: "Cancel", onclick: async () => {
+    stopped = true;
+    try { await computeJSON(`/api/compute/signin/${encodeURIComponent(st.id)}`, { method: "DELETE" }); } catch { /* gone already */ }
+    setBusy(button, false);
+    setChildren(status);
+  } });
+  let stopped = false;
+  const waiting = () => setChildren(status,
+    st.prompt.user_code
+      ? el("p", {}, el("span", { text: "Confirm the code " }), el("strong", { class: "mono", id: `compute-${cloud}-code`, text: st.prompt.user_code }),
+          el("span", { text: " on AWS's sign-in page." }))
+      : el("p", { text: st.prompt.message || "Finish signing in in your browser." }),
+    st.prompt.url ? el("p", {}, el("a", { href: st.prompt.url, target: "_blank", rel: "noopener noreferrer", id: `compute-${cloud}-open`,
+      text: cloud === "aws" ? "Open the AWS sign-in page" : "Open Microsoft's sign-in page" })) : null,
+    el("p", { class: "muted", text: "Waiting for you to sign in…" }),
+    el("div", { class: "form-actions" }, cancel));
+  waiting();
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 1000));
+    if (stopped || location.pathname !== path) return;
+    try {
+      st = await computeJSON(`/api/compute/signin/${encodeURIComponent(st.id)}`);
+    } catch (err) {
+      setBusy(button, false);
+      showError(`The sign-in failed: ${err.message}`);
+      setChildren(status);
+      return;
+    }
+    if (st.state === "waiting") continue;
+    setBusy(button, false);
+    if (st.state === "failed") {
+      showError(`The sign-in failed: ${st.error}`);
+      setChildren(status);
+      return;
+    }
+    if (st.state === "choose") return computeChooseAccount(cloud, st, status, showError, redraw);
+    return redraw();
+  }
+}
+
+function computeChooseAccount(cloud, st, status, showError, redraw) {
+  const legend = cloud === "aws" ? "Account and role" : "Subscription";
+  const name = `compute-${cloud}-choice`;
+  const options = st.choices.map((c, i) => el("label", { class: "check-line" },
+    el("input", { type: "radio", name, value: c.id, checked: i === 0 }), el("span", { text: c.label })));
+  const button = el("button", { type: "submit", class: "primary", id: `compute-${cloud}-choose`, text: "Connect" });
+  const form = el("form", { id: `compute-${cloud}-choose-form`, novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    const picked = form.querySelector(`input[name="${name}"]:checked`);
+    if (!picked) return showError(`Choose ${legend.toLowerCase()}.`);
+    setBusy(button, true);
+    const op = recordOperation(`Connect ${CLOUD_TITLES[cloud]}`);
+    try {
+      const conn = await computeJSON(`/api/compute/signin/${encodeURIComponent(st.id)}/choose`, { method: "POST", body: { choice: picked.value } });
+      op.succeeded(conn.account_id);
+      notify(`Connected ${CLOUD_TITLES[cloud]} ${conn.account_name || conn.account_id}`);
+      redraw();
+    } catch (err) {
+      op.failed(err.message);
+      showError(`Not connected: ${err.message}`);
+      setBusy(button, false);
+    }
+  } },
+    el("fieldset", {}, el("legend", { text: legend }), ...options),
+    el("div", { class: "form-actions" }, button));
+  if (!st.choices.length) {
+    setChildren(status, el("p", { class: "form-error", role: "alert",
+      text: cloud === "aws" ? "Your sign-in has no account or role assigned in IAM Identity Center." : "Your account has no subscription." }));
+    return;
+  }
+  setChildren(status, el("p", { text: "Signed in." }), form);
+  form.querySelector("input").focus();
+}
+
+async function computeDisconnect(conn, data, redraw, showError) {
+  const machines = data.machines.filter((m) => m.connection === conn.id);
+  await confirmDestructive({
+    title: `Disconnect ${conn.account_id}`,
+    detail: machines.length
+      ? `Removes the credentials of ${connectionLabel(conn)} from this machine's keychain. ${machines.map((m) => m.instance).join(", ")} ` +
+        "would be left running in your account with no way to stop or delete it from here: delete it first."
+      : `Removes the credentials of ${connectionLabel(conn)} from this machine's keychain. Nothing in the account changes.`,
+    confirmWord: conn.account_id,
+    confirmLabel: "Disconnect",
+    consequence: "You can connect again by signing in.",
+    onConfirm: async () => {
+      const op = recordOperation(`Disconnect ${conn.account_id}`);
+      try {
+        await computeJSON(`/api/compute/connections/${encodeURIComponent(conn.id)}`, { method: "DELETE" });
+        op.succeeded(conn.account_id);
+        notify(`Disconnected ${conn.account_id}`);
+      } catch (err) {
+        op.failed(err.message);
+        showError(err.message);
+        throw err;
+      }
+      redraw();
+    },
+  });
+}
+
+function computeMachinesCard(data) {
+  return el("section", { class: "card", id: "compute-machines-card", "aria-labelledby": "compute-machines-title" },
+    el("h2", { id: "compute-machines-title", text: "VMs" }),
+    data.machines.length
+      ? el("ul", { id: "compute-machines" }, ...data.machines.map((m) => el("li", { "data-instance": m.instance },
+          el("a", { href: `/compute-capacity#${encodeURIComponent(m.instance)}`, text: m.instance }),
+          el("span", { text: ` · ${CLOUD_TITLES[m.cloud] || m.cloud} ${m.region} · ${m.size} · ${m.state}` }))))
+      : el("p", { class: "muted", text: data.connections.length ? "No VM yet: Create VM makes one." : "Connect a cloud first." }));
+}
+
+// ---- Settings > Compute > Create VM ----
+
+async function renderComputeCreate(view) {
+  closeSettingsPanel();
+  const path = location.pathname;
+  const title = "Create VM";
+  const subtitle = "A VM in your cloud that runs this instance's compute. The price is shown before anything is made.";
+  const redraw = () => renderComputeCreate(view);
+  const back = { back: "/settings/compute", backLabel: "Back to Compute" };
+  setChildren(view, pageHeader(title, subtitle, back), loadingState(6));
+  const data = await computeLoad(view, path, title, subtitle, redraw);
+  if (!data || location.pathname !== path) return;
+  if (!data.connections.length) {
+    setChildren(view, pageHeader(title, subtitle, back),
+      emptyState("No cloud connected", "Connect AWS or Azure in Settings > Compute first."));
+    return;
+  }
+  const want = new URLSearchParams(location.search).get("connection");
+  const connection = el("select", { id: "compute-connection" },
+    ...data.connections.map((c) => el("option", { value: c.id, text: connectionLabel(c), selected: c.id === want })));
+  const instance = el("input", { id: "compute-instance", type: "text", value: data.instance || "", autocomplete: "off", spellcheck: "false",
+    "aria-describedby": "compute-instance-help" });
+  const region = el("select", { id: "compute-region", disabled: true }, el("option", { text: "Reading regions…" }));
+  const sizes = el("div", { id: "compute-sizes", role: "radiogroup", "aria-labelledby": "compute-size-legend" });
+  const autoStop = el("select", { id: "compute-autostop" },
+    ...AUTO_STOP_CHOICES.map(([v, t]) => el("option", { value: String(v), text: t, selected: v === 60 })));
+  // How CloudBurrow reaches the VM (#2209): on AWS, Session Manager with
+  // nothing inbound, or SSH to the user's address; Azure has SSH only.
+  const connectSSM = el("input", { type: "radio", name: "compute-connect", id: "compute-connect-ssm", value: "ssm", checked: true });
+  const connectSSH = el("input", { type: "radio", name: "compute-connect", id: "compute-connect-ssh", value: "ssh" });
+  const connectHelp = el("p", { class: "form-help", id: "compute-connect-help" });
+  const connectGroup = el("fieldset", { class: "form-row compute-connect", id: "compute-connect", "aria-describedby": "compute-connect-help" },
+    el("legend", { text: "Connect" }),
+    el("div", { class: "radio-row" }, connectSSM, el("label", { for: "compute-connect-ssm", text: "Session Manager: nothing open to the internet" })),
+    el("div", { class: "radio-row" }, connectSSH, el("label", { for: "compute-connect-ssh", text: "SSH from your address only" })),
+    connectHelp);
+  const drawConnect = () => {
+    const c = data.connections.find((x) => x.id === connection.value);
+    const aws = !c || c.cloud === "aws";
+    connectSSM.disabled = !aws;
+    if (!aws) connectSSH.checked = true;
+    connectHelp.textContent = !aws
+      ? "Azure has no Session Manager: SSH is open to your public address only, and the firewall follows your address when it changes."
+      : connectSSM.checked
+        ? "The VM's SSM agent dials out to AWS and CloudBurrow reaches SSH through it: the firewall allows nothing inbound. The VM gets an IAM role with AmazonSSMManagedInstanceCore."
+        : "For a network that blocks Session Manager: SSH is open to your public address only, and the firewall follows your address when it changes.";
+  };
+  connection.addEventListener("change", drawConnect);
+  connectSSM.addEventListener("change", drawConnect);
+  connectSSH.addEventListener("change", drawConnect);
+  drawConnect();
+  const permissions = el("div", { id: "compute-permissions", role: "status" });
+  const error = el("p", { class: "form-error", role: "alert", id: "compute-create-error", hidden: true });
+  const create = el("button", { type: "submit", class: "primary", id: "compute-create-submit", text: "Create", disabled: true });
+  const priceMonthly = el("p", { class: "compute-price-monthly", id: "compute-price-monthly", text: "—" });
+  const priceHourly = el("p", { class: "muted", id: "compute-price-hourly" });
+  const priceDetail = el("p", { class: "form-help", id: "compute-price-detail" });
+  let sizeList = [];
+
+  const chosenSize = () => {
+    const r = sizes.querySelector("input[name=compute-size]:checked");
+    return r ? sizeList.find((s) => s.preset === r.value) : null;
+  };
+  const conn = () => data.connections.find((c) => c.id === connection.value);
+  const drawPrice = () => {
+    const s = chosenSize();
+    if (!s) {
+      priceMonthly.textContent = "—";
+      priceHourly.textContent = "";
+      priceDetail.textContent = "";
+      return;
+    }
+    if (!s.hourly_usd) {
+      priceMonthly.textContent = "Price unavailable";
+      priceHourly.textContent = s.price_error || "";
+      priceDetail.textContent = `See ${CLOUD_TITLES[conn().cloud]}'s pricing page for ${s.name}.`;
+      return;
+    }
+    const total = s.hourly_usd + (s.disk_hourly_usd || 0);
+    priceMonthly.textContent = usdMonthly.format(total * HOURS_PER_MONTH);
+    priceHourly.textContent = `That's about ${usdFormat.format(total)} hourly`;
+    const stop = Number(autoStop.value);
+    priceDetail.textContent = `${s.name}: ${usdFormat.format(s.hourly_usd)}/hour while it runs` +
+      (s.disk_hourly_usd ? `, plus its disk at ${usdFormat.format(s.disk_hourly_usd)}/hour while it exists` : "") +
+      `. Billed by ${CLOUD_TITLES[conn().cloud]} to ${conn().account_id}; ${s.price_source || "on-demand Linux price"}. ` +
+      (stop ? "Auto-stop ends the hourly VM charge while it is idle." : "Without auto-stop it is billed until you stop it.");
+  };
+  const loadPermissions = async () => {
+    setChildren(permissions, el("p", { class: "muted", text: "Checking permissions…" }));
+    try {
+      const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(connection.value)}/permissions?region=${encodeURIComponent(region.value)}`);
+      const missing = res.report.missing || [];
+      setChildren(permissions, missing.length
+        ? el("div", { class: "form-error", id: "compute-permissions-missing" },
+            el("p", { text: "This account cannot create the VM yet. Ask its administrator to grant:" }),
+            el("ul", {}, ...missing.map((m) => el("li", {}, el("code", { text: m.action }), el("span", { text: `: ${m.why}` })))))
+        : el("p", { class: "muted", id: "compute-permissions-ok", text: res.summary }));
+    } catch (err) {
+      setChildren(permissions, el("p", { class: "form-error", text: `The permissions could not be checked: ${err.message}` }));
+    }
+  };
+  const loadSizes = async () => {
+    create.disabled = true;
+    setChildren(sizes, el("p", { class: "muted", text: "Reading sizes and prices…" }));
+    try {
+      const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(connection.value)}/sizes?region=${encodeURIComponent(region.value)}`);
+      sizeList = res.sizes || [];
+    } catch (err) {
+      setChildren(sizes, el("p", { class: "form-error", text: `The sizes could not be read: ${err.message}` }));
+      return;
+    }
+    setChildren(sizes, ...sizeList.map((s, i) => el("label", { class: "check-line compute-size", "data-preset": s.preset },
+      el("input", { type: "radio", name: "compute-size", value: s.preset, checked: i === 0, onchange: drawPrice }),
+      el("span", {},
+        el("strong", { text: PRESET_TITLES[s.preset] || s.preset }),
+        el("span", { text: ` · ${s.name} · ${sizeSummary(s)} · ` }),
+        el("span", { class: "compute-size-price", text: hourly(s) }),
+        s.note ? el("span", { class: "form-help compute-size-note", text: ` ${s.note}` }) : null))));
+    drawPrice();
+    create.disabled = false;
+  };
+  const loadRegions = async () => {
+    region.disabled = true;
+    setChildren(region, el("option", { text: "Reading regions…" }));
+    try {
+      const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(connection.value)}/regions`);
+      setChildren(region, ...res.regions.map((r) => el("option", { value: r.name, selected: r.name === res.default,
+        text: r.display_name ? `${r.name} (${r.display_name})` : r.name })));
+      region.disabled = false;
+    } catch (err) {
+      setChildren(region, el("option", { text: "No regions" }));
+      error.textContent = `The regions could not be read: ${err.message}`;
+      error.hidden = false;
+      return;
+    }
+    await Promise.all([loadSizes(), loadPermissions()]);
+  };
+  connection.addEventListener("change", loadRegions);
+  region.addEventListener("change", () => Promise.all([loadSizes(), loadPermissions()]));
+  autoStop.addEventListener("change", drawPrice);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const name = instance.value.trim();
+    if (!/^[a-z][a-z0-9-]{0,38}[a-z0-9]$/.test(name)) {
+      error.textContent = "The instance name is 2 to 40 lowercase letters, digits and hyphens, starting with a letter.";
+      error.hidden = false;
+      instance.focus();
+      return;
+    }
+    const s = chosenSize();
+    if (!s) return;
+    setBusy(create, true);
+    const op = recordOperation(`Create VM ${name}`);
+    try {
+      const started = await computeJSON("/api/compute/machines", { method: "POST", body: {
+        instance: name, connection: connection.value, region: region.value, preset: s.preset, auto_stop_minutes: Number(autoStop.value),
+        connect_mode: connectSSH.checked ? "ssh" : "ssm" } });
+      op.succeeded(name);
+      navigate(`/settings/compute/operation?id=${encodeURIComponent(started.id)}`);
+    } catch (err) {
+      op.failed(err.message);
+      error.textContent = `The VM was not created: ${err.message}`;
+      error.hidden = false;
+      setBusy(create, false);
+    }
+  };
+
+  setChildren(view, pageHeader(title, subtitle, back),
+    el("div", { class: "compute-create-layout" },
+      el("form", { class: "create-page", id: "compute-create-form", novalidate: true, onsubmit: submit },
+        el("h2", { class: "form-section-title", text: "Name and region" }),
+        el("div", { class: "form-row" }, el("label", { for: "compute-connection", text: "Cloud account" }), connection),
+        el("div", { class: "form-row" }, el("label", { for: "compute-instance", text: "Instance" }), instance,
+          el("p", { class: "form-help", id: "compute-instance-help", text: "The CloudBurrow instance whose compute runs on this VM. Every resource is tagged cloudburrow-instance with it." })),
+        el("div", { class: "form-row" }, el("label", { for: "compute-region", text: "Region" }), region,
+          el("p", { class: "form-help", text: "The closest to you is chosen first. A region can't be changed later." })),
+        el("h2", { class: "form-section-title", id: "compute-size-legend", text: "Machine configuration" }),
+        sizes,
+        el("h2", { class: "form-section-title", text: "Auto-stop" }),
+        el("div", { class: "form-row" }, el("label", { for: "compute-autostop", text: "Stop the VM" }), autoStop,
+          el("p", { class: "form-help", text: "Idle means no connection from CloudBurrow. A stopped VM keeps its disk, and the cluster's state on it. You can change it later on Compute capacity." })),
+        el("h2", { class: "form-section-title", text: "Connection" }),
+        connectGroup,
+        el("h2", { class: "form-section-title", text: "Permissions" }),
+        permissions,
+        error,
+        el("div", { class: "form-actions" }, create,
+          el("a", { class: "button secondary", href: "/settings/compute", text: "Cancel" }))),
+      el("aside", { class: "card compute-price", id: "compute-price", "aria-labelledby": "compute-price-title" },
+        el("h2", { id: "compute-price-title", text: "Monthly estimate" }),
+        priceMonthly, priceHourly, priceDetail)));
+  await loadRegions();
+}
+
+// ---- operation progress ----
+
+const COMPUTE_OP_TITLES = { create: "Creating", scale: "Resizing", start: "Starting", stop: "Stopping", delete: "Deleting" };
+
+function computeFailureHelp(op) {
+  switch (op.error_kind) {
+    case "permission": return "The account lacks a permission CloudBurrow needs. Ask its administrator to grant what is named above, then try again. Nothing was left behind.";
+    case "quota": return "The cloud refused for want of quota or capacity. Choose a smaller size or another region, or request more quota in the cloud's own console. Nothing was left behind.";
+    case "auth": return "The cloud no longer accepts the sign-in. Connect the account again in Settings > Compute.";
+    case "leftover": return "Some resources are still tagged with the instance. Delete again, or remove them in the cloud's own console.";
+  }
+  return "";
+}
+
+function computeEventList(op, id) {
+  return el("ol", { class: "compute-events", id },
+    ...op.events.map((e) => el("li", { "data-step": e.step, "data-status": e.status },
+      statusIcon(e.status === "done" ? "Succeeded" : e.status === "running" ? "Pending" : e.status === "failed" ? "Failed" : "Warning"),
+      el("span", { class: "compute-event-step", text: e.step }),
+      el("span", { text: ` ${e.message}` }))));
+}
+
+async function renderComputeOperation(view) {
+  closeSettingsPanel();
+  const path = location.pathname;
+  const id = new URLSearchParams(location.search).get("id") || "";
+  const back = { back: "/compute-capacity", backLabel: "Back to Compute capacity" };
+  let op;
+  for (;;) {
+    try {
+      op = await computeJSON(`/api/compute/operations/${encodeURIComponent(id)}`);
+    } catch (err) {
+      if (location.pathname !== path) return;
+      if (err.status === 401) return computeTokenForm(view, err, "Operation", "", () => renderComputeOperation(view));
+      setChildren(view, pageHeader("Operation", "", back), errorState("Operation unavailable", err.message, () => renderComputeOperation(view)));
+      return;
+    }
+    if (location.pathname !== path || new URLSearchParams(location.search).get("id") !== id) return;
+    const title = `${COMPUTE_OP_TITLES[op.kind] || op.kind} ${op.instance}`;
+    const outcome = !op.done
+      ? el("p", { class: "muted", id: "compute-op-running", role: "status", text: "In progress. You can leave this page; it carries on." })
+      : op.error
+        ? el("div", { class: "form-error", id: "compute-op-failed", role: "alert" },
+            el("p", { text: `Failed: ${op.error}` }), el("p", { text: computeFailureHelp(op) }))
+        : el("p", { id: "compute-op-done", role: "status", text: op.kind === "delete"
+            ? `${op.instance} is deleted, and nothing tagged with it is left.` : `${op.instance} is ${op.machine ? op.machine.state : "done"}.` });
+    keepingFocus(view, () => setChildren(view, pageHeader(title, op.kind === "create" ? "Network, firewall, VM and disk, then Docker and kind by cloud-init." : "", back),
+      el("section", { class: "card", id: "compute-op", "aria-labelledby": "compute-op-title" },
+        el("h2", { id: "compute-op-title", text: "Progress" }),
+        computeEventList(op, "compute-events"),
+        outcome,
+        op.done ? el("div", { class: "form-actions" },
+          el("a", { class: "button secondary", id: "compute-op-capacity", href: "/compute-capacity", text: "Compute capacity" })) : null)));
+    if (op.done) {
+      announce(op.error ? `${title} failed` : `${title}: done`);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+    if (location.pathname !== path) return;
+  }
+}
+
+// ---- Compute capacity ----
+
+// autoStopWords says an auto-stop setting as byoc.AutoStopWords does.
+function autoStopWords(n) {
+  if (!n) return "Never";
+  if (n % 60 === 0) return `After ${n / 60} hour${n === 60 ? "" : "s"} idle`;
+  return `After ${n} minutes idle`;
+}
+
+async function renderComputeCapacity(view) {
+  closeSettingsPanel();
+  const path = location.pathname;
+  const redraw = () => renderComputeCapacity(view);
+  setChildren(view, pageHeader(CAPACITY_TITLE, CAPACITY_SUBTITLE), loadingState(4));
+  const data = await computeLoad(view, path, CAPACITY_TITLE, CAPACITY_SUBTITLE, redraw);
+  if (!data || location.pathname !== path) return;
+  const create = el("button", { type: "button", class: "primary header-button", id: "capacity-create", text: "Create VM",
+    onclick: () => navigate("/settings/compute/create") });
+  if (!data.machines.length) {
+    setChildren(view, pageHeader(CAPACITY_TITLE, CAPACITY_SUBTITLE, { actions: [create] }),
+      emptyState("No VMs", data.connections.length ? "Create VM makes one in a connected cloud." : "Connect AWS or Azure in Settings > Compute, then create a VM."));
+    return;
+  }
+  const running = data.operations.filter((o) => !o.done);
+  setChildren(view, pageHeader(CAPACITY_TITLE, CAPACITY_SUBTITLE, { actions: [create] }),
+    computeInstanceSection(data, redraw),
+    ...data.machines.map((m) => computeMachineCard(m, data, running.find((o) => o.instance === m.instance), redraw)));
+  if (location.hash) {
+    const card = document.getElementById(`capacity-${decodeURIComponent(location.hash.slice(1))}`);
+    if (card) card.scrollIntoView();
+  }
+}
+
+function computeMachineCard(m, data, running, redraw) {
+  const conn = data.connections.find((c) => c.id === m.connection);
+  const idp = `capacity-${m.instance}`;
+  const busy = !!running || COMPUTE_TRANSITIONAL.includes(m.state);
+  const error = el("p", { class: "form-error", role: "alert", id: `${idp}-error`, hidden: true });
+  const progress = el("div", { id: `${idp}-progress` });
+  const showError = (msg) => { error.textContent = msg; error.hidden = !msg; };
+  const stateWord = { running: "Running", stopped: "Stopped", failed: "Failed", provisioning: "Pending", starting: "Pending",
+    stopping: "Pending", resizing: "Pending", deleting: "Pending", unknown: "Unknown" }[m.state] || m.state;
+
+  const slider = el("input", { type: "range", id: `${idp}-size`, min: "0", max: "0", step: "1", value: "0", disabled: true,
+    "aria-describedby": `${idp}-size-value` });
+  const sliderValue = el("output", { id: `${idp}-size-value`, for: `${idp}-size`, text: `${m.size} · ${m.hourly_usd ? usdFormat.format(m.hourly_usd) + "/hour" : ""}` });
+  const resize = el("button", { type: "button", class: "secondary", id: `${idp}-resize`, text: "Resize", disabled: true });
+  let ladder = [];
+  const drawSlider = () => {
+    const s = ladder[Number(slider.value)];
+    if (!s) return;
+    const cross = (s.preset === "gpu") !== (m.preset === "gpu");
+    const delta = s.hourly_usd && m.hourly_usd ? s.hourly_usd - m.hourly_usd : 0;
+    const diff = s.name === m.size ? "" : Math.abs(delta) < 0.0005 ? " · same price" : ` · ${delta > 0 ? "+" : "−"}${usdFormat.format(Math.abs(delta))}/hour`;
+    const text = `${PRESET_TITLES[s.preset]} · ${s.name} · ${sizeSummary(s)} · ${hourly(s)}${diff}${cross ? " · a new VM" : ""}`;
+    sliderValue.textContent = text;
+    slider.setAttribute("aria-valuetext", text);
+    resize.textContent = cross ? "Change VM" : "Resize";
+    resize.disabled = busy || s.name === m.size;
+  };
+  slider.addEventListener("input", drawSlider);
+  (async () => {
+    try {
+      const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(m.connection)}/sizes?region=${encodeURIComponent(m.region)}`);
+      // Every size: one of the other kind (to or from GPU, whose driver
+      // cloud-init installs at create) is a new VM, the instance moved
+      // onto it and this one deleted, as one guided action.
+      ladder = (res.sizes || []).slice();
+      slider.max = String(Math.max(ladder.length - 1, 0));
+      const at = ladder.findIndex((s) => s.name === m.size);
+      slider.value = String(at < 0 ? 0 : at);
+      slider.disabled = busy || ladder.length < 2;
+      drawSlider();
+    } catch (err) {
+      sliderValue.textContent = `The sizes could not be read: ${err.message}`;
+    }
+  })();
+
+  const act = async (label, path, body, method = "POST") => {
+    showError("");
+    const op = recordOperation(`${label} ${m.instance}`);
+    try {
+      const started = await computeJSON(path, { method, body });
+      op.succeeded(m.instance);
+      await computeFollow(started, progress, `${idp}-events`);
+      const done = await computeJSON(`/api/compute/operations/${encodeURIComponent(started.id)}`);
+      if (done.error) {
+        showError(`${label} failed: ${done.error} ${computeFailureHelp(done)}`);
+        notify(`${label} ${m.instance} failed`, "error");
+      } else {
+        notify(`${label}: ${m.instance} done`);
+      }
+    } catch (err) {
+      op.failed(err.message);
+      showError(`${label} failed: ${err.message}`);
+      return;
+    }
+    redraw();
+  };
+  const base = `/api/compute/machines/${encodeURIComponent(m.instance)}`;
+  resize.addEventListener("click", async () => {
+    const s = ladder[Number(slider.value)];
+    if (!s) return;
+    if ((s.preset === "gpu") === (m.preset === "gpu")) {
+      act("Resize", `${base}/scale`, { preset: s.preset, size: s.name });
+      return;
+    }
+    showError("");
+    let plan;
+    try {
+      plan = await computeJSON(`${base}/resize-plan?preset=${encodeURIComponent(s.preset)}`);
+    } catch (err) {
+      showError(`Change VM failed: ${err.message}`);
+      return;
+    }
+    const delta = plan.delta_usd;
+    confirmDestructive({
+      title: `Change ${m.instance} to ${plan.to.name}`,
+      detail: `${CLOUD_TITLES[m.cloud]} cannot resize ${plan.from.name} to ${plan.to.name} in place: a GPU VM's NVIDIA driver is installed when it is made. ` +
+        `${plan.note}. Price: ${hourly(plan.from)} now, ${hourly(plan.to)} after: ` +
+        `${Math.abs(delta) < 0.0005 ? "the same" : `${usdFormat.format(Math.abs(delta))}/hour ${delta > 0 ? "more" : "less"}`}. ` +
+        "If the move fails, the new VM is deleted and the instance stays here. The console restarts during the move.",
+      confirmLabel: "Change VM", consequence: `${m.instance} is deleted only once the instance runs on ${plan.new_name}.`, style: "confirm",
+      onConfirm: async () => {
+        try {
+          await computeJSON(`${base}/replace`, { method: "POST", body: { preset: s.preset, instance: data.instance } });
+        } catch (err) {
+          showError(`Change VM failed: ${err.message}`);
+          return;
+        }
+        // The old VM's card goes with it: the instance's section follows,
+        // and, drawn again, follows the finished change too.
+        const node = document.getElementById("capacity-instance-progress") || progress;
+        followMove(data.instance, node, "capacity-instance-move-steps", showError).then(redraw);
+      },
+    });
+  });
+  const start = el("button", { type: "button", class: "secondary", id: `${idp}-start`, text: "Start",
+    disabled: busy || m.state === "running", onclick: () => act("Start", `${base}/start`, {}) });
+  const stop = el("button", { type: "button", class: "secondary", id: `${idp}-stop`, text: "Stop",
+    disabled: busy || m.state !== "running", onclick: () => act("Stop", `${base}/stop`, {}) });
+  // A VM an instance runs on holds that instance's cluster and data: a
+  // plain Delete of it is refused (#2209). The instance moves off first, or
+  // the user chooses, typing the VM's name, to delete its data with it.
+  const user = m.in_use_by || "";
+  const inUse = user ? el("p", { class: "form-help", id: `${idp}-in-use`,
+    text: `${user} runs on this VM: its cluster and data are on the VM's disk. Move ${user} off the VM before you delete it, or delete the VM and ${user}'s data.` }) : null;
+  const del = el("button", { type: "button", class: "secondary danger", id: `${idp}-delete`,
+    text: user ? "Delete VM and this instance's data" : "Delete", disabled: busy,
+    "aria-describedby": user ? `${idp}-in-use` : null,
+    onclick: () => user ? confirmDestructive({
+      title: `Delete ${m.instance} and ${user}'s data`,
+      detail: `${user} runs on ${m.instance}. To keep ${user}'s cluster and data, cancel and move ${user} off the VM first (Move back to this machine, or Move instance here on another VM). ` +
+        `Deleting stops ${user}, then deletes the VM, its disk, network and firewall in ${CLOUD_TITLES[m.cloud]} ${m.region}: everything tagged cloudburrow-instance=${m.instance}, ` +
+        `with ${user}'s cluster, its volumes and every object in it. ${user} starts afresh on this machine at its next start.`,
+      confirmWord: m.instance, confirmLabel: "Delete VM and this instance's data",
+      consequence: `${user}'s data on the VM cannot be recovered.`,
+      onConfirm: async () => {
+        showError("");
+        await computeJSON(`${base}?with_instance_data=true`, { method: "DELETE" });
+        followMove(user, progress, `${idp}-delete-steps`, showError).then(redraw);
+      },
+    }) : confirmDestructive({
+      title: `Delete ${m.instance}`,
+      detail: `Deletes the VM, its disk, network and firewall in ${CLOUD_TITLES[m.cloud]} ${m.region}: everything tagged cloudburrow-instance=${m.instance}. ` +
+        "The cluster's state on the disk is gone afterwards.",
+      confirmWord: m.instance,
+      onConfirm: async () => { act("Delete", base, undefined, "DELETE"); },
+    }) });
+  const move = computeMoveButton(m, data, idp, busy, progress, showError, redraw);
+  // Auto-stop, editable after create: a running VM's setting changes at
+  // once, a stopped one's at its next start.
+  const autoStop = el("select", { id: `${idp}-autostop`, disabled: busy },
+    ...AUTO_STOP_CHOICES.map(([v, t]) => el("option", { value: String(v), text: t, selected: v === m.auto_stop_minutes })));
+  if (!AUTO_STOP_CHOICES.some(([v]) => v === m.auto_stop_minutes)) {
+    autoStop.prepend(el("option", { value: String(m.auto_stop_minutes), text: autoStopWords(m.auto_stop_minutes), selected: true }));
+  }
+  const saveAutoStop = el("button", { type: "button", class: "secondary", id: `${idp}-autostop-save`, text: "Save", disabled: true,
+    onclick: () => act("Change auto-stop", `${base}/settings`, { auto_stop_minutes: Number(autoStop.value) }) });
+  autoStop.addEventListener("change", () => { saveAutoStop.disabled = busy || Number(autoStop.value) === m.auto_stop_minutes; });
+  const ssm = m.connect_mode === "ssm";
+  const allow = ssm ? null : el("button", { type: "button", class: "secondary", id: `${idp}-allow-address`, text: "Allow my address",
+    disabled: busy || m.state !== "running" && m.state !== "stopped",
+    onclick: () => act("Allow my address", `${base}/allow-my-address`, {}) });
+  const connectText = ssm
+    ? "Session Manager; nothing inbound is open"
+    : `SSH from ${m.source_cidr || "an unrecorded address"} only` +
+      (m.source_updated_at ? ` (updated ${new Date(m.source_updated_at).toLocaleString()})` : "");
+  const resourcesOut = el("div", { id: `${idp}-resources` });
+  const resources = el("button", { type: "button", class: "link-button", id: `${idp}-resources-button`, text: "View resources",
+    onclick: async () => {
+      setChildren(resourcesOut, el("p", { class: "muted", text: "Listing…" }));
+      try {
+        const res = await computeJSON(`${base}/resources`);
+        setChildren(resourcesOut, el("table", { class: "compute-resources" },
+          el("caption", { text: `Tagged ${res.tag}` }),
+          el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Type" }), el("th", { scope: "col", text: "ID" }), el("th", { scope: "col", text: "State" }))),
+          el("tbody", {}, ...res.resources.map((r) => el("tr", {}, el("td", { text: r.type }), el("td", { class: "mono", text: r.id }), el("td", { text: r.state || "" }))))));
+      } catch (err) {
+        setChildren(resourcesOut, el("p", { class: "form-error", role: "alert", text: err.message }));
+      }
+    } });
+  const card = el("section", { class: "card compute-machine", id: idp, "data-instance": m.instance, "data-state": m.state, "aria-labelledby": `${idp}-title` },
+    el("h2", { id: `${idp}-title` }, statusIcon(stateWord), el("span", { text: ` ${m.instance}` })),
+    el("dl", {},
+      el("dt", { text: "Status" }), el("dd", { id: `${idp}-state`, text: stateWord }),
+      el("dt", { text: "Cloud" }), el("dd", { text: conn ? connectionLabel(conn) : `${CLOUD_TITLES[m.cloud]} ${m.connection}` }),
+      el("dt", { text: "Region" }), el("dd", { text: m.region }),
+      el("dt", { text: "Machine type" }), el("dd", { id: `${idp}-type`, text: m.size }),
+      el("dt", { text: "Price" }), el("dd", { id: `${idp}-price`, text: m.hourly_usd ? `${usdFormat.format(m.hourly_usd)}/hour while running` : "unavailable" }),
+      el("dt", { text: "External IP" }), el("dd", { text: m.public_ip || "None" }),
+      el("dt", { text: "Connection" }), el("dd", { id: `${idp}-connect`, text: connectText }),
+      el("dt", { text: "Auto-stop" }), el("dd", { id: `${idp}-autostop-value`, text: autoStopWords(m.auto_stop_minutes) })),
+    el("div", { class: "form-row compute-autostop" },
+      el("label", { for: `${idp}-autostop`, text: "Auto-stop" }), autoStop, saveAutoStop,
+      el("p", { class: "form-help", id: `${idp}-autostop-help`, text: m.state === "running"
+        ? "Idle means no connection from CloudBurrow. The VM's setting changes as soon as you save."
+        : "The VM is not running: the new setting is written when it next starts." })),
+    allow ? el("div", { class: "form-row compute-address" }, allow,
+      el("p", { class: "form-help", text: "CloudBurrow moves the firewall to this machine's public address before each connection and every few minutes; this does it now." })) : null,
+    el("div", { class: "form-row compute-slider" },
+      el("label", { for: `${idp}-size`, text: "Size" }), slider, sliderValue,
+      el("p", { class: "form-help", text: m.cloud === "aws"
+        ? "AWS resizes a stopped instance: a running one is stopped, resized and started again, its disk kept."
+        : "Azure resizes in place where it can, else deallocates, resizes and starts the VM, its disk kept." })),
+    inUse,
+    el("div", { class: "card-actions" }, resize, start, stop, move, del, resources),
+    error, progress, resourcesOut);
+  if (running) computeFollow(running, progress, `${idp}-events`).then(redraw);
+  return card;
+}
+
+// computeInstanceSection is where this instance runs (#2209): this
+// machine's Docker or one of the VMs, with Move back to this machine, and
+// Resume and Roll back for a move that was interrupted (its process ended,
+// or the machine slept).
+function computeInstanceSection(data, redraw) {
+  const instance = data.instance;
+  const id = "capacity-instance";
+  const error = el("p", { class: "form-error", role: "alert", id: `${id}-error`, hidden: true });
+  const progress = el("div", { id: `${id}-progress` });
+  const showError = (msg) => { error.textContent = msg; error.hidden = !msg; };
+  const where = data.local_compute ? "This machine's Docker"
+    : data.compute_machine ? `VM ${data.compute_machine}` : (data.engine && data.engine.message) || "A remote host";
+  const actions = el("div", { class: "card-actions", id: `${id}-actions` });
+  const whereNode = el("dd", { id: `${id}-where`, text: where });
+  // After a move the section says where the instance runs now; the outcome
+  // stays in view (a full redraw would drop it).
+  const refresh = async () => {
+    try {
+      const now = await computeJSON("/api/compute");
+      whereNode.textContent = now.local_compute ? "This machine's Docker" : now.compute_machine ? `VM ${now.compute_machine}` : where;
+      back.hidden = !!now.local_compute;
+      for (const b of actions.querySelectorAll(`#${id}-move-resume, #${id}-move-rollback, #${id}-move-interrupted`)) b.remove();
+      back.disabled = false;
+    } catch { /* the console is restarting; the next load reads it */ }
+  };
+  const post = async (label, path) => {
+    showError("");
+    try {
+      await computeJSON(path, { method: "POST", body: {} });
+    } catch (err) {
+      showError(`${label} failed: ${err.message}`);
+      return;
+    }
+    followMove(instance, progress, `${id}-move-steps`, showError).then(refresh);
+  };
+  const back = el("button", { type: "button", class: "secondary", id: `${id}-move-back`, text: "Move back to this machine",
+    onclick: () => confirmDestructive({
+      title: `Move ${instance} back to this machine`,
+      detail: `${instance} stops on ${data.compute_machine || "its host"}. Its cluster's state is copied to this machine's Docker, where it starts and is checked. ` +
+        "If any step fails, the move rolls back and the instance runs on the VM again. The VM is kept: stop or delete it afterwards.",
+      confirmLabel: "Move", consequence: "Nothing is removed from the VM until the instance runs here.", style: "confirm",
+      onConfirm: async () => post("Move", `/api/compute/moves/${encodeURIComponent(instance)}/back`),
+    }) });
+  back.hidden = !!data.local_compute;
+  actions.append(back);
+  const section = el("section", { class: "card", id, "aria-labelledby": `${id}-title` },
+    el("h2", { id: `${id}-title`, text: `Instance ${instance}` }),
+    el("dl", {}, el("dt", { text: "Runs on" }), whereNode),
+    actions, error, progress);
+  (async () => {
+    let st;
+    try {
+      st = await computeJSON(`/api/compute/moves/${encodeURIComponent(instance)}`);
+    } catch { return; }
+    if (!st || st.none) return;
+    if (st.interrupted) {
+      const resume = el("button", { type: "button", class: "primary", id: `${id}-move-resume`, text: "Resume move",
+        onclick: () => post("Resume", `/api/compute/moves/${encodeURIComponent(instance)}/resume`) });
+      const rollback = el("button", { type: "button", class: "secondary", id: `${id}-move-rollback`, text: "Roll back move",
+        onclick: () => confirmDestructive({
+          title: `Roll back the move of ${instance}`,
+          detail: `What the move made on ${st.to} is removed, and ${instance} starts where it ran before, with its state.`,
+          confirmLabel: "Roll back", consequence: "The copy made so far is lost; a new move starts from the beginning.", style: "confirm",
+          onConfirm: async () => post("Roll back", `/api/compute/moves/${encodeURIComponent(instance)}/rollback`),
+        }) });
+      actions.prepend(el("p", { class: "form-help", id: `${id}-move-interrupted`, role: "status",
+        text: `The move of ${instance} to ${st.to} was interrupted. Resume it from where it stopped, or roll it back.` }), resume, rollback);
+      back.disabled = true;
+      return;
+    }
+    // A move back here or a change of VM under way, or just finished (this
+    // page reloaded with the console's restart), is followed here; a move
+    // onto a VM, on that VM's card.
+    const onCard = st.kind !== "replace" && (data.machines || []).some((m) => m.instance === st.to);
+    if (!onCard && (!st.done || Date.now() - Date.parse(st.started) < 10 * 60 * 1000)) {
+      followMove(instance, progress, `${id}-move-steps`, showError);
+    }
+  })();
+  return section;
+}
+
+// computeMoveButton is the card's Move (#2209): this instance, running on
+// this machine's Docker or another VM, moves onto the VM. The move stops the instance's
+// up, which serves this page, so it runs in a process of its own and the
+// page follows its progress across the restart.
+function computeMoveButton(m, data, idp, busy, progress, showError, redraw) {
+  const instance = data.instance;
+  const usedByOther = m.used_by && m.used_by !== instance;
+  const here = !data.local_compute && data.compute_machine === m.instance;
+  const from = data.local_compute ? "this machine" : data.compute_machine || "its host";
+  const canMove = !here && m.state === "running" && !usedByOther;
+  const why = here ? `${instance} runs on this VM`
+    : m.state !== "running" ? "Start the VM first" : usedByOther ? `The VM is ${m.used_by}'s compute` : "";
+  const button = el("button", { type: "button", class: "secondary", id: `${idp}-move`, text: "Move instance here",
+    disabled: busy || !canMove, title: why || `Move ${instance} onto ${m.instance}`,
+    "aria-describedby": why ? `${idp}-move-why` : null,
+    onclick: () => confirmDestructive({
+      title: `Move ${instance} to ${m.instance}`,
+      detail: `${instance} stops on ${from}. Its cluster's state (the kind node, its volumes, and every container and volume of the instance) ` +
+        `is copied to ${m.instance} in ${CLOUD_TITLES[m.cloud]} ${m.region}, where it starts and is checked. ` +
+        `If any step fails, the move rolls back and the instance runs on ${from} again. An interrupted move resumes from where it stopped. The console restarts during the move.`,
+      confirmLabel: "Move", consequence: data.local_compute ? "Nothing is removed from this machine until the instance runs on the VM."
+        : `Nothing is removed from ${from} until the instance runs on ${m.instance}.`, style: "confirm",
+      onConfirm: async () => {
+        showError("");
+        try {
+          await computeJSON(`/api/compute/machines/${encodeURIComponent(m.instance)}/move`, { method: "POST", body: { instance } });
+        } catch (err) {
+          showError(`Move failed: ${err.message}`);
+          return;
+        }
+        followMove(instance, progress, `${idp}-move-steps`, showError).then(redraw);
+      },
+    }) });
+  // A move onto this VM under way (this page reloaded during it) is
+  // followed again.
+  (async () => {
+    try {
+      const st = await computeJSON(`/api/compute/moves/${encodeURIComponent(instance)}`);
+      if (st.to === m.instance && st.kind !== "replace" && !st.interrupted && (!st.done || Date.now() - Date.parse(st.started) < 10 * 60 * 1000)) {
+        followMove(instance, progress, `${idp}-move-steps`, showError);
+      }
+    } catch { /* no move */ }
+  })();
+  if (!why) return button;
+  return el("span", { class: "compute-move" }, button, el("span", { class: "sr-only", id: `${idp}-move-why`, text: why }));
+}
+
+// followMove draws a move's steps until it is done, waiting out the
+// console's own restart.
+async function followMove(instance, node, id, showError) {
+  const path = location.pathname;
+  const deadline = Date.now() + 3 * 60 * 60 * 1000;
+  let last = null;
+  while (Date.now() < deadline && location.pathname === path) {
+    let gap = "";
+    try {
+      last = await computeJSON(`/api/compute/moves/${encodeURIComponent(instance)}`);
+    } catch (err) {
+      gap = err.status === 401
+        ? "The instance restarted with a new admin token: reload the page and enter it to follow the move."
+        : "The console is restarting with the instance; this page reconnects when it is back.";
+    }
+    if (last) {
+      setChildren(node, el("ol", { class: "compute-events", id },
+        ...last.steps.map((s) => el("li", { "data-step": s.step },
+          statusIcon(s.step === "rollback" ? "Warning" : s.step === "done" ? "Succeeded" : "Pending"),
+          el("span", { class: "compute-event-step", text: s.step }),
+          el("span", { text: ` ${s.message}` })))),
+        gap ? el("p", { class: "muted", role: "status", id: `${id}-gap`, text: gap }) : null,
+        last.done ? el("p", { role: last.error ? "alert" : "status", class: last.error ? "form-error" : "", id: `${id}-outcome`,
+          text: last.kind === "delete" ? (last.error ? `The delete failed: ${last.error}` : `${last.to} and ${instance}'s data on it are deleted.`)
+            : last.interrupted ? `The ${last.kind === "replace" ? "change" : "move"} was interrupted: ${last.error || "its process ended"}. Resume it or roll it back.`
+            : last.error ? `The ${last.kind === "replace" ? "change" : "move"} failed${last.rolled_back ? " and was rolled back" : ""}: ${last.error}`
+              : `${instance} runs on ${last.to === "local" ? "this machine" : last.to}.` }) : null);
+      if (last.done) {
+        const what = last.kind === "replace" ? "Change of VM" : last.kind === "delete" ? "Delete" : "Move";
+        announce(last.kind === "delete" ? (last.error ? `Delete of ${last.to} failed` : `${last.to} deleted`)
+          : last.error ? `${what} of ${instance} failed` : `${instance} moved to ${last.to === "local" ? "this machine" : last.to}`);
+        if (last.error) showError(`${what} failed: ${last.error}`);
+        return last;
+      }
+    } else if (gap) {
+      setChildren(node, el("p", { class: "muted", role: "status", id: `${id}-gap`, text: gap }));
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  return last;
+}
+
+// computeFollow draws an operation's events into node until it is done.
+async function computeFollow(op, node, id) {
+  const path = location.pathname;
+  for (;;) {
+    setChildren(node, computeEventList(op, id));
+    if (op.done || location.pathname !== path) return op;
+    await new Promise((r) => setTimeout(r, 1000));
+    try {
+      op = await computeJSON(`/api/compute/operations/${encodeURIComponent(op.id)}`);
+    } catch {
+      return op;
+    }
+  }
+}
+
 const INSTANCE_DEADLINE_MS = 11 * 60 * 1000;
 
 function instanceToken() {
@@ -12349,10 +13402,76 @@ async function renderInstance(view) {
     return true;
   };
   setChildren(view, header(),
+    instanceComputeCard(refused),
     instanceSaveCard(info, refused),
     instanceLoadCard(info, instance, refused),
     instanceResetCard(info, refused),
     instanceSeedCard(info, refused));
+}
+
+// instanceComputeCard says where the instance's compute runs (#2209): this
+// machine's Docker, or a remote host over SSH, with its size and the
+// connection's state. Reconnect needs the admin token, like the cards below.
+function instanceComputeCard(refused) {
+  const body = el("div", { id: "instance-compute-body" }, el("p", { class: "muted", text: "Loading…" }));
+  const result = instanceResult("instance-compute-result");
+  const error = el("p", { class: "form-error", role: "alert", id: "instance-compute-error", hidden: true });
+  const button = el("button", { id: "instance-compute-reconnect", text: "Reconnect", hidden: true });
+  const row = (label, value, id) => [el("dt", { text: label }), el("dd", { id, text: value })];
+  const fill = (c) => {
+    if (c.location !== "ssh") {
+      setChildren(body, el("dl", { class: "info-fields", id: "instance-compute-details" },
+        ...row("Location", "This machine", "instance-compute-location"),
+        ...row("Runs on", "This machine's Docker", "instance-compute-target")));
+      button.hidden = true;
+      return;
+    }
+    const h = c.host || {};
+    setChildren(body, el("dl", { class: "info-fields", id: "instance-compute-details" },
+      ...row("Location", "Remote host over SSH", "instance-compute-location"),
+      ...row("Runs on", c.target || "", "instance-compute-target"),
+      ...row("Size", c.size || "unknown", "instance-compute-size"),
+      ...row("System", [h.os, h.arch, h.dockerVersion ? `Docker ${h.dockerVersion}` : ""].filter(Boolean).join(", "), "instance-compute-system"),
+      ...row("Connection", c.connected ? "Connected" : `Reconnecting${c.lastError ? `: ${c.lastError}` : ""}`, "instance-compute-state"),
+      ...row("Reconnects", String(c.reconnects || 0), "instance-compute-reconnects"),
+      ...row("Forwarded ports", (c.published || []).join(", ") || "none", "instance-compute-ports")));
+    button.hidden = false;
+  };
+  const load = async () => {
+    try {
+      const res = await fetch("/api/instance/compute", { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error(`/api/instance/compute responded ${res.status}`);
+      fill(await res.json());
+    } catch (err) {
+      setChildren(body, el("p", { class: "form-error", text: `Where the compute runs is unknown: ${err.message}` }));
+    }
+  };
+  button.addEventListener("click", async () => {
+    error.hidden = true;
+    result.textContent = "";
+    setBusy(button, true);
+    const op = recordOperation("Reconnect compute host");
+    try {
+      fill(await (await instanceFetch("/api/instance/compute/reconnect", { method: "POST", deadline: INSTANCE_DEADLINE_MS })).json());
+      op.succeeded("compute host");
+      result.textContent = "Reconnected.";
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      if (refused(err)) return;
+      error.textContent = `The connection was not re-established: ${err.message}`;
+      error.hidden = false;
+    } finally {
+      setBusy(button, false);
+    }
+  });
+  load();
+  return el("section", { class: "card", id: "instance-compute-card", "aria-labelledby": "instance-compute-title" },
+    el("h2", { id: "instance-compute-title", text: "Compute" }),
+    el("p", { text: "Where this instance's cluster and containers run. The console, the APIs and the metadata server always run on this machine." }),
+    body,
+    error,
+    el("div", { class: "form-actions" }, button),
+    result);
 }
 
 // instanceResult is a card's outcome line.

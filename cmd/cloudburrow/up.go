@@ -88,6 +88,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err := preflightPorts(cfg, doctor.RealEnv(), stderr); err != nil {
 		return err
 	}
+	// The compute host (#2209), before anything asks Docker a question:
+	// from here every docker and kind this process runs reaches it.
+	compute, err := connectCompute(ctx, cfg, stdout, true)
+	if err != nil {
+		return err
+	}
+	defer compute.Close()
 	// Before anything is created too: with --offline, every artifact the
 	// cluster would download must be in the cache, and the first that is
 	// not is named here rather than found as a pull timeout minutes in
@@ -1042,7 +1049,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	// The runtime file straight after the control server, so it names an
 	// address already listening and `wait` can follow startup from the start.
-	runtime := &runtimeFile{cfg: cfg, control: control, detached: os.Getenv(detachedEnv) != "", token: adminToken}
+	runtime := &runtimeFile{cfg: cfg, control: control, detached: os.Getenv(detachedEnv) != "", token: adminToken, args: args, offline: offline}
 	// The cache on either side of the cluster: the node image must be in
 	// Docker before kind creates the node, and the backend and Knative
 	// images in the node before anything runs them.
@@ -1948,6 +1955,20 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// through the admin API in process with the token the page sends,
 		// never one the console holds (#553).
 		consoleSrv.SetInstance(newConsoleInstance(cfg, adminAPI), adminTokenPath(cfg))
+		consoleSrv.SetCompute(consoleCompute{})
+		// Settings > Compute and Compute capacity (#2209): the same state and
+		// keychain items as `cloudburrow cloud`, behind the admin token.
+		if m, err := processCloudManager(cfg); err == nil {
+			consoleSrv.SetCloudCompute(m, cfg.Name, nil)
+			consoleSrv.SetMover(consoleMover{cfg: cfg})
+			// Session Manager sessions this process opened end with it.
+			defer m.CloseTunnels()
+			// SSH-mode VMs' firewalls follow this machine's public address
+			// while the instance runs (#2209).
+			go m.WatchAddresses(ctx, 3*time.Minute, func(format string, args ...any) { fmt.Fprintf(stderr, format+"\n", args...) })
+		} else {
+			fmt.Fprintf(stderr, "cloudburrow: Compute is not available in the console: %v\n", err)
+		}
 	}
 	// Last: ready hooks run once everything above has started, and shutdown
 	// hooks run first, before anything they use is stopped.
@@ -2275,6 +2296,9 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 
 	fmt.Fprintf(stdout, "instance:   %s\n", cfg.Name)
 	fmt.Fprintf(stdout, "project:    %s\n", projectLine(cfg))
+	if where, err := computeSummary(cfg); err == nil {
+		fmt.Fprintf(stdout, "compute:    %s\n", where)
+	}
 	fmt.Fprintf(stdout, "cluster:    %s (%s)\n", cfg.ClusterName(), cfg.Cluster.NodeImage)
 	fmt.Fprintf(stdout, "namespace:  %s\n", cfg.Cluster.Namespace)
 	fmt.Fprintf(stdout, "kubeconfig: %s\n", cfg.KubeconfigPath())
@@ -2316,6 +2340,16 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	compute, err := connectCompute(ctx, cfg, io.Discard, false)
+	if err != nil {
+		fmt.Fprintf(stdout, "\ncluster state: unknown (%v)\n", err)
+		return nil
+	}
+	defer compute.Close()
+	if compute != nil {
+		st := compute.session.Status()
+		fmt.Fprintf(stdout, "\ncompute host:  %s, connected (%s; Docker %s, %s)\n", st.Target, st.Host.Size(), st.Host.DockerVersion, st.Host.Arch)
+	}
 
 	status, err := c.Status(ctx)
 	if err != nil {

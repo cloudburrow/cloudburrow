@@ -63,6 +63,7 @@ application pods get no host mounts, no Docker socket and no privileged mode by 
 | `seed <file>` | Create the resources in a [seed document](#admin-api) in the running `up`. `--if-not-exists` skips resources that exist. |
 | `events` | Print the running `up`'s recent [admin events](#admin-api), newest first (`--service`, `--kind`, `--since 10m`, `--limit`, `--format json`). **Changes nothing.** |
 | `delete` | Destroy the cluster CloudBurrow created. |
+| `cloud` | Run the instance's compute on a VM in your own AWS account or Azure subscription: `cloud connect aws\|azure`, `disconnect`, `create`, `status`, `scale`, `start`, `stop`, `delete`, `resources`. **Creates billed resources in your cloud account** (it shows the price first). See [Bring your own cloud](#bring-your-own-cloud) and [byoc.md](byoc.md). |
 | `gc` | List the Docker images and volumes past CloudBurrow builds left behind; `--yes` removes them. See [Docker images and volumes](#docker-images-and-volumes). |
 | `storage-server` | Run CloudBurrow's own Cloud Storage server alone (`--listen`, default `127.0.0.1:4443`; `--host` for virtual-hosted XML; `--allow-remote` for a non-loopback address). It is built to Google's spec (#485) and is what `up` runs in the cluster (#514, #519): every JSON API method from Google's discovery document is routed, and each one not built answers **501 `notImplemented`** naming it; XML requests answer an XML `<Error>`. It is the Cloud Storage `up` serves; methods it has not built answer 501, and [compatibility.md](compatibility.md) lists which are Verified. |
 
@@ -456,6 +457,29 @@ client, err := bigquery.NewClient(ctx, os.Getenv("GOOGLE_CLOUD_PROJECT"),
     option.WithoutAuthentication())
 ```
 
+## Bring your own cloud
+
+The console's **Settings and utilities > Compute** (`/settings/compute`) and **Compute capacity**
+(`/compute-capacity`), and `cloudburrow cloud`, connect an AWS account or Azure subscription and
+create, resize, start, stop and delete the VM that runs an instance's compute there (#2209). The
+user guide, with what it costs, what it creates, how to delete and the security model, is
+[byoc.md](byoc.md).
+
+| What | Where |
+|---|---|
+| Connections and VMs (no secrets) | `<state dir>/byoc/byoc.json`, owner-only, shared by the console and the CLI |
+| Credentials and SSH keys | the OS keychain, service `CloudBurrow`, account `<state dir>/connection/<id>` and `<state dir>/machine/<instance>`; removed by Disconnect and Delete |
+| Instance | `--name` (the default instance otherwise): its VM's resources are tagged `cloudburrow-instance=<name>` |
+| Admin token | every Compute page and API call needs it, as the Instance page's do |
+
+`cloud create` flags: `--connection` (when several are connected), `--region` (default: the
+closest), `--size small|medium|large|gpu` (default small), `--auto-stop 60m` (default 1 hour; `0`
+for never), `--disk-gib`, `--connect ssm|ssh` (AWS defaults to Session Manager, nothing inbound;
+`ssh` opens TCP 22 to your address only, Azure's only mode), and `--yes` to skip the price
+confirmation. `cloud scale --size`, `cloud set --auto-stop 30m` (after create; a stopped VM gets
+it at its next start), `cloud allow-my-ip` (move the SSH rule to your current address),
+`cloud delete` and `cloud status --format json` work on the instance's VM.
+
 ## Console
 
 `--port-console` (default `9090`, `CLOUDBURROW_PORT_CONSOLE`) serves the web console, and
@@ -633,6 +657,7 @@ video decoder images, which `prefetch` builds for offline use and every instance
 | `--allow-unconfined-containers` | `CLOUDBURROW_ALLOW_UNCONFINED_CONTAINERS` | `allowUnconfinedContainers` | `false` | Lets the Dataproc DOCKER optional component run (#2162): each node's rootless Docker daemon runs with seccomp, AppArmor and the `/proc` and `/sys` masks unconfined, which weakens the isolation between those containers and this machine, so it is off by default; `up` warns when it is on and `status` shows it. Off, a cluster with DOCKER is refused `FAILED_PRECONDITION` naming this flag. A discovered `./cloudburrow.json` cannot set it. See [security.md](security.md#unconfined-containers-opt-in-2162). |
 | `--cloudbuild-host-steps` | `CLOUDBURROW_CLOUDBUILD_HOST_STEPS` | `cloudbuildHostSteps` | `false` | Lets Cloud Build's `CreateBuild` and `RetryBuild` run a step that is not a docker build, docker push or pack step (#1382). Such a step runs as a container on the host's Docker **with the host's Docker socket mounted**, which gives it control of the host, so it is off by default, and even when on it runs only for builds submitted from this machine's loopback, never from a pod through `cloudburrow-host`. Off, a build with one is refused `FAILED_PRECONDITION` naming this flag. A discovered `./cloudburrow.json` cannot set it. See [functions-and-builds.md](functions-and-builds.md) and [ADR-0004](adr/0004-local-access-and-no-authentication.md). |
 | `--appengine-url` | `CLOUDBURROW_APPENGINE_URL` | `appEngineUrl` | none | Base URL (`http://` or `https://`) of a local HTTP server standing in for the App Engine app, such as `http://localhost:8080` (#1506). Cloud Tasks (`appEngineHttpRequest`) and Cloud Scheduler (`appEngineHttpTarget`) deliver an App Engine target's request there, at its `relative_uri`, with the `Host` its `AppEngineRouting` computes (`service.project.appspot.com`, ...) and the headers Google documents (`X-AppEngine-QueueName`, `X-AppEngine-TaskName`, ..., `X-CloudScheduler`). There is no App Engine runtime: whatever serves that URL is the app, for every service and version. Unset, every App Engine attempt fails HTTP 404 (`NOT_FOUND`), as for an app that does not exist. |
+| `--compute` | `CLOUDBURROW_COMPUTE` | `compute` | empty (this machine's Docker) | Where the instance's Docker runs (#2209): empty for this machine's, or `ssh://[user@]host[:port]` for a remote Linux host. Its kind cluster and every container CloudBurrow starts run there, reached over one supervised SSH connection with CloudBurrow's own key (made under `<state-dir>/<name>/remote/`, mode `0600`, and installed once with your ssh agent and config); the CLI, console, metadata server and every endpoint stay here, the host's published ports are forwarded back to this machine's loopback, and workloads reach this machine's listeners through reverse forwards. `up` records the host in the instance directory (`compute.json`), so `status`, `stop`, `reset`, `delete` and `doctor` reach it without the flag; another host than the recorded one is refused until `delete`. A discovered `./cloudburrow.json` cannot set it. The host needs Docker usable by the account, cgroup v2 and sshd's `GatewayPorts clientspecified`; `doctor` checks each. See [remote-compute.md](remote-compute.md). |
 | `--cloudsql-connector` | `CLOUDBURROW_CLOUDSQL_CONNECTOR` | `cloudsqlConnector` | `<bind address>:3307` | `host:port` the Cloud SQL connectors' TLS listener binds (#1364); `connect.get` reports its host as the instance's address. The connectors dial that address at port `3307`, a constant in each, so `--port-base` does not move it. A second instance with `cloudsql` or `cloudsql-mysql` takes another loopback address on Linux (`127.0.0.2:3307`), or on macOS another port, which the application's dialer must redirect to. Loopback only, unless `--allow-remote`. See [cloudsql.md](cloudsql.md#running-two-instances-with-the-connectors). |
 | `--port-base` | `CLOUDBURROW_PORT_BASE` | `portBase` | `0` (the defaults, from `9000`) | Moves every fixed default port so the layout starts here: control at the base, each `900x`/`901x` port the same distance above it, ingress at base+80, console at base+90. A port set explicitly by flag, environment or `endpoints.*` is not moved; an OS-assigned one (`0`, and Local AI's by default) stays OS-assigned. `1024`–`65445`; keep the block below the OS's ephemeral port range (Linux `32768`, macOS `49152`), which `doctor` and `up` warn about. See [Running two instances](#running-two-instances). |
 | `--port-control` | `CLOUDBURROW_PORT_CONTROL` | `endpoints.control` | `9000` | Health, readiness and admin. Always loopback. |
