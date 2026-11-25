@@ -42,6 +42,10 @@ func TestCreateImageFromCloudStorageFileThroughTheBrowser(t *testing.T) {
 	p.waitFor(`(() => { const f = document.querySelector("#f-rawSource"); return !!f && f.getClientRects().length > 0; })()`)
 	p.run(chromedp.Click(chromedp.CSS(`#browse-rawSource`)))
 	p.clickText("#browse-title ~ .browse-list .fs-row-link", bucket)
+	// A row's name only chooses it; Select commits the choice, as in
+	// Google's picker.
+	p.waitFor(`!document.querySelector("#browse-select").disabled`)
+	p.run(chromedp.Click(chromedp.CSS(`#browse-select`)))
 	p.waitFor(`document.querySelector("#f-rawSource").value === "gs://` + bucket + `/" && document.querySelector("#browse-title") === null`)
 
 	p.submitForm(map[string]string{"name": "browser-imported", "rawSource": "gs://" + bucket + "/missing.tar.gz"}, "name")
