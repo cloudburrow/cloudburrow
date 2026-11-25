@@ -353,6 +353,13 @@ func (f front) continuous(w http.ResponseWriter, r *http.Request, project string
 	}
 	low := start.UnixMilli()
 	first := true
+	stateful := plan.query.stateful()
+	var prevWM int64 // microseconds: the latest _CHANGE_TIMESTAMP read
+	if stateful {
+		if e := f.cqStarts(r, plan, q.queryOptions, location, low); e != nil {
+			return failJobWith(*e)
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -377,14 +384,38 @@ func (f front) continuous(w http.ResponseWriter, r *http.Request, project string
 			high = low + int64(24*time.Hour/time.Millisecond) // CHANGES reads at most a day
 		}
 		if high > low {
-			if e := f.cqWindow(r, plan, q.queryOptions, location, sink, cqWindow{low: low, high: high, first: first}); e != nil {
+			win := cqWindow{low: low, high: high, first: first}
+			run := true
+			if stateful {
+				win.stateful, win.prevWM, win.curWM = true, prevWM, prevWM
+				if sizes := plan.query.windowSizes(); len(sizes) > 0 {
+					m, e := f.cqLatestChange(r, plan, q.queryOptions, location, win)
+					if e != nil {
+						if ctx.Err() != nil {
+							writeError(w, http.StatusBadRequest, "stopped", stoppedError().Message)
+							return true
+						}
+						return failJobWith(*e)
+					}
+					win.curWM = max(prevWM, m)
+					run = closesWindow(sizes, win.prevWM, win.curWM)
+				} else {
+					win.joinOnce = true
+				}
+				win.read = statefulRead(plan.query, win)
+			}
+			var e *rowError
+			if run {
+				e = f.cqWindow(r, plan, q.queryOptions, location, sink, win)
+			}
+			if e != nil {
 				if ctx.Err() != nil {
 					writeError(w, http.StatusBadRequest, "stopped", stoppedError().Message)
 					return true
 				}
 				return failJobWith(*e)
 			}
-			low, first = high, false
+			low, first, prevWM = high, false, win.curWM
 			cqRegistry.mark(key, func(r *cqRun) { r.watermark = high })
 		}
 		if lag := now.UnixMilli() - low; time.Duration(lag)*time.Millisecond > cqMaxWatermarkLag {
@@ -572,6 +603,120 @@ func (f front) cqWindow(r *http.Request, plan *cqPlan, q queryOptions, location 
 			return &rowError{Reason: "internalError", Message: err.Error()}
 		}
 	}
+}
+
+// cqScalars runs a query of one row and returns its values as the REST
+// API gives them ("" for NULL).
+func (f front) cqScalars(r *http.Request, q queryOptions, location, sql string) ([]string, *rowError) {
+	body, _ := json.Marshal(map[string]any{"query": sql, "useLegacySql": false, "defaultDataset": q.DefaultDataset,
+		"timeoutMs": 600000, "location": location})
+	st, got := cqRegistry.call(r, http.MethodPost, f.base+"/queries", body)
+	for {
+		if st != http.StatusOK {
+			return nil, &rowError{Reason: "invalidQuery", Message: errorMessage(got, st)}
+		}
+		var p struct {
+			Rows []struct {
+				F []struct {
+					V any `json:"v"`
+				} `json:"f"`
+			} `json:"rows"`
+			JobComplete  *bool `json:"jobComplete"`
+			JobReference struct {
+				JobID    string `json:"jobId"`
+				Location string `json:"location"`
+			} `json:"jobReference"`
+		}
+		if err := json.Unmarshal(got, &p); err != nil {
+			return nil, &rowError{Reason: "internalError", Message: err.Error()}
+		}
+		if p.JobComplete != nil && !*p.JobComplete {
+			if r.Context().Err() != nil {
+				return nil, &rowError{Reason: "stopped", Message: stoppedError().Message}
+			}
+			st, got = cqRegistry.call(r, http.MethodGet, f.base+"/queries/"+url.PathEscape(p.JobReference.JobID)+
+				"?timeoutMs=60000&location="+url.QueryEscape(p.JobReference.Location), nil)
+			continue
+		}
+		var out []string
+		if len(p.Rows) > 0 {
+			for _, c := range p.Rows[0].F {
+				v, _ := c.V.(string)
+				out = append(out, v)
+			}
+		}
+		return out, nil
+	}
+}
+
+// cqStarts sets where a stateful query reads each source from: its
+// APPENDS start, evaluated once as the job starts, or the job's start
+// (jobStart, milliseconds) for a table.
+func (f front) cqStarts(r *http.Request, plan *cqPlan, q queryOptions, location string, jobStart int64) *rowError {
+	var exprs []string
+	var set []*cqSource
+	for _, s := range plan.query.baseSources() {
+		switch {
+		case s.call == "":
+			s.startMs = jobStart
+		case s.start == "":
+			s.startNull = true
+		default:
+			exprs = append(exprs, "UNIX_MILLIS("+s.start+")")
+			set = append(set, s)
+		}
+	}
+	if len(exprs) == 0 {
+		return nil
+	}
+	vals, e := f.cqScalars(r, q, location, "SELECT "+strings.Join(exprs, ", "))
+	if e != nil {
+		return e
+	}
+	for i, s := range set {
+		if i < len(vals) {
+			s.startMs, _ = strconv.ParseInt(vals[i], 10, 64)
+		}
+	}
+	return nil
+}
+
+// cqLatestChange is the latest _CHANGE_TIMESTAMP, in microseconds, of
+// the rows window w reads new from a stateful query's sources (0 for
+// none): what moves its watermark.
+func (f front) cqLatestChange(r *http.Request, plan *cqPlan, q queryOptions, location string, w cqWindow) (int64, *rowError) {
+	ts := func(ms int64) string { return "TIMESTAMP_MILLIS(" + strconv.FormatInt(ms, 10) + ")" }
+	dataset := defaultDatasetOf(q)
+	seen := map[string]bool{}
+	var reads []string
+	for _, s := range plan.query.baseSources() {
+		parts := s.parts
+		if len(parts) == 1 && dataset != "" {
+			parts = []string{dataset, parts[0]}
+		}
+		name := quotePath(parts)
+		low := ts(w.low)
+		if w.first {
+			low = ts(s.startMs)
+			if s.startNull {
+				low = "NULL"
+			}
+		}
+		if seen[name+low] {
+			continue
+		}
+		seen[name+low] = true
+		reads = append(reads, "SELECT MAX(_CHANGE_TIMESTAMP) AS t FROM APPENDS(TABLE "+name+", "+low+", "+ts(w.high)+")")
+	}
+	if len(reads) == 0 {
+		return 0, nil
+	}
+	vals, e := f.cqScalars(r, q, location, "SELECT UNIX_MICROS(MAX(t)) FROM ("+strings.Join(reads, " UNION ALL ")+")")
+	if e != nil || len(vals) == 0 || vals[0] == "" {
+		return 0, e
+	}
+	n, _ := strconv.ParseInt(vals[0], 10, 64)
+	return n, nil
 }
 
 // decodeCQRow is a row of the REST API's f/v form as values: a scalar's

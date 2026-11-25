@@ -29,7 +29,10 @@ import (
 // Create assignment with the CONTINUOUS job type for the project; then
 // the query editor's Edit > Query mode > Continuous query runs a
 // continuous INSERT on it, answered with the job running, whose rows
-// reach the destination table as they arrive. The job is cancelled, the
+// reach the destination table as they arrive; then a window aggregation
+// over TUMBLE (a stateful continuous query) writes a window's count once
+// the window closes, and a LEFT JOIN is refused with BigQuery's rule. The
+// jobs are cancelled, the
 // assignment deleted from the page, and the reservation with Delete.
 // WCAG 2.1 AA and the keyboard walk of the list, the create page and the
 // reservation's page.
@@ -163,6 +166,70 @@ func TestBigQueryCapacityManagementThroughThePage(t *testing.T) {
 	}
 	if err := job.Cancel(ctx); err != nil {
 		t.Fatal(err)
+	}
+
+	// A stateful continuous query from the same editor: a window
+	// aggregation over TUMBLE, whose window's count is written once a row
+	// of a later window arrives; and a LEFT JOIN, refused with its rule.
+	dml("CREATE TABLE `" + project + "." + ds + ".ride_counts` (window_end TIMESTAMP, rides INT64)")
+	runContinuous := func(sql, after string) string {
+		t.Helper()
+		p.setField("#cq-editor", sql)
+		p.clickExpr(`[...document.querySelectorAll(".bq-toolbar button.primary")].find((b) => b.textContent === "Run" && b.offsetParent !== null)`)
+		p.waitFor(`document.querySelector(".modal.is-open") !== null`)
+		p.clickText(".modal.is-open button", "Run statement")
+		p.waitForWithin(fmt.Sprintf(`[...document.querySelectorAll(".bq-results")].some((r) => r.offsetParent !== null && `+
+			`(r.textContent.includes("Continuous query ") && !r.textContent.includes(%q) || r.querySelector(".form-error")))`, after), 2*time.Minute)
+		var out string
+		p.eval(`[...document.querySelectorAll(".bq-results")].find((r) => r.offsetParent !== null).textContent`, &out)
+		return out
+	}
+	msg = runContinuous("INSERT INTO `"+project+"."+ds+".ride_counts` SELECT window_end, COUNT(*) AS rides FROM TUMBLE(TABLE `"+
+		project+"."+ds+".rides`, \"_CHANGE_TIMESTAMP\", INTERVAL 5 SECOND) GROUP BY window_end", m[1])
+	m2 := regexp.MustCompile(`Continuous query (\S+) \(RUNNING\)`).FindStringSubmatch(msg)
+	if m2 == nil {
+		t.Fatalf("a window aggregation's Run: %q, want its job running", msg)
+	}
+	job2, err := bq.JobFromIDLocation(ctx, m2[1], "US")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = job2.Cancel(context.Background()) })
+	next := time.Now().Truncate(5 * time.Second).Add(5 * time.Second)
+	time.Sleep(time.Until(next) + 300*time.Millisecond)
+	dml("INSERT INTO `" + project + "." + ds + ".rides` VALUES ('a', 1), ('b', 2)")
+	time.Sleep(time.Until(next.Add(5*time.Second)) + 300*time.Millisecond)
+	dml("INSERT INTO `" + project + "." + ds + ".rides` VALUES ('c', 3)")
+	deadline = time.Now().Add(90 * time.Second)
+	for {
+		it, err := bq.Query("SELECT window_end, rides FROM `" + project + "." + ds + ".ride_counts`").Read(ctx)
+		var got []string
+		if err == nil {
+			for {
+				var row []bigquery.Value
+				if it.Next(&row) != nil {
+					break
+				}
+				got = append(got, fmt.Sprint(row[0].(time.Time).UnixMilli(), "=", row[1]))
+			}
+		}
+		if want := fmt.Sprint(next.Add(5*time.Second).UnixMilli(), "=", 2); strings.Join(got, ",") == want {
+			break
+		} else if time.Now().After(deadline) {
+			t.Fatalf("ride_counts holds %v, %v; want %s, the closed window's count", got, err, want)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if err := job2.Cancel(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// The refusal is the query call's 400, which the page shows.
+	p.expected = append(p.expected, "/api/studio/bigquery?call=query")
+	msg = runContinuous("INSERT INTO `"+project+"."+ds+".long_rides` SELECT a.ride_id, b.meters FROM APPENDS(TABLE `"+project+"."+ds+
+		".rides`, CURRENT_TIMESTAMP()) AS a LEFT JOIN APPENDS(TABLE `"+project+"."+ds+".rides`, CURRENT_TIMESTAMP()) AS b ON a.ride_id = b.ride_id "+
+		"AND b._CHANGE_TIMESTAMP BETWEEN a._CHANGE_TIMESTAMP - INTERVAL 1 MINUTE AND a._CHANGE_TIMESTAMP", m2[1])
+	if !strings.Contains(msg, "only INNER JOIN operations are supported") {
+		t.Errorf("a LEFT JOIN's Run: %q, want BigQuery's rule that only INNER JOIN is supported", msg)
 	}
 
 	auditScreens(t, []a11yPage{
