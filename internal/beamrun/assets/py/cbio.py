@@ -195,6 +195,10 @@ def _splice(pipeline, mini, prefix, env_id):
         n.CopyFrom(pc)
         n.coder_id = ren(pc.coder_id)
         n.windowing_strategy_id = ren(pc.windowing_strategy_id)
+        # Unique in the pipeline too: two Pub/Sub writes' replacements
+        # each have a "Write.None" output, which the job server's
+        # validator refuses as one name.
+        n.unique_name = prefix + pc.unique_name
         c.pcollections[ren(pid)].CopyFrom(n)
     out = {}
     for tid, t in mc.transforms.items():
