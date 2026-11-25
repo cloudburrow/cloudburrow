@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/chromedp/chromedp"
 )
 
 // TestFilestoreThroughThePage (#2192), in the served shard, whose instance
@@ -84,4 +86,69 @@ func TestFilestoreThroughThePage(t *testing.T) {
 		{"Filestore backup", backupPath, settled, ""},
 		screen("Filestore snapshots", "/filestore/snapshots", project),
 	})
+}
+
+// TestFilestoreMultishareThroughThePage (#2194): Create an instance with
+// Enterprise's "Enable multishares", the instance's page with its
+// Performance limits and its Shares, Create share from the page, the share
+// listed, and Delete share. The console API reads each result back. Every
+// screen meets WCAG 2.1 AA and is walked by keyboard.
+func TestFilestoreMultishareThroughThePage(t *testing.T) {
+	needService(t, "filestore")
+	project := uniqueProject(t)
+	detail := func(path ...string) string {
+		t.Helper()
+		q := url.Values{"project": {project}, "name": path}
+		code, body := consoleDo(t, http.MethodGet, "/api/detail/filestore?"+q.Encode(), "")
+		if code != http.StatusOK {
+			t.Fatalf("read %v through the console API = %d: %s", path, code, body)
+		}
+		return body
+	}
+	const inst = "us-central1/browser-ms"
+	t.Cleanup(func() {
+		consoleDo(t, http.MethodDelete, "/api/resources/filestore?project="+url.QueryEscape(project)+"&name="+url.QueryEscape(inst), "")
+	})
+	p := openWithin(t, 10*time.Minute)
+	p.navigate("/filestore/instances?project=" + project)
+	p.clickText("#view button, #view a", "Create instance")
+	p.waitFor(`document.getElementById("f-tier") !== null`)
+	p.submitForm(map[string]string{"instanceId": "browser-ms", "tier": "ENTERPRISE", "multiShare": "true"}, "instanceId")
+	p.waitForWithin(`location.pathname === "/filestore/instances" &&
+		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("browser-ms") && r.textContent.includes("Multishare"))`, 5*time.Minute)
+	if got := detail(inst); !strings.Contains(got, "Multishares") || !strings.Contains(got, "Max read IOPS") || !strings.Contains(got, "12000") {
+		t.Fatalf("the instance reads back as %s", got)
+	}
+	find := `[...document.querySelectorAll("#view tbody a")].find((a) => a.textContent.includes("browser-ms") && a.getClientRects().length)`
+	p.waitFor(find + ` !== undefined`)
+	var href string
+	p.eval(find+`.getAttribute("href")`, &href)
+	p.navigate(href)
+	p.waitFor(`document.querySelector("#view").textContent.includes("Max write throughput")`)
+	var instPath string
+	p.eval(`location.pathname + location.search`, &instPath)
+
+	p.clickText("#view button", "Create share")
+	p.submitForm(map[string]string{"shareId": "web-share", "mountName": "web_share", "capacityGb": "50"}, "shareId")
+	p.waitForWithin(`document.querySelector(".modal") === null`, 5*time.Minute)
+	if got := detail(inst); !strings.Contains(got, "web-share") || !strings.Contains(got, "web_share") {
+		t.Fatalf("the share reads back as %s", got)
+	}
+	p.navigate(instPath)
+	p.clickText("#view [role=tab]", "Shares")
+	p.waitFor(`document.querySelector("#view").textContent.includes("web_share")`)
+	auditScreens(t, []a11yPage{
+		screen("create a Filestore instance", "/filestore/instances/create", project),
+		{"Filestore multishare instance", instPath, settled, ""},
+	})
+
+	p.navigate(instPath)
+	p.clickText("#view button", "Delete share")
+	p.submitForm(map[string]string{"share": "web-share"}, "share")
+	p.confirmOnlyDialogLabelled("Delete share")
+	p.run(chromedp.Click(chromedp.CSS(`.modal.is-open form[data-confirm] .modal-actions button.danger`)))
+	p.waitForWithin(`document.querySelector(".modal") === null`, 5*time.Minute)
+	if got := detail(inst); strings.Contains(got, "web_share") {
+		t.Errorf("the share is still there: %s", got)
+	}
 }

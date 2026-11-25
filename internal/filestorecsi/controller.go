@@ -146,6 +146,7 @@ var StorageClasses = map[string]string{
 	"zonal-rwx":      "zonal",
 	"regional-rwx":   "regional",
 	"enterprise-rwx": "enterprise",
+	MultishareClass:  "enterprise",
 }
 
 // Manifest is the driver's CSIDriver and StorageClasses.
@@ -167,6 +168,10 @@ spec:
 	}
 	sort.Strings(names)
 	for _, n := range names {
+		params := fmt.Sprintf("{tier: %s, network: %s}", StorageClasses[n], network)
+		if n == MultishareClass {
+			params = fmt.Sprintf("{tier: %s, multishare: \"true\", instance-storageclass-label: %s, network: %s}", StorageClasses[n], n, network)
+		}
 		fmt.Fprintf(&b, `---
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -174,11 +179,11 @@ metadata:
   name: %s
   labels: {addonmanager.kubernetes.io/mode: EnsureExists, k8s-app: gcp-filestore-csi-driver}
 provisioner: %s
-parameters: {tier: %s, network: %s}
+parameters: %s
 allowVolumeExpansion: true
 reclaimPolicy: Delete
 volumeBindingMode: WaitForFirstConsumer
-`, n, Driver, StorageClasses[n], network)
+`, n, Driver, params)
 	}
 	return b.String()
 }
@@ -337,8 +342,8 @@ func (c *Controller) provision(ctx context.Context, cl Cluster) error {
 	}
 	for _, p := range claims {
 		if p.Status.Phase == "Bound" && p.Spec.StorageClassName != nil {
-			if _, ok := mine[*p.Spec.StorageClassName]; ok {
-				if err := c.expand(ctx, cl, p, vols); err != nil {
+			if sc, ok := mine[*p.Spec.StorageClassName]; ok {
+				if err := c.expand(ctx, cl, sc, p, vols); err != nil {
 					c.event(ctx, cl, p, err)
 				}
 			}
@@ -355,7 +360,11 @@ func (c *Controller) provision(ctx context.Context, cl Cluster) error {
 		if p.Metadata.Annotations["volume.kubernetes.io/selected-node"] == "" {
 			continue
 		}
-		if err := c.provisionOne(ctx, cl, sc, p); err != nil {
+		provision := c.provisionOne
+		if multishare(sc) {
+			provision = c.provisionShare
+		}
+		if err := provision(ctx, cl, sc, p); err != nil {
 			c.event(ctx, cl, p, err)
 		}
 	}
@@ -366,7 +375,11 @@ func (c *Controller) provision(ctx context.Context, cl Cluster) error {
 		if v.Metadata.Annotations["pv.kubernetes.io/provisioned-by"] != Driver {
 			continue
 		}
-		if err := c.deleteOne(ctx, cl, v.Metadata.Name, v.Spec.CSI.VolumeHandle); err != nil {
+		del := c.deleteOne
+		if strings.HasPrefix(v.Spec.CSI.VolumeHandle, "modeMultishare/") {
+			del = c.deleteShare
+		}
+		if err := del(ctx, cl, v.Metadata.Name, v.Spec.CSI.VolumeHandle); err != nil {
 			c.logf("filestore CSI: delete %s: %v", v.Metadata.Name, err)
 		}
 	}
@@ -548,6 +561,19 @@ func (c *Controller) provisionOne(ctx context.Context, cl Cluster, sc storageCla
 		return fmt.Errorf("instance %s is %s", name, in.GetState())
 	}
 	ip := in.GetNetworks()[0].GetIpAddresses()[0]
+	attrs := map[string]string{"ip": ip, "volume": "vol1"}
+	if protocol == filestorepb.Instance_NFS_V4_1 {
+		attrs["protocol"] = "NFS_V4_1"
+	}
+	if err := c.writeVolume(ctx, cl, sc, p, pvName, capGiB, "modeInstance/"+location+"/"+pvName+"/vol1", attrs); err != nil {
+		return err
+	}
+	c.logf("filestore CSI: provisioned %s/%s as %s (%s, %d GiB, %s)", p.Metadata.Namespace, p.Metadata.Name, name, tier, capGiB, ip)
+	return nil
+}
+
+// writeVolume creates the claim's PersistentVolume, bound to it.
+func (c *Controller) writeVolume(ctx context.Context, cl Cluster, sc storageClass, p pvc, pvName string, capGiB int64, handle string, attrs map[string]string) error {
 	reclaim := sc.ReclaimPolicy
 	if reclaim == "" {
 		reclaim = "Delete"
@@ -555,10 +581,6 @@ func (c *Controller) provisionOne(ctx context.Context, cl Cluster, sc storageCla
 	modes := p.Spec.AccessModes
 	if len(modes) == 0 {
 		modes = []string{"ReadWriteMany"}
-	}
-	attrs := map[string]string{"ip": ip, "volume": "vol1"}
-	if protocol == filestorepb.Instance_NFS_V4_1 {
-		attrs["protocol"] = "NFS_V4_1"
 	}
 	vol := map[string]any{
 		"apiVersion": "v1", "kind": "PersistentVolume",
@@ -570,15 +592,13 @@ func (c *Controller) provisionOne(ctx context.Context, cl Cluster, sc storageCla
 			"storageClassName":              sc.Metadata.Name,
 			"mountOptions":                  sc.MountOptions,
 			"claimRef":                      map[string]string{"apiVersion": "v1", "kind": "PersistentVolumeClaim", "namespace": p.Metadata.Namespace, "name": p.Metadata.Name, "uid": p.Metadata.UID},
-			"csi": map[string]any{"driver": Driver, "volumeHandle": "modeInstance/" + location + "/" + pvName + "/vol1",
-				"volumeAttributes": attrs},
+			"csi":                           map[string]any{"driver": Driver, "volumeHandle": handle, "volumeAttributes": attrs},
 		},
 	}
 	b, _ := json.Marshal(vol)
 	if _, err := c.kubectl(ctx, cl, string(b), "create", "-f", "-"); err != nil && !strings.Contains(err.Error(), "AlreadyExists") {
 		return err
 	}
-	c.logf("filestore CSI: provisioned %s/%s as %s (%s, %d GiB, %s)", p.Metadata.Namespace, p.Metadata.Name, name, tier, capGiB, ip)
 	return nil
 }
 
@@ -637,7 +657,7 @@ func (c *Controller) deleteOne(ctx context.Context, cl Cluster, pvName, handle s
 // its volume holds (allowVolumeExpansion, as GKE's classes allow): the
 // instance's share is resized through the API, then the volume's and the
 // claim's capacity are set to it.
-func (c *Controller) expand(ctx context.Context, cl Cluster, p pvc, vols []pv) error {
+func (c *Controller) expand(ctx context.Context, cl Cluster, sc storageClass, p pvc, vols []pv) error {
 	want, err := GiB(p.Spec.Resources.Requests["storage"])
 	if err != nil || p.Status.Capacity["storage"] == "" {
 		return nil
@@ -651,6 +671,13 @@ func (c *Controller) expand(ctx context.Context, cl Cluster, p pvc, vols []pv) e
 		if v.Metadata.Name == p.Spec.VolumeName && v.Spec.CSI != nil && v.Spec.CSI.Driver == Driver {
 			handle = v.Spec.CSI.VolumeHandle
 		}
+	}
+	if strings.HasPrefix(handle, "modeMultishare/") {
+		got, err := c.expandShare(ctx, handle, want, sc)
+		if err != nil {
+			return err
+		}
+		return c.patchSize(ctx, cl, p, GiBString(got))
 	}
 	parts := strings.Split(handle, "/")
 	if len(parts) != 4 || parts[0] != "modeInstance" {
@@ -682,7 +709,11 @@ func (c *Controller) expand(ctx context.Context, cl Cluster, p pvc, vols []pv) e
 			return fmt.Errorf("resize %s to %d GiB: %s", name, want, e.GetMessage())
 		}
 	}
-	size := strconv.FormatInt(max(want, fs.GetCapacityGb()), 10) + "Gi"
+	return c.patchSize(ctx, cl, p, strconv.FormatInt(max(want, fs.GetCapacityGb()), 10)+"Gi")
+}
+
+// patchSize sets the claim's volume's and the claim's capacity to size.
+func (c *Controller) patchSize(ctx context.Context, cl Cluster, p pvc, size string) error {
 	patch := `{"spec":{"capacity":{"storage":"` + size + `"}}}`
 	if _, err := c.kubectl(ctx, cl, "", "patch", "pv", p.Spec.VolumeName, "--type=merge", "-p", patch); err != nil {
 		return err

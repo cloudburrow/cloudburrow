@@ -71,6 +71,15 @@ type Share struct {
 	// Exports are the share's NFS export options, defaults applied; none
 	// is every client, read-write, without root squash.
 	Exports []Export
+	// CapacityBytes is the share's size (#2194): its filesystem's, so a
+	// full share refuses writes; 0 keeps the share a plain directory.
+	CapacityBytes int64
+}
+
+// Limits are an instance's performance limits (#2194), as
+// performance_limits reports them; 0 is no limit.
+type Limits struct {
+	ReadIOPS, WriteIOPS, ReadBps, WriteBps int64
 }
 
 // Export is one NFS export option of a share.
@@ -92,6 +101,13 @@ type Spec struct {
 	// NFSv41 serves NFSv4.1 (and NFSv3); otherwise NFSv3 alone.
 	NFSv41 bool
 	Shares []Share
+	// Encrypted is an instance with a customer-managed key (#2194): its
+	// shares are encrypted at rest with DataKey, which Cloud KMS unwraps;
+	// with DataKey nil (the key cannot be used) no share is opened.
+	Encrypted bool
+	DataKey   []byte
+	// Limits are the instance's IOPS and throughput.
+	Limits Limits
 }
 
 // Backend runs the instances' NFS servers. key names an instance's server
@@ -120,6 +136,9 @@ type Backend interface {
 	Replicate(ctx context.Context, from, to, share string) error
 	// DeleteBackup deletes backup's data.
 	DeleteBackup(ctx context.Context, backup string) error
+	// RemoveShare deletes a share's files and snapshots, once the server
+	// no longer serves it (multishare instances, #2194).
+	RemoveShare(ctx context.Context, key, share string) error
 }
 
 // Options are the server's collaborators.
@@ -184,6 +203,12 @@ type instRecord struct {
 	// Block is the instance's range on its VPC network and Addr its
 	// address there, the one it serves at.
 	Block, Addr string
+	// Sealed is the data key its shares are encrypted with at rest, as
+	// Cloud KMS wrapped it with kms_key_name (#2194).
+	Sealed *cmek.Sealed
+	// Multi is a multishare instance's own fields and its shares
+	// (v1beta1, #2194); nil for an instance of one file share.
+	Multi *multiState
 }
 
 type snapRecord struct {
@@ -278,7 +303,7 @@ func (s *Server) Resume(ctx context.Context) {
 			spec.Shares = nil
 		}
 		s.mu.Unlock()
-		got, err := s.opts.Backend.Ensure(ctx, key, ip, spec)
+		got, err := s.ensure(ctx, s.opts.Backend, r, key, ip, spec)
 		s.mu.Lock()
 		if err != nil {
 			r.I.State, r.I.StatusMessage = filestorepb.Instance_ERROR, "The NFS server did not start: "+err.Error()
@@ -314,6 +339,8 @@ type stateInst struct {
 	IP       string          `json:"ip"`
 	Block    string          `json:"block,omitempty"`
 	Address  string          `json:"address,omitempty"`
+	Sealed   *cmek.Sealed    `json:"sealed,omitempty"`
+	Multi    *multiState     `json:"multi,omitempty"`
 }
 
 type stateSnap struct {
@@ -344,7 +371,7 @@ func (s *Server) load() error {
 		if err := protojson.Unmarshal(x.Instance, in); err != nil {
 			return fmt.Errorf("filestore: parse state %s: %w", s.state, err)
 		}
-		s.instances[in.GetName()] = &instRecord{I: in, Key: x.Key, IP: x.IP, Block: x.Block, Addr: x.Address}
+		s.instances[in.GetName()] = &instRecord{I: in, Key: x.Key, IP: x.IP, Block: x.Block, Addr: x.Address, Sealed: x.Sealed, Multi: x.Multi}
 	}
 	for _, x := range f.Snapshots {
 		sn := &filestorepb.Snapshot{}
@@ -374,7 +401,7 @@ func (s *Server) saveLocked() error {
 		if err != nil {
 			return err
 		}
-		f.Instances = append(f.Instances, stateInst{Instance: b, Key: r.Key, IP: r.IP, Block: r.Block, Address: r.Addr})
+		f.Instances = append(f.Instances, stateInst{Instance: b, Key: r.Key, IP: r.IP, Block: r.Block, Address: r.Addr, Sealed: r.Sealed, Multi: r.Multi})
 	}
 	for _, name := range sortedKeys(s.snapshots) {
 		r := s.snapshots[name]
@@ -458,8 +485,10 @@ func specOf(in *filestorepb.Instance) Spec {
 			}
 			sh.Exports = append(sh.Exports, e)
 		}
+		sh.CapacityBytes = fs.GetCapacityGb() << 30
 		spec.Shares = append(spec.Shares, sh)
 	}
+	spec.Encrypted = in.GetKmsKeyName() != ""
 	return spec
 }
 
@@ -468,8 +497,12 @@ func (r *instRecord) spec() Spec { return r.specFor(r.I) }
 
 func (r *instRecord) specFor(in *filestorepb.Instance) Spec {
 	spec := specOf(in)
+	if r.Multi != nil {
+		spec.Shares = r.Multi.spec()
+	}
 	spec.Address = r.Addr
 	spec.ReadOnly = isStandby(in)
+	spec.Limits = limitsOf(PerformanceLimits(in.GetTier(), r.capacityOf(in), in.GetPerformanceConfig()))
 	return spec
 }
 

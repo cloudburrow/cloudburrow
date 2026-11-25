@@ -17,6 +17,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/filestoreserver"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
@@ -484,6 +485,20 @@ func (s *computeService) filestoreNetworks() filestore.Networks {
 		return api
 	}
 	return nil
+}
+
+// filestoreClients are the VMs whose NFS traffic Filestore's servers see
+// from their internal IPs (#2194).
+func (s *computeService) filestoreClients() []filestoreserver.Client {
+	api := s.API()
+	if api == nil {
+		return nil
+	}
+	var out []filestoreserver.Client
+	for _, v := range api.VMAddresses() {
+		out = append(out, filestoreserver.Client{PodIP: v.PodIP, InternalIP: v.InternalIP})
+	}
+	return out
 }
 
 func (s *computeService) gkeNetworks() gke.Networks {

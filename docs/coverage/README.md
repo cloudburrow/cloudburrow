@@ -67,6 +67,7 @@ Do not edit these files by hand.
 | [App Hub (v1)](apphub.md) | 31 | 31 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [AlloyDB for PostgreSQL (v1)](alloydb.md) | 37 | 37 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Filestore (v1)](filestore.md) | 18 | 18 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Filestore (v1beta1)](filestorev1beta1.md) | 23 | 10 | 0 | 0 | 13 | 0 | 0 | 0 |
 | [Cloud Trace API (v1 and v2)](trace.md) | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Serverless VPC Access (v1)](vpcaccess.md) | 4 | 4 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Certificate Manager (v1)](certificatemanager.md) | 30 | 25 | 0 | 0 | 5 | 0 | 0 | 0 |

@@ -4,12 +4,16 @@ import (
 	"context"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"cloud.google.com/go/filestore/apiv1/filestorepb"
 	"google.golang.org/genproto/googleapis/api/annotations"
 	_ "google.golang.org/genproto/googleapis/cloud/common" // OperationMetadata, for the JSON API's Any
 	locationpb "google.golang.org/genproto/googleapis/cloud/location"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
+
+	betapb "github.com/cloudburrow/cloudburrow/internal/service/filestore/filestorev1beta1pb"
 
 	"github.com/cloudburrow/cloudburrow/internal/aipfilter"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -21,6 +25,7 @@ import (
 // Register serves the API, its operations and its locations on g.
 func (s *Server) Register(g grpc.ServiceRegistrar) {
 	filestorepb.RegisterCloudFilestoreManagerServer(g, s)
+	betapb.RegisterCloudFilestoreManagerServer(g, s.Beta())
 	NewOperationsServer(s).Register(g)
 	locations.Register(g, &locationsServer{})
 }
@@ -75,8 +80,28 @@ func (l *locationsServer) GetLocation(_ context.Context, req *locationpb.GetLoca
 	return &locationpb.Location{Name: req.GetName(), LocationId: m[2]}, nil
 }
 
-// Mixins are the bindings file_v1.yaml adds: Locations and Operations.
+// Mixins are the bindings file_v1.yaml and file_v1beta1.yaml add:
+// Locations and Operations, under each version.
 func Mixins() []*annotations.HttpRule {
+	var out []*annotations.HttpRule
+	for _, v := range []string{"v1", "v1beta1"} {
+		for _, r := range mixinsV1() {
+			r = proto.Clone(r).(*annotations.HttpRule)
+			switch p := r.Pattern.(type) {
+			case *annotations.HttpRule_Get:
+				p.Get = strings.Replace(p.Get, "/v1/", "/"+v+"/", 1)
+			case *annotations.HttpRule_Post:
+				p.Post = strings.Replace(p.Post, "/v1/", "/"+v+"/", 1)
+			case *annotations.HttpRule_Delete:
+				p.Delete = strings.Replace(p.Delete, "/v1/", "/"+v+"/", 1)
+			}
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func mixinsV1() []*annotations.HttpRule {
 	return []*annotations.HttpRule{
 		{Selector: "google.cloud.location.Locations.GetLocation",
 			Pattern: &annotations.HttpRule_Get{Get: "/v1/{name=projects/*/locations/*}"}},
@@ -95,7 +120,7 @@ func Mixins() []*annotations.HttpRule {
 
 // Transcoder is the JSON API's configuration, with nothing registered.
 func Transcoder() *rest.Transcoder {
-	return &rest.Transcoder{Packages: []string{"google.cloud.filestore.v1"}, Mixins: Mixins(), SnakeCaseMasks: true}
+	return &rest.Transcoder{Packages: []string{"google.cloud.filestore.v1", "google.cloud.filestore.v1beta1"}, Mixins: Mixins(), SnakeCaseMasks: true}
 }
 
 // NewRESTHandler is the JSON API over s.

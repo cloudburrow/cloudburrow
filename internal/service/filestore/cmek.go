@@ -102,6 +102,48 @@ func (s *Server) openKey(ctx context.Context, project, backup string, sealed *cm
 	return dek, nil
 }
 
+// ensure runs r's NFS server with spec, its shares opened with r's data
+// key when it has a customer-managed key: made and sealed with that key on
+// the first start (#2194), unwrapped by Cloud KMS on every start after.
+func (s *Server) ensure(ctx context.Context, b Backend, r *instRecord, key, ip string, spec Spec) (string, error) {
+	if spec.Encrypted && len(spec.Shares) > 0 {
+		dek, err := s.dataKey(ctx, r)
+		if err != nil {
+			return "", err
+		}
+		spec.DataKey = dek
+	}
+	return b.Ensure(ctx, key, ip, spec)
+}
+
+// dataKey is r's shares' data key, made and sealed with its kms_key_name
+// when it has none yet.
+func (s *Server) dataKey(ctx context.Context, r *instRecord) ([]byte, error) {
+	if s.opts.Keys == nil {
+		return nil, apierror.FailedPrecondition("The instance is encrypted with a customer-managed key, and Cloud KMS is not served")
+	}
+	s.mu.Lock()
+	name, kmsKey, sealed := r.I.GetName(), r.I.GetKmsKeyName(), r.Sealed
+	s.mu.Unlock()
+	project := projectOf(name)
+	if sealed == nil {
+		dek, sl, err := s.sealKey(ctx, project, kmsKey, name)
+		if err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		r.Sealed = sl
+		_ = s.saveLocked()
+		s.mu.Unlock()
+		return dek, nil
+	}
+	dek, err := s.opts.Keys.Open(ctx, project, agentOf(project), *sealed, []byte(name))
+	if err != nil {
+		return nil, keyError("kms_key_name", err)
+	}
+	return dek, nil
+}
+
 // checkKeys suspends each READY instance whose key cannot be used, and
 // resumes each it suspended once its key can be used again.
 func (s *Server) checkKeys(ctx context.Context) {
@@ -148,7 +190,7 @@ func (s *Server) checkKeys(ctx context.Context) {
 		}
 		s.busy[name] = "key check"
 		s.mu.Unlock()
-		_, berr := s.opts.Backend.Ensure(ctx, key, ip, spec)
+		_, berr := s.ensure(ctx, s.opts.Backend, j.r, key, ip, spec)
 		s.mu.Lock()
 		delete(s.busy, name)
 		if berr == nil {

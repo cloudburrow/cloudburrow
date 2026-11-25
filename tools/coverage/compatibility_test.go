@@ -99,6 +99,7 @@ var compatSections = map[string]string{
 	"apphub":             "## App Hub — `google.cloud.apphub.v1`",
 	"alloydb":            "## AlloyDB for PostgreSQL — `google.cloud.alloydb.v1`",
 	"filestore":          "## Filestore — `google.cloud.filestore.v1`",
+	"filestorev1beta1":   "## Filestore v1beta1 — `google.cloud.filestore.v1beta1`",
 	"trace":              "## Cloud Trace — `google.devtools.cloudtrace.v1` and `v2`",
 	"vpcaccess":          "## Serverless VPC Access — `google.cloud.vpcaccess.v1`",
 	"certificatemanager": "## Certificate Manager — `google.cloud.certificatemanager.v1`",

@@ -137,6 +137,36 @@
         "verification": "built-and-run",
         "skipDiscovery": "Debian package; depcheck only discovers GitHub-sourced components."
       },
+      "cryptsetup": {
+        "$comment": "apt-get install cryptsetup-bin=2:2.7.5-2 from snapshot.debian.org 20261120T000000Z in internal/filestoreserver/image/Dockerfile (#2194): dm-crypt mappings that encrypt a share at rest with the data key its customer-managed key wraps.",
+        "version": "2:2.7.5-2",
+        "source": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/c/cryptsetup/",
+        "license": "GPL-2.0-or-later (cryptsetup), LGPL-2.1-or-later (libcryptsetup)",
+        "redistribution": "not published: installed into the locally built Filestore NFS server image and run there as a separate program; none of its code is in the repository or linked into the CLI",
+        "updateFeed": "debian-snapshot",
+        "verification": "built-and-run",
+        "skipDiscovery": "Debian package; depcheck only discovers GitHub-sourced components."
+      },
+      "e2fsprogs": {
+        "$comment": "apt-get install e2fsprogs=1.47.2-3+b12 from snapshot.debian.org 20261120T000000Z in internal/filestoreserver/image/Dockerfile (#2194): mkfs.ext4 and resize2fs for the share's filesystem, sized to the instance's capacity.",
+        "version": "1.47.2-3+b12",
+        "source": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/e/e2fsprogs/",
+        "license": "GPL-2.0 (e2fsprogs), LGPL-2.0 (libext2fs)",
+        "redistribution": "not published: installed into the locally built Filestore NFS server image and run there as a separate program; none of its code is in the repository or linked into the CLI",
+        "updateFeed": "debian-snapshot",
+        "verification": "built-and-run",
+        "skipDiscovery": "Debian package; depcheck only discovers GitHub-sourced components."
+      },
+      "iproute2": {
+        "$comment": "apt-get install iproute2=6.15.0-1 from snapshot.debian.org 20261120T000000Z in internal/filestoreserver/image/Dockerfile (#2194): tc, the read throughput shaper, and ip, the server's routes back to its VPC clients.",
+        "version": "6.15.0-1",
+        "source": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/i/iproute2/",
+        "license": "GPL-2.0-or-later",
+        "redistribution": "not published: installed into the locally built Filestore NFS server image and run there as a separate program; none of its code is in the repository or linked into the CLI",
+        "updateFeed": "debian-snapshot",
+        "verification": "built-and-run",
+        "skipDiscovery": "Debian package; depcheck only discovers GitHub-sourced components."
+      },
       "netbase": {
         "$comment": "apt-get install netbase=6.5 from snapshot.debian.org 20261120T000000Z in internal/filestoreserver/image/Dockerfile (#2192): /etc/services and /etc/protocols, which NFS-Ganesha's RPC registration reads.",
         "version": "6.5",

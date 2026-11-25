@@ -499,6 +499,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if filestoreSvc != nil && computeSvc != nil {
 		filestoreSvc.networks = computeSvc.filestoreNetworks
+		filestoreSvc.clients = computeSvc.filestoreClients
 	}
 	filestoreSvc.register(coord)
 	if gkeSvc != nil && runSvc != nil && runSvc.events != nil {

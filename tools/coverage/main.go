@@ -50,6 +50,7 @@ import (
 	rpccode "google.golang.org/genproto/googleapis/rpc/code"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	_ "github.com/cloudburrow/cloudburrow/internal/service/filestore/filestorev1beta1pb"
 	gcs "github.com/cloudburrow/cloudburrow/internal/service/storage"
 	bqv2 "google.golang.org/api/bigquery/v2"
 	bqconnection "google.golang.org/api/bigqueryconnection/v1"
@@ -410,6 +411,9 @@ var areas = []area{
 	// Filestore (#2192): CloudBurrow's own, gRPC and JSON on one port; its
 	// Locations and Operations mixins are other areas' rows.
 	{Key: "filestore", Title: "Filestore (v1)", Own: true, Services: []string{"google.cloud.filestore.v1.CloudFilestoreManager"}},
+	// Filestore v1beta1 (#2194): multishare instances and their shares,
+	// on the same port; the rest is v1's.
+	{Key: "filestorev1beta1", Title: "Filestore (v1beta1)", Own: true, Services: []string{"google.cloud.filestore.v1beta1.CloudFilestoreManager"}},
 	// Cloud Trace (#2118): CloudBurrow's own, v1 and v2 gRPC and JSON on
 	// one port, beside OTLP's ingestion (not a googleapis service).
 	{Key: "trace", Title: "Cloud Trace API (v1 and v2)", Own: true,

@@ -62,6 +62,10 @@ func (s *Server) CreateSnapshot(_ context.Context, req *filestorepb.CreateSnapsh
 	if r.I.GetState() != filestorepb.Instance_READY {
 		return nil, apierror.FailedPrecondition("Instance %s is %s: a snapshot can be taken only when it is READY", r.I.GetName(), r.I.GetState())
 	}
+	if err := multiRefused(r); err != nil {
+		return nil, err
+	}
+
 	now := s.now()
 	sn.Name, sn.State, sn.CreateTime, sn.FilesystemUsedBytes = name, filestorepb.Snapshot_CREATING, timestamppb.New(now), 0
 	rec := &snapRecord{S: sn, Key: keyOf("snap-", name, now)}

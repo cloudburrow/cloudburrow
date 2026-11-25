@@ -378,15 +378,15 @@ services access) from the instance's and its Kubernetes Engine clusters' nodes; 
 regional backups and restore; customer-managed keys (suspension on a key's loss, encrypted backups),
 tags as Resource Manager bindings, replication and `PromoteReplica`; the GKE Filestore CSI driver
 with dynamic provisioning; gcloud `filestore` and Terraform `google_filestore_*` driven by tests;
-data kept across `stop` and `up` in persistent mode; the console's Filestore pages.
+data kept across `stop` and `up` in persistent mode; the console's Filestore pages. Since #2194: v1beta1 multishare instances and shares and the CSI driver's `enterprise-multishare-rwx`; each share an ext4 filesystem of its capacity, encrypted at rest with dm-crypt under the instance's customer-managed key; each tier's documented IOPS and throughput enforced; export options' `ip_ranges` matched against VMs' internal IPs and Kubernetes Engine pods' addresses.
 
 | Gap | Why open | Size |
 |---|---|---|
 | Backup and DR protection of Filestore instances (#1524) | not built yet | M |
-| The CSI driver installs `standard-rwx`, `premium-rwx`, `zonal-rwx`, `regional-rwx` and `enterprise-rwx`, not `enterprise-multishare-rwx` (multishares, several shares an Enterprise instance) (#2192) | not built yet | M |
-| `performance_config` and `performance_limits` (IOPS, throughput) are recorded, not enforced: the share is a local Docker volume | no emulator support | S |
-| A customer-managed key protects backups (sealed with a data key Cloud KMS wraps) and the instance's service (suspended while the key cannot be used), but the live share's volume is not encrypted at rest with it | no emulator support | M |
-| Export options' `ip_ranges` match a client's node address on the `kind` network, so ranges of VPC addresses admit no local client | no emulator support | S |
+| Read IOPS the server's page cache answers are not counted against `max_read_iops` (read throughput is, by shaping what the server sends); a multishare instance's limits are the instance's, shared by its shares (#2194) | no emulator support | S |
+| A share's filesystem is at most 16 TiB less 1 GiB, the largest file of the Docker disk's ext4, so a larger capacity is served as that (#2194) | no emulator support | S |
+| A Kubernetes Engine node's own NFS traffic (the kubelet's mounts of PersistentVolumes) arrives from its InternalIP, an address of the `kind` network, not of the VPC, so `ip_ranges` must name it to admit PersistentVolume mounts; two Kubernetes Engine clusters' pods share kind's 10.244.0.0/16, so a server routes a pod address back to the last cluster that reported it (#2194) | no emulator support | S |
+| Multishare instances: a share made from a backup (`Share.backup`), and snapshots, backups and replication of multishare instances, are refused (Google documents snapshots as "not yet supported" for multishares) (#2194) | not built yet | S |
 | The address inside `reserved_ip_range` is routed (DNAT) in the nodes of the instance's kind cluster and its Kubernetes Engine clusters; elsewhere on the machine the server answers only at its `kind` network address | no emulator support | S |
 | A deleted instance whose share a node still mounts leaves a stand-in server answering ESTALE at its address until the mount is gone; the error texts of CMEK, replication and tag refusals, and a replica's tier, protocol and capacity matching its active instance's, are CloudBurrow's (UNVERIFIED in compatibility.md) | not documented by Google | S |
 

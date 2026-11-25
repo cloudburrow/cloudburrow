@@ -4,6 +4,12 @@
 # and the repo holds none of its code, only this recipe, which installs
 # Debian's build at run time on the machine that runs it.
 #
+# Each share is an ext4 filesystem of its own size (e2fsprogs, GPL-2.0
+# programs run, not linked), on a loop device, encrypted with dm-crypt
+# under the instance's CMEK-sealed key (cryptsetup-bin, GPL-2.0, likewise
+# run only) (#2194); iproute2's tc and the cgroup's io.max hold the server
+# to its tier's performance limits.
+#
 # The base is the Docker official debian image, pinned by its multi-arch
 # index digest (dependencies.json's filestore.serverBase records the same
 # digest); the packages are pinned to one Debian version through
@@ -18,7 +24,7 @@ RUN printf '%s\n' \
  && rm -f /etc/apt/sources.list.d/debian.sources \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
-      nfs-ganesha=6.5-5 nfs-ganesha-vfs=6.5-5 rpcbind=1.2.7-1 nfs-common=1:2.8.3-1 dbus=1.16.2-2 netbase=6.5 \
+      nfs-ganesha=6.5-5 nfs-ganesha-vfs=6.5-5 rpcbind=1.2.7-1 nfs-common=1:2.8.3-1 dbus=1.16.2-2 netbase=6.5 cryptsetup-bin=2:2.7.5-2 e2fsprogs=1.47.2-3+b12 iproute2=6.15.0-1 \
  && rm -rf /var/lib/apt/lists/*
 
 COPY entrypoint.sh /usr/local/bin/filestore-nfs
