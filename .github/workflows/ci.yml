@@ -570,8 +570,11 @@ jobs:
     # vCPUs, before a suite of up to 120 minutes (COMPAT_TIMEOUT). The
     # storage shard's 105: its job took 78 minutes in main run 45126544176
     # with the browser suite cut off at 20 of them, and that suite's
-    # timeout is now 30m (below).
-    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || matrix.shard == 'storage' && 105 || 90 }}
+    # timeout is now 30m (below). The crossservice shard's 105 too: Landing
+    # 169's Vertex AI pages took its browser suite to its 30m, and the job
+    # past 90 minutes in run 45680873104's re-run (a 60-minute suite); its
+    # browser suite has 40m.
+    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || (matrix.shard == 'storage' || matrix.shard == 'crossservice') && 105 || 90 }}
     # Same rule as integration: the suite that caught #268 only after it merged.
     needs: [changes, bigquery-emulator]
     if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
@@ -1332,7 +1335,7 @@ jobs:
           # through the pages beside its compat suite's 766 s.
           # served's GKE browser tests take about 2 minutes each, and its
           # suite reached 20m (main run 45477746718), so it gets 30m too.
-          BROWSER_TIMEOUT=10m; case "$SHARD" in served|run|crossservice|storage|sql|vpcvms) BROWSER_TIMEOUT=30m ;; esac
+          BROWSER_TIMEOUT=10m; case "$SHARD" in served|run|storage|sql|vpcvms) BROWSER_TIMEOUT=30m ;; crossservice) BROWSER_TIMEOUT=40m ;; esac
           go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
           for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | grep -E "${BROWSER_RUN:-^Test}" | grep -vE "$BROWSER_SKIP"); do
             grep -q -- "^--- PASS: $t (" browser.log ||

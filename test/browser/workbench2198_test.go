@@ -142,6 +142,26 @@ func TestWorkbenchJupyterLabFromTheConsole(t *testing.T) {
 	lab.run(chromedp.Click(chromedp.CSS(`.jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .cm-content`)))
 	lab.run(chromedp.SendKeys(chromedp.CSS(`.jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .cm-content`), cell))
 	lab.run(chromedp.KeyEvent(kb.Enter, chromedp.KeyModifiers(chromedp.ModifierShift)))
+	// The cell's prompt leaves [ ] once the kernel takes it. On a slow
+	// runner (main run 45680873104) the Shift+Enter landed before the
+	// notebook's session had the kernel, and the cell was never run: the
+	// prompt stayed [ ] with the kernel idle. Once, then, and logged.
+	const firstPrompt = `((document.querySelector(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .jp-InputPrompt") || {}).textContent || "")`
+	started := func() bool {
+		var p string
+		lab.eval(firstPrompt, &p)
+		return !strings.Contains(p, "[ ]")
+	}
+	for deadline := time.Now().Add(time.Minute); !started() && time.Now().Before(deadline); {
+		time.Sleep(time.Second)
+	}
+	if !started() {
+		var status string
+		lab.eval(`((document.querySelector(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-Notebook-ExecutionIndicator") || {getAttribute: () => ""}).getAttribute("data-status") || "")`, &status)
+		t.Logf("the cell was not run a minute after Shift+Enter (kernel status %q); running it again", status)
+		lab.run(chromedp.Click(chromedp.CSS(`.jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .cm-content`)))
+		lab.run(chromedp.KeyEvent(kb.Enter, chromedp.KeyModifiers(chromedp.ModifierShift)))
+	}
 	lab.waitForWithin(`[...document.querySelectorAll(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-OutputArea-output")].some((o) => /total 1000/.test(o.textContent) || /Error/.test(o.textContent))`, 5*time.Minute)
 	var output string
 	lab.eval(`[...document.querySelectorAll(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-OutputArea-output")].map((o) => o.textContent).join("\n")`, &output)
