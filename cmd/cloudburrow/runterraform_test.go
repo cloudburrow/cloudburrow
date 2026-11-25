@@ -84,6 +84,7 @@ func TestTerraformSetsArtifactRegistryAndCloudBuild(t *testing.T) {
 		`eventarc_custom_endpoint = "http://127.0.0.1:9004/eventarc/v1/"`,
 		`cloudfunctions2_custom_endpoint = "http://127.0.0.1:9004/v2/"`,
 		`cloud_functions_custom_endpoint = "http://127.0.0.1:9004/v1/"`,
+		`cloudbuildv2_custom_endpoint = "http://127.0.0.1:9004/v2/"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%s is not set:\n%s", want, body)
@@ -111,7 +112,7 @@ data "google_iam_role" "r" {}
 		t.Fatal(err)
 	}
 	got := unpointed(dir, unpointedResources(cfg))
-	want := []string{"google_cloudbuildv2_connection", "google_storage_buckets", "google_projects", "google_folders",
+	want := []string{"google_storage_buckets", "google_projects", "google_folders",
 		"google_cloud_run_locations", "google_artifact_registry_locations", "google_iam_testable_permissions"}
 	if len(got) != len(want) {
 		t.Errorf("with Cloud Run: unpointed = %q, want %q", got, want)

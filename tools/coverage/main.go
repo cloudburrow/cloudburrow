@@ -84,6 +84,7 @@ import (
 	_ "cloud.google.com/go/billing/budgets/apiv1/budgetspb"
 	_ "cloud.google.com/go/certificatemanager/apiv1/certificatemanagerpb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	_ "cloud.google.com/go/cloudbuild/apiv2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	_ "cloud.google.com/go/container/apiv1/containerpb"
@@ -168,6 +169,9 @@ var areas = []area{
 	// repository calls and the builds SubmitBuild runs.
 	{Key: "artifactregistry", Title: "Artifact Registry", Own: true, Services: []string{"google.devtools.artifactregistry.v1.ArtifactRegistry"}},
 	{Key: "cloudbuild", Title: "Cloud Build", Own: true, Services: []string{"google.devtools.cloudbuild.v1.CloudBuild"}},
+	// Cloud Build repositories, 2nd gen (#2197), on the Run port:
+	// connections to this instance's git server and linked repositories.
+	{Key: "cloudbuildv2", Title: "Cloud Build repositories (2nd gen)", Own: true, Services: []string{"google.devtools.cloudbuild.v2.RepositoryManager"}},
 	// Secure Source Manager (#1521), on the Run port: a repository is a git
 	// host whose pushes run Cloud Build triggers.
 	{Key: "securesourcemanager", Title: "Secure Source Manager", Own: true, Services: []string{"google.cloud.securesourcemanager.v1.SecureSourceManager"}},

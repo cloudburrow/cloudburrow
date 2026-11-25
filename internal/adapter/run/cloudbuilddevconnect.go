@@ -42,13 +42,21 @@ import (
 
 var devConnectLinkRE = regexp.MustCompile(`^projects/[^/]+/locations/[^/]+/connections/[^/]+/gitRepositoryLinks/[^/]+$`)
 
+// isRepoEventRepository reports whether a repositoryEventConfig's
+// repository is one this instance holds the commits of: a Developer
+// Connect link, or a Cloud Build repository (2nd gen, #2197,
+// cloudbuildv2.go), whose triggers run the same way.
+func isRepoEventRepository(repo string) bool {
+	return devConnectLinkRE.MatchString(repo) || cb2RepoRE.MatchString(repo)
+}
+
 // devConnectEventError is why a repositoryEventConfig cannot run here, or
 // nil when it names a Developer Connect link with a push filter.
 func devConnectEventError(rc *cbpb.RepositoryEventConfig) error {
-	if !devConnectLinkRE.MatchString(rc.GetRepository()) {
-		return apierror.Unimplemented("BuildTrigger field repositoryEventConfig is supported only for a Developer Connect "+
-			"git repository link (projects/PROJECT/locations/LOCATION/connections/CONNECTION/gitRepositoryLinks/LINK) "+
-			"of this instance's Secure Source Manager; %q is not one", rc.GetRepository())
+	if !isRepoEventRepository(rc.GetRepository()) {
+		return apierror.InvalidArgument("invalid trigger: repositoryEventConfig.repository %q is neither a Cloud Build repository "+
+			"(projects/PROJECT/locations/LOCATION/connections/CONNECTION/repositories/REPOSITORY) nor a Developer Connect "+
+			"git repository link (projects/PROJECT/locations/LOCATION/connections/CONNECTION/gitRepositoryLinks/LINK)", rc.GetRepository())
 	}
 	if pr := rc.GetPullRequest(); pr != nil {
 		if pr.GetBranch() == "" {
@@ -101,7 +109,7 @@ func devConnectTriggers(repo string) []*cbpb.BuildTrigger {
 	var out []*cbpb.BuildTrigger
 	for _, n := range sortedKeys(triggerStore.triggers) {
 		t := triggerStore.triggers[n]
-		if rc := t.GetRepositoryEventConfig(); rc != nil && devConnectLinkRE.MatchString(rc.GetRepository()) {
+		if rc := t.GetRepositoryEventConfig(); rc != nil && isRepoEventRepository(rc.GetRepository()) {
 			out = append(out, proto.Clone(t).(*cbpb.BuildTrigger))
 		}
 	}
@@ -163,7 +171,7 @@ func (c *CloudBuildServer) runDevConnectTrigger(ctx context.Context, t *cbpb.Bui
 	if err != nil {
 		return nil, apierror.FailedPrecondition("%v", err)
 	}
-	cloneURI := ""
+	cloneURI := cb2RemoteURI(link)
 	ssmState.mu.Lock()
 	if l, ok := dcState.links[link]; ok {
 		cloneURI = l.GetCloneUri()
@@ -254,7 +262,7 @@ func (c *CloudBuildServer) runDevConnectManual(ctx context.Context, t *cbpb.Buil
 // Connect git repository link, whose commits this instance holds.
 func onDevConnectLink(t *cbpb.BuildTrigger) bool {
 	rc := t.GetRepositoryEventConfig()
-	return rc != nil && devConnectLinkRE.MatchString(rc.GetRepository())
+	return rc != nil && isRepoEventRepository(rc.GetRepository())
 }
 
 // triggerRepoBuild is the build a trigger runs at a commit (#1854): its

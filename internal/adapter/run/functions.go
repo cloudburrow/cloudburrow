@@ -1169,6 +1169,9 @@ func (i functionsIAM) GetIamPolicy(ctx context.Context, req *iampb.GetIamPolicyR
 	if isSSMInstanceName(req.GetResource()) {
 		return ssmInstanceIAM{}.GetIamPolicy(ctx, req)
 	}
+	if isCB2Connection(req.GetResource()) {
+		return cb2ConnectionIAM{}.GetIamPolicy(ctx, req) // a Cloud Build connection (#2197)
+	}
 	functions.mu.Lock()
 	defer functions.mu.Unlock()
 	sf, err := i.stored(req.GetResource())
@@ -1181,6 +1184,9 @@ func (i functionsIAM) GetIamPolicy(ctx context.Context, req *iampb.GetIamPolicyR
 func (i functionsIAM) SetIamPolicy(ctx context.Context, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
 	if isSSMInstanceName(req.GetResource()) {
 		return ssmInstanceIAM{}.SetIamPolicy(ctx, req)
+	}
+	if isCB2Connection(req.GetResource()) {
+		return cb2ConnectionIAM{}.SetIamPolicy(ctx, req) // a Cloud Build connection (#2197)
 	}
 	functions.mu.Lock()
 	defer functions.mu.Unlock()
@@ -1202,6 +1208,9 @@ func (i functionsIAM) SetIamPolicy(ctx context.Context, req *iampb.SetIamPolicyR
 func (i functionsIAM) TestIamPermissions(ctx context.Context, req *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
 	if isSSMInstanceName(req.GetResource()) {
 		return ssmInstanceIAM{}.TestIamPermissions(ctx, req)
+	}
+	if isCB2Connection(req.GetResource()) {
+		return cb2ConnectionIAM{}.TestIamPermissions(ctx, req) // a Cloud Build connection (#2197)
 	}
 	functions.mu.Lock()
 	defer functions.mu.Unlock()

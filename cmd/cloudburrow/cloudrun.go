@@ -355,6 +355,11 @@ func (r *runService) Start(ctx context.Context) error {
 				runadapter.EventarcPublishingHandlerOr(functions.EventarcPublisher(),
 					functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
 						adapter.V1Handler(runadapter.NewRESTHandler(register))))))))))
+	// Cloud Build repositories, 2nd gen (#2197): connections and linked
+	// repositories at Google's /v2/ paths, beside Cloud Run v2's, whose
+	// operations they share.
+	repoManager := builds.RepositoryManager()
+	jsonAPI = runadapter.CloudBuildV2HandlerOr(func(g grpc.ServiceRegistrar) { repoManager.Register(g) }, jsonAPI)
 	// Artifact Registry's own prefix (#1578): its Locations mixin, whose
 	// /v1/ path is Cloud Run v1's, and its other calls through the above.
 	jsonAPI = runadapter.ArtifactRegistryHandlerOr(jsonAPI)
@@ -378,6 +383,7 @@ func (r *runService) Start(ctx context.Context) error {
 		builds.CloudBuild().Register(g)
 		ssm.Register(g)
 		devConnect.Register(g)
+		repoManager.Register(g)
 		functions.Register(g)
 		// Eventarc (#1877), on the functions' event transport.
 		functions.Eventarc().Register(g)

@@ -32,6 +32,7 @@ func init() {
 		"google.cloud.run.v2.Builds":                           Run,
 		"google.devtools.artifactregistry.v1.ArtifactRegistry": ArtifactRegistry,
 		"google.devtools.cloudbuild.v1.CloudBuild":             CloudBuild,
+		"google.devtools.cloudbuild.v2.RepositoryManager":      CloudBuild,
 	} {
 		Services[name] = svc
 	}
