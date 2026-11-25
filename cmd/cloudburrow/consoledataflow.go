@@ -151,15 +151,24 @@ func (dataflowProvider) CreateForm() (string, []console.Field) {
 			Help: "The region the job runs in and its metadata is kept."},
 		{Name: "template", Label: "Dataflow template", Type: "select", Default: "custom",
 			Options: []string{"custom", "Bulk_Compress_GCS_Files", "Bulk_Decompress_GCS_Files", "Spanner_to_GCS_Text",
+				"Cloud_Spanner_to_GCS_Avro", "GCS_Avro_to_Cloud_Spanner", "GCS_Text_to_Cloud_Spanner", "Cloud_BigQuery_to_GCS_TensorFlow_Records",
+				"flex/GCS_Text_to_BigQuery_Flex", "flex/PubSub_to_BigQuery_Flex", "flex/Cloud_PubSub_to_GCS_Text_Flex",
 				"GCS_Text_to_Cloud_PubSub", "Cloud_PubSub_to_GCS_Text", "PubSub_Subscription_to_BigQuery", "PubSub_to_BigQuery",
 				"GCS_Text_to_BigQuery", "Word_Count"},
 			OptionLabels: map[string]string{"custom": "Custom Template", "PubSub_Subscription_to_BigQuery": "Pub/Sub Subscription to BigQuery",
 				"PubSub_to_BigQuery": "Pub/Sub Topic to BigQuery", "GCS_Text_to_BigQuery": "Text Files on Cloud Storage to BigQuery",
 				"Word_Count": "Word Count", "Bulk_Compress_GCS_Files": "Bulk Compress Files on Cloud Storage",
-				"Bulk_Decompress_GCS_Files": "Bulk Decompress Files on Cloud Storage",
-				"Spanner_to_GCS_Text":       "Cloud Spanner to Text Files on Cloud Storage",
-				"GCS_Text_to_Cloud_PubSub":  "Cloud Storage Text File to Pub/Sub (Batch)",
-				"Cloud_PubSub_to_GCS_Text":  "Pub/Sub to Text Files on Cloud Storage"},
+				"Bulk_Decompress_GCS_Files":                "Bulk Decompress Files on Cloud Storage",
+				"Spanner_to_GCS_Text":                      "Cloud Spanner to Text Files on Cloud Storage",
+				"GCS_Text_to_Cloud_PubSub":                 "Cloud Storage Text File to Pub/Sub (Batch)",
+				"Cloud_PubSub_to_GCS_Text":                 "Pub/Sub to Text Files on Cloud Storage",
+				"Cloud_Spanner_to_GCS_Avro":                "Cloud Spanner to Avro Files on Cloud Storage",
+				"GCS_Avro_to_Cloud_Spanner":                "Avro Files on Cloud Storage to Cloud Spanner",
+				"GCS_Text_to_Cloud_Spanner":                "Text Files on Cloud Storage to Cloud Spanner",
+				"Cloud_BigQuery_to_GCS_TensorFlow_Records": "BigQuery to TensorFlow Records",
+				"flex/GCS_Text_to_BigQuery_Flex":           "Text Files on Cloud Storage to BigQuery with BigQuery Storage API support",
+				"flex/PubSub_to_BigQuery_Flex":             "Pub/Sub to BigQuery",
+				"flex/Cloud_PubSub_to_GCS_Text_Flex":       "Pub/Sub Subscription or Topic to Text Files on Cloud Storage"},
 			Help: "A Google-provided template (gs://dataflow-templates-REGION/latest/NAME, built here from Google's DataflowTemplates sources), or a Custom Template: a classic template staged in Cloud Storage, such as one the Beam SDK writes with --template_location, or a Flex Template's spec. Give a template's parameters under Additional parameters."},
 		{Name: "gcsPath", Label: "Template path", Type: "text", Required: true, Pattern: `^gs://[^\/]+\/.+$`, Section: "Required parameters",
 			VisibleWhen: map[string]string{"template": "custom"},
@@ -205,7 +214,8 @@ func (p dataflowProvider) Create(ctx context.Context, project string, values map
 	region := strings.TrimSpace(values["region"])
 	gcsPath := strings.TrimSpace(values["gcsPath"])
 	if t := strings.TrimSpace(values["template"]); t != "" && t != "custom" {
-		// A Google-provided template, from Google's regional path.
+		// A Google-provided template, from Google's regional path (a Flex
+		// Template's spec under flex/).
 		gcsPath = "gs://dataflow-templates-" + region + "/latest/" + t
 	}
 	// A Custom Template's path is a classic template's file or a Flex

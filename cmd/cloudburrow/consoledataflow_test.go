@@ -104,6 +104,11 @@ func TestConsoleDataflow(t *testing.T) {
 				t.Errorf("Create job from template does not offer %s by its name (%q)", n, f.OptionLabels[n])
 			}
 		}
+		for n := range beamrun.ProvidedFlexNames {
+			if !offered["flex/"+n] || f.OptionLabels["flex/"+n] == "" {
+				t.Errorf("Create job from template does not offer the Flex Template %s by its name (%q)", n, f.OptionLabels["flex/"+n])
+			}
+		}
 	}
 	if _, err := p.Create(ctx, project, form(map[string]string{"jobName": "words", "gcsPath": "gs://b/missing", "tempLocation": "gs://b/tmp"})); err == nil {
 		t.Error("a job was launched from a template that does not exist")

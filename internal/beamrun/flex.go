@@ -14,6 +14,7 @@ package beamrun
 // one route is the instance's APIs, as a job's pipeline is.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -54,6 +55,12 @@ type Flex struct {
 	MaxWorkers                    int32
 	Update                        bool
 	TransformNameMapping          string
+	// Provided, when set, is the Google-provided Flex Template f.Image
+	// stands for (ProvidedFlexImage), and ProvidedDir its module's build:
+	// the launcher runs its main class on that build, in the Java SDK
+	// image, instead of reading an image from Artifact Registry.
+	Provided    *ProvidedTemplate
+	ProvidedDir string
 }
 
 // flexTimeout bounds a launcher's run: its program submits the job and,
@@ -190,9 +197,28 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, flexTimeout)
 	defer cancel()
-	local, env, err := d.registryImage(ctx, f.Image)
-	if err != nil {
-		return err
+	var local string
+	var env map[string]string
+	var mounts, extra []string
+	if f.Provided != nil {
+		// Google's Java launcher image, built by its templates-maven-plugin
+		// with Jib, puts the module's classes and libraries under /template
+		// and sets FLEX_TEMPLATE_JAVA_MAIN_CLASS; here they are the
+		// module's build, mounted.
+		local = JavaImages[providedJava]
+		env = map[string]string{"FLEX_TEMPLATE_JAVA_MAIN_CLASS": f.Provided.MainClass, "FLEX_TEMPLATE_JAVA_CLASSPATH": "/t/classes:/t/deps/*"}
+		mounts = []string{"-v", f.ProvidedDir + ":/t:ro"}
+		labels := fmt.Sprintf(`{"goog-dataflow-provided-template-name":"%s","goog-dataflow-provided-template-version":"%s","goog-dataflow-provided-template-type":"flex"}`,
+			strings.ToLower(f.Provided.Name), strings.ToLower(TemplatesRelease))
+		extra = []string{fmt.Sprintf("--pubsubRootUrl=http://%s:%d", relayName, pubsubPort), "--labels=" + labels}
+		if bytes.Contains(f.Provided.Metadata, []byte(`"spannerHost"`)) {
+			extra = append(extra, fmt.Sprintf("--spannerHost=http://%s:%d", relayName, spannerPort))
+		}
+	} else {
+		var err error
+		if local, env, err = d.registryImage(ctx, f.Image); err != nil {
+			return err
+		}
 	}
 	main, py := env["FLEX_TEMPLATE_JAVA_MAIN_CLASS"], env["FLEX_TEMPLATE_PYTHON_PY_FILE"]
 	if main == "" && py == "" {
@@ -214,7 +240,11 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 	suffix = strings.Trim(suffix, "-")
 	network, relay, launch := "cb-df-net-flex-"+suffix, "cb-df-relay-flex-"+suffix, "cb-df-flex-"+suffix
 	label := InstanceLabel + "=" + d.Instance
-	if main != "" {
+	if main != "" && f.Provided != nil {
+		if err := d.providedCredentials(ctx, f.ProvidedDir, dir, label); err != nil {
+			return err
+		}
+	} else if main != "" {
 		if err := d.flexCredentials(ctx, local, env, dir, label, "cb-df-flexcp-"+suffix); err != nil {
 			return err
 		}
@@ -231,7 +261,7 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 			cenv[i] += ":" + env["PYTHONPATH"]
 		}
 	}
-	args := append([]string{"run", "--rm", "--name", launch, "--label", label, "--network", network, "-v", dir + ":/cb:ro"}, cenv...)
+	args := append(append([]string{"run", "--rm", "--name", launch, "--label", label, "--network", network, "-v", dir + ":/cb:ro"}, mounts...), cenv...)
 	program := main
 	if main != "" {
 		cp := env["FLEX_TEMPLATE_JAVA_CLASSPATH"]
@@ -244,6 +274,7 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 		args = append(args, "--runner=DataflowRunner", "--apiRootUrl=http://"+relayName+"/",
 			fmt.Sprintf("--gcsEndpoint=http://%s:%d/storage/v1/", relayName, storagePort),
 			"--credentialFactoryClass=CbCredentialFactory")
+		args = append(args, extra...)
 	} else {
 		program = py
 		pip, _ := pipIndexEnv(env)
@@ -320,6 +351,20 @@ func (d *Docker) flexCredentials(ctx context.Context, local string, env map[stri
 		return fmt.Errorf("compile the launcher's credentials against the template's classpath: %v: %s", err, lastLines(string(out), 3))
 	}
 	return os.RemoveAll(filepath.Join(dir, "cp"))
+}
+
+// providedCredentials compiles CbCredentialFactory into dir/cbcred
+// against a provided template's build (build, its classes/ and deps/).
+func (d *Docker) providedCredentials(ctx context.Context, build, dir, label string) error {
+	if err := os.MkdirAll(filepath.Join(dir, "cbcred"), 0o777); err != nil {
+		return err
+	}
+	args := []string{"run", "--rm", "--network", "none", "--label", label, "-v", dir + ":/cb", "-v", build + ":/t:ro", "--entrypoint", "javac",
+		JavaImages[providedJava], "-nowarn", "-d", "/cb/cbcred", "-cp", "/t/classes:/t/deps/*", "/cb/java/CbCredentialFactory.java"}
+	if out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("compile the launcher's credentials against the template's classpath: %v: %s", err, lastLines(string(out), 3))
+	}
+	return nil
 }
 
 // lastLines are text's last n non-empty lines, joined.

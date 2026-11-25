@@ -121,15 +121,18 @@ func (s *dataflowService) Start(ctx context.Context) error {
 		RegistryToken: s.registryToken,
 		Snapshots:     snaps,
 		Logf:          func(format string, args ...any) { fmt.Printf("cloudburrow: "+format+"\n", args...) }}
-	opts := dataflow.Options{State: state, Engine: dataflowEngine{d: s.docker}, Launcher: flexLauncher{d: s.docker},
+	launcher := flexLauncher{d: s.docker}
+	opts := dataflow.Options{State: state, Engine: dataflowEngine{d: s.docker},
 		Logf: func(format string, args ...any) { fmt.Printf("cloudburrow: "+format+"\n", args...) }}
 	if s.live != nil && serviceEnabled(s.cfg, config.ServiceStorage) {
 		st := &dataprocStorage{live: s.live}
 		opts.Storage = st
 		// Google-provided templates, built once per state directory.
-		opts.Provided = &providedTemplates{p: &beamrun.Provided{D: s.docker, Cache: s.cfg.StateDir}, storage: st,
+		launcher.provided = &beamrun.Provided{D: s.docker, Cache: s.cfg.StateDir}
+		opts.Provided = &providedTemplates{p: launcher.provided, storage: st,
 			project: func() string { return s.cfg.DefaultProject() }}
 	}
+	opts.Launcher = launcher
 	if s.live != nil {
 		opts.Logs = dataflowLogger{logging: func() string { return s.live()["logging"] }}
 	}
@@ -190,13 +193,29 @@ func (r *dataflowResetter) ResetProject(_ context.Context, project string) error
 	return api.Reset(project)
 }
 
-// flexLauncher runs the API's Flex Template launches on beamrun.
-type flexLauncher struct{ d *beamrun.Docker }
+// flexLauncher runs the API's Flex Template launches on beamrun. A
+// Google-provided Flex Template's image (beamrun.ProvidedFlexImage) is
+// its build in provided.
+type flexLauncher struct {
+	d        *beamrun.Docker
+	provided *beamrun.Provided
+}
 
 func (l flexLauncher) Launch(ctx context.Context, f dataflow.FlexLaunch) error {
-	return l.d.LaunchFlex(ctx, beamrun.Flex{Project: f.Project, Location: f.Location, JobName: f.JobName, Image: f.Image, Args: f.Args,
+	fl := beamrun.Flex{Project: f.Project, Location: f.Location, JobName: f.JobName, Image: f.Image, Args: f.Args,
 		TempLocation: f.TempLocation, StagingLocation: f.StagingLocation, MaxWorkers: f.MaxWorkers, Update: f.Update,
-		TransformNameMapping: f.TransformNameMapping})
+		TransformNameMapping: f.TransformNameMapping}
+	if name, ok := beamrun.ProvidedFlexTemplate(f.Image); ok && l.provided != nil {
+		tpl, dir, found, err := l.provided.FlexTemplate(ctx, name)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("the image %s is not a Google-provided Flex Template's", f.Image)
+		}
+		fl.Provided, fl.ProvidedDir = &tpl, dir
+	}
+	return l.d.LaunchFlex(ctx, fl)
 }
 
 // dataflowEngine runs the API's jobs on beamrun.

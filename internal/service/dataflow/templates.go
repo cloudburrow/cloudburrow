@@ -382,7 +382,11 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 		if s.opts.Storage == nil {
 			return nil, apierror.FailedPrecondition("Templates are read from Cloud Storage, which this instance does not serve.")
 		}
-		b, err := s.opts.Storage.Read(ctx, lp.GetContainerSpecGcsPath())
+		local, err := s.templatePath(ctx, lp.GetContainerSpecGcsPath())
+		if err != nil {
+			return nil, err
+		}
+		b, err := s.opts.Storage.Read(ctx, local)
 		if err != nil {
 			return nil, apierror.InvalidArgument("(%s): Unable to open template file: %s.", lp.GetContainerSpecGcsPath(), lp.GetContainerSpecGcsPath())
 		}
