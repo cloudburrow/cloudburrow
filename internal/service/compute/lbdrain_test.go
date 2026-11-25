@@ -234,9 +234,12 @@ func TestConnectionDrainingNetworkEndpoints(t *testing.T) {
 }
 
 // TestSameFingerprint: a fingerprint sent base64url-encoded, as gcloud
-// sends bytes fields, matches the standard encoding the server wrote.
+// sends bytes fields, matches the standard encoding the server wrote, and
+// a different one does not. (The last character of an 8-byte value
+// carries only 4 bits, so 8 and 9 there encode the same bytes: the
+// different one differs in a kept bit.)
 func TestSameFingerprint(t *testing.T) {
-	if !sameFingerprint("a-_bcdefgh8=", "a+/bcdefgh8=") || !sameFingerprint("abc=", "abc=") || sameFingerprint("a-_bcdefgh8=", "a+/bcdefgh9=") {
+	if !sameFingerprint("a-_bcdefgh8=", "a+/bcdefgh8=") || !sameFingerprint("abc=", "abc=") || sameFingerprint("a-_bcdefgh8=", "a+/bcdefgh4=") {
 		t.Fatal("sameFingerprint")
 	}
 }

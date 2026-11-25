@@ -17,6 +17,63 @@ tagging `vX.Y.Z` by hand, move the entries under **Unreleased** into a new
 
 ## [Unreleased]
 
+### Compute and networking
+
+- Bring your own cloud, part of #2209: run an instance's compute on a VM in your own AWS account or
+  Azure subscription, created, resized, started, stopped and deleted from the console's Compute
+  capacity page or `cloudburrow cloud`, with the console and APIs staying on this machine;
+  `cloudburrow up --compute ssh://user@host` puts the instance's Docker on any Linux host, and
+  `cloudburrow cloud move` moves a running instance between machines and clouds.
+- Compute Engine regional disks with force-attach and asynchronous replication, disk consistency
+  groups, customer-managed and customer-supplied encryption keys, `disks.update`, snapshot and
+  instance schedules, and workload policies on managed instance groups (#2206).
+- Managed instance group autohealing driven by health checks (part of #2225), retries of VM
+  creations that fail with `listErrors` (part of #2220), and load balancer connection draining
+  with the `DRAINING` health state (#2226).
+
+### Databases
+
+- Cloud SQL and AlloyDB check passwords on every sign-in and refuse a wrong one, as Google does;
+  Cloud SQL Studio and AlloyDB Studio sign in with a password or IAM database authentication, and
+  `gcloud sql connect` and the Cloud SQL Auth Proxy are tested end to end (#2208).
+- AlloyDB Omni as an opt-in engine for AlloyDB clusters, run only once you accept Google's AlloyDB
+  Omni terms at provisioning (first part of #2207).
+- Backup and DR protects AlloyDB clusters and Filestore instances (part of #1524).
+- Filestore multishare instances (v1beta1) for GKE's `enterprise-multishare-rwx`, encryption at
+  rest with a customer-managed key, enforced performance limits and export `ip_ranges` (#2194).
+- Spanner query plans for `PLAN` and `PROFILE`, including Spanner Graph's documented statements,
+  with Spanner Studio's Run options and Query execution timeline (part of #2029).
+
+### Data and analytics
+
+- BigQuery stateful continuous queries, exporting to Pub/Sub, Bigtable and Spanner (#2193).
+- Dataflow jobs, classic and Flex Templates, Google-provided templates, snapshots and the Jobs
+  console with its Job graph, running Apache Beam pipelines (Python, Java, Go and Beam YAML) on a
+  local runner (part of #2215).
+- Real JupyterLab in Vertex AI Workbench instances, Colab Enterprise runtimes and Dataproc
+  Component Gateway, with Google's JupyterLab plugins (#2198).
+
+### Agent Platform
+
+- Agent Platform Pipelines run nested DAGs, `ParallelFor`, conditions, exit handlers, importers and
+  caching (#2205), Google Cloud Pipeline Components and `template_uri` (#2210), with the run's
+  runtime graph and Pipeline run analysis in the console.
+- Vertex AI hyperparameter tuning jobs, managed datasets and batch predictions, and BigQuery ML
+  `EXPORT MODEL` of TRANSFORM models to SavedModels that import back (#2210).
+- Agent Platform Model Monitoring (v1 and v2), Neural Architecture Search and data labeling, with a
+  local mail sink for email notifications (the console's Mail page) and console clocks to advance
+  scheduled runs (#2214).
+
+### Developer tools
+
+- Cloud Build repositories (2nd gen): connections, linked repositories and their triggers, against
+  the instance's own git server (#2197).
+
+### Fixed
+
+- Official Spanner, Bigtable and Cloud Storage gRPC clients made by CloudBurrow no longer export
+  their built-in metrics to Google; `cloudburrow env` sets `SPANNER_DISABLE_BUILTIN_METRICS=true`.
+
 ## [0.6.0] - 2026-11-24
 
 Released by the schedule from `54131a7a6`. These entries were written after the release, from the

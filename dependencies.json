@@ -82,10 +82,10 @@
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/beam_java17_sdk:2.78.0`."
       },
       "mavenTemurin17": {
-        "$comment": "Dataflow (#2215 round 3): Maven 3.9.9 on Eclipse Temurin 17. internal/beamrun builds Google's DataflowTemplates v1 module (the Google-provided classic templates, release 2026-11-18-00_RC00 from github.com/GoogleCloudPlatform/DataflowTemplates, Apache-2.0, archive SHA-256 checked) in it, once per state directory, on a provided template's first use.",
+        "$comment": "Dataflow (#2215): Maven 3.9.9 on Eclipse Temurin 17. test/compat/dataflowjava2215_test.go builds testdata/dataflowjava (Apache Beam 2.78.0's Java SDK and Dataflow runner, from Maven Central) and submits it with this image's JDK; and (round 3) internal/beamrun builds Google's DataflowTemplates v1 module (the Google-provided classic templates, release 2026-11-18-00_RC00 from github.com/GoogleCloudPlatform/DataflowTemplates, Apache-2.0, archive SHA-256 checked) in it, once per state directory, on a provided template's first use.",
         "image": "maven:3.9.9-eclipse-temurin-17",
         "digest": "sha256:f58d59b6273e785ac0a4477f6e9b5ba1d7731c75b906c0f7b34076f1851318cc",
-        "license": "Apache-2.0 (Apache Maven) and the Ubuntu and Eclipse Temurin packages it is built on",
+        "license": "Apache-2.0 (Apache Maven) and GPL-2.0-with-Classpath-Exception (Eclipse Temurin OpenJDK) with the Ubuntu packages it is built on, run as a tool only, never copied into the repository or linked",
         "redistribution": "not published: pulled by digest by the local CLI on a Google-provided template's first use",
         "updateFeed": "docker-hub-tag-list",
         "verification": "image-digest",
@@ -125,21 +125,6 @@
         ],
         "notes": "Resolved 2026-11-24. The SDK container the Apache Beam project publishes for its portable runners; testdata/dataflowgo (test-only) builds its pipelines with the Go SDK module github.com/apache/beam/sdks/v2 v2.78.0 (Apache-2.0) from the Go module proxy.",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/beam_go_sdk:2.78.0`."
-      },
-      "mavenTemurin17": {
-        "$comment": "Dataflow (#2215): test/compat/dataflowjava2215_test.go builds testdata/dataflowjava (Apache Beam 2.78.0's Java SDK and Dataflow runner, from Maven Central) and submits it with this image's JDK. Test-only.",
-        "image": "maven:3.9.9-eclipse-temurin-17",
-        "digest": "sha256:f58d59b6273e785ac0a4477f6e9b5ba1d7731c75b906c0f7b34076f1851318cc",
-        "license": "Apache-2.0 (Apache Maven) and GPL-2.0-with-Classpath-Exception (Eclipse Temurin OpenJDK), run as a tool only, never copied into the repository or linked",
-        "redistribution": "not published: pulled by the compat tests only",
-        "updateFeed": "docker-hub-tag-list",
-        "verification": "image-digest",
-        "platforms": [
-          "linux/amd64",
-          "linux/arm64"
-        ],
-        "notes": "Resolved 2026-11-24. The Docker official Maven image.",
-        "skipDiscovery": "Docker Hub tag list. Re-resolve with `docker buildx imagetools inspect maven:3.9.9-eclipse-temurin-17`."
       }
     },
     "computeGuest": {
@@ -3493,7 +3478,7 @@
         "version": "1.5.4-0.20250319132907-e064f32e3674",
         "license": "BSD-2-Clause",
         "verification": "go.sum",
-        "notes": "IAP TCP forwarding (#2160): internal/service/iap/tunnel.go serves the relay.tunnel.cloudproxy.app WebSocket subprotocol gcloud start-iap-tunnel speaks, closing a refused tunnel with IAP's close codes and reasons, which golang.org/x/net/websocket cannot send. Promoted from indirect (google.golang.org/genai already links it) to direct; same version, no new dependency."
+        "notes": "IAP TCP forwarding (#2160): internal/service/iap/tunnel.go serves the relay.tunnel.cloudproxy.app WebSocket subprotocol gcloud start-iap-tunnel speaks, closing a refused tunnel with IAP's close codes and reasons, which golang.org/x/net/websocket cannot send. Promoted from indirect (google.golang.org/genai already links it) to direct; same version, no new dependency. Bring your own cloud (#2209) uses it too, for the Session Manager data channel's WebSocket (internal/byoc/awsprov/ssmtunnel), the library AWS's session-manager-plugin uses."
       },
       "goMSSQL": {
         "module": "github.com/microsoft/go-mssqldb",
@@ -3789,14 +3774,6 @@
         "license": "MIT",
         "verification": "go.sum",
         "notes": "Bring your own cloud (#2209): internal/byoc/awsprov/ssmtunnel multiplexes a Session Manager port session's TCP connections with smux, as AWS's session-manager-plugin (Apache-2.0, whose protocol ssmtunnel implements in Go; no plugin code is copied) and the SSM agent do for agents after 3.0.196.0. v1.5.34 is the newest release without dependencies. Google publishes nothing for AWS Session Manager."
-      },
-      "goGorillaWebsocket": {
-        "module": "github.com/gorilla/websocket",
-        "version": "v1.5.4-0.20250319132907-e064f32e3674",
-        "source": "https://github.com/gorilla/websocket",
-        "license": "BSD-2-Clause",
-        "verification": "go.sum",
-        "notes": "Bring your own cloud (#2209): the Session Manager data channel's WebSocket (internal/byoc/awsprov/ssmtunnel), the library AWS's session-manager-plugin uses; already in the module graph indirectly, now a direct dependency."
       },
       "goKeyring": {
         "module": "github.com/zalando/go-keyring",
@@ -4344,6 +4321,44 @@
           {"zip": "referencesWav.zip", "member": "../mpeg4audio-conformance2ndEd_20230125/referencesWav/add-opt/al_sbr_ps_06_ur.wav", "bytes": 2605244, "sha256": "e2ef76b498971db8871190e2102eadc747870ca00c83d0e9add7fb9be7d4e817", "md5": "a170700536bd15130a58d2cbe22ee99d"}
         ],
         "notes": "HE-AAC v2 streams with parametric stereo beyond baseline (fine IID and mixing B; IPD/OPD; 34 bands) and their unrestricted-PS reference decodes. md5 is ISO's own (mpeg4audio-conformance2ndEd_20230125.md5); sha256 was measured on the members downloaded 2026-11-19. internal/isoconformance holds the same pins (TestDependenciesRecordThePins)."
+      },
+      "cloudSqlAuthProxyInContainer": {
+        "$comment": "Google's Cloud SQL Auth Proxy v2.19.0, the release the Makefile's cloud-sql-proxy target pins, downloaded by test/compat/testdata/sqlconnect/Dockerfile and checked against the same SHA-256s (the Makefile's CLOUD_SQL_PROXY_SHA256_linux.*), for the daemon's architecture.",
+        "version": "v2.19.0",
+        "source": "https://github.com/GoogleCloudPlatform/cloud-sql-proxy",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded into the locally built test image; nothing of it is in the CLI or the repository",
+        "scope": "test-only",
+        "usedBy": "test/compat/testdata/sqlconnect/Dockerfile (#2208): TestGcloudSQLConnectInContainer's `gcloud sql connect` containers",
+        "updateFeed": "github-releases",
+        "verification": "release-checksum",
+        "checksums": {
+          "cloud-sql-proxy.linux.amd64": "sha256:218ae2a18ef8295c48809b73962f326caca1270aad4623f16c4ff5fa1e9f7d3e",
+          "cloud-sql-proxy.linux.arm64": "sha256:a58e9e0d4f10f368dbe2e24079597eb005dd9352b43fb18726f7983f913e6c1f"
+        },
+        "checksumsNote": "The Makefile's pins for the same release (#1421), recorded for the Dockerfile in Landing 169."
+      },
+      "trainerBusybox": {
+        "$comment": "Docker Hub's official busybox image, the base of testdata/trainer/Dockerfile, the Vertex AI custom-job trainer fixture (#2210), whose sh a replica runs.",
+        "image": "busybox",
+        "version": "1.38.0",
+        "digest": "sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4",
+        "source": "https://hub.docker.com/_/busybox",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "GPL-2.0 (BusyBox), run as a test fixture only, never copied into the repository or linked",
+        "redistribution": "not published: pulled by digest by the compat tests only",
+        "scope": "test-only",
+        "usedBy": "testdata/trainer/Dockerfile (#2210): test/compat/jobs2210_test.go's custom-job trainer",
+        "verification": "image-digest",
+        "updateFeed": "docker-hub-tag-list",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. busybox:1.38.0 resolved to this index on 2026-11-25; re-resolve with `docker buildx imagetools inspect busybox:<version>`."
       }
     },
     "realTools": {

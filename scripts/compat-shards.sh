@@ -403,8 +403,11 @@ COMPAT_BROWSER_VPCVMS_TEST_NAMES="ComputeA1Screens ComputeA1ScreensMeetWCAG
   NetworkSecurityRound4MeetsWCAG2160 RoutingRuleMapsThroughTheBrowser2160
   SecureWebProxyThroughTheBrowser2160 SecureWebProxyMeetsWCAG2160"
 COMPAT_BROWSER_VPCVMS_SHARD_TESTS="^Test($(echo "$COMPAT_BROWSER_VPCVMS_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
-COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore)'
-COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore)'
+# Compute Engine's regional disks, disk performance, keys and snapshot
+# schedules, instance schedules and group workload policies (#2206) need
+# Compute Engine, which served serves.
+COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore|ComputeDiskPerformance|ComputeGroupWorkloadPolicy|ComputeInstanceSchedules|ComputeRegionalDisks)'
+COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore|ComputeDiskPerformance|ComputeGroupWorkloadPolicy|ComputeInstanceSchedules|ComputeRegionalDisks)'
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipeline|VertexAIMetadata|VertexAITraining|VertexAIDatasets|Workbench|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS='^Test(KMS|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipeline|VertexAIMetadata|VertexAITraining|VertexAIDatasets|Workbench|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
@@ -453,8 +456,11 @@ COMPAT_BROWSER_LOCALAI_SHARD_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbedd
 # them (main run 45422957668 skipped all three in emulators). Every other
 # shard skips them (compat_browser_select): the emulators shard's TestBigQuery*
 # names three.
+# Dataflow's pages (TestDataflow*Page, #2215), whose jobs run on the pinned
+# Flink job server this shard alone serves Dataflow beside, and Dataproc's
+# JupyterLab through the Component Gateway (#2198), on a Dataproc cluster.
 COMPAT_BROWSER_NIGHTLY_SHARDS="spark"
-COMPAT_BROWSER_SPARK_SHARD_TESTS='^Test(BigQueryStudioNotebookRuntimeThroughThePage|BigQueryStudioConnectToARuntimeThroughThePage|BigQuerySparkNotebookManageSessionsThroughThePage|BigQuerySparkNotebookThroughThePage|Dataproc[A-Za-z0-9]*ThroughThePage)$'
+COMPAT_BROWSER_SPARK_SHARD_TESTS='^Test(BigQueryStudioNotebookRuntimeThroughThePage|BigQueryStudioConnectToARuntimeThroughThePage|BigQuerySparkNotebookManageSessionsThroughThePage|BigQuerySparkNotebookThroughThePage|Dataproc[A-Za-z0-9]*ThroughThePage|DataprocJupyterLabThroughComponentGateway|Dataflow[A-Za-z0-9]*Page)$'
 # Browser tests no shard runs: Functions' Edit, Download and Permissions
 # builds a function from source with Google's builder, as the compat
 # suite's Functions tests do, so it runs only when asked for
