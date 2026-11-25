@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -26,6 +27,8 @@ type fakeClusterEngine struct {
 	mu       sync.Mutex
 	clusters []*fakeNodes
 	submit   func(sparkproc.Job) sparkproc.Result
+	// gate, when set, holds StartCluster until it is closed.
+	gate chan struct{}
 }
 
 type fakeNodes struct {
@@ -41,6 +44,9 @@ type fakeNodes struct {
 }
 
 func (f *fakeClusterEngine) StartCluster(_ context.Context, spec sparkproc.ClusterSpec) (Nodes, error) {
+	if f.gate != nil {
+		<-f.gate
+	}
 	n := &fakeNodes{spec: spec, workers: spec.Workers, submit: f.submit}
 	f.mu.Lock()
 	f.clusters = append(f.clusters, n)
@@ -619,4 +625,46 @@ func TestRangerPassword(t *testing.T) {
 	if msg := rangerPasswordRule("2.1", "rangerrr"); msg == "" {
 		t.Errorf("2.1 no digit accepted")
 	}
+}
+
+// TestClusterStartingAgainAfterRestart (#2248): a cluster the CLI's last
+// run left RUNNING is STARTING while the next run starts its nodes again,
+// so a client that waits for RUNNING does not submit a job the cluster
+// cannot yet run; RUNNING once they answer.
+func TestClusterStartingAgainAfterRestart(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "dataproc.json")
+	opts := func(eng *fakeClusterEngine) Options {
+		return Options{Engine: eng, Storage: &fakeStorage{objects: map[string][]byte{}}, State: state,
+			ProjectNumber: func(string) string { return "123" }}
+	}
+	s1, err := NewServer(opts(&fakeClusterEngine{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	op, err := s1.CreateCluster(ctx, &dataprocpb.CreateClusterRequest{ProjectId: "p", Region: "us-central1", Cluster: &dataprocpb.Cluster{ClusterName: "c"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitOp(t, s1, op.Name)
+	s1.Close()
+
+	eng := &fakeClusterEngine{gate: make(chan struct{})}
+	s2, err := NewServer(opts(eng))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	get := func() dataprocpb.ClusterStatus_State {
+		c, err := s2.GetCluster(ctx, &dataprocpb.GetClusterRequest{ProjectId: "p", Region: "us-central1", ClusterName: "c"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.GetStatus().GetState()
+	}
+	if st := get(); st != dataprocpb.ClusterStatus_STARTING {
+		t.Errorf("while its nodes start again: %v; want STARTING", st)
+	}
+	close(eng.gate)
+	wait(t, func() bool { return get() == dataprocpb.ClusterStatus_RUNNING })
 }
