@@ -472,7 +472,7 @@ jobs:
       # request does not run. third_party is bqengine's and is left alone.
       - name: go mod tidy leaves no diff
         run: |
-          MODULES=(. test/oracle/fakekms testdata/worker testdata/function testdata/sourcebuild)
+          MODULES=(. test/oracle/fakekms testdata/worker testdata/function testdata/sourcebuild testdata/dataflowgo)
           files=()
           for m in "${MODULES[@]}"; do
             (cd "$m" && go mod tidy && go mod verify)

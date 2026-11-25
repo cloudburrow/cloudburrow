@@ -31,9 +31,9 @@ func buildBeamGo(t *testing.T, ctx context.Context) string {
 		t.Fatalf("docker version: %v", err)
 	}
 	work, src := t.TempDir(), t.TempDir()
-	// Its go.sum is made here, from the module proxy and the checksum
-	// database (the Beam SDK's module graph names modules the repository
-	// keeps no sums of).
+	// Its go.mod and go.sum are kept tidy by ci.yml's modules job (the
+	// module is in its MODULES); -mod=mod lets a build for another
+	// platform add what that platform's graph needs.
 	if err := os.CopyFS(src, os.DirFS(filepath.Join(moduleRoot(t), "testdata", "dataflowgo"))); err != nil {
 		t.Fatal(err)
 	}
