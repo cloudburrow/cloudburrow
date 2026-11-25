@@ -165,12 +165,14 @@ func tfRecordFile(rows []map[string]any) []byte {
 // channel is verified with the code its verification email carries.
 func TestAgentPlatformModelMonitoringInputsAndAlerts(t *testing.T) {
 	h := New(t)
-	endpoint := runShardEndpoint(h, envRunLocalAI, EnvPrediction)
+	// shardEndpoint: gardenOpts below reads PREDICTION, which the run shard
+	// names RUN_LOCALAI.
+	endpoint := shardEndpoint(h, envRunLocalAI, EnvPrediction)
 	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
 	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_BIGQUERY", EnvBigQuery)
 	logAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_LOGGING", EnvLogging)
 	pubsubAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_PUBSUB", EnvPubSub)
-	h.Endpoint(EnvMonitoring)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_MONITORING", EnvMonitoring)
 	console := consoleAddr(t, h)
 	if strings.TrimSpace(endpoint) == "" {
 		t.Fatal("no Agent Platform endpoint")

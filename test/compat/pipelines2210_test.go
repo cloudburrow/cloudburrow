@@ -147,7 +147,7 @@ func TestPythonGCPC(t *testing.T) {
 	endpoint := runShardEndpoint(h, envRunLocalAI, EnvPrediction)
 	runEndpoint := h.Endpoint(EnvRun)
 	gcs := dataformStorage(t, h)
-	bq, bqProject := bigqueryClient(t, h)
+	bq, bqProject := dataformBigQuery(t, h)
 	creds := os.Getenv("CLOUDBURROW_TEST_CREDENTIALS")
 	if creds == "" {
 		t.Skip("CLOUDBURROW_TEST_CREDENTIALS is not set: the SDK needs the instance's ADC fixture")

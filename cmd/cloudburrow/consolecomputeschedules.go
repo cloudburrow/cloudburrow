@@ -223,7 +223,9 @@ func (p computeSnapshotSchedulesProvider) scheduleActions(pol map[string]any, in
 		}
 	}
 	acts = append(acts, console.Action{ID: "edit", Label: "Edit", Submit: "Save", Fields: edit})
-	del := console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: onPage, Confirm: "Delete snapshot schedule " + vpcStr(pol, "name") + "?"}
+	// Google's confirm-only dialog, as every Compute Engine delete (#2139).
+	del := console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: onPage, ConfirmStyle: console.DeleteConfirmClick,
+		Confirm: "Delete snapshot schedule " + vpcStr(pol, "name") + "?"}
 	if onPage && len(in) > 0 {
 		del.Unavailable = "The schedule is attached to " + vpcStr(in[0], "name") + ": detach it first."
 	}

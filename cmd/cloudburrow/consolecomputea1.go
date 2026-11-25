@@ -181,7 +181,9 @@ func diskLocationProperty(d map[string]any) console.Property {
 	if z := zoneOf(vpcStr(d, "zone")); z != "" {
 		return console.Property{Label: "Zone", Value: z}
 	}
-	return console.Property{Label: "Replica zones", Value: vpcLast(vpcStr(d, "region")) + ": " + diskZoneText(d)}
+	// The region and its two replica zones, as the Asynchronous replication
+	// page's Primary location reads (#2206).
+	return console.Property{Label: "Replica zones", Value: vpcLast(vpcStr(d, "region")) + " (" + diskZoneText(d) + ")"}
 }
 
 // replicaZoneField is Create a disk's Replica zone, for Location Regional

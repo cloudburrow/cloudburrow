@@ -144,7 +144,7 @@ func TestComputeInstanceSchedulesThroughTheBrowser(t *testing.T) {
 	p.pageAction("Remove instances from schedule", map[string]string{"instance": vmPath}, "")
 	waitRow("compute-instance-schedules", sched, func(r *row) bool { return r.Fields["In use by"] == "0 VM instances" })
 	p.navigate("/compute/instanceSchedules" + q)
-	vmRowMenu(p, sched, "Delete", nil, sched)
+	vmRowMenu(p, sched, "Delete", nil, byButton)
 	gone := time.Now().Add(time.Minute)
 	for find("compute-instance-schedules", sched) != nil {
 		if time.Now().After(gone) {

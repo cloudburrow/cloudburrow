@@ -2061,19 +2061,6 @@ func diskBase(path []string) string {
 	return "zones/" + path[0] + "/disks/" + path[1]
 }
 
-// locationProp is a disk's Zone, or a regional disk's Region and replica
-// zones.
-func locationProp(d map[string]any, path []string) console.Property {
-	if !compute.IsRegion(path[0]) {
-		return console.Property{Label: "Zone", Value: path[0]}
-	}
-	var zs []string
-	for _, z := range vpcStrs(d, "replicaZones") {
-		zs = append(zs, vpcLast(z))
-	}
-	return console.Property{Label: "Replica zones", Value: path[0] + " (" + strings.Join(zs, ", ") + ")"}
-}
-
 // diskEncryptionText is a disk's Encryption as Google's disk page shows it
 // (#2206).
 func diskEncryptionText(d map[string]any) string {

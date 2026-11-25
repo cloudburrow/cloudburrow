@@ -48,10 +48,15 @@ func TestComputeEngineParityScreens2139(t *testing.T) {
 	// Snapshot schedules.
 	p.navigate("/compute/snapshotSchedules" + q)
 	p.clickText("#view button", "Create snapshot schedule")
-	p.submitForm(map[string]string{"name": "browser-nightly", "region": "us-central1", "frequency": "Daily", "startTime": "02:00",
-		"retention": "3"}, "name")
+	p.waitFor(`document.querySelector("#f-name") !== null`)
+	// Schedule frequency is a radio group, which submitForm does not fill.
+	daily := `[...document.querySelectorAll('input[type="radio"][name="f-frequency-choice"]')].find((r) => r.value === "Daily")`
+	p.waitFor(daily + ` !== undefined`)
+	p.eval(daily+`.click()`, nil)
+	p.submitForm(map[string]string{"name": "browser-nightly", "region": "us-central1", "startTime": "02:00",
+		"retentionDays": "3"}, "name")
 	p.waitFor(`location.pathname === "/compute/snapshotSchedules" && ` + rowReady("browser-nightly"))
-	if body := list("compute-snapshot-schedules"); !strings.Contains(body, `"Autodelete after":"3 days"`) {
+	if body := list("compute-snapshot-schedules"); !strings.Contains(body, `"Auto-delete snapshots after":"3 days"`) {
 		t.Errorf("the schedule made on the page reads %s", body)
 	}
 	vmRowMenu(p, "browser-nightly", "Delete", nil, byButton)
@@ -69,10 +74,10 @@ func TestComputeEngineParityScreens2139(t *testing.T) {
 	// Instance schedules.
 	p.navigate("/compute/instanceSchedules" + q)
 	p.clickText("#view button", "Create schedule")
-	p.submitForm(map[string]string{"name": "browser-office", "region": "us-central1", "startTime": "08:00", "stopTime": "17:00",
-		"timeZone": "UTC", "frequency": "Daily"}, "name")
+	p.submitForm(map[string]string{"name": "browser-office", "region": "us-central1", "startSchedule": "0 8 * * *",
+		"stopSchedule": "0 17 * * *", "timeZone": "UTC"}, "name")
 	p.waitFor(`location.pathname === "/compute/instanceSchedules" && ` + rowReady("browser-office"))
-	if body := list("compute-instance-schedules"); !strings.Contains(body, `"Start":"0 8 * * *"`) {
+	if body := list("compute-instance-schedules"); !strings.Contains(body, `"Start schedule":"0 8 * * *"`) {
 		t.Errorf("the schedule made on the page reads %s", body)
 	}
 	vmRowMenu(p, "browser-office", "Delete", nil, byButton)

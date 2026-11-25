@@ -181,7 +181,7 @@ func TestComputeDiskPerformanceKeysAndSchedulesThroughTheBrowser(t *testing.T) {
 	p.pageAction("Detach from disk", map[string]string{"disk": "regions/us-central1/disks/" + disk}, "")
 	waitRow("compute-snapshot-schedules", sched, func(r *row) bool { return r.Fields["Disks"] == "0" })
 	p.navigate("/compute/snapshotSchedules" + q)
-	vmRowMenu(p, sched, "Delete", nil, sched)
+	vmRowMenu(p, sched, "Delete", nil, byButton)
 	gone := time.Now().Add(time.Minute)
 	for find("compute-snapshot-schedules", sched) != nil {
 		if time.Now().After(gone) {

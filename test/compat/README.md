@@ -119,6 +119,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_FILESTORE_BACKUPDR` | as `BACKUPDR` | Backup and DR of Filestore instances (#1524), in the served and gke shards, so the Backup and DR suites stay in sql |
 | `CLOUDBURROW_TEST_RUN_COMPUTE` | as `COMPUTE` | `TestComputeExternalHTTPLoadBalancerThroughTheGoClient` (#2153): the run shard's Compute Engine, whose load balancers front its Cloud Run services and VMs and which App Hub discovers, so the Compute Engine suite stays in served |
 | `CLOUDBURROW_TEST_SQL_MONITORING` | as `MONITORING` | Cloud SQL's managed connection pooling metrics (#2163), in the sql shards, so the Monitoring suites stay in theirs |
+| `CLOUDBURROW_TEST_RUN_MONITORING` | as `MONITORING` | `TestAgentPlatformModelMonitoringInputsAndAlerts` (#2214): Vertex AI Model Monitoring's alerts in the run shard's Cloud Monitoring, so the Monitoring suites stay in theirs |
 | `CLOUDBURROW_TEST_MEMORYSTORE_COMPUTE` | as `COMPUTE` | Memorystore's networks and reserved ranges checked against Compute Engine's (#1936), in the memorystore shard |
 | `CLOUDBURROW_TEST_SQL_PRIVATECA` | as `PRIVATECA` | the CA pools of Cloud SQL's `CUSTOMER_MANAGED_CAS_CA` instances (#1834), in the sql shard, so the Certificate Authority Service tests stay in their shard |
 | `CLOUDBURROW_TEST_MEMORYSTORE_PRIVATECA` | as `PRIVATECA` | the CA pools of Redis clusters' `SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA` (#1907), in the memorystore shard, so the Certificate Authority Service tests stay in their shard |

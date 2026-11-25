@@ -227,12 +227,18 @@ COMPAT_GKE_UPGRADE_TESTS="^Test($(echo "$COMPAT_GKE_UPGRADE_TEST_NAMES" | tr -s 
 # computevms has Compute Engine's VMs, disks, groups and metadata servers
 # (1,888 s of that run, plus three tests that never ran), vpcvms the VPC
 # networking tests that carry VM traffic (766 s, plus seven that never
-# ran), and served keeps about 940 s with the rest of its tests.
+# ran), and served keeps about 940 s with the rest of its tests. Landing
+# 169's disk tests that boot VMs (#2206: encryption and instance policies,
+# Hyperdisk Balanced HA, the volume's ciphertext and regional disks' HA,
+# 986 s in all) took served's suite from about 2,560 s to 3,840 s, and its
+# job past its 90m with the browser step (run 45680873104): they run here.
 COMPAT_COMPUTE_VM_TEST_NAMES="ComputeRegionalDisksThroughTheGoClient ComputeVMsThroughTheGoClient
   ComputeLabelsSchedulingAndExternalIPsThroughTheGoClient ComputeRollingUpdatesThroughTheGoClient2139
   TerraformComputeInstance ComputeRegionalGroupsThroughTheGoClient GcloudComputeInstances
   ComputeOpsAgentWritesLogsAndMetrics ComputeAutoscalerScalesOnRealCPU
-  ShieldedVMHTTPSMetadataServer2179 VMAccessScopesLimitTokens2179 VMMetadataServerFromInsideTheVM2177"
+  ShieldedVMHTTPSMetadataServer2179 VMAccessScopesLimitTokens2179 VMMetadataServerFromInsideTheVM2177
+  ComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient ComputeHyperdiskBalancedHAThroughTheGoClient
+  ComputeDiskVolumeIsCiphertextWhileTheVMWrites ComputeRegionalDisksHAThroughTheGoClient"
 COMPAT_COMPUTE_VM_TESTS="^Test($(echo "$COMPAT_COMPUTE_VM_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 COMPAT_VPC_VM_TEST_NAMES="CloudRouterBGPWithARouterApplianceVM2140 ComputeVMNetworkingThroughTheGoClient
   RelayedConnectionsFollowTheEgressFirewall ComputeIPv6ThroughTheGoClient
@@ -716,7 +722,10 @@ compat_shard() {
       # without a model, for the Document AI and Speech-to-Text
       # customer-managed key tests (with RUN_KMS); LOCALAI, which the
       # generation tests read, is not exported, so they still skip.
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_DATASTORE,RUN_GKE,RUN_MEMORYSTORE_ADMIN,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,CLOUDSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS,DATAFORM,APPHUB,RUN_TRACE,RUN_COMPUTE
+      # RUN_MONITORING (#2214): Vertex AI Model Monitoring's alerts, read
+      # through this instance's Cloud Monitoring (the Monitoring suite keeps
+      # to served).
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_FIRESTORE,RUN_DATASTORE,RUN_GKE,RUN_MEMORYSTORE_ADMIN,RUN_KMS,RUN_LOCALAI,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,RUN_APIKEYS,RUN_MYSQL,MYSQL_PASSWORD,CLOUDSQL_PASSWORD,BIGQUERY_PROJECT,APPENGINE_URL,WORKFLOWS,DATAFORM,APPHUB,RUN_TRACE,RUN_COMPUTE,RUN_MONITORING
       if [ "$1" = crossservice ]; then
         # The run shard's instance again, for COMPAT_CROSSSERVICE_TESTS only, with
         # the plain names of the services they read: COMPAT_RUN keeps every
@@ -774,7 +783,7 @@ compat_shard() {
       # (#2110); Dataform, whose strict act-as mode checks actAs on a
       # repository's service account (#2173).
       SERVICES=storage,pubsub,tasks,secretmanager,kms,run,bigquery,scheduler,workflows,logging,monitoring,memorystore,cloudsql,privateca,gke,compute,firestore,datastore,spanner,bigtable,backupdr,parametermanager,apphub,dataform
-      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,PRIVATECA,GKE,COMPUTE,APIKEYS,SERVICEUSAGE,LOCALAI,FIRESTORE,DATASTORE,SPANNER,BIGTABLE,DATATRANSFER,BACKUPDR,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,IAM_ENFORCEMENT,PARAMETERMANAGER,FIREBASERULES,APPHUB,DATAFORM
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,SECRETS,KMS,RUN,RESOURCEMANAGER,ANALYTICSHUB,BIGQUERY,BIGQUERY_PROJECT,SCHEDULER,WORKFLOWS,LOGGING,MONITORING,MEMORYSTORE_ADMIN,SQLADMIN,PRIVATECA,GKE,COMPUTE,APIKEYS,SERVICEUSAGE,LOCALAI,FIRESTORE,DATASTORE,SPANNER,BIGTABLE,DATATRANSFER,BACKUPDR,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,IAM_ENFORCEMENT,PARAMETERMANAGER,FIREBASERULES,APPHUB,DATAFORM,PREDICTION
       UP_FLAGS=(--iam-enforcement=on)
       # And Workload Identity Federation's federated principal reading a
       # bucket, refused until it is granted (#1941), and Workforce Identity

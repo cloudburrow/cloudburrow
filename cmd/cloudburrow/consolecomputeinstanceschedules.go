@@ -177,7 +177,9 @@ func (p computeInstanceSchedulesProvider) actions(pol map[string]any, in, all []
 		}
 		acts = append(acts, a, r)
 	}
-	del := console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: onPage, Confirm: "Delete instance schedule " + vpcStr(pol, "name") + "?"}
+	// Google's confirm-only dialog, as every Compute Engine delete (#2139).
+	del := console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: onPage, ConfirmStyle: console.DeleteConfirmClick,
+		Confirm: "Delete instance schedule " + vpcStr(pol, "name") + "?"}
 	if onPage && len(in) > 0 {
 		del.Unavailable = "The schedule has VM instances (" + vpcStr(in[0], "name") + "): remove them first."
 	}

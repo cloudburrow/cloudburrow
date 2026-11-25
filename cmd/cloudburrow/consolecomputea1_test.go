@@ -97,7 +97,7 @@ func TestConsoleComputeA1(t *testing.T) {
 		t.Fatalf("the regional disk's row = %+v", r)
 	}
 	dd, _ := disks.Detail(ctx, project, r.Target)
-	if !strings.Contains(c2139Props(dd), "Replica zones=us-central1: us-central1-a, us-central1-b") {
+	if !strings.Contains(c2139Props(dd), "Replica zones=us-central1 (us-central1-a, us-central1-b)") {
 		t.Fatalf("the regional disk's page = %s", c2139Props(dd))
 	}
 	if err := disks.ActAt(ctx, project, r.Target, "labels", map[string]string{"labels": `{"tier":"ha"}`}); err != nil {
