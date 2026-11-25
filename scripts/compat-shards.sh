@@ -430,32 +430,42 @@ COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS|ConnectionP
 # the local models (CLOUDBURROW_TEST_LOCALAI): its TestSpeech name matches
 # the run shard's pattern, which skips the localai shard's tests.
 COMPAT_BROWSER_LOCALAI_SHARD_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbeddings|EmbeddingsPageEmbedsAnImage|EmbeddingsPageEmbedsAudioAndCloudStorage|EmbeddingsPageReadsAScannedPDFWithOCR|SpeechWorkspaceAndPlaybackThroughThePage)$'
-# Browser tests no shard runs: Functions' Edit, Download and Permissions builds a function from source with
-# Google's builder, as the compat suite's Functions tests do, so it runs only
-# when asked for (CLOUDBURROW_TEST_FUNCTIONS) on amd64 nodes. BigQuery
-# Studio's notebook runtime (#2094) builds its runtime image, about 1 GB of
-# IPython, pandas and Google's BigQuery client installed with pip, on the
-# first Connect, so it runs only when asked for
-# (CLOUDBURROW_TEST_NOTEBOOK_RUNTIME=1), as the Spark procedures' tests run
-# with CLOUDBURROW_TEST_SPARK (main runs 45047408927 and 45102950103 skipped
-# it in emulators, which failed the step). So do Connect to a runtime's
-# (#2094), over the same runtime image, and the Spark notebook's and its
-# Manage sessions' (#2094, #2156), whose Spark Connect session runs in the
-# pinned 1.8 GB apache/spark image (CLOUDBURROW_TEST_SPARK) on Serverless
-# for Apache Spark, which only the nightly spark shard serves, beside
-# Dataform, which it does not (main run 45422957668 skipped all three in
-# emulators). So do Dataproc's pages (TestDataproc*ThroughThePage: #2156,
-# #2162, #2186, #2188, #2189), whose batches, sessions and clusters run in
-# the pinned apache/spark images (CLOUDBURROW_TEST_SPARK) on the Dataproc
-# API, which only the nightly spark shard serves (main run 45422957668
-# skipped all nine in storage).
-COMPAT_BROWSER_NEVER_TESTS='^Test(CloudRunFunctionsEditDownloadAndPermissionsThroughThePage|BigQueryStudioNotebookRuntimeThroughThePage|BigQueryStudioConnectToARuntimeThroughThePage|BigQuerySparkNotebookManageSessionsThroughThePage|BigQuerySparkNotebookThroughThePage|Dataproc[A-Za-z0-9]*ThroughThePage)$'
+# The nightly spark shard's browser tests (#2234), in
+# nightly-sql-ephemeral.yml's spark job, not ci.yml's compat job: the spark
+# shard is no COMPAT_SHARDS entry, so it is named in
+# COMPAT_BROWSER_NIGHTLY_SHARDS, not COMPAT_BROWSER_SHARDS (which is
+# ci.yml's browser step's matrix). Dataproc's pages (TestDataproc*ThroughThePage:
+# #2156, #2162, #2186, #2188, #2189), whose batches, sessions and clusters
+# run in the pinned apache/spark images (CLOUDBURROW_TEST_SPARK) on the
+# Dataproc API, which only that shard serves (main run 45422957668 skipped
+# all nine in storage); Dataproc on GKE's among them makes its virtual
+# cluster on a Kubernetes Engine cluster, so the shard serves gke too.
+# BigQuery Studio's notebook runtime (#2094), which builds its runtime
+# image, about 1 GB of IPython, pandas and Google's BigQuery client
+# installed with pip, on the first Connect, and Connect to a runtime's over
+# the same image, so they run only with CLOUDBURROW_TEST_NOTEBOOK_RUNTIME=1
+# (compat_browser_prepare sets it for this shard alone; main runs
+# 45047408927 and 45102950103 skipped the first in emulators). And the
+# Spark notebook's and its Manage sessions' (#2094, #2156), whose Spark
+# Connect session runs in the pinned 1.8 GB apache/spark image on
+# Serverless for Apache Spark, beside Dataform, which the shard serves for
+# them (main run 45422957668 skipped all three in emulators). Every other
+# shard skips them (compat_browser_select): the emulators shard's TestBigQuery*
+# names three.
+COMPAT_BROWSER_NIGHTLY_SHARDS="spark"
+COMPAT_BROWSER_SPARK_SHARD_TESTS='^Test(BigQueryStudioNotebookRuntimeThroughThePage|BigQueryStudioConnectToARuntimeThroughThePage|BigQuerySparkNotebookManageSessionsThroughThePage|BigQuerySparkNotebookThroughThePage|Dataproc[A-Za-z0-9]*ThroughThePage)$'
+# Browser tests no shard runs: Functions' Edit, Download and Permissions
+# builds a function from source with Google's builder, as the compat
+# suite's Functions tests do, so it runs only when asked for
+# (CLOUDBURROW_TEST_FUNCTIONS) on amd64 nodes.
+COMPAT_BROWSER_NEVER_TESTS='^TestCloudRunFunctionsEditDownloadAndPermissionsThroughThePage$'
 
 # compat_browser_select <shard>: sets, for that shard's browser step,
 #   BROWSER_RUN   its go test -run pattern (every test when empty)
 #   BROWSER_SKIP  its go test -skip pattern
 # and returns 1 for a shard that runs no browser test. Every test the two
-# select must pass: ci.yml and verify-local.sh read both, and
+# select must pass: ci.yml, verify-local.sh and nightly-sql-ephemeral.yml's
+# spark job read both, and
 # cmd/cloudburrow's TestBrowserTestsRunWhereTheirScreensAreServed holds
 # each test to one shard whose instance draws every screen it needs.
 compat_browser_select() {
@@ -465,6 +475,9 @@ compat_browser_select() {
   # shard's pattern (TestSpeech*) names one, whose transcription needs that
   # shard's local models.
   [ "$1" = localai ] || BROWSER_SKIP="$COMPAT_BROWSER_LOCALAI_SHARD_TESTS|$BROWSER_SKIP"
+  # And the nightly spark shard's: the emulators shard's pattern
+  # (TestBigQuery*) names three, and the storage shard's (the rest) the others.
+  [ "$1" = spark ] || BROWSER_SKIP="$COMPAT_BROWSER_SPARK_SHARD_TESTS|$BROWSER_SKIP"
   case "$1" in
     # And the run instance's tests the crossservice shard runs.
     run) BROWSER_RUN=$COMPAT_BROWSER_RUN_SHARD_TESTS BROWSER_SKIP="$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS|$BROWSER_SKIP" ;;
@@ -475,6 +488,8 @@ compat_browser_select() {
     served) BROWSER_RUN=$COMPAT_BROWSER_SERVED_SHARD_TESTS ;;
     vpcvms) BROWSER_RUN=$COMPAT_BROWSER_VPCVMS_SHARD_TESTS ;;
     localai) BROWSER_RUN=$COMPAT_BROWSER_LOCALAI_SHARD_TESTS ;;
+    # Nightly (COMPAT_BROWSER_NIGHTLY_SHARDS).
+    spark) BROWSER_RUN=$COMPAT_BROWSER_SPARK_SHARD_TESTS ;;
     # The rest of the suite.
     storage) BROWSER_SKIP="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS|$COMPAT_BROWSER_SQL_SHARD_TESTS|$COMPAT_BROWSER_SERVED_ONLY_TESTS|$COMPAT_BROWSER_VPCVMS_SHARD_TESTS|$BROWSER_SKIP" ;;
     *) return 1 ;;
@@ -768,6 +783,10 @@ compat_shard() {
       # Spark (#2156), the Dataproc API's batches and Spark Connect
       # sessions, which run on the same Spark runner.
       SERVICES=bigquery,storage,logging,run,kms,dataproc
+      # And, for the shard's browser tests (#2234), Dataform, which BigQuery
+      # Studio's notebooks are, and Kubernetes Engine, whose cluster Dataproc
+      # on GKE's page runs on.
+      SERVICES+=,dataform,gke
       # --allow-unconfined-containers (#2162): the Dataproc DOCKER component's
       # rootless daemons run unconfined, so only with it; TestDataprocDockerComponent
       # runs here, and TestDataprocDockerComponentOff, the refusal without
@@ -932,6 +951,9 @@ compat_shard() {
 # neither.
 compat_browser_prepare() {
   case "$1" in
+    # BigQuery Studio's notebook runtime tests (#2094) build the runtime
+    # image on the first Connect, so they run only with this switch.
+    spark) export CLOUDBURROW_TEST_NOTEBOOK_RUNTIME=1 ;;
     localai)
       local control=${CLOUDBURROW_TEST_CONTROL:?} code
       case "$control" in http://*) ;; *) control="http://$control" ;; esac

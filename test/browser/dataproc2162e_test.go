@@ -79,7 +79,7 @@ func TestDataprocRangerThroughThePage(t *testing.T) {
 		"properties": "dataproc:ranger.kms.key.uri=" + key + "\ndataproc:ranger.admin.password.uri=gs://" + bucket + "/admin-password.encrypted"}, "clusterName")
 	cluster := "projects/" + project + "/regions/us-central1/clusters/ranger-b"
 	t.Cleanup(func() {
-		consoleDo(t, "POST", "/api/act/dataproc-clusters?project="+project+"&name="+cluster+"&action=delete", "{}")
+		dpDeleteCluster(t, project, cluster)
 	})
 	dpWait(t, "dataproc-clusters", project, cluster, `"Running"`, 40*time.Minute)
 	p.navigate("/dataproc/clusters?project=" + project)
