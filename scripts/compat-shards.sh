@@ -813,8 +813,14 @@ compat_shard() {
       # it, skips on this instance (it runs on any instance without the flag).
       FIXTURES=(--allow-unconfined-containers)
       TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,KMS,GCLOUD,DATAPROC,PUBSUB,DATAFLOW,DATASTORE,BIGTABLE,SPANNER
+      # And Workbench's JupyterLab plugins with Dataproc served (#2198):
+      # TestWorkbenchJupyterLabBearerAndIdentity lists the clusters through
+      # the page here; the run shard, without Dataproc, runs it for the
+      # local refusal. Workbench is on the Vertex AI port (PREDICTION),
+      # which Cloud Run starts.
+      TEST_VARS+=,PREDICTION
       export CLOUDBURROW_TEST_SPARK=1
-      COMPAT_RUN='^Test(BigQuerySpark|BqSpark|Dataproc|GcloudDataproc|PythonDataflow|JavaDataflow|GoDataflow|DataflowJobsAPI|DataflowSnapshots|DataflowProvided|GcloudDataflow|TerraformDataflow)'
+      COMPAT_RUN='^Test(BigQuerySpark|BqSpark|Dataproc|GcloudDataproc|PythonDataflow|JavaDataflow|GoDataflow|DataflowJobsAPI|DataflowSnapshots|DataflowProvided|GcloudDataflow|TerraformDataflow|WorkbenchJupyterLabBearerAndIdentity$)'
       COMPAT_TIMEOUT=150m ;;
     localai|localaispeech)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI
