@@ -6701,8 +6701,8 @@
     "Title": "Vertex AI PredictionService",
     "counts": {
       "Implemented": 5,
-      "Unimplemented": 27,
-      "Verified": 188
+      "Unimplemented": 7,
+      "Verified": 208
     },
     "rows": [
       {
@@ -6990,8 +6990,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CancelDataLabelingJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CancelHyperparameterTuningJob",
@@ -7002,8 +7004,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CancelNasJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/nas2214_test.go:44 TestVertexAINeuralArchitectureSearch"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CreateBatchPredictionJob",
@@ -7021,8 +7025,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CreateDataLabelingJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CreateHyperparameterTuningJob",
@@ -7034,13 +7040,19 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CreateModelDeploymentMonitoringJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mdm2214_test.go:38 TestAgentPlatformDeploymentMonitoringRuns",
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals",
+          "test/compat/monitoring2214r3_test.go:480 TestAgentPlatformDeploymentMonitoringAttributionAndAlerts"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/CreateNasJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/nas2214_test.go:44 TestVertexAINeuralArchitectureSearch"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/DeleteBatchPredictionJob",
@@ -7058,8 +7070,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/DeleteDataLabelingJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/DeleteHyperparameterTuningJob",
@@ -7070,13 +7084,18 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/DeleteModelDeploymentMonitoringJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mdm2214_test.go:38 TestAgentPlatformDeploymentMonitoringRuns",
+          "test/compat/monitoring2214r3_test.go:480 TestAgentPlatformDeploymentMonitoringAttributionAndAlerts"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/DeleteNasJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/nas2214_test.go:44 TestVertexAINeuralArchitectureSearch"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/GetBatchPredictionJob",
@@ -7094,8 +7113,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/GetDataLabelingJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/GetHyperparameterTuningJob",
@@ -7107,18 +7128,26 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/GetModelDeploymentMonitoringJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mdm2214_test.go:38 TestAgentPlatformDeploymentMonitoringRuns",
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals",
+          "test/compat/monitoring2214r3_test.go:480 TestAgentPlatformDeploymentMonitoringAttributionAndAlerts"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/GetNasJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/nas2214_test.go:44 TestVertexAINeuralArchitectureSearch"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/GetNasTrialDetail",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/nas2214_test.go:44 TestVertexAINeuralArchitectureSearch"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/ListBatchPredictionJobs",
@@ -7136,8 +7165,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/ListDataLabelingJobs",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/ListHyperparameterTuningJobs",
@@ -7148,38 +7179,54 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/ListModelDeploymentMonitoringJobs",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:294 TestAgentPlatformDataLabelingAndDeploymentMonitoringRefusals"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/ListNasJobs",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/nas2214_test.go:44 TestVertexAINeuralArchitectureSearch"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/ListNasTrialDetails",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/nas2214_test.go:44 TestVertexAINeuralArchitectureSearch"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/PauseModelDeploymentMonitoringJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mdm2214_test.go:38 TestAgentPlatformDeploymentMonitoringRuns",
+          "test/compat/monitoring2214r3_test.go:480 TestAgentPlatformDeploymentMonitoringAttributionAndAlerts"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/ResumeModelDeploymentMonitoringJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mdm2214_test.go:38 TestAgentPlatformDeploymentMonitoringRuns"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/SearchModelDeploymentMonitoringStatsAnomalies",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/mdm2214_test.go:38 TestAgentPlatformDeploymentMonitoringRuns",
+          "test/compat/monitoring2214r3_test.go:480 TestAgentPlatformDeploymentMonitoringAttributionAndAlerts"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.JobService/UpdateModelDeploymentMonitoringJob",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/monitoring2214r3_test.go:480 TestAgentPlatformDeploymentMonitoringAttributionAndAlerts"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.LlmUtilityService/ComputeTokens",
@@ -7723,7 +7770,7 @@
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/CancelTrainingPipeline",
         "status": "Implemented",
-        "note": "no official-SDK test can reach it: Served (#2210): cancels the pipeline and its backing CustomJob, as CancelCustomJob does (TestVertexAICustomTraining verifies CancelCustomJob); no compat test cancels a training pipeline yet"
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.cloud.aiplatform.v1.PipelineService/CreatePipelineJob",
@@ -8607,8 +8654,8 @@
     "Key": "vertexaiv1beta1",
     "Title": "Vertex AI PredictionService v1beta1",
     "counts": {
-      "Implemented": 12,
-      "Verified": 10
+      "Implemented": 13,
+      "Verified": 27
     },
     "rows": [
       {
@@ -8650,6 +8697,96 @@
         "method": "google.cloud.aiplatform.v1beta1.LlmUtilityService/ComputeTokens",
         "status": "Implemented",
         "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/CreateModelMonitor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/mdm2214_test.go:248 TestPythonAIPlatformModelMonitoring",
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring",
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/CreateModelMonitoringJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/mdm2214_test.go:248 TestPythonAIPlatformModelMonitoring",
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring",
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/DeleteModelMonitor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/mdm2214_test.go:248 TestPythonAIPlatformModelMonitoring",
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring",
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/DeleteModelMonitoringJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/GetModelMonitor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/mdm2214_test.go:248 TestPythonAIPlatformModelMonitoring",
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/GetModelMonitoringJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/mdm2214_test.go:248 TestPythonAIPlatformModelMonitoring",
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring",
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/ListModelMonitoringJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/mdm2214_test.go:248 TestPythonAIPlatformModelMonitoring",
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/ListModelMonitors",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/SearchModelMonitoringAlerts",
+        "status": "Verified",
+        "tests": [
+          "test/compat/mdm2214_test.go:248 TestPythonAIPlatformModelMonitoring",
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/SearchModelMonitoringStats",
+        "status": "Verified",
+        "tests": [
+          "test/compat/mdm2214_test.go:248 TestPythonAIPlatformModelMonitoring",
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring",
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ModelMonitoringService/UpdateModelMonitor",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/ChatCompletions",
@@ -8749,6 +8886,53 @@
       },
       {
         "method": "google.cloud.aiplatform.v1beta1.PredictionService/StreamingRawPredict",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ScheduleService/CreateSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ScheduleService/DeleteSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ScheduleService/GetSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ScheduleService/ListSchedules",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ScheduleService/PauseSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ScheduleService/ResumeSchedule",
+        "status": "Verified",
+        "tests": [
+          "test/compat/modelmonitoring2214_test.go:34 TestAgentPlatformModelMonitoring"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1beta1.ScheduleService/UpdateSchedule",
         "status": "Implemented",
         "note": "no official-SDK test proves it yet"
       }
@@ -11206,7 +11390,7 @@
       {
         "method": "google.storage.v2.Storage/CancelResumableWrite",
         "status": "Implemented",
-        "note": "no official-SDK test can reach it: the official Go client never calls it (it abandons a session by not finishing it); unit-tested in TestGRPCWriteObjectResumes"
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.storage.v2.Storage/ComposeObject",
@@ -27948,6 +28132,7 @@
         "method": "google.monitoring.v3.NotificationChannelService/CreateNotificationChannel",
         "status": "Verified",
         "tests": [
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts",
           "test/compat/monitoring_alerting_test.go:111 TestMonitoringAlertPoliciesAndChannels",
           "test/compat/monitoring_alerting_test.go:594 TestTerraformMonitoringAlerting",
           "test/compat/monitoring_alerting_test.go:703 TestGcloudMonitoring",
@@ -28005,6 +28190,7 @@
         "method": "google.monitoring.v3.NotificationChannelService/SendNotificationChannelVerificationCode",
         "status": "Verified",
         "tests": [
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts",
           "test/compat/monitoring_alerting_test.go:111 TestMonitoringAlertPoliciesAndChannels",
           "test/compat/monitoring_query_test.go:365 TestMonitoringPubSubChannelAndVerification"
         ]
@@ -28020,6 +28206,7 @@
         "method": "google.monitoring.v3.NotificationChannelService/VerifyNotificationChannel",
         "status": "Verified",
         "tests": [
+          "test/compat/monitoring2214r3_test.go:166 TestAgentPlatformModelMonitoringInputsAndAlerts",
           "test/compat/monitoring_query_test.go:365 TestMonitoringPubSubChannelAndVerification"
         ]
       },

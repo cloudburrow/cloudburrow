@@ -64,8 +64,10 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
 
-// jobService serves JobService's CustomJob and BatchPredictionJob methods
-// (batchprediction.go); the rest of JobService is UNIMPLEMENTED.
+// jobService serves JobService's CustomJob, BatchPredictionJob
+// (batchprediction.go), HyperparameterTuningJob (hptuning.go),
+// ModelDeploymentMonitoringJob (mdmjobs.go), DataLabelingJob
+// (datalabeling.go) and NasJob (nasjobs.go) methods.
 type jobService struct {
 	aiplatformpb.UnimplementedJobServiceServer
 	s *Server

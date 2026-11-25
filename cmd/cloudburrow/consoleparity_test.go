@@ -2649,6 +2649,15 @@ var parityRows = []parityRow{
 		Screen:   "/instance", Offers: "Instance: Save state (download), Load state (upload, confirmed by the instance's name), " +
 			"Reset (every service or those chosen, optionally one project, with Reseed, confirmed by the scope), Seed (upload, If not exists)",
 		Tests: []string{"TestConsoleInstanceActsThroughTheAdminAPI", "TestConsoleStateSaveResetLoadRestores", "TestInstanceResetConfirmedByTypingTheScope"}},
+	{Resource: "Local mail sink",
+		Screen: "/mail", Offers: "Mail (#2214, Management tools and Settings and utilities): the local mail sink's SMTP address, its messages newest first " +
+			"(Subject, From, To, Sent by, Received), a message's headers, text and original, Delete and Delete all; Cloud Monitoring's email channels " +
+			"(incidents, test notifications, verification codes) and Model Monitoring's email alerts arrive here",
+		Tests: []string{"TestMailPageAPI", "TestMailPageAndTheAgentPlatformClock", "TestAgentPlatformModelMonitoringInputsAndAlerts"}},
+	{Resource: "Agent Platform clock (POST /cloudburrow/v1/clock:advance)",
+		Screen: "/instance", Offers: "Instance > Clocks (#2214), with or without the admin token: Advance the Agent Platform clock by days, hours, " +
+			"minutes and seconds, which starts the model deployment monitoring runs and schedules it passes, and says where the clock now is",
+		Tests: []string{"TestClocksAPI", "TestMailPageAndTheAgentPlatformClock"}},
 	{Resource: "Connect, About and diagnose",
 		Commands: []string{"env", "gcloud-setup", "terraform", "version", "diagnose"},
 		Screen:   "/connect", Offers: "Connect: what `env` exports in each of its formats with Copy, client snippets, the gcloud-setup, gcloud-teardown and terraform commands to copy; About, as `version` prints it; Download bundle, the `diagnose` bundle (#802)",
@@ -2870,6 +2879,38 @@ var parityRows = []parityRow{
 			"run details, run parameters and each node's Node info), Cancel and Delete; " +
 			"the Schedules tab (vertex-pipeline-schedules, the schedule methods' Colab row) with Pause, Resume and Delete",
 		Tests: []string{"TestVertexAIPipelinesThroughThePages", "TestVertexAIPipelineRunGraphThroughThePages"}},
+	// Agent Platform Model Monitoring and data labeling (#2214).
+	{Resource: "Agent Platform Model Monitoring: model monitors", Service: "vertexaiv1beta1",
+		Methods: []string{"ModelMonitoringService/CreateModelMonitor", "ModelMonitoringService/GetModelMonitor",
+			"ModelMonitoringService/ListModelMonitors", "ModelMonitoringService/DeleteModelMonitor",
+			"ModelMonitoringService/CreateModelMonitoringJob", "ModelMonitoringService/GetModelMonitoringJob",
+			"ModelMonitoringService/ListModelMonitoringJobs", "ModelMonitoringService/SearchModelMonitoringStats",
+			"ModelMonitoringService/SearchModelMonitoringAlerts"},
+		Provider: "vertex-model-monitors", Offers: "Monitoring's Model monitors: a Region menu, Configure monitoring (model and version, the input features' and prediction outputs' schema, " +
+			"training dataset, Advanced options' Cloud Storage bucket, objectives with metric and alert threshold, email addresses and notification channels; Set up), " +
+			"a monitor's page with its Runs, Feature statistics and Alerts, Run now (target and baseline datasets), Schedule (name, cron with time zone, end date), and Delete",
+		Tests: []string{"TestAgentPlatformMonitoringThroughThePages"}},
+	{Resource: "Agent Platform Model Monitoring: monitor update and job delete", Service: "vertexaiv1beta1",
+		Methods:  []string{"ModelMonitoringService/UpdateModelMonitor", "ModelMonitoringService/DeleteModelMonitoringJob"},
+		Excluded: "Google's Model Monitoring console docs (set-up-model-monitoring, run-monitoring-job, read 2026-11-24) describe no edit of a monitor and no delete of a run; the API's methods are served"},
+	{Resource: "Agent Platform Model Monitoring: schedules (v1beta1)", Service: "vertexaiv1beta1",
+		Methods: []string{"ScheduleService/CreateSchedule", "ScheduleService/GetSchedule",
+			"ScheduleService/ListSchedules", "ScheduleService/PauseSchedule",
+			"ScheduleService/ResumeSchedule", "ScheduleService/DeleteSchedule",
+			"ScheduleService/UpdateSchedule"},
+		Provider: "vertex-model-monitoring-schedules", Offers: "Monitoring's Schedules: the monitoring schedules with their model monitor, Pause, Resume and Delete; a monitor's Schedule creates one",
+		Tests: []string{"TestAgentPlatformMonitoringThroughThePages"}},
+	{Resource: "Agent Platform Model Monitoring: deployment monitoring jobs (v1)", Service: "vertexai",
+		Methods: []string{"JobService/CreateModelDeploymentMonitoringJob", "JobService/GetModelDeploymentMonitoringJob", "JobService/ListModelDeploymentMonitoringJobs",
+			"JobService/PauseModelDeploymentMonitoringJob", "JobService/ResumeModelDeploymentMonitoringJob", "JobService/DeleteModelDeploymentMonitoringJob",
+			"JobService/SearchModelDeploymentMonitoringStatsAnomalies", "JobService/UpdateModelDeploymentMonitoringJob"},
+		Provider: "vertex-model-deployment-monitoring", Offers: "Monitoring's Deployment monitoring jobs: Configure model monitoring (job name, endpoint, monitoring frequency, sampling rate, " +
+			"alert emails, skew or drift objective with training data source and alert threshold), a job's page with its feature statistics, Pause, Resume and Delete",
+		Tests: []string{"TestAgentPlatformMonitoringThroughThePages"}},
+	{Resource: "Agent Platform data labeling jobs", Service: "vertexai",
+		Methods: []string{"JobService/CreateDataLabelingJob", "JobService/GetDataLabelingJob", "JobService/ListDataLabelingJobs",
+			"JobService/DeleteDataLabelingJob", "JobService/CancelDataLabelingJob"},
+		Excluded: "Google shut the Vertex AI Data Labeling Service down on October 3, 2024 (https://docs.cloud.google.com/vertex-ai/docs/deprecations); its console page is gone, so there is none to match"},
 	{Resource: "Vertex AI Pipelines: batch delete and cancel", Service: "vertexai",
 		Methods:  []string{"PipelineService/BatchDeletePipelineJobs", "PipelineService/BatchCancelPipelineJobs"},
 		Excluded: "Google's Pipelines docs describe no bulk action (https://docs.cloud.google.com/vertex-ai/docs/pipelines/run-pipeline); the API's batch methods are served"},
@@ -2900,6 +2941,15 @@ var parityRows = []parityRow{
 	{Resource: "Vertex AI Training: create a hyperparameter tuning job", Service: "vertexai", Methods: []string{"JobService/CreateHyperparameterTuningJob"},
 		Excluded: "Google's console creates hyperparameter tuning through Train new model's Hyperparameter tuning step, a training pipeline with the " +
 			"hyperparameter tuning task (https://docs.cloud.google.com/vertex-ai/docs/training/using-hyperparameter-tuning, Console tab), which this console offers"},
+	{Resource: "Vertex AI Training: Neural Architecture Search jobs", Service: "vertexai",
+		Methods: []string{"JobService/GetNasJob", "JobService/ListNasJobs", "JobService/CancelNasJob", "JobService/DeleteNasJob",
+			"JobService/GetNasTrialDetail", "JobService/ListNasTrialDetails"},
+		Provider: "vertex-nas-jobs", Offers: "Training's Neural Architecture Search tab: a Region menu, a job's page (its details, search space, " +
+			"search and train trial worker pools, a chart of the search trials' rewards, and its Trials table, each a NAS trial detail), Cancel and Delete",
+		Tests: []string{"TestVertexAITrainingNASThroughThePages"}},
+	{Resource: "Vertex AI Training: create a NAS job", Service: "vertexai", Methods: []string{"JobService/CreateNasJob"},
+		Excluded: "Google creates NAS jobs with vertex-nas-cli and the API (https://docs.cloud.google.com/vertex-ai/docs/training/neural-architecture-search/overview); " +
+			"the console lists and opens them"},
 	{Resource: "Vertex AI batch inference", Service: "vertexai",
 		Methods: []string{"JobService/CreateBatchPredictionJob", "JobService/GetBatchPredictionJob", "JobService/ListBatchPredictionJobs",
 			"JobService/CancelBatchPredictionJob", "JobService/DeleteBatchPredictionJob"},

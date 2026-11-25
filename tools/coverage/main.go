@@ -280,7 +280,9 @@ var areas = []area{
 	{Key: "documentaiv1beta3", Title: "Document AI v1beta3 datasets", Own: true, Services: []string{"google.cloud.documentai.v1beta3.DocumentService"}},
 	{Key: "speechv1", Title: "Speech-to-Text v1", Own: true, Services: []string{"google.cloud.speech.v1.Speech", "google.cloud.speech.v1.Adaptation"}},
 	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService",
-		"google.cloud.aiplatform.v1beta1.LlmUtilityService", "google.cloud.aiplatform.v1beta1.GenAiCacheService"}},
+		"google.cloud.aiplatform.v1beta1.LlmUtilityService", "google.cloud.aiplatform.v1beta1.GenAiCacheService",
+		// Model Monitoring v2 and its schedules of runs (#2214).
+		"google.cloud.aiplatform.v1beta1.ModelMonitoringService", "google.cloud.aiplatform.v1beta1.ScheduleService"}},
 	// The Memorystore for Redis admin API (#1302), over the one Valkey
 	// server --services memorystore runs, and Memorystore for Redis
 	// Cluster and Memorystore for Valkey (#1519) on the same port.

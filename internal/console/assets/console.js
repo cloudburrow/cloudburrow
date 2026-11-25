@@ -41,6 +41,8 @@ const AP_DOCS = "https://docs.cloud.google.com/gemini-enterprise-agent-platform/
 
 // Colab Enterprise's pages, drawn as one page's tabs.
 const COLAB_TABS = ["notebooks", "runtimes", "runtime-templates", "executions", "schedules"].map((p) => `${AP}/colab/${p}`);
+// Agent Platform's Monitoring page's tabs (#2214).
+const MONITOR_TABS = ["/agent-platform/model-monitoring/model-monitors", "/agent-platform/model-monitoring/schedules", "/agent-platform/model-monitoring/deployment-jobs"];
 
 function agentPlatformRoutes() {
   const base = { section: "AI and machine learning", product: "vertexai", productTitle: "Agent Platform", icon: "ai" };
@@ -147,12 +149,12 @@ function agentPlatformRoutes() {
     // (https://docs.cloud.google.com/vertex-ai/docs/training/create-training-pipeline,
     // read 2026-11-24).
     page(`${AP}/training`, "Training", "Model development", { service: "vertex-training-pipelines", listedWhenOff: true, tabTitle: "Training pipelines",
-      pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`, `${AP}/training/hyperparameter-tuning-jobs`], kind: "Training pipeline",
+      pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`, `${AP}/training/hyperparameter-tuning-jobs`, `${AP}/training/nas-jobs`], kind: "Training pipeline",
       api: "projects.locations.trainingPipelines", about: "Training pipelines, each a custom job that trains a model and uploads it to the Model Registry",
       docs: "https://docs.cloud.google.com/vertex-ai/docs/training/create-training-pipeline",
       instead: "Start CloudBurrow with --services including run and storage: a job's workers run on Docker and write to Cloud Storage." }),
     page(`${AP}/training/custom-jobs`, "Training", "Model development", { service: "vertex-custom-jobs", listedWhenOff: true, tabTitle: "Custom jobs",
-      navHidden: true, navAs: `${AP}/training`, pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`, `${AP}/training/hyperparameter-tuning-jobs`], kind: "Custom job",
+      navHidden: true, navAs: `${AP}/training`, pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`, `${AP}/training/hyperparameter-tuning-jobs`, `${AP}/training/nas-jobs`], kind: "Custom job",
       api: "projects.locations.customJobs", about: "Custom training jobs, each worker a container of its image",
       docs: "https://docs.cloud.google.com/vertex-ai/docs/training/create-custom-job",
       instead: "Start CloudBurrow with --services including run and storage." }),
@@ -161,9 +163,18 @@ function agentPlatformRoutes() {
     // read 2026-11-24).
     page(`${AP}/training/hyperparameter-tuning-jobs`, "Training", "Model development", { service: "vertex-hyperparameter-tuning-jobs", listedWhenOff: true,
       tabTitle: "Hyperparameter tuning jobs", navHidden: true, navAs: `${AP}/training`,
-      pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`, `${AP}/training/hyperparameter-tuning-jobs`], kind: "Hyperparameter tuning job",
+      pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`, `${AP}/training/hyperparameter-tuning-jobs`, `${AP}/training/nas-jobs`], kind: "Hyperparameter tuning job",
       api: "projects.locations.hyperparameterTuningJobs", about: "Hyperparameter tuning jobs, each trial a custom job whose code reports metrics with cloudml-hypertune",
       docs: "https://docs.cloud.google.com/vertex-ai/docs/training/using-hyperparameter-tuning",
+      instead: "Start CloudBurrow with --services including run and storage." }),
+    // Its Neural Architecture Search tab (#2214): each trial a custom job
+    // (https://docs.cloud.google.com/vertex-ai/docs/training/neural-architecture-search/overview,
+    // read 2026-11-24).
+    page(`${AP}/training/nas-jobs`, "Training", "Model development", { service: "vertex-nas-jobs", listedWhenOff: true,
+      tabTitle: "Neural Architecture Search", navHidden: true, navAs: `${AP}/training`,
+      pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`, `${AP}/training/hyperparameter-tuning-jobs`, `${AP}/training/nas-jobs`], kind: "NAS job",
+      api: "projects.locations.nasJobs", about: "Neural Architecture Search jobs, each search and train trial a custom job given --nas_params_str",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/training/neural-architecture-search/overview",
       instead: "Start CloudBurrow with --services including run and storage." }),
     // Vertex AI Pipelines (#2173): the Pipelines page's Runs and Schedules
     // tabs ("Go to the Schedules tab on the Pipelines page":
@@ -208,8 +219,25 @@ function agentPlatformRoutes() {
     // Deploy and use.
     absent(`${AP}/matching-engine/indexes`, "Vector Search", "Deploy and use", "projects.locations.indexes and indexEndpoints",
       "Vector indexes and the endpoints that serve them", AP_DOCS + "build"),
-    absent(`${AP}/model-monitoring/model-monitors`, "Monitoring", "Deploy and use", "projects.locations.modelMonitors",
-      "Model monitors for drift and skew", AP_DOCS + "machine-learning"),
+    // Model Monitoring (#2214): "In the Google Cloud console, go to the
+    // Monitoring page. Click Configure monitoring"
+    // (https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/set-up-model-monitoring,
+    // read 2026-11-24). The tabs' names are CloudBurrow's (UNVERIFIED, re-read 2026-11-24).
+    page(`${AP}/model-monitoring/model-monitors`, "Monitoring", "Deploy and use", { service: "vertex-model-monitors", listedWhenOff: true, tabTitle: "Model monitors",
+      pageTabs: MONITOR_TABS, kind: "Model monitor",
+      api: "v1beta1 projects.locations.modelMonitors", about: "Model monitors, their runs, feature statistics and alerts",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/set-up-model-monitoring",
+      instead: "Start CloudBurrow with --services including run and storage: a monitor's model is in the Model Registry, and its datasets in Cloud Storage." }),
+    page(`${AP}/model-monitoring/schedules`, "Monitoring", "Deploy and use", { service: "vertex-model-monitoring-schedules", listedWhenOff: true, tabTitle: "Schedules",
+      navHidden: true, navAs: `${AP}/model-monitoring/model-monitors`, pageTabs: MONITOR_TABS, kind: "Schedule",
+      api: "v1beta1 projects.locations.schedules", about: "Recurring monitoring runs, with Pause, Resume and Delete",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/run-monitoring-job",
+      instead: "Start CloudBurrow with --services including run and storage." }),
+    page(`${AP}/model-monitoring/deployment-jobs`, "Monitoring", "Deploy and use", { service: "vertex-model-deployment-monitoring", listedWhenOff: true, tabTitle: "Deployment monitoring jobs",
+      navHidden: true, navAs: `${AP}/model-monitoring/model-monitors`, pageTabs: MONITOR_TABS, kind: "Monitoring job",
+      api: "projects.locations.modelDeploymentMonitoringJobs", about: "Skew and drift monitoring of an endpoint's deployed models, with Pause, Resume and Delete",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/using-model-monitoring",
+      instead: "Start CloudBurrow with --services including run and storage: a job watches a Model Registry endpoint." }),
   ];
 }
 
@@ -1188,6 +1216,10 @@ const ROUTES = [
   { path: "/settings/compute/create", service: null, screen: "compute-create", title: "Create VM" },
   { path: "/settings/compute/operation", service: null, screen: "compute-operation", title: "Operation" },
   { path: "/compute-capacity", service: null, screen: "compute-capacity", title: "Compute capacity", section: "Management tools" },
+  // Mail (#2214): what the local mail sink received, Cloud Monitoring's
+  // and Model Monitoring's email notifications among it. CloudBurrow's own
+  // page, also reached from Settings and utilities.
+  { path: "/mail", service: null, screen: "mail", title: "Mail", section: "Management tools" },
   // Billing (#2109), Google's Billing menu: Manage billing accounts, the
   // projects' Account management, Budgets & alerts and Pricing. Every
   // account is local: nothing asks for or shows payment details.
@@ -1359,6 +1391,7 @@ const ICONS = {
   "compute-settings": '<path d="M7 11a4 4 0 0 1 .6-7.9A5 5 0 0 1 17 5a3 3 0 0 1 0 6z"/><rect x="5" y="14" width="14" height="6" rx="1"/><path d="M8 17h.01M12 11v3"/>',
   // Compute capacity (#2209): a gauge, for a VM's size.
   "compute-capacity": '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/><path d="M4 20h16"/>',
+  mail:      '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
   dashboard: '<rect x="3" y="3" width="8" height="10" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="15" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="10" rx="1"/>',
 };
 
@@ -12387,6 +12420,7 @@ function dispatch(view) {
   if (match.screen === "compute-create") return renderComputeCreate(view);
   if (match.screen === "compute-operation") return renderComputeOperation(view);
   if (match.screen === "compute-capacity") return renderComputeCapacity(view);
+  if (match.screen === "mail") return renderMail(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "metrics-explorer") return renderMetricsExplorer(view, match);
   if (match.screen === "trace-explorer") return renderTraceExplorer(view, match);
@@ -13618,7 +13652,191 @@ async function renderInstance(view) {
     instanceSaveCard(info, refused),
     instanceLoadCard(info, instance, refused),
     instanceResetCard(info, refused),
-    instanceSeedCard(info, refused));
+    instanceSeedCard(info, refused),
+    await instanceClocksCard());
+  if (location.hash === "#clocks") {
+    const card = document.getElementById("instance-clocks-card");
+    if (card) card.scrollIntoView();
+  }
+}
+
+// instanceClocksCard is CloudBurrow's clock:advance calls (#2214), by the
+// UI parity rule: a service whose runs are hours apart (Agent Platform's
+// model deployment monitoring jobs and schedules) is reached by moving its
+// clock forward, never back. Each clock is its service's, of every
+// project. The calls need no admin token: the services' own clock:advance
+// endpoints take none.
+async function instanceClocksCard() {
+  let clocks = [];
+  let failure = "";
+  try {
+    const res = await fetch("/api/clocks", { headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error(`/api/clocks responded ${res.status}`);
+    clocks = (await res.json()).clocks || [];
+  } catch (err) {
+    failure = err.message;
+  }
+  const rows = clocks.map((c) => {
+    const id = `instance-clock-${c.id}`;
+    const input = el("input", { id: `${id}-duration`, type: "text", value: "1h", autocomplete: "off", spellcheck: "false",
+      "aria-describedby": `${id}-help` });
+    const result = instanceResult(`${id}-result`);
+    const error = el("p", { class: "form-error", role: "alert", id: `${id}-error`, hidden: true });
+    const button = el("button", { class: "primary", id: `${id}-advance`, text: `Advance ${c.title}` });
+    button.addEventListener("click", async () => {
+      error.hidden = true;
+      result.textContent = "";
+      setBusy(button, true);
+      const op = recordOperation(`Advance ${c.title} by ${input.value.trim()}`);
+      try {
+        const res = await fetch(`/api/clocks/${encodeURIComponent(c.id)}`, { method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ duration: input.value.trim() }) });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || `the console responded ${res.status}`);
+        op.succeeded(body.now);
+        result.textContent = `The ${c.title} is now ${body.now}, ${body.ahead} ahead of this machine's. The runs it passed have started.`;
+        notify(`Advanced the ${c.title} by ${body.advancedBy}`);
+      } catch (err) {
+        op.failed(err.message);
+        error.textContent = `The clock did not move: ${err.message}`;
+        error.hidden = false;
+      } finally {
+        setBusy(button, false);
+      }
+    });
+    return el("div", { class: "instance-clock", "data-clock": c.id },
+      el("h3", { text: c.title }),
+      el("div", { class: "form-row" },
+        el("label", { for: input.id, text: "Advance by" }), input,
+        el("p", { class: "form-help", id: `${id}-help`, text: `Days, hours, minutes and seconds, such as 1h, 7d or 1d12h. ${c.help}` })),
+      error,
+      el("div", { class: "form-actions" }, button),
+      result);
+  });
+  return el("section", { class: "card", id: "instance-clocks-card", "aria-labelledby": "instance-clocks-title" },
+    el("h2", { id: "instance-clocks-title", text: "Clocks" }),
+    el("p", { text: "CloudBurrow test extensions, not Google APIs: each moves a service's clock forward, and it can never be moved back. " +
+      "The clock is the whole instance's, for every project, and lives in memory: cloudburrow up starts it at this machine's time." }),
+    failure ? el("p", { class: "form-error", role: "alert", text: `The clocks could not be read: ${failure}` }) : null,
+    !failure && !rows.length ? el("p", { class: "muted", text: "No service on this instance has a clock to advance." }) : null,
+    ...rows);
+}
+
+// --- Mail (#2214) ------------------------------------------------------
+
+// The local mail sink's messages: Cloud Monitoring's email channels, Model
+// Monitoring's email alerts and whatever an application on the machine
+// sent to its SMTP address. It relays nothing, so no message here left the
+// machine.
+const MAIL_TITLE = "Mail";
+const MAIL_SUBTITLE = "Email that services and applications on this instance sent. The local mail sink keeps it here " +
+  "and delivers nothing off the machine.";
+
+const mailTime = (t) => (t ? new Date(t).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "medium" }) : "");
+
+async function renderMail(view, selected) {
+  const settings = document.getElementById("settings-panel");
+  if (settings && overlayOpen(settings)) {
+    hideOverlay(settings);
+    document.getElementById("settings").setAttribute("aria-expanded", "false");
+  }
+  const header = () => pageHeader(MAIL_TITLE, MAIL_SUBTITLE);
+  setChildren(view, header(), loadingState(4));
+  let data;
+  try {
+    const res = await fetch("/api/mail", { headers: { Accept: "application/json" } });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `/api/mail responded ${res.status}`);
+    data = body;
+  } catch (err) {
+    if (location.pathname !== "/mail") return;
+    setChildren(view, header(), errorState("Mail unavailable", err.message, () => renderMail(view)));
+    return;
+  }
+  if (location.pathname !== "/mail") return;
+  const msgs = data.messages || [];
+  const refresh = el("button", { class: "secondary", id: "mail-refresh", text: "Refresh" });
+  refresh.addEventListener("click", () => renderMail(view));
+  const clear = el("button", { class: "secondary danger", id: "mail-delete-all", text: "Delete all", disabled: !msgs.length });
+  clear.addEventListener("click", () => confirmDestructive({
+    title: "Delete every message", detail: `Deletes the ${msgs.length} messages the local mail sink holds.`,
+    confirmWord: "all", confirmLabel: "Delete all",
+    onConfirm: async () => {
+      const res = await fetch("/api/mail?all=true", { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `the console responded ${res.status}`);
+      notify("Deleted every message");
+      renderMail(view);
+    },
+  }));
+  const reader = el("section", { class: "card", id: "mail-message", "aria-live": "polite", hidden: true });
+  const open = async (m, row) => {
+    for (const r of view.querySelectorAll("#mail-list tbody tr")) r.removeAttribute("aria-selected");
+    if (row) row.setAttribute("aria-selected", "true");
+    reader.hidden = false;
+    setChildren(reader, loadingState(2));
+    try {
+      const res = await fetch(`/api/mail/${encodeURIComponent(m.id)}`, { headers: { Accept: "application/json" } });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `the console responded ${res.status}`);
+      const del = el("button", { class: "secondary danger", id: "mail-delete", text: "Delete" });
+      del.addEventListener("click", async () => {
+        const r = await fetch(`/api/mail?id=${encodeURIComponent(m.id)}`, { method: "DELETE" });
+        if (r.ok) {
+          notify(`Deleted "${m.subject || "(no subject)"}"`);
+          renderMail(view);
+        }
+      });
+      setChildren(reader,
+        el("h2", { id: "mail-message-subject", text: body.subject || "(no subject)" }),
+        el("dl", { class: "properties", id: "mail-message-headers" },
+          el("dt", { text: "From" }), el("dd", { text: body.from }),
+          el("dt", { text: "To" }), el("dd", { text: (body.to || []).join(", ") }),
+          el("dt", { text: "Received" }), el("dd", { text: mailTime(body.time) }),
+          el("dt", { text: "Sent by" }), el("dd", { text: body.source })),
+        el("pre", { class: "mail-text", id: "mail-message-text", tabindex: "0", "aria-label": "Message text", text: body.text || "" }),
+        el("details", {}, el("summary", { text: "Show original" }),
+          el("pre", { class: "mail-text", id: "mail-message-raw", "aria-label": "Original message", text: body.raw || "" })),
+        el("div", { class: "form-actions" }, del));
+    } catch (err) {
+      setChildren(reader, el("p", { class: "form-error", role: "alert", text: `The message could not be read: ${err.message}` }));
+    }
+  };
+  const rows = msgs.map((m) => {
+    const link = el("a", { href: `/mail#${m.id}`, text: m.subject || "(no subject)" });
+    const row = el("tr", { "data-id": m.id },
+      el("td", {}, link),
+      el("td", { text: m.from }),
+      el("td", { text: (m.to || []).join(", ") }),
+      el("td", { text: m.source }),
+      el("td", { text: mailTime(m.time) }));
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      history.replaceState(history.state, "", `/mail#${m.id}`);
+      open(m, row);
+    });
+    return row;
+  });
+  setChildren(view, header(),
+    el("section", { class: "card", id: "mail-smtp" },
+      el("h2", { text: "SMTP server" }),
+      el("p", { text: "An application on this machine can send mail here: plain SMTP with no TLS and no sign-in, " +
+        "on the loopback interface only." }),
+      el("dl", { class: "properties" },
+        el("dt", { text: "Address" }), el("dd", {}, el("code", { id: "mail-smtp-address", text: data.smtp || "-" })),
+        el("dt", { text: "Kept" }), el("dd", { text: `The newest ${data.limit} messages, in memory: they do not survive cloudburrow up's restart.` }))),
+    el("div", { class: "form-actions", id: "mail-actions" }, refresh, clear),
+    msgs.length
+      ? el("div", { class: "table-wrap" }, el("table", { class: "table", id: "mail-list" },
+          el("caption", { class: "sr-only", text: "Messages, newest first" }),
+          el("thead", {}, el("tr", {}, ...["Subject", "From", "To", "Sent by", "Received"].map((h) => el("th", { scope: "col", text: h })))),
+          el("tbody", {}, ...rows)))
+      : el("p", { class: "muted", id: "mail-empty", text: "No mail yet. Cloud Monitoring's email channels and Model Monitoring's email alerts arrive here." }),
+    reader);
+  const want = selected || decodeURIComponent(location.hash.slice(1));
+  const pick = msgs.find((m) => m.id === want);
+  if (pick) open(pick, rows[msgs.indexOf(pick)]);
 }
 
 // instanceComputeCard says where the instance's compute runs (#2209): this
@@ -13980,6 +14198,14 @@ function renderInstanceToken(view, err) {
       el("div", { class: "form-actions" }, el("button", { type: "submit", class: "primary", text: "Use token" }))));
   input.focus();
   announce("Admin token required");
+  // The clocks need no token (#2214): they are offered below the form.
+  instanceClocksCard().then((card) => {
+    if (location.pathname === "/instance" && document.getElementById("instance-token-form") &&
+      !document.getElementById("instance-clocks-card")) {
+      view.append(card);
+      if (location.hash === "#clocks") card.scrollIntoView();
+    }
+  });
 }
 
 // syncStickyOffsets measures the pinned blocks so the ones below them know

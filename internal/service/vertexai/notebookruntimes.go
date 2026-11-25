@@ -71,6 +71,7 @@ import (
 	"unicode/utf8"
 
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
+	betapb "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	nbpb "cloud.google.com/go/notebooks/apiv2/notebookspb"
@@ -204,6 +205,9 @@ type notebookStore struct {
 	// pipelineRunner.
 	pipelines      map[string]*pipelineEntry
 	pipelineRunner PipelineRunner
+	// mon is Model Monitoring's resources (modelmonitor.go,
+	// mdmjobs.go, #2214), saved beside file.
+	mon *monitorState
 	// md is Vertex ML Metadata (metadata.go, #2205).
 	md *mdStore
 	// pipelineCache are pipeline tasks' cache entries by parent and cache
@@ -219,6 +223,8 @@ type notebookStore struct {
 	trainingPipelines map[string]*trainingEntry
 	// hpJobs are hyperparameter tuning jobs (hptuning.go, #2210).
 	hpJobs map[string]*hpJobEntry
+	// nasJobs are Neural Architecture Search jobs (nasjobs.go, #2214).
+	nasJobs map[string]*nasJobEntry
 	// ds are Vertex AI managed datasets (datasets.go, #2210).
 	ds *dsStore
 }
@@ -239,7 +245,7 @@ func (s *Server) notebooks() *notebookStore {
 	defer s.mu.Unlock()
 	if s.nb == nil {
 		s.nb = &notebookStore{templates: map[string]*aiplatformpb.NotebookRuntimeTemplate{}, runtimes: map[string]*runtimeEntry{},
-			defaults: map[string]string{}, now: time.Now, jobs: map[string]*jobEntry{}, schedules: map[string]*aiplatformpb.Schedule{},
+			defaults: map[string]string{}, now: s.clockNow, jobs: map[string]*jobEntry{}, schedules: map[string]*aiplatformpb.Schedule{},
 			policies: map[string]*iampolicy.Stored{}, owners: map[string]string{}, pipelines: map[string]*pipelineEntry{}}
 	}
 	if s.ops == nil {
@@ -256,6 +262,7 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.host, st.file = host, file
+	st.loadMonitoringState()
 	b, err := os.ReadFile(file)
 	if err != nil {
 		return
@@ -276,6 +283,7 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 		Cache     map[string]json.RawMessage   `json:"pipelineCache"`
 		Training  map[string][]json.RawMessage `json:"trainingJobs"`
 		Datasets  json.RawMessage              `json:"datasets"`
+		NAS       []savedNASJob                `json:"nasJobs"`
 	}
 	if json.Unmarshal(b, &saved) != nil {
 		return
@@ -304,7 +312,16 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 	st.loadMetadata(saved.Metadata)
 	st.pipelineCache = saved.Cache
 	st.loadTrainingJobs(saved.Training)
+	st.loadNASJobs(saved.NAS)
 	st.loadDatasets(saved.Datasets)
+}
+
+// loadMonitoringState reads Model Monitoring's state, which
+// SetNotebookRuntimes's file has beside it; the caller holds st.mu.
+func (st *notebookStore) loadMonitoringState() {
+	if st.file != "" {
+		st.loadMonitoring()
+	}
 }
 
 // save writes the store; the caller holds st.mu.
@@ -329,7 +346,8 @@ func (st *notebookStore) save() {
 		Cache     map[string]json.RawMessage   `json:"pipelineCache,omitempty"`
 		Training  map[string][]json.RawMessage `json:"trainingJobs,omitempty"`
 		Datasets  json.RawMessage              `json:"datasets,omitempty"`
-	}{Datasets: st.savedDatasets(), Training: st.savedJobs(), Cache: st.pipelineCache, Owners: st.owners, Pipelines: st.savedPipelines(), Metadata: st.savedMetadata(), Templates: []json.RawMessage{}, Runtimes: []savedRuntime{}, Defaults: st.defaults, Jobs: []json.RawMessage{}, Schedules: []json.RawMessage{},
+		NAS       []savedNASJob                `json:"nasJobs,omitempty"`
+	}{NAS: st.savedNASJobs(), Datasets: st.savedDatasets(), Training: st.savedJobs(), Cache: st.pipelineCache, Owners: st.owners, Pipelines: st.savedPipelines(), Metadata: st.savedMetadata(), Templates: []json.RawMessage{}, Runtimes: []savedRuntime{}, Defaults: st.defaults, Jobs: []json.RawMessage{}, Schedules: []json.RawMessage{},
 		Policies: st.policies}
 	for _, n := range sortedNames(st.jobs) {
 		if b, err := protojson.Marshal(st.jobs[n].Job); err == nil {
@@ -1218,22 +1236,31 @@ func (s *Server) registerNotebooks(srv grpc.ServiceRegistrar) {
 	aiplatformpb.RegisterMetadataServiceServer(srv, &metadataService{s: s})
 	aiplatformpb.RegisterDatasetServiceServer(srv, &datasetService{s: s})
 	nbpb.RegisterNotebookServiceServer(srv, &workbenchService{s: s})
+	// Model Monitoring and data labeling jobs (#2214): v1's JobService
+	// (above), v1beta1's ModelMonitoringService and ScheduleService.
+	betapb.RegisterModelMonitoringServiceServer(srv, &modelMonitoringService{s: s})
+	betapb.RegisterScheduleServiceServer(srv, &betaScheduleService{s: s})
 }
 
 // notebookREST is the transcoder for the notebookRuntimeTemplates and
 // notebookRuntimes paths and their operations.
 func (s *Server) notebookREST() *rest.Transcoder {
 	s.nbRESTOnce.Do(func() {
-		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1", "google.cloud.notebooks.v2"}, SnakeCaseMasks: true, Mixins: []*annotations.HttpRule{
+		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1", "google.cloud.aiplatform.v1beta1", "google.cloud.notebooks.v2"}, SnakeCaseMasks: true, Mixins: []*annotations.HttpRule{
 			opRule("/v1/{name=projects/*/locations/*/notebookRuntimeTemplates/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/notebookRuntimes/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/notebookExecutionJobs/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/schedules/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/pipelineJobs/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/modelDeploymentMonitoringJobs/*/operations/*}"),
+			opRule("/v1beta1/{name=projects/*/locations/*/modelMonitors/*/operations/*}"),
+			opRule("/v1beta1/{name=projects/*/locations/*/modelMonitors/*/modelMonitoringJobs/*/operations/*}"),
+			opRule("/v1beta1/{name=projects/*/locations/*/schedules/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/customJobs/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/batchPredictionJobs/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/trainingPipelines/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/hyperparameterTuningJobs/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/nasJobs/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/datasets/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/datasets/*/savedQueries/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/datasets/*/datasetVersions/*/operations/*}"),

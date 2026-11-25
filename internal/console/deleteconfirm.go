@@ -244,6 +244,11 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// UNVERIFIED (re-read 2026-11-22): deleting a pipeline run from the
 	// console is not described (run-pipeline, schedule-pipeline-run).
 	"vertex-pipeline-runs": unverified,
+	// Agent Platform Model Monitoring (#2214): Google's docs show no
+	// delete dialog for a monitor, a monitoring schedule or a v1 job.
+	"vertex-model-monitors":              unverified,
+	"vertex-model-monitoring-schedules":  unverified,
+	"vertex-model-deployment-monitoring": unverified,
 	// UNVERIFIED (re-read 2026-11-24): deleting a training pipeline, custom
 	// job or batch prediction from the console is not described
 	// (training/create-training-pipeline, training/create-custom-job,
@@ -254,6 +259,7 @@ var DeleteConfirmRules = map[string]DeleteConfirmRule{
 	// UNVERIFIED (re-read 2026-11-24): deleting a hyperparameter tuning job
 	// from the console is not described (training/using-hyperparameter-tuning).
 	"vertex-hyperparameter-tuning-jobs": unverified,
+	"vertex-nas-jobs":                   unverified,
 	// UNVERIFIED (re-read 2026-11-24): deleting a dataset from the console
 	// is not described (image-data/classification/create-dataset).
 	"vertex-datasets": unverified,
