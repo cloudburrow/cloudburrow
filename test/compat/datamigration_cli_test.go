@@ -19,7 +19,8 @@ import (
 // Cloud SQL destination profile; a continuous migration job with
 // --use-postgres-native, which needs no pglogical; describe and list;
 // start, the rows and a row written after reach the destination; stop,
-// resume, promote and delete. The official client reads back what gcloud
+// resume, promote and delete, which return their operation at once, as
+// Google's do (the creates are run with --no-async). The official client reads back what gcloud
 // made.
 // covers: google.cloud.clouddms.v1.DataMigrationService/CreateConnectionProfile, google.cloud.clouddms.v1.DataMigrationService/GetConnectionProfile, google.cloud.clouddms.v1.DataMigrationService/ListConnectionProfiles, google.cloud.clouddms.v1.DataMigrationService/DeleteConnectionProfile, google.cloud.clouddms.v1.DataMigrationService/CreateMigrationJob, google.cloud.clouddms.v1.DataMigrationService/GetMigrationJob, google.cloud.clouddms.v1.DataMigrationService/ListMigrationJobs, google.cloud.clouddms.v1.DataMigrationService/StartMigrationJob, google.cloud.clouddms.v1.DataMigrationService/StopMigrationJob, google.cloud.clouddms.v1.DataMigrationService/ResumeMigrationJob, google.cloud.clouddms.v1.DataMigrationService/PromoteMigrationJob, google.cloud.clouddms.v1.DataMigrationService/DeleteMigrationJob
 func TestGcloudDatabaseMigration(t *testing.T) {
@@ -56,9 +57,9 @@ func TestGcloudDatabaseMigration(t *testing.T) {
 	})
 
 	run("connection-profiles", "create", "postgresql", srcID, "--host", src.ip, "--port", "5432",
-		"--username", "postgres", "--password", dmsSourcePass, "--display-name", "gcloud source")
+		"--username", "postgres", "--password", dmsSourcePass, "--display-name", "gcloud source", "--no-async")
 	run("connection-profiles", "create", "cloudsql", dstID, "--source-id", srcID, "--database-version", "POSTGRES_15",
-		"--tier", "db-custom-1-3840", "--root-password", pgRootPassword)
+		"--tier", "db-custom-1-3840", "--root-password", pgRootPassword, "--no-async")
 	if out := run("connection-profiles", "list", "--format", "value(name)"); !strings.Contains(out, srcID) || !strings.Contains(out, dstID) {
 		t.Errorf("gcloud database-migration connection-profiles list: %s", out)
 	}
@@ -66,7 +67,7 @@ func TestGcloudDatabaseMigration(t *testing.T) {
 		t.Errorf("gcloud database-migration connection-profiles describe: %s", out)
 	}
 
-	run("migration-jobs", "create", jobID, "--source", srcID, "--destination", dstID, "--type", "CONTINUOUS", "--use-postgres-native")
+	run("migration-jobs", "create", jobID, "--source", srcID, "--destination", dstID, "--type", "CONTINUOUS", "--use-postgres-native", "--no-async")
 	job := parent + "/migrationJobs/" + jobID
 	if out := run("migration-jobs", "describe", jobID, "--format", "value(state,type)"); !strings.Contains(out, "NOT_STARTED") || !strings.Contains(out, "CONTINUOUS") {
 		t.Errorf("gcloud database-migration migration-jobs describe: %s", out)
@@ -94,18 +95,23 @@ func TestGcloudDatabaseMigration(t *testing.T) {
 		return nil
 	})
 	run("migration-jobs", "stop", jobID)
-	if j := dmsJobState(t, ctx, c, job); j.GetState() != dmspb.MigrationJob_STOPPED {
-		t.Errorf("after gcloud stop: %v", j.GetState())
-	}
+	dmsWaitFor(t, ctx, c, job, "STOPPED", func(j *dmspb.MigrationJob) bool { return j.GetState() == dmspb.MigrationJob_STOPPED })
 	run("migration-jobs", "resume", jobID)
 	dmsWaitFor(t, ctx, c, job, "the CDC phase again", inCDC)
 	run("migration-jobs", "promote", jobID)
-	if j := dmsJobState(t, ctx, c, job); j.GetState() != dmspb.MigrationJob_COMPLETED {
-		t.Errorf("after gcloud promote: %v", j.GetState())
-	}
+	dmsWaitFor(t, ctx, c, job, "COMPLETED", func(j *dmspb.MigrationJob) bool { return j.GetState() == dmspb.MigrationJob_COMPLETED })
 	run("migration-jobs", "delete", jobID)
+	eventually(t, "the job and its destination profile deleted", func() error {
+		if out := run("connection-profiles", "list", "--format", "value(name)"); strings.Contains(out, dstID) {
+			return fmt.Errorf("profiles: %s", out)
+		}
+		return nil
+	})
 	run("connection-profiles", "delete", srcID)
-	if out := run("connection-profiles", "list", "--format", "value(name)"); strings.Contains(out, srcID) || strings.Contains(out, dstID) {
-		t.Errorf("profiles after gcloud delete: %s", out)
-	}
+	eventually(t, "the source profile deleted", func() error {
+		if out := run("connection-profiles", "list", "--format", "value(name)"); strings.Contains(out, srcID) {
+			return fmt.Errorf("profiles: %s", out)
+		}
+		return nil
+	})
 }

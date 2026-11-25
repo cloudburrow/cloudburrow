@@ -430,10 +430,14 @@ func (s *Server) VerifyMigrationJob(_ context.Context, req *dmspb.VerifyMigratio
 	}
 	started := j.State != dmspb.MigrationJob_NOT_STARTED && j.State != dmspb.MigrationJob_DRAFT
 	op, err := s.startOp(parentOf(j.GetName()), "verify", j.GetName(), "")
-	s.mu.Unlock()
 	if err != nil {
+		s.mu.Unlock()
 		return nil, err
 	}
+	// The answer is copied under mu: the check below finishes the stored
+	// operation as soon as it may.
+	out := clone(op)
+	s.mu.Unlock()
 	name, opName := j.GetName(), op.Name
 	s.background(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), stepTimeout)
@@ -450,7 +454,7 @@ func (s *Server) VerifyMigrationJob(_ context.Context, req *dmspb.VerifyMigratio
 		}
 		_ = s.save()
 	})
-	return clone(op), nil
+	return out, nil
 }
 
 func (s *Server) StartMigrationJob(_ context.Context, req *dmspb.StartMigrationJobRequest) (*longrunningpb.Operation, error) {
@@ -657,6 +661,11 @@ func (s *Server) ResumeMigrationJob(_ context.Context, req *dmspb.ResumeMigratio
 }
 
 func (s *Server) PromoteMigrationJob(_ context.Context, req *dmspb.PromoteMigrationJobRequest) (*longrunningpb.Operation, error) {
+	if boolField(req, "failback") {
+		// A failback promotes the source back after a reverse migration,
+		// which is not run (docs/gaps.md).
+		return nil, unimplemented("promote with failback", "reverse (failback) migrations are not run")
+	}
 	s.mu.Lock()
 	j, err := s.jobLocked(req.GetName())
 	if err == nil && j.Phase != dmspb.MigrationJob_CDC {

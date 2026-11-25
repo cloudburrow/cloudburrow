@@ -112,7 +112,7 @@ func TestDataMigrationThroughThePage(t *testing.T) {
 		p.waitFor(fmt.Sprintf(`[...document.querySelectorAll('a[href^=%q]')].length > 0`, path))
 	}
 	// Migrate on Cloud SQL's Instances page opens Migration jobs.
-	p.navigate("/sql/instances?project=" + project)
+	p.navigate("/cloudsql-instances?project=" + project)
 	p.clickText("#view button, #view a", "Migrate")
 	p.waitFor(`location.pathname === "/dbmigrate/migrations"`)
 
@@ -177,13 +177,18 @@ func TestDataMigrationThroughThePage(t *testing.T) {
 		if !ring {
 			t.Error("the focused Promote draws no focus indicator")
 		}
+		// Enter opens Google's Promote dialog, focus on its Cancel.
 		p.run(chromedp.KeyEvent(kb.Enter))
-		p.waitFor(`document.querySelector(".modal.is-open form") !== null`)
+		p.waitFor(`document.querySelector(".modal.is-open form[data-confirm]") !== null`)
+		p.waitFor(`document.activeElement !== null && document.activeElement.textContent === "Cancel"`)
 		p.run(chromedp.KeyEvent(kb.Escape))
 		p.waitFor(`document.querySelector(".modal") === null`)
 	})
 
-	p.pageActionWithin("Promote", nil, jobID, 5*time.Minute)
+	// Google's Promote dialog asks for nothing typed: its Promote alone
+	// (docs/postgres/promote-migration).
+	p.clickText(p.findAction("Promote"), "Promote")
+	p.pressConfirm("Promote")
 	for deadline := time.Now().Add(5 * time.Minute); ; {
 		body := dmsDetail(t, project, job)
 		if strings.Contains(body, `"Completed"`) {

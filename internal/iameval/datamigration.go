@@ -18,6 +18,7 @@ import (
 // generateTcpProxyScript) are not checked. Google's wording of a denial
 // is UNVERIFIED: its newer APIs' "Permission 'P' denied on resource 'R'
 // (or it may not exist).".
+// Docs re-read 2026-11-25, still unanswered: https://docs.cloud.google.com/database-migration/docs/access-control
 var DataMigration = &Service{
 	Name:              "datamigration.googleapis.com",
 	PolicyCollections: []string{"connectionProfiles", "migrationJobs", "privateConnections"},

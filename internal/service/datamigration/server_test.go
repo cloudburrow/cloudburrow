@@ -3,6 +3,7 @@ package datamigration
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -491,6 +492,18 @@ func TestREST(t *testing.T) {
 	resp.Body.Close()
 	if !strings.Contains(string(b), `"type":"NONE"`) || strings.Contains(string(b), `"password":`) {
 		t.Fatalf("GET the source: %s", b)
+	}
+	// gcloud's bodies carry Google's v1 request fields: resume's
+	// skipValidation (refused here only for the job's state), restart's
+	// restartFailedObjects, and promote's failback, which is not run.
+	if c, m := post("/v1/"+parent+"/migrationJobs/j:resume", `{"skipValidation":true}`); c != 400 || !strings.Contains(fmt.Sprint(m), "FAILED_PRECONDITION") {
+		t.Errorf("resume a job not started, with skipValidation: %d %v", c, m)
+	}
+	if c, m := post("/v1/"+parent+"/migrationJobs/j:restart", `{"restartFailedObjects":true,"skipValidation":true}`); c != 400 || !strings.Contains(fmt.Sprint(m), "FAILED_PRECONDITION") {
+		t.Errorf("restart a job not started: %d %v", c, m)
+	}
+	if c, m := post("/v1/"+parent+"/migrationJobs/j:promote", `{"failback":true}`); c != 501 {
+		t.Errorf("promote with failback: %d %v", c, m)
 	}
 	for _, p := range []string{"/v1/" + parent + "/migrationJobs/j:demoteDestination", "/v1/" + parent + "/conversionWorkspaces?conversionWorkspaceId=c"} {
 		if c, m := post(p, `{}`); c != 501 {

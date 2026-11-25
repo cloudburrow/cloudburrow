@@ -194,6 +194,7 @@ const dmsPoll = 2 * time.Second
 // sourceRep is the name of a Cloud SQL destination's source
 // representation instance (UNVERIFIED: Google's console names it after
 // the destination; the API does not say how).
+// Docs re-read 2026-11-25, still unanswered: https://docs.cloud.google.com/sql/docs/postgres/replication/configure-replication-from-external
 func sourceRep(t datamigration.Target) string { return t.ID + "-master" }
 
 // sqlCall calls the Cloud SQL Admin API in process and answers its JSON.

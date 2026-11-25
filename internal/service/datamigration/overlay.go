@@ -70,6 +70,12 @@ func addFields(f *descriptorpb.FileDescriptorProto) {
 			}})
 	}
 	add("ConnectionProfile", overlayField("role", "role", 1001, tStr, ""))
+	// Request fields Google's v1 has and clouddmspb v1.16.1 lacks, which
+	// gcloud sends (its generated datamigration_v1 messages): resume's
+	// skipValidation, promote's failback, restart's restartFailedObjects.
+	add("ResumeMigrationJobRequest", overlayField("skip_validation", "skipValidation", 1001, tBool, ""))
+	add("PromoteMigrationJobRequest", overlayField("failback", "failback", 1001, tBool, ""))
+	add("RestartMigrationJobRequest", overlayField("restart_failed_objects", "restartFailedObjects", 1001, tBool, ""))
 	add("PostgreSqlConnectionProfile",
 		overlayField("database", "database", 1001, tStr, ""),
 		overlayField("alloydb_cluster_id", "alloydbClusterId", 1002, tStr, ""),

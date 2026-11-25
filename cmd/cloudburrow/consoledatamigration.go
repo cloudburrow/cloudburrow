@@ -369,20 +369,28 @@ func (p dmsJobsProvider) DetailActions(ctx context.Context, project string, path
 		return why
 	}
 	return []console.Action{
-		{ID: "verify", Label: "Test job", Confirm: "Checks that the destination can reach the source and that the source is configured for the migration."},
+		{ID: "verify", Label: "Test job"},
 		{ID: "start", Label: "Start", Unavailable: unavail(notStarted, "Only a job not started yet is started.")},
 		{ID: "stop", Label: "Stop", Unavailable: unavail(st == dmspb.MigrationJob_RUNNING, "Only a running job is stopped."),
-			Confirm: "Stopped in its CDC phase, the job is resumed later; stopped in its full dump, it is restarted."},
+			// UNVERIFIED: Google's docs describe no Stop or Restart dialog, so
+			// the job's ID is typed back, the strictest confirmation (docs
+			// re-read 2026-11-25: https://docs.cloud.google.com/database-migration/docs/postgres/migration-job-statuses).
+			Confirm: "Stopped in its CDC phase, the job is resumed later; stopped in its full dump, it is restarted.", ConfirmWord: lastSegment(j.GetName())},
 		{ID: "resume", Label: "Resume", Unavailable: unavail(st == dmspb.MigrationJob_STOPPED && cdc, "Only a job stopped in its CDC phase is resumed.")},
-		{ID: "promote", Label: "Promote", Unavailable: unavail(cdc && j.GetType() == dmspb.MigrationJob_CONTINUOUS &&
+		{ID: "promote", Label: "Promote", Destructive: true, Unavailable: unavail(cdc && j.GetType() == dmspb.MigrationJob_CONTINUOUS &&
 			(st == dmspb.MigrationJob_RUNNING || st == dmspb.MigrationJob_STOPPED || st == dmspb.MigrationJob_FAILED), "A continuous job is promoted in its CDC phase."),
-			Confirm: "Replication stops and the destination becomes a standalone database. Stop writes to the source first."},
+			// "In the dialog, confirm that no errors are shown, then click
+			// Promote": nothing typed (docs re-read 2026-11-25:
+			// https://docs.cloud.google.com/database-migration/docs/postgres/promote-migration).
+			Confirm:      "Replication stops and the destination becomes a standalone database. Stop writes to the source first.",
+			ConfirmStyle: console.DeleteConfirmClick, ConfirmTitle: "Promote migration job?"},
 		{ID: "restart", Label: "Restart", Unavailable: unavail(st == dmspb.MigrationJob_STOPPED || st == dmspb.MigrationJob_FAILED || st == dmspb.MigrationJob_RUNNING,
-			"A stopped, failed or running job is restarted."), Confirm: "The destination is emptied and the migration starts again from scratch."},
+			"A stopped, failed or running job is restarted."), Confirm: "The destination is emptied and the migration starts again from scratch.",
+			ConfirmWord: lastSegment(j.GetName())},
 		{ID: "edit", Label: "Edit", Fields: []console.Field{{Name: "displayName", Label: "Migration job name", Type: "text", Default: j.GetDisplayName()}}},
 		{ID: "delete", Label: "Delete", Destructive: true, Leaves: true, Fields: []console.Field{
 			{Name: "force", Label: "Also delete the destination Cloud SQL instance", Type: "checkbox"}},
-			Confirm: "A Cloud SQL destination's connection profile is deleted with the job."},
+			Confirm: "A Cloud SQL destination's connection profile is deleted with the job.", ConfirmWord: lastSegment(j.GetName())},
 	}
 }
 
@@ -413,8 +421,7 @@ func (p dmsJobsProvider) ActAt(ctx context.Context, project string, path []strin
 			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name"}}}))
 	case "delete":
 		force := v["force"] == "true" || v["force"] == "on"
-		_, err := s.DeleteMigrationJob(ctx, &dmspb.DeleteMigrationJobRequest{Name: n, Force: force})
-		return err
+		return dmsWait(s)(s.DeleteMigrationJob(ctx, &dmspb.DeleteMigrationJobRequest{Name: n, Force: force}))
 	}
 	return fmt.Errorf("unknown action %q", action)
 }
