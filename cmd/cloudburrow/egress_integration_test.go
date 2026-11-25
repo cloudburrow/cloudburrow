@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // egressGuard is added to the standard library's net package of the binary
@@ -453,7 +454,7 @@ func seedSpannerAndBigtable(t *testing.T, ctx context.Context, vars map[string]s
 	if err := admin.CreateColumnFamily(ctx, "egress", "cf"); err != nil && status.Code(err) != codes.AlreadyExists {
 		t.Fatalf("CreateColumnFamily: %v", err)
 	}
-	data, err := bigtable.NewClientWithConfig(ctx, project, "cloudburrow", bigtable.ClientConfig{
+	data, err := localclient.BigtableWithConfig(ctx, project, "cloudburrow", bigtable.ClientConfig{
 		DisableSession: true, DisableDirectAccess: true, MetricsProvider: bigtable.NoopMetricsProvider{}}, bt...)
 	if err != nil {
 		t.Fatal(err)

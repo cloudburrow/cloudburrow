@@ -20,6 +20,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/wrapperspb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // serveFront is serve, with the front itself returned.
@@ -123,7 +125,7 @@ func TestSessionsServeTheGoClient(t *testing.T) {
 	if err := ac.CreateColumnFamily(ctx, "t", "f"); err != nil {
 		t.Fatal(err)
 	}
-	c, err := bigtable.NewClientWithConfig(ctx, "p", "i", bigtable.ClientConfig{MetricsProvider: bigtable.NoopMetricsProvider{}, DisableDirectAccess: true},
+	c, err := localclient.BigtableWithConfig(ctx, "p", "i", bigtable.ClientConfig{MetricsProvider: bigtable.NoopMetricsProvider{}, DisableDirectAccess: true},
 		option.WithEndpoint(addr), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
 	if err != nil {
@@ -204,7 +206,7 @@ func TestSessionsDefaultClientStaysClassic(t *testing.T) {
 	if err := ac.CreateColumnFamily(ctx, "t", "f"); err != nil {
 		t.Fatal(err)
 	}
-	c, err := bigtable.NewClientWithConfig(ctx, "p", "i", bigtable.ClientConfig{MetricsProvider: bigtable.NoopMetricsProvider{}, DisableDirectAccess: true},
+	c, err := localclient.BigtableWithConfig(ctx, "p", "i", bigtable.ClientConfig{MetricsProvider: bigtable.NoopMetricsProvider{}, DisableDirectAccess: true},
 		option.WithEndpoint(addr), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
 	if err != nil {

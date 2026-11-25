@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigtable"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestConsoleBigtableInstancePicker (#1360).
@@ -49,7 +51,7 @@ func TestConsoleBigtableInstancePicker(t *testing.T) {
 		t.Fatalf("NewAdminClient: %v", err)
 	}
 	defer admin.Close()
-	client, err := bigtable.NewClient(ctx, project, id)
+	client, err := localclient.Bigtable(ctx, project, id)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

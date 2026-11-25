@@ -12,6 +12,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestSpannerAddSplitPoints (#1523): AddSplitPoints, a hint Google
@@ -36,7 +38,7 @@ func TestSpannerAddSplitPoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CREATE INDEX: %v", err)
 	}
-	dc, err := spanner.NewClient(ctx, f.database, spannerOpts(f.addr)...)
+	dc, err := localclient.Spanner(ctx, f.database, spannerOpts(f.addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}

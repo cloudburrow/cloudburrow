@@ -20,15 +20,17 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // spannerRows reads "SELECT Id, Name FROM Items ORDER BY Id" and the child
 // table's rows from db, as "id=name" and "id/n=note" strings.
 func spannerRows(t *testing.T, ctx context.Context, addr, db string) []string {
 	t.Helper()
-	c, err := spanner.NewClient(ctx, db, spannerOpts(addr)...)
+	c, err := localclient.Spanner(ctx, db, spannerOpts(addr)...)
 	if err != nil {
-		t.Fatalf("spanner.NewClient(%s): %v", db, err)
+		t.Fatalf("localclient.Spanner(%s): %v", db, err)
 	}
 	defer c.Close()
 	var out []string
@@ -78,7 +80,7 @@ func TestSpannerBackupAndRestore(t *testing.T) {
 	if err := op.Wait(ctx); err != nil {
 		t.Fatalf("UpdateDatabaseDdl: %v", err)
 	}
-	dc, err := spanner.NewClient(ctx, f.database, spannerOpts(f.addr)...)
+	dc, err := localclient.Spanner(ctx, f.database, spannerOpts(f.addr)...)
 	if err != nil {
 		t.Fatalf("spanner.NewClient: %v", err)
 	}

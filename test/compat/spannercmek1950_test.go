@@ -22,6 +22,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // spannerKeyText is Google's documented message for a key Spanner cannot
@@ -133,7 +135,7 @@ func TestSpannerCMEK(t *testing.T) {
 		got.GetEncryptionInfo()[0].GetEncryptionType() != databasepb.EncryptionInfo_CUSTOMER_MANAGED_ENCRYPTION {
 		t.Fatalf("GetDatabase = %v, %v", got, err)
 	}
-	c, err := spanner.NewClient(ctx, db, spannerOpts(addr)...)
+	c, err := localclient.Spanner(ctx, db, spannerOpts(addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +213,7 @@ func TestSpannerCMEK(t *testing.T) {
 	}
 
 	setState(dbKey, kmspb.CryptoKeyVersion_DISABLED)
-	c2, err := spanner.NewClient(ctx, db, spannerOpts(addr)...)
+	c2, err := localclient.Spanner(ctx, db, spannerOpts(addr)...)
 	if err == nil {
 		_, err = c2.Single().ReadRow(ctx, "Items", spanner.Key{1}, []string{"Name"})
 		c2.Close()
@@ -265,9 +267,9 @@ func TestSpannerCMEK(t *testing.T) {
 func spannerRows1950(t *testing.T, addr, db string) string {
 	t.Helper()
 	ctx := t.Context()
-	c, err := spanner.NewClient(ctx, db, spannerOpts(addr)...)
+	c, err := localclient.Spanner(ctx, db, spannerOpts(addr)...)
 	if err != nil {
-		t.Fatalf("spanner.NewClient(%s): %v", db, err)
+		t.Fatalf("localclient.Spanner(%s): %v", db, err)
 	}
 	defer c.Close()
 	var out []string

@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"cloud.google.com/go/bigtable"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestConsoleBigtableSQLGeography (#1720) runs the geography functions in
@@ -32,7 +34,7 @@ func TestConsoleBigtableSQLGeography(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = admin.Close() })
-	client, err := bigtable.NewClient(ctx, "demo", "geo-inst", localOpts(addr)...)
+	client, err := localclient.Bigtable(ctx, "demo", "geo-inst", localOpts(addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}

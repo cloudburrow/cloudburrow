@@ -27,6 +27,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // pastGRPCDenial fails when err is PERMISSION_DENIED: the call passed its
@@ -138,7 +140,7 @@ func TestIAMEnforcementFirestore(t *testing.T) {
 // client's built-in metrics off (they export to Cloud Monitoring).
 func spannerAs(t *testing.T, h *Harness, addr, db, token string) *spanner.Client {
 	t.Helper()
-	c, err := spanner.NewClientWithConfig(h.Context(), db, spanner.ClientConfig{DisableNativeMetrics: true}, grpcAs(addr, token)...)
+	c, err := localclient.SpannerWithConfig(h.Context(), db, spanner.ClientConfig{DisableNativeMetrics: true}, grpcAs(addr, token)...)
 	if err != nil {
 		t.Fatalf("spanner.NewClient: %v", err)
 	}
@@ -311,7 +313,7 @@ func TestIAMEnforcementBigtable(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := bigtable.ClientConfig{MetricsProvider: bigtable.NoopMetricsProvider{}}
-	oc, err := bigtable.NewClientWithConfig(ctx, project, inst, cfg, bigtableAs(t, addr, "")...)
+	oc, err := localclient.BigtableWithConfig(ctx, project, inst, cfg, bigtableAs(t, addr, "")...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +323,7 @@ func TestIAMEnforcementBigtable(t *testing.T) {
 	if err := oc.Open(table).Apply(ctx, "r1", mut); err != nil {
 		t.Fatalf("the instance's own account: MutateRow = %v", err)
 	}
-	pc, err := bigtable.NewClientWithConfig(ctx, project, inst, cfg, bigtableAs(t, addr, p.token)...)
+	pc, err := localclient.BigtableWithConfig(ctx, project, inst, cfg, bigtableAs(t, addr, p.token)...)
 	if err != nil {
 		t.Fatal(err)
 	}
