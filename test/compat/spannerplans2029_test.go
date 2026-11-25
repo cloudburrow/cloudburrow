@@ -14,6 +14,8 @@ import (
 	databasepb "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	sppb "cloud.google.com/go/spanner/apiv1/spannerpb"
 	"google.golang.org/api/iterator"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // plansDDL is the schema of Google's query plan pages
@@ -80,7 +82,7 @@ func plansDB(t *testing.T, ctx context.Context, addr, project, dbID string, pg b
 			t.Fatalf("UpdateDatabaseDdl wait: %v", err)
 		}
 	}
-	client, err := spanner.NewClient(ctx, db, spannerOpts(addr)...)
+	client, err := localclient.Spanner(ctx, db, spannerOpts(addr)...)
 	if err != nil {
 		t.Fatalf("spanner.NewClient: %v", err)
 	}

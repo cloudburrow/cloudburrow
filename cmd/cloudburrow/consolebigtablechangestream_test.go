@@ -13,6 +13,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/bigtablefront"
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestBigtableConsoleEditsTheChangeStream (#1523): a table page's Edit
@@ -72,7 +73,7 @@ func TestBigtableConsoleEditsTheChangeStream(t *testing.T) {
 		t.Errorf("Edit change stream is prefilled with %s, want 3", got)
 	}
 	// A write is listed in the table's Change stream section.
-	client, err := bigtable.NewClient(ctx, "demo", bigtableInstance, localOpts(p.endpoint)...)
+	client, err := localclient.Bigtable(ctx, "demo", bigtableInstance, localOpts(p.endpoint)...)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -30,6 +30,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestAPurgedProjectsDataGoesEverywhere (#1540) is TestAPurgedProjectsIDStartsEmpty
@@ -229,7 +231,7 @@ func TestAPurgedProjectsDataGoesEverywhere(t *testing.T) {
 			t.Fatalf("Bigtable CreateTable under never-made: %v", err)
 		}
 		t.Cleanup(func() { _ = gac.DeleteTable(context.Background(), "ghost") })
-		dc, err := bigtable.NewClient(ctx, id, "never-made")
+		dc, err := localclient.Bigtable(ctx, id, "never-made")
 		if err != nil {
 			t.Fatal(err)
 		}

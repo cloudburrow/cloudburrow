@@ -12,6 +12,8 @@ import (
 
 	"cloud.google.com/go/bigtable"
 	"github.com/chromedp/chromedp"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestBigtableInstancePickerThroughTheBrowser (#1360). An instance is made
@@ -52,7 +54,7 @@ func TestBigtableInstancePickerThroughTheBrowser(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = admin.Close() })
-	client, err := bigtable.NewClient(ctx, project, id)
+	client, err := localclient.Bigtable(ctx, project, id)
 	if err != nil {
 		t.Fatal(err)
 	}

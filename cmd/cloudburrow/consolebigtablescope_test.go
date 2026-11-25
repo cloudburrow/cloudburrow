@@ -17,6 +17,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/bigtablefront"
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // bigtablePickerConsole is the Bigtable and Bigtable instances screens over
@@ -98,7 +99,7 @@ func TestConsoleBigtableInstancePicker(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer admin.Close()
-	data, err := bigtable.NewClient(ctx, "demo", inst, localOpts(addr)...)
+	data, err := localclient.Bigtable(ctx, "demo", inst, localOpts(addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}

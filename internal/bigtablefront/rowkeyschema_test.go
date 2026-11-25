@@ -17,6 +17,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 func TestOrderedCodeInt64RoundTripsInOrder(t *testing.T) {
@@ -85,7 +87,7 @@ func rowKeyClients(t *testing.T, addr string) (context.Context, *bigtable.AdminC
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ac.Close() })
-	c, err := bigtable.NewClient(ctx, "p", "i", option.WithGRPCConn(conn))
+	c, err := localclient.Bigtable(ctx, "p", "i", option.WithGRPCConn(conn))
 	if err != nil {
 		t.Fatal(err)
 	}

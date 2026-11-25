@@ -15,6 +15,7 @@ import (
 	"cloud.google.com/go/bigtable/bttest"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // bigtableConsole is the console serving the Bigtable screen over the
@@ -39,7 +40,7 @@ func bigtableConsole(t *testing.T, table string) (*httptest.Server, *bigtable.Ad
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = admin.Close() })
-	client, err := bigtable.NewClient(ctx, "demo", bigtableInstance, localOpts(bt.Addr)...)
+	client, err := localclient.Bigtable(ctx, "demo", bigtableInstance, localOpts(bt.Addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}

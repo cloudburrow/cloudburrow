@@ -10,6 +10,8 @@ import (
 
 	"cloud.google.com/go/bigtable"
 	btapb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestBigtableConsoleParity (#1858): Create instance's steps (edition, 2x
@@ -284,7 +286,7 @@ func TestBigtableTablesReplicationsAndExplorerActions(t *testing.T) {
 	if err := admin.CreateColumnFamily(ctx, "orders", "cf1"); err != nil {
 		t.Fatal(err)
 	}
-	client, err := bigtable.NewClient(ctx, "demo", "rep-inst", localOpts(p.endpoint)...)
+	client, err := localclient.Bigtable(ctx, "demo", "rep-inst", localOpts(p.endpoint)...)
 	if err != nil {
 		t.Fatal(err)
 	}
