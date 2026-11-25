@@ -4,6 +4,7 @@ package compat
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -548,6 +549,27 @@ func (s *toolsStack) writeShimConfig() error {
 // connection (init.sh leaves root's loopback traffic in the container), carried
 // over `docker exec`'s stdin and stdout. Without the container it is a plain
 // dial.
+// toolReadFile reads the file at p in the tools container: a path a tool
+// reports (gcloud's sdk_root) is the container's, which the host may also
+// have, holding something else (a runner's own gcloud). A missing file is
+// os.ErrNotExist.
+func toolReadFile(t *testing.T, p string) ([]byte, error) {
+	t.Helper()
+	s := toolsContainer(t)
+	var stderr bytes.Buffer
+	cmd := exec.Command("docker", "exec", s.container, "sh", "-c", `[ -f "$1" ] || exit 3; cat "$1"`, "sh", p)
+	cmd.Stderr = &stderr
+	b, err := cmd.Output()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == 3 {
+		return nil, fmt.Errorf("%s in the tools container: %w", p, os.ErrNotExist)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s in the tools container: %v: %s", p, err, strings.TrimSpace(stderr.String()))
+	}
+	return b, nil
+}
+
 func toolDial(addr string, timeout time.Duration) (net.Conn, error) {
 	s := toolsState
 	if s == nil || s.container == "" {

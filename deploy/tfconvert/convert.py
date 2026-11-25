@@ -817,8 +817,9 @@ SELU_SCALE = 1.0507009873554805
 SELU_ALPHA = 1.6732632423543772
 
 
-def export():
-    """Writes the SavedModel of /spec/spec.json to /out/model.
+def export_model():
+    """The export command: writes the SavedModel of /spec/spec.json to
+    /out/model. (export, above, is convert's copy of its SavedModel.)
 
     spec: {"inputs": [{"name", "dtype"}], "features": [encoder], "head": {...},
     "label": name, "labelType": BigQuery type}. Each encoder makes the
@@ -836,6 +837,9 @@ def export():
     import numpy as np
     import tensorflow as tf
 
+    # What this writes as nobody the CLI's user moves and deletes: on a
+    # Linux host the files keep nobody's uid.
+    os.umask(0)
     spec = json.load(open("/spec/spec.json"))
     if "transform" in spec:
         # -I leaves the script's folder off the path: transform.py is next to it.
@@ -1024,4 +1028,4 @@ def export():
 
 
 if __name__ == "__main__":
-    {"convert": convert, "predict": predict, "serve": serve, "export": export}[sys.argv[1] if len(sys.argv) > 1 else "convert"]()
+    {"convert": convert, "predict": predict, "serve": serve, "export": export_model}[sys.argv[1] if len(sys.argv) > 1 else "convert"]()

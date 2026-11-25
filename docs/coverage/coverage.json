@@ -13648,8 +13648,8 @@
         "tests": [
           "test/compat/bigqueryasyncjobs_test.go:60 TestBigQueryAsyncJobs",
           "test/compat/bigquerycontinuous2193_test.go:394 TestBigQueryContinuousQueryPubSub",
-          "test/compat/bigquerycontinuousstateful2193_test.go:226 TestBigQueryContinuousQueryJoin",
-          "test/compat/bigquerycontinuousstateful2193_test.go:60 TestBigQueryContinuousQueryTumblePubSub",
+          "test/compat/bigquerycontinuousstateful2193_test.go:232 TestBigQueryContinuousQueryJoin",
+          "test/compat/bigquerycontinuousstateful2193_test.go:66 TestBigQueryContinuousQueryTumblePubSub",
           "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
         ]
@@ -13799,8 +13799,8 @@
           "test/compat/bigquerycontinuous2193_test.go:394 TestBigQueryContinuousQueryPubSub",
           "test/compat/bigquerycontinuous2193_test.go:525 TestBigQueryContinuousQueryInsert",
           "test/compat/bigquerycontinuous2193_test.go:589 TestBigQueryContinuousQueryBigtableAndSpanner",
-          "test/compat/bigquerycontinuousstateful2193_test.go:226 TestBigQueryContinuousQueryJoin",
-          "test/compat/bigquerycontinuousstateful2193_test.go:60 TestBigQueryContinuousQueryTumblePubSub",
+          "test/compat/bigquerycontinuousstateful2193_test.go:232 TestBigQueryContinuousQueryJoin",
+          "test/compat/bigquerycontinuousstateful2193_test.go:66 TestBigQueryContinuousQueryTumblePubSub",
           "test/compat/bigquerycopykey1762_test.go:33 TestBigQueryCopyKey1762",
           "test/compat/bigquerycopykey1822_test.go:35 TestBigQueryCopyKeyPartition1822",
           "test/compat/bigquerycopylayout1759_test.go:43 TestBigQueryCopyLayout1759",
@@ -16276,21 +16276,21 @@
         "method": "serviceusage.operations.cancel",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:281 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:282 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.operations.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:281 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:282 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.operations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:281 TestServiceUsageOperations",
+          "test/compat/serviceusage_test.go:282 TestServiceUsageOperations",
           "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
@@ -16298,14 +16298,14 @@
         "method": "serviceusage.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:281 TestServiceUsageOperations"
+          "test/compat/serviceusage_test.go:282 TestServiceUsageOperations"
         ]
       },
       {
         "method": "serviceusage.services.batchEnable",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:169 TestTerraformProjectService",
           "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
@@ -16326,8 +16326,8 @@
           "test/compat/apienable_test.go:211 TestServiceDisabledBigQuery",
           "test/compat/apienable_test.go:244 TestServiceDisabledFirestore",
           "test/compat/apienable_test.go:270 TestGcloudServicesDisableEnforced",
-          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:239 TestGcloudServices",
+          "test/compat/serviceusage_test.go:169 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:240 TestGcloudServices",
           "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
@@ -16341,8 +16341,8 @@
           "test/compat/apienable_test.go:211 TestServiceDisabledBigQuery",
           "test/compat/apienable_test.go:244 TestServiceDisabledFirestore",
           "test/compat/apienable_test.go:270 TestGcloudServicesDisableEnforced",
-          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:239 TestGcloudServices",
+          "test/compat/serviceusage_test.go:169 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:240 TestGcloudServices",
           "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
@@ -16350,8 +16350,8 @@
         "method": "serviceusage.services.get",
         "status": "Verified",
         "tests": [
-          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:239 TestGcloudServices",
+          "test/compat/serviceusage_test.go:169 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:240 TestGcloudServices",
           "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       },
@@ -16360,8 +16360,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingparents_test.go:290 TestServiceUsageFolderParentRefused",
-          "test/compat/serviceusage_test.go:168 TestTerraformProjectService",
-          "test/compat/serviceusage_test.go:239 TestGcloudServices",
+          "test/compat/serviceusage_test.go:169 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:240 TestGcloudServices",
           "test/compat/serviceusage_test.go:53 TestServiceUsageServices"
         ]
       }

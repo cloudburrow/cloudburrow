@@ -114,10 +114,13 @@ func run() int {
 }
 
 // toolVariable reports whether a tool reads k, so a host path in it that the
-// container cannot see must stop the run rather than be dropped.
+// container cannot see must stop the run rather than be dropped. The
+// CLI's own CLOUDBURROW_ variables, which `cloudburrow terraform` passes on
+// (CLOUDBURROW_LOCALAI_MODEL, a model file outside the mounts), no tool
+// reads: one that names a path the container cannot see is dropped.
 func toolVariable(k string) bool {
 	for _, p := range []string{"CLOUDSDK_", "GOOGLE_", "GCE_", "BOTO", "TF_", "TOFU_", "KUBECONFIG", "SSL_CERT_",
-		"REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "BIGTABLE_", "CLOUDBURROW_"} {
+		"REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "BIGTABLE_"} {
 		if strings.HasPrefix(k, p) {
 			return true
 		}

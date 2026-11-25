@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -115,10 +116,35 @@ func (d *Docker) Export(ctx context.Context, spec []byte, dir string) error {
 	if _, err := os.Stat(filepath.Join(model, "saved_model.pb")); err != nil {
 		return &Refusal{Kind: "convert", Message: "the TensorFlow exporter wrote no SavedModel: " + strings.TrimSpace(log.String())}
 	}
-	if err := os.Remove(dir); err != nil {
-		return err
-	}
-	return os.Rename(model, dir)
+	// Copied, not renamed: on a Linux host model is nobody's, and moving
+	// a directory another user owns to a new parent is refused.
+	return copyTree(model, dir)
+}
+
+// copyTree copies src's directories and regular files into dir, which
+// exists.
+func copyTree(src, dir string) error {
+	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		to := filepath.Join(dir, rel)
+		switch {
+		case d.IsDir():
+			return os.MkdirAll(to, 0o755)
+		case d.Type().IsRegular():
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(to, b, 0o644)
+		}
+		return nil
+	})
 }
 
 // Export sends spec to the converter and returns the SavedModel's files,

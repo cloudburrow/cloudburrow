@@ -332,7 +332,7 @@ func (d *Docker) Ensure(ctx context.Context, key, ip string, spec filestore.Spec
 	}
 	args := []string{"run", "-d", "--name", name, "--hostname", "filestore-" + key,
 		"--label", d.label(), "--label", "cloudburrow.dev/owned=true", "--label", "io.cloudburrow.filestore.config=" + confHash,
-		"--privileged", "--network", Network, "--ip", ip,
+		"--privileged", "--cgroupns", "private", "--network", Network, "--ip", ip,
 		"--sysctl", "net.ipv6.conf.all.disable_ipv6=1", "--stop-timeout", "30",
 		"--tmpfs", "/run/filestore:size=1m,mode=0700",
 		"-e", "GANESHA_CONFIG=" + base64.StdEncoding.EncodeToString([]byte(conf))}

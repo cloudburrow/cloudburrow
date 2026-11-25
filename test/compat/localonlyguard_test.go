@@ -4,8 +4,10 @@ package compat
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -185,10 +187,11 @@ func TestPinnedToolsGainNoUnmappedEndpoint(t *testing.T) {
 		}
 		// gcloud 593 moved the section into core/properties/sections;
 		// earlier releases keep it in core/properties.py.
-		lib := filepath.Join(strings.TrimSpace(string(root)), "lib", "googlecloudsdk", "core")
-		src, err := os.ReadFile(filepath.Join(lib, "properties", "sections", "api_endpoint_overrides.py"))
-		if os.IsNotExist(err) {
-			src, err = os.ReadFile(filepath.Join(lib, "properties.py"))
+		// The SDK root is the tools container's, read there.
+		lib := path.Join(strings.TrimSpace(string(root)), "lib", "googlecloudsdk", "core")
+		src, err := toolReadFile(t, path.Join(lib, "properties", "sections", "api_endpoint_overrides.py"))
+		if errors.Is(err, os.ErrNotExist) {
+			src, err = toolReadFile(t, path.Join(lib, "properties.py"))
 		}
 		if err != nil {
 			t.Fatal(err)

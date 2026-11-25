@@ -36,12 +36,18 @@ func refusedContinuous(t *testing.T, h *Harness, bq *bigquery.Client, what, sql,
 }
 
 // waitForWindowStart sleeps until just after the start of the next window
-// of size, on this machine's clock (the instance's): rows inserted then
-// commit within that window.
-func waitForWindowStart(size time.Duration) time.Time {
-	now := time.Now()
-	next := now.Truncate(size).Add(size)
-	time.Sleep(time.Until(next) + 300*time.Millisecond)
+// of size on the instance's BigQuery clock, which stamps the rows' commits:
+// rows inserted then commit within that window. It answers the window's
+// start, on that clock. The clock is this machine's plus what earlier tests
+// in the shard moved it by (clock:advance, a CloudBurrow test extension),
+// read here.
+func waitForWindowStart(t *testing.T, h *Harness, size time.Duration) time.Time {
+	t.Helper()
+	before := time.Now()
+	inst := advanceBigQueryClock(t, h, 0)
+	off := inst.Sub(before.Add(time.Since(before) / 2))
+	next := inst.Truncate(size).Add(size)
+	time.Sleep(time.Until(next.Add(-off)) + 300*time.Millisecond)
 	return next
 }
 
@@ -164,7 +170,7 @@ func TestBigQueryContinuousQueryTumblePubSub(t *testing.T) {
 	}
 
 	// Window 1: three clicks of ann, one of bob.
-	w1 := waitForWindowStart(size)
+	w1 := waitForWindowStart(t, h, size)
 	insert("('ann', 3), ('ann', 1), ('bob', 5)")
 	insert("('ann', 2)")
 	// The window is open: nothing is published while no later row is read.
@@ -173,7 +179,7 @@ func TestBigQueryContinuousQueryTumblePubSub(t *testing.T) {
 		t.Fatalf("published %v before any row of a later window, want nothing until the window closes", g)
 	}
 	// Window 2 (or later): a row of bob closes window 1.
-	w2 := waitForWindowStart(size)
+	w2 := waitForWindowStart(t, h, size)
 	insert("('bob', 7)")
 	eventually1874(t, "window 1's aggregates", 60*time.Second, func() bool { return len(snapshot()) >= 2 })
 	g := snapshot()
@@ -203,7 +209,7 @@ func TestBigQueryContinuousQueryTumblePubSub(t *testing.T) {
 	check(g, want1)
 	// A third window's row closes window 2: bob's one click there, and
 	// window 1 is not published again.
-	waitForWindowStart(size)
+	waitForWindowStart(t, h, size)
 	insert("('cy', 1)")
 	eventually1874(t, "window 2's aggregate", 60*time.Second, func() bool { return len(snapshot()) >= 3 })
 	time.Sleep(3 * time.Second)
@@ -335,10 +341,10 @@ func TestBigQueryContinuousQueryJoin(t *testing.T) {
 		"GROUP BY window_end, geohash"
 	job2 := startContinuous(t, h, bq, health, "")
 	t.Cleanup(func() { _ = job2.Cancel(context.Background()) })
-	wa := waitForWindowStart(size)
+	wa := waitForWindowStart(t, h, size)
 	insert("taxirides", "('t5', 'g5', 'available')")
 	insert("ride_requests", "('r5', 'g5'), ('r6', 'g5')")
-	waitForWindowStart(size)
+	waitForWindowStart(t, h, size)
 	insert("ride_requests", "('r7', 'g7')") // closes the window
 	type demand struct {
 		end    time.Time

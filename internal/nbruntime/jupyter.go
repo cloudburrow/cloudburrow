@@ -67,6 +67,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
+	"github.com/cloudburrow/cloudburrow/internal/unserved"
 )
 
 // Jupyter is a Workbench instance's JupyterLab setup (Options.Jupyter).
@@ -430,6 +431,7 @@ func (m *Manager) gcloudEnv(project, ep string) []string {
 		"-e", "CLOUDSDK_CORE_DISABLE_PROMPTS=1", "-e", "CLOUDSDK_CONFIG=/home/jupyter/.config/gcloud",
 		"-e", "CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGQUERY=" + ep + relayPort + "/"}
 	ports := []string{relayPort}
+	set := map[string]bool{"BIGQUERY": true}
 	for _, o := range []struct {
 		f             func() string
 		port, env, ov string
@@ -455,10 +457,22 @@ func (m *Manager) gcloudEnv(project, ep string) []string {
 			url = ep + o.port + "/compute/v1"
 		}
 		env = append(env, "-e", "CLOUDSDK_API_ENDPOINT_OVERRIDES_"+o.ov+"="+url)
+		set[o.ov] = true
 		if o.env != "" {
 			env = append(env, "-e", o.env+"="+ep+o.port)
 		}
 		ports = append(ports, o.port)
+	}
+	// Every other API's override is CloudBurrow's refusal, on the Resource
+	// Manager port, as `cloudburrow env` sets them (#1977): a property left
+	// unset sends gcloud, and the plugins that read it (the Dataproc
+	// plugin's getGcpServiceUrls), to googleapis.com.
+	if call(m.ResourceManager) != "" {
+		for _, p := range unserved.GcloudOverrides() {
+			if name := strings.ToUpper(p); !set[name] {
+				env = append(env, "-e", "CLOUDSDK_API_ENDPOINT_OVERRIDES_"+name+"="+unserved.URL(ep+rmPort, p))
+			}
+		}
 	}
 	return append(env, "-e", "CB_API_PORTS="+strings.Join(ports, ","))
 }

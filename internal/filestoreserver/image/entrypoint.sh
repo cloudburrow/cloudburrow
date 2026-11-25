@@ -119,7 +119,18 @@ if [ -n "$SHARES" ]; then
   done
   rm -rf /run/filestore/keys/* /run/filestore/keys/.ready 2>/dev/null || true
   if [ -n "${IO_MAX:-}" ]; then
-    echo "$(wholedisk /export/disks) $IO_MAX" > /sys/fs/cgroup/io.max
+    # cgroup v2 delegation: a container (its own cgroup namespace, run
+    # with --cgroupns private) may not set its root cgroup's limits, only
+    # a child's. Every process of the container moves into the child
+    # "server", which then holds the server and its disk's limits.
+    cg=/sys/fs/cgroup
+    if ! { mkdir -p "$cg/server" &&
+      for p in $(cat "$cg/cgroup.procs"); do echo "$p" > "$cg/server/cgroup.procs" 2>/dev/null || true; done &&
+      echo +io > "$cg/cgroup.subtree_control" &&
+      echo "$(wholedisk /export/disks) $IO_MAX" > "$cg/server/io.max"; }; then
+      log "cannot set the instance's disk limits ($IO_MAX): the host's cgroup v2 io controller is not delegated to the container"
+      exit 1
+    fi
   fi
 fi
 if [ "${READ_BPS:-0}" -gt 0 ]; then
