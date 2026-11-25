@@ -197,10 +197,14 @@ func (s *computeService) Addr() string {
 	return s.ln.Addr().String()
 }
 
+// computeStateFile is the Compute Engine service's persisted state in the
+// instance directory.
+const computeStateFile = "compute.json"
+
 func (s *computeService) Start(ctx context.Context) error {
 	state := ""
 	if s.cfg.Mode == config.ModePersistent {
-		state = filepath.Join(s.cfg.InstanceDir(), "compute.json")
+		state = filepath.Join(s.cfg.InstanceDir(), computeStateFile)
 	}
 	bg, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel

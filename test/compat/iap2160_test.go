@@ -372,7 +372,8 @@ func TestGcloudStartIAPTunnel(t *testing.T) {
 	var line string
 	deadline = time.Now().Add(2 * time.Minute)
 	for {
-		c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 5*time.Second)
+		// The tunnel listens where gcloud runs: in the tools container.
+		c, err := toolDial(fmt.Sprintf("127.0.0.1:%d", port), 5*time.Second)
 		if err == nil {
 			_ = c.SetDeadline(time.Now().Add(20 * time.Second))
 			_, _ = c.Write([]byte("PING\n"))

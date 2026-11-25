@@ -22,7 +22,7 @@ cloudburrow stop --name lab        # stops the cluster's nodes on the host
 cloudburrow delete --name lab      # deletes them; the instance can then choose again
 ```
 
-`up` records the host in the instance directory (`compute.json`), so `status`, `stop`, `reset`,
+`up` records the host in the instance directory (`compute-host.json`), so `status`, `stop`, `reset`,
 `delete`, `doctor`, `logs` and the rest reach the same host without `--compute`. If you pass
 `--compute` with a different host, the command is refused: the cluster and its state are on the
 recorded host, so `cloudburrow delete` it first. `up --compute` is also refused for an instance
@@ -218,7 +218,7 @@ the same way, with two differences, both through `remotecompute.Options`:
   that now answers with another key is refused.
 
 `remotecompute.Engine` is `internal/byoc`'s `RemoteEngine`. The manager hands it each VM that a
-create, start or resize leaves running. It connects as above and writes `compute.json` with
+create, start or resize leaves running. It connects as above and writes `compute-host.json` with
 `provisioned: true`. `up`, `stop`, `delete`, `reset`, `status` and `doctor` then read the key,
 the pinned host key and the VM's current address from the provisioner on each connect; a stopped
 and started VM's new address is used. The cloud-init also sets sshd's `GatewayPorts

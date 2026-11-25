@@ -21,6 +21,11 @@ if [ -z "$relay" ]; then echo "FAIL setup: no relay"; exit 1; fi
 ip route add default dev eth0 || { echo "FAIL setup: route"; exit 1; }
 set -e
 iptables -t nat -A OUTPUT -d 127.0.0.0/8 -p tcp -m multiport --dports 53,9997,9998,9999 -j RETURN
+# Root's loopback connections stay in the container: the test's toolDial
+# reaches a tool's own listener (gcloud start-iap-tunnel's) this way. Only
+# root, the sink and toolDial, connects as root; the tools run as the test's
+# uid.
+iptables -t nat -A OUTPUT -d 127.0.0.0/8 -p tcp -m owner --uid-owner 0 -j RETURN
 iptables -t nat -A OUTPUT -d 127.0.0.0/8 -p tcp -j REDIRECT --to-ports 9997
 iptables -t nat -A OUTPUT -d 127.0.0.0/8 -j RETURN
 iptables -t nat -A OUTPUT -d "$relay" -p tcp --dport 7000 -m owner --uid-owner 0 -j RETURN
@@ -33,5 +38,13 @@ iptables -t nat -A OUTPUT -p udp -j REDIRECT --to-ports 9998
 ip6tables -A OUTPUT -p tcp -j REJECT --reject-with tcp-reset 2>/dev/null || true
 ip6tables -A OUTPUT -j REJECT 2>/dev/null || true
 echo "nameserver 127.0.0.1" > /etc/resolv.conf
+# The tools run as the test's uid; ssh-keygen and ssh (gcloud compute ssh)
+# refuse a uid with no passwd entry.
+if [ -n "${CB_TOOLS_UID:-}" ] && ! getent passwd "$CB_TOOLS_UID" >/dev/null; then
+  if ! getent group "${CB_TOOLS_GID:-$CB_TOOLS_UID}" >/dev/null; then
+    echo "tools:x:${CB_TOOLS_GID:-$CB_TOOLS_UID}:" >> /etc/group
+  fi
+  echo "tools:x:$CB_TOOLS_UID:${CB_TOOLS_GID:-$CB_TOOLS_UID}:CloudBurrow compat tools:/home/tools:/bin/bash" >> /etc/passwd
+fi
 exec /cbtools/sink -loopback "127.0.0.1:9997=$relay:7000" -token-env CB_TOOLS_TOKEN \
   -log /cblog/egress.log -ready /cblog/ready

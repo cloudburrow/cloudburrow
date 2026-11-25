@@ -167,6 +167,10 @@ func (s *Server) BackupDRBackup(ctx context.Context, name, runID string) (int64,
 		s.mu.Unlock()
 		return 0, err
 	}
+	if err := multiRefused(r); err != nil {
+		s.mu.Unlock()
+		return 0, err
+	}
 	if err := s.busyLocked(name); err != nil {
 		s.mu.Unlock()
 		return 0, err
@@ -212,9 +216,13 @@ func (s *Server) DeleteBackupDRBackup(ctx context.Context, runID string) error {
 }
 
 // bdrSourceLocked checks a new instance's sourceBackupdrBackup, and
-// answers the backup's data, nil when the share names none. The caller
-// holds mu.
+// answers the backup's data, nil when the share names none or the
+// instance has no share (a multishare instance's shares come later). The
+// caller holds mu.
 func (s *Server) bdrSourceLocked(in *filestorepb.Instance) (*bdrBackup, string, error) {
+	if len(in.GetFileShares()) == 0 {
+		return nil, "", nil
+	}
 	fs := in.GetFileShares()[0]
 	src := SourceBackupDR(fs)
 	if src == "" {

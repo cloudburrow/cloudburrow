@@ -33,13 +33,16 @@ func TestNoFakeGCSServerReferences(t *testing.T) {
 	// The BigQuery emulator CloudBurrow builds (#1061) depends on
 	// fake-gcs-server itself; its go.sum records the module's sums, and
 	// nothing of CloudBurrow's uses it.
-	upstream := "third_party/bigquery-emulator/go.sum"
+	// Apache Beam's GCS filesystem tests import it too, so the Dataflow Go
+	// pipeline module's go.sum (#2215) records its sums; no package that
+	// module builds imports it.
+	upstream := map[string]bool{"third_party/bigquery-emulator/go.sum": true, "testdata/dataflowgo/go.sum": true}
 	// An upgrade from a release that ran fake-gcs-server (v0.1.0) has to
 	// find that server's container and volume layout by name to copy its
 	// buckets out (#1606); nothing else of CloudBurrow's names it.
 	migration := map[string]bool{"cmd/cloudburrow/earlierstorage.go": true}
 	for _, f := range strings.Split(strings.TrimRight(string(out), "\x00"), "\x00") {
-		if f == "" || f == self || f == upstream || migration[f] || strings.HasPrefix(f, "docs/") {
+		if f == "" || f == self || upstream[f] || migration[f] || strings.HasPrefix(f, "docs/") {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(dir, f))

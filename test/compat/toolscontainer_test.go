@@ -338,6 +338,7 @@ func startTools(ctx context.Context, mounts []string) (*toolsStack, error) {
 	container := "cb-tools-" + suffix
 	args = []string{"run", "-d", "--platform", "linux/amd64", "--name", container, "--label", "cloudburrow.compat=tools", "--label", pidLabel,
 		"--network", network, "--cap-add", "NET_ADMIN", "-e", "CB_TOOLS_TOKEN=" + s.token,
+		"-e", fmt.Sprintf("CB_TOOLS_UID=%d", os.Getuid()), "-e", fmt.Sprintf("CB_TOOLS_GID=%d", os.Getgid()),
 		"-v", s.dir + ":/cbtools:ro", "-v", s.logDir + ":/cblog"}
 	tmp := []string{filepath.Clean(os.TempDir())}
 	if r, err := filepath.EvalSymlinks(os.TempDir()); err == nil {
@@ -539,6 +540,85 @@ func (s *toolsStack) writeShimConfig() error {
 	}
 	return os.WriteFile(filepath.Join(toolsShimDir, "shim.json"), b, 0o644)
 }
+
+// toolDial connects to addr as the test sees it: a listener a tool opened,
+// gcloud start-iap-tunnel's --local-host-port among them, is on the tools
+// container's loopback, not the host's. Within the container it is root's
+// connection (init.sh leaves root's loopback traffic in the container), carried
+// over `docker exec`'s stdin and stdout. Without the container it is a plain
+// dial.
+func toolDial(addr string, timeout time.Duration) (net.Conn, error) {
+	s := toolsState
+	if s == nil || s.container == "" {
+		return net.DialTimeout("tcp", addr, timeout)
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := strconv.Atoi(port); err != nil || net.ParseIP(host) == nil {
+		return nil, fmt.Errorf("toolDial %q: want IP:PORT", addr)
+	}
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		_, _ = inR.Close(), inW.Close()
+		return nil, err
+	}
+	script := fmt.Sprintf("exec 3<>/dev/tcp/%s/%s || exit 7; echo CB-DIAL-OK; cat <&3 & cat >&3; wait", host, port)
+	cmd := exec.Command("docker", "exec", "-i", "-u", "0", s.container, "bash", "-c", script)
+	cmd.Stdin, cmd.Stdout = inR, outW
+	if err := cmd.Start(); err != nil {
+		_, _, _, _ = inR.Close(), inW.Close(), outR.Close(), outW.Close()
+		return nil, err
+	}
+	_, _ = inR.Close(), outW.Close()
+	c := &execConn{cmd: cmd, r: outR, w: inW, addr: addr}
+	_ = outR.SetReadDeadline(time.Now().Add(timeout))
+	var ok [len("CB-DIAL-OK\n")]byte
+	if _, err := io.ReadFull(outR, ok[:]); err != nil || string(ok[:]) != "CB-DIAL-OK\n" {
+		_ = c.Close()
+		return nil, fmt.Errorf("dial %s in the tools container: connection refused", addr)
+	}
+	_ = outR.SetReadDeadline(time.Time{})
+	return c, nil
+}
+
+// execConn is a connection made in the tools container, carried over a
+// docker exec's stdin and stdout.
+type execConn struct {
+	cmd  *exec.Cmd
+	r, w *os.File
+	addr string
+	once sync.Once
+}
+
+func (c *execConn) Read(b []byte) (int, error)  { return c.r.Read(b) }
+func (c *execConn) Write(b []byte) (int, error) { return c.w.Write(b) }
+func (c *execConn) Close() error {
+	c.once.Do(func() {
+		_, _ = c.w.Close(), c.r.Close()
+		_ = c.cmd.Process.Kill()
+		_ = c.cmd.Wait()
+	})
+	return nil
+}
+func (c *execConn) LocalAddr() net.Addr  { return execAddr("tools-container") }
+func (c *execConn) RemoteAddr() net.Addr { return execAddr(c.addr) }
+func (c *execConn) SetDeadline(t time.Time) error {
+	_ = c.r.SetReadDeadline(t)
+	return c.w.SetWriteDeadline(t)
+}
+func (c *execConn) SetReadDeadline(t time.Time) error  { return c.r.SetReadDeadline(t) }
+func (c *execConn) SetWriteDeadline(t time.Time) error { return c.w.SetWriteDeadline(t) }
+
+type execAddr string
+
+func (a execAddr) Network() string { return "tools-container" }
+func (a execAddr) String() string  { return string(a) }
 
 // stop removes the containers and the network, by the names this run gave
 // them.

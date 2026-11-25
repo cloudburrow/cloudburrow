@@ -16579,7 +16579,7 @@
         "tests": [
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
           "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
-          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient"
+          "test/compat/computea1_test.go:411 TestComputeIPv6ThroughTheGoClient"
         ]
       },
       {
@@ -16588,7 +16588,7 @@
         "tests": [
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
           "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
-          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/computea1_test.go:411 TestComputeIPv6ThroughTheGoClient",
           "test/compat/iamenforcementround13_1879_test.go:223 TestIAMEnforcementComputeRound13"
         ]
       },
@@ -17026,7 +17026,7 @@
         "tests": [
           "test/compat/compute_test.go:299 TestGcloudComputeNetworks",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/computea1_test.go:411 TestComputeIPv6ThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/iap2160_test.go:224 TestGcloudStartIAPTunnel",
           "test/compat/relayfirewall2180_test.go:43 TestRelayedConnectionsFollowTheEgressFirewall"
@@ -17804,7 +17804,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
-          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/computea1_test.go:411 TestComputeIPv6ThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance",
@@ -17854,7 +17854,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
-          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/computea1_test.go:411 TestComputeIPv6ThroughTheGoClient",
           "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
           "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
           "test/compat/computeimagevdisk_test.go:40 TestComputeImageImportFromAVirtualDiskThroughTheGoClient",
@@ -18204,7 +18204,7 @@
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient"
+          "test/compat/computea1_test.go:411 TestComputeIPv6ThroughTheGoClient"
         ]
       },
       {
@@ -18218,7 +18218,7 @@
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/computea1_test.go:411 TestComputeIPv6ThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient"
         ]
       },
@@ -19723,7 +19723,7 @@
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/computea1_test.go:411 TestComputeIPv6ThroughTheGoClient",
           "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },
@@ -19741,7 +19741,7 @@
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/computea1_test.go:411 TestComputeIPv6ThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
@@ -19766,7 +19766,7 @@
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/computea1_test.go:411 TestComputeIPv6ThroughTheGoClient",
           "test/compat/vpcipv6_2140_test.go:45 TestIPv6OnlyVMsAndGlobalIPv6LoadBalancing2140"
         ]
       },

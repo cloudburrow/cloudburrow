@@ -11,8 +11,9 @@ import (
 
 // RecordFile is where an instance remembers the host its compute runs on,
 // so stop, delete, reset, status and doctor reach the same host as the up
-// that created it without being told again.
-const RecordFile = "compute.json"
+// that created it without being told again. It is not compute.json: that
+// is the Compute Engine service's persisted state in the same directory.
+const RecordFile = "compute-host.json"
 
 // Record is an instance's compute placement.
 type Record struct {
