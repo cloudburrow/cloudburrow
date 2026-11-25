@@ -38,11 +38,12 @@ tracks it; a closed issue is named only where it says what was built.
 | App Hub | 5 | 1 | 1 | 3 | 0 |
 | AlloyDB for PostgreSQL | 5 | 0 | 4 | 1 | 0 |
 | Filestore | 6 | 1 | 4 | 1 | 0 |
+| Dataflow | 4 | 2 | 1 | 1 | 0 |
 | Dataform | 8 | 0 | 3 | 5 | 0 |
 | Console | 11 | 5 | 5 | 1 | 0 |
 | Remote compute | 0 | 0 | 0 | 0 | 0 |
 | Bring your own cloud | 2 | 1 | 0 | 0 | 1 |
-| **Total** | **108** | **16** | **37** | **48** | **7** |
+| **Total** | **112** | **18** | **38** | **49** | **7** |
 
 ## Cloud Storage
 
@@ -395,6 +396,25 @@ data kept across `stop` and `up` in persistent mode; the console's Filestore pag
 | Multishare instances: a share made from a backup (`Share.backup`), and snapshots, backups and replication of multishare instances, are refused (Google documents snapshots as "not yet supported" for multishares) (#2194) | not built yet | S |
 | The address inside `reserved_ip_range` is routed (DNAT) in the nodes of the instance's kind cluster and its Kubernetes Engine clusters; elsewhere on the machine the server answers only at its `kind` network address | no emulator support | S |
 | A deleted instance whose share a node still mounts leaves a stand-in server answering ESTALE at its address until the mount is gone; the error texts of CMEK, replication and tag refusals, and a replica's tier, protocol and capacity matching its active instance's, are CloudBurrow's (UNVERIFIED in compatibility.md) | not documented by Google | S |
+
+## Dataflow
+
+Built (#2215, part): the Dataflow v1b3 API over gRPC and JSON (jobs create, get, list, aggregated
+list, update with cancel, drain and runtime parameters, replacement by `replaceJobId`; messages,
+autoscaling events, metrics, execution details; classic templates through `templates.launch`,
+`templates.get` and `templates.create`; Python Flex Templates from the instance's Artifact Registry; Google-provided Word Count and Text Files on Cloud Storage to BigQuery, built from Google's DataflowTemplates sources (#2215 round 3)); each job's Beam pipeline run on Apache Beam 2.78.0's
+Flink 1.20 portable runner with the Python 3.12 SDK harness, or for the Java SDK's pipelines the Java 11, 17 or 21 harness (#2215 round 2), in Docker on an `--internal` network
+whose one route is the instance's Cloud Storage, Pub/Sub, BigQuery, Dataflow and database emulators; the Python SDK's
+DataflowRunner, batch and streaming with drain; the Java SDK's DataflowRunner; snapshots as Flink savepoints, and jobs created from them; gcloud `dataflow jobs`, `snapshots` and `flex-template`, Terraform
+`google_dataflow_job` and `google_dataflow_flex_template_job`; the console's Jobs list, job page with its graph, metrics and logs, and
+Create job from template; the Go SDK's pipelines, with BigQuery through the cross-language `xlang/bigqueryio` (#2215 round 6); Java Flex Templates, and Python Flex Templates' requirements, setup file and extra packages, installed from an Artifact Registry Python repository of the instance's that the image's `PIP_INDEX_URL` names, as for a launcher without internet access (#2215 round 8); Beam YAML pipelines with Java providers through the Java expansion service (#2215 round 8); metrics committed for the bundles that finished successfully and tentative for every bundle attempted, Java's running bundles through their progress reports (#2215 round 8). Beam's `MetricsPusher` cannot report a running job on Beam 2.78.0's Flink runners (they make it only after `execute` returns), so running jobs' metrics come from the workers' own bundle reports.
+
+| Gap | Why open | Size |
+|---|---|---|
+| Google-provided templates: Word Count, Text Files on Cloud Storage to BigQuery, Pub/Sub Subscription and Topic to BigQuery (#2215 rounds 3 to 5), Cloud Storage Text to Pub/Sub and Bulk Compress and Decompress Files on Cloud Storage (#2215 round 8) run, built from Google's DataflowTemplates sources (release 2026-11-18-00_RC00, Apache-2.0) with Maven on first use, staged in the instance's own `gs://dataflow-templates` and served at Google's `gs://dataflow-templates[-REGION]/VERSION/NAME` paths. Built but not yet passing (#2215 round 8): Cloud Spanner to Text Files on Cloud Storage, whose SpannerIO ignores `SPANNER_EMULATOR_HOST` for its `spannerHost` parameter (default `batch-spanner.googleapis.com`): staged with `spannerHost=http://relay...:9005` it connects to the instance's Spanner but its read never completes (likely TLS against the relay's plain gRPC port); and Pub/Sub to Text Files on Cloud Storage, which passed one run in three: on the other two the drained job wrote no window file. Not built yet: JDBC to BigQuery (classic `Jdbc_to_BigQuery` and Flex): a job's network routes only the instance's APIs and emulators, so it has no route to a database a JDBC URL names; BigQuery to Cloud Storage (classic `Cloud_BigQuery_to_GCS_TensorFlow_Records`, Flex `BigQuery_to_Parquet`); the Spanner imports (`GCS_Avro_to_Cloud_Spanner`, `GCS_Text_to_Cloud_Spanner`) and Avro export; and every Flex template of DataflowTemplates' v2 modules (each a launcher image Google builds with Jib), including `gcloud dataflow yaml run`'s `Yaml_Template`. Java Flex Templates themselves run (#2215 round 8) | not built yet | M |
+| The pipeline components (#2210) | not built yet | M |
+| Workers are one local Flink cluster per job: machine types, zones, networks, disk sizes and service accounts are recorded, not used; `maxNumWorkers` bounds the job's parallelism | no emulator support | S |
+| Error texts Google publishes nowhere (searched 2026-11-24: Dataflow's guides, the v1b3 REST reference, gcloud's reference, Apache Beam's sources and issues): an invalid job name's message (the rule itself is Job.name's), a missing required template parameter, cancelling or draining a job in a terminal state, the update (`replaceJobId`) refusals, snapshot refusals, an unknown stage, and the `updateMask` checks; each is marked `UNVERIFIED` where it is made. Found and now used (#2215 round 8): an unknown template parameter's "The workflow could not be created. Causes: Found unexpected parameters: [...]" (Beam issue BEAM-2470), a duplicate active job's "There is already an active job named ..." (BEAM-12673), and for a drain of a batch job the stopping guide's "Draining a job is not supported for batch pipelines." | not documented by Google | S |
 
 ## Dataform
 

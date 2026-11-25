@@ -123,6 +123,8 @@ type consoleDeps struct {
 	alloyDB *alloyDBService
 	// filestore is Filestore (#2192), nil unless enabled.
 	filestore *filestoreService
+	// dataflow is Dataflow (#2215), nil unless enabled.
+	dataflow *dataflowService
 	// trace is Cloud Trace (#2118), nil unless enabled.
 	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
@@ -415,6 +417,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Filestore (#2192), in process: Instances, Backups, Snapshots.
 	if enabled[config.ServiceFilestore] && d.filestore != nil {
 		providers = append(providers, filestoreProvider{svc: d.filestore}, filestoreBackupsProvider{svc: d.filestore}, filestoreSnapshotsProvider{svc: d.filestore})
+	}
+	// Dataflow (#2215), in process: Jobs, Snapshots.
+	if enabled[config.ServiceDataflow] && d.dataflow != nil {
+		providers = append(providers, dataflowProvider{svc: d.dataflow, logging: d.logging}, dataflowSnapshotsProvider{svc: d.dataflow})
 	}
 	// App Hub (#2110), in process: Applications, Services and workloads,
 	// Settings.
@@ -956,6 +962,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceAppHub:           "App Hub",
 	config.ServiceAlloyDB:          "AlloyDB",
 	config.ServiceFilestore:        "Filestore",
+	config.ServiceDataflow:         "Dataflow",
 	config.ServiceTrace:            "Cloud Trace",
 }
 

@@ -1225,6 +1225,11 @@ const (
 	// expandable in place, artifacts shown with Expand artifacts, and the
 	// Pipeline run analysis pane beside it, its Node info the chosen node's.
 	KindPipelineGraph SectionKind = "pipelinegraph"
+	// KindGraph is a Dataflow job's graph (#2215): Pipeline's steps drawn
+	// as boxes joined by the collections that pass between them, each
+	// with its state and the elements it has output, as Google's Job graph
+	// tab draws them; choosing a step shows its properties.
+	KindGraph SectionKind = "graph"
 )
 
 // PipelineGraph is a KindPipelineGraph section's run: its nodes and the
@@ -1248,6 +1253,24 @@ type PipelineNode struct {
 	After  []string        `json:"after,omitempty"`
 	Inputs []string        `json:"inputs,omitempty"`
 	Info   []PropertyGroup `json:"info,omitempty"`
+}
+
+// JobGraph is a KindGraph section's content: the job's steps, each
+// naming the steps whose output it reads, in the pipeline's order.
+type JobGraph struct {
+	Steps []JobGraphStep `json:"steps"`
+}
+
+// JobGraphStep is one box of a job graph: its name and kind (Read, ParDo,
+// GroupByKey and so on), its state, the IDs of the steps it reads, and
+// what its step panel shows.
+type JobGraphStep struct {
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	Kind       string     `json:"kind,omitempty"`
+	State      string     `json:"state,omitempty"`
+	Inputs     []string   `json:"inputs,omitempty"`
+	Properties []Property `json:"properties,omitempty"`
 }
 
 // Media is a KindMedia section's player: Src is the console's own media
@@ -1321,6 +1344,8 @@ type Section struct {
 	Visualization string `json:"visualization,omitempty"`
 	// Media is the content when Kind is KindMedia.
 	Media *Media `json:"media,omitempty"`
+	// JobGraph is the content when Kind is KindGraph (a Dataflow job's).
+	JobGraph *JobGraph `json:"jobGraph,omitempty"`
 	// Unavailable explains why this one section has no content, so a section
 	// that cannot be read shows its own error inside its own panel rather
 	// than an empty table claiming the resource holds nothing.

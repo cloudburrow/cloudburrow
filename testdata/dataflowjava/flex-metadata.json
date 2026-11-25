@@ -1,0 +1,8 @@
+{
+  "name": "Word count (Java Flex Template)",
+  "description": "Counts the words of a Cloud Storage text file into Cloud Storage.",
+  "parameters": [
+    {"name": "input", "label": "Input file", "helpText": "The Cloud Storage file to read, gs://bucket/path."},
+    {"name": "output", "label": "Output file", "helpText": "The Cloud Storage file prefix the counts are written to."}
+  ]
+}

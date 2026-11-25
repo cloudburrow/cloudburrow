@@ -520,6 +520,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		filestoreSvc.clients = computeSvc.filestoreClients
 	}
 	filestoreSvc.register(coord)
+	// Dataflow (#2215), in process; its jobs run on Flink's Beam job
+	// server in Docker, reaching the instance's Storage, Pub/Sub and
+	// BigQuery.
+	dataflowSvc := newDataflowService(cfg)
+	if dataflowSvc != nil {
+		dataflowSvc.live = boundAddrs
+	}
+	dataflowSvc.register(coord)
 	if gkeSvc != nil && runSvc != nil && runSvc.events != nil {
 		// Eventarc's GKE destinations (#1877) reach its clusters' services.
 		runSvc.events.gke = gkeSvc.clusterAccess
@@ -772,6 +780,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		appHub:           appHubSvc,
 		alloyDB:          alloyDBSvc,
 		filestore:        filestoreSvc,
+		dataflow:         dataflowSvc,
 		trace:            traceSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
@@ -881,6 +890,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		appHubSvc.calls = callEvents(recorder, requestMetrics, "apphub")
 		appHubSvc.interpose = append(appHubSvc.interpose, grpctransport.LogInterceptor(logger, "apphub"), faults.Interceptor("apphub"))
 		appHubSvc.requests = requestEvents(recorder, requestMetrics, "apphub")
+	}
+	if dataflowSvc != nil {
+		dataflowSvc.tracing = tracing
+		dataflowSvc.calls = callEvents(recorder, requestMetrics, "dataflow")
+		dataflowSvc.interpose = append(dataflowSvc.interpose, grpctransport.LogInterceptor(logger, "dataflow"), faults.Interceptor("dataflow"))
+		dataflowSvc.requests = requestEvents(recorder, requestMetrics, "dataflow")
 	}
 	if filestoreSvc != nil {
 		filestoreSvc.tracing = tracing
@@ -1622,6 +1637,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		appHub:           appHubSvc,
 		alloyDB:          alloyDBSvc,
 		filestore:        filestoreSvc,
+		dataflow:         dataflowSvc,
 		trace:            traceSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
@@ -1711,6 +1727,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		return creds.MintAccessTokenFor(email, metadata.TokenTTL), nil
 	}, cmekKeys(kmsSvc, iamEnforcer).Usable, func() string { return creds.MintAccessTokenFor(creds.Email, metadata.TokenTTL) })
+	if dataflowSvc != nil {
+		// A Flex Template's image is read as the instance's account (#2215).
+		dataflowSvc.registryToken = func() string { return creds.MintAccessTokenFor(creds.Email, metadata.TokenTTL) }
+	}
 	if sparkRunner != nil {
 		coord.Register(sparkRunner)
 		if dataprocSvc != nil {
@@ -1762,6 +1782,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := filestoreSvc.Addr(); a != "" {
 			live["filestore"] = a
+		}
+		if a := dataflowSvc.Addr(); a != "" {
+			live["dataflow"] = a
 		}
 		if a := traceSvc.Addr(); a != "" {
 			live["trace"] = a
