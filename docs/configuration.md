@@ -203,6 +203,17 @@ The opt-in Firestore, Datastore, Bigtable and Spanner emulators have their own
 (`FIRESTORE_EMULATOR_HOST`, `DATASTORE_EMULATOR_HOST`, `BIGTABLE_EMULATOR_HOST`,
 `SPANNER_EMULATOR_HOST`), exported by `cloudburrow env` when the service is enabled.
 
+With Spanner enabled, `cloudburrow env` also exports `SPANNER_DISABLE_BUILTIN_METRICS=true`.
+Every official Spanner client (Go, Java, Python, Node) otherwise exports built-in metrics to
+Google's Cloud Monitoring (`monitoring.googleapis.com`) once a minute, whatever endpoint it
+dials, unless it reads `SPANNER_EMULATOR_HOST`; a client given an endpoint of its own does
+not. The Bigtable clients have no such variable: `BIGTABLE_EMULATOR_HOST` turns their metrics
+off in Go, Java and Python. Node's `@google-cloud/bigtable` (7.5.1) exports whether it is set
+or not: pass `metricsEnabled: false` to `new Bigtable()`. A Go client given an endpoint
+directly needs `bigtable.ClientConfig{MetricsProvider: bigtable.NoopMetricsProvider{}}`, and a
+Go Cloud Storage gRPC client `storage.WithDisabledClientMetrics()` unless it reads
+`STORAGE_EMULATOR_HOST_GRPC`.
+
 The storage value carries a scheme because the official clients disagree: Python uses the
 value verbatim and requires one, while Go prepends `http://` when it is absent. The form with
 a scheme satisfies both.

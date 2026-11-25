@@ -12,6 +12,8 @@ import (
 
 	"cloud.google.com/go/bigtable"
 	"github.com/chromedp/chromedp"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestBigtableRowKeySchema1900 (#1900). Create table's Define row key
@@ -83,7 +85,7 @@ func TestBigtableRowKeySchema1900(t *testing.T) {
 		t.Errorf("the schema's encoding = %#v, want DelimitedBytes #", info.RowKeySchema.Encoding)
 	}
 
-	client, err := bigtable.NewClient(ctx, project, id)
+	client, err := localclient.Bigtable(ctx, project, id)
 	if err != nil {
 		t.Fatal(err)
 	}

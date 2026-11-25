@@ -25,6 +25,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	"cloud.google.com/go/spanner"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // spannerOpts are the client options for the local emulator. No credentials
@@ -110,7 +112,7 @@ func TestSpannerReadWriteTransactionIsAtomic(t *testing.T) {
 	dbName := spannerDatabase(t, ctx, addr, h.Project(), "cb-txn", "txndb",
 		`CREATE TABLE Accounts (Id INT64 NOT NULL, Balance INT64 NOT NULL) PRIMARY KEY (Id)`)
 
-	c, err := spanner.NewClient(ctx, dbName, spannerOpts(addr)...)
+	c, err := localclient.Spanner(ctx, dbName, spannerOpts(addr)...)
 	if err != nil {
 		t.Fatalf("spanner.NewClient: %v", err)
 	}
@@ -209,12 +211,12 @@ func TestSpannerDatabasesAreIsolated(t *testing.T) {
 	a := spannerDatabase(t, ctx, addr, h.Project(), "cb-iso", "isoa", ddl)
 	b := spannerDatabase(t, ctx, addr, h.Project(), "cb-iso", "isob", ddl)
 
-	ca, err := spanner.NewClient(ctx, a, spannerOpts(addr)...)
+	ca, err := localclient.Spanner(ctx, a, spannerOpts(addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ca.Close()
-	cb, err := spanner.NewClient(ctx, b, spannerOpts(addr)...)
+	cb, err := localclient.Spanner(ctx, b, spannerOpts(addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +261,7 @@ func TestSpannerStateDoesNotSurviveARestart(t *testing.T) {
 	dbName := spannerDatabase(t, ctx, addr, h.Project(), "cb-durab", "durabdb",
 		`CREATE TABLE Survivors (Id INT64 NOT NULL, Name STRING(MAX)) PRIMARY KEY (Id)`)
 
-	c, err := spanner.NewClient(ctx, dbName, spannerOpts(addr)...)
+	c, err := localclient.Spanner(ctx, dbName, spannerOpts(addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +280,7 @@ func TestSpannerStateDoesNotSurviveARestart(t *testing.T) {
 	// That is exactly how this test first "passed".
 	waitForEndpoint(t, addr, 2*time.Minute)
 
-	c2, err := spanner.NewClient(ctx, dbName, spannerOpts(addr)...)
+	c2, err := localclient.Spanner(ctx, dbName, spannerOpts(addr)...)
 	if err != nil {
 		t.Fatalf("client after restart: %v", err)
 	}

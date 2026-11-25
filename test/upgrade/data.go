@@ -41,6 +41,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/api/iterator"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // The fixed data set, seeded by the older release and read back by this
@@ -310,7 +312,7 @@ func seed(ctx context.Context, t *testing.T, in instance) map[string]error {
 		if err := ac.CreateColumnFamily(ctx, bigtableTable, "f"); err != nil {
 			return err
 		}
-		c, err := bigtable.NewClient(ctx, p, "upgrade")
+		c, err := localclient.Bigtable(ctx, p, "upgrade")
 		if err != nil {
 			return err
 		}
@@ -407,7 +409,7 @@ func seedSpanner(ctx context.Context, t *testing.T, in instance) error {
 	if _, err := dop.Wait(ctx); err != nil {
 		return err
 	}
-	c, err := spanner.NewClient(ctx, spannerDBName(p), grpcOpts(t, host)...)
+	c, err := localclient.Spanner(ctx, spannerDBName(p), grpcOpts(t, host)...)
 	if err != nil {
 		return err
 	}
@@ -674,7 +676,7 @@ func verify(ctx context.Context, t *testing.T, in instance, want map[string]bool
 		return nil
 	})
 	run("spanner", func(ctx context.Context) error {
-		c, err := spanner.NewClient(ctx, spannerDBName(p), grpcOpts(t, in.env.need(t, "SPANNER_EMULATOR_HOST"))...)
+		c, err := localclient.Spanner(ctx, spannerDBName(p), grpcOpts(t, in.env.need(t, "SPANNER_EMULATOR_HOST"))...)
 		if err != nil {
 			return err
 		}
@@ -691,7 +693,7 @@ func verify(ctx context.Context, t *testing.T, in instance, want map[string]bool
 	})
 	run("bigtable", func(ctx context.Context) error {
 		t.Setenv("BIGTABLE_EMULATOR_HOST", in.env.need(t, "BIGTABLE_EMULATOR_HOST"))
-		c, err := bigtable.NewClient(ctx, p, "upgrade")
+		c, err := localclient.Bigtable(ctx, p, "upgrade")
 		if err != nil {
 			return err
 		}

@@ -16,6 +16,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // brokenWriteStream is the first BidiWriteObject stream of a client, which
@@ -96,7 +98,7 @@ func TestStorageGRPCResumesABrokenWrite(t *testing.T) {
 		}
 		return err
 	}
-	g, err := storage.NewGRPCClient(h.Context(), option.WithEndpoint(addr), option.WithoutAuthentication(),
+	g, err := localclient.StorageGRPC(h.Context(), option.WithEndpoint(addr), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
 		option.WithGRPCDialOption(grpc.WithChainStreamInterceptor(streamInt)),
 		option.WithGRPCDialOption(grpc.WithChainUnaryInterceptor(unaryInt)))

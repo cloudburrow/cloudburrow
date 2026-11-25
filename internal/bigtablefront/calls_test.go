@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // Every Bigtable call through the front, the ones it refuses itself among
@@ -31,7 +32,7 @@ func TestCallLogRecordsBigtableCalls(t *testing.T) {
 	if _, err := ac.Backups(ctx, "c").Next(); err == nil {
 		t.Fatal("ListBackups succeeded")
 	}
-	c, err := bigtable.NewClient(ctx, "p", "i", option.WithGRPCConn(dial(t, addr)))
+	c, err := localclient.Bigtable(ctx, "p", "i", option.WithGRPCConn(dial(t, addr)))
 	if err != nil {
 		t.Fatal(err)
 	}

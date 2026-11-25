@@ -18,6 +18,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // storageAs are the official client's three transports as a minted token's
@@ -41,7 +43,7 @@ func newStorageAs(t *testing.T, h *Harness, token string) storageAs {
 	if out.xml, err = storage.NewClient(ctx, option.WithEndpoint(endpoint+"/storage/v1/"), option.WithHTTPClient(hc)); err != nil {
 		t.Fatal(err)
 	}
-	if out.grpc, err = storage.NewGRPCClient(ctx, option.WithEndpoint(stripScheme(endpoint)), option.WithoutAuthentication(),
+	if out.grpc, err = localclient.StorageGRPC(ctx, option.WithEndpoint(stripScheme(endpoint)), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
 		option.WithGRPCDialOption(grpc.WithPerRPCCredentials(bearerCreds(token)))); err != nil {
 		t.Fatal(err)

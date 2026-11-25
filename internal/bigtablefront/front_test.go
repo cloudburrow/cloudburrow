@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // serve starts Google's emulator in process with the front before it, and
@@ -79,7 +80,7 @@ func TestFrontForwardsWhatTheEmulatorServes(t *testing.T) {
 	if err := ac.CreateColumnFamily(ctx, "t", "f"); err != nil {
 		t.Fatalf("CreateColumnFamily: %v", err)
 	}
-	c, err := bigtable.NewClient(ctx, "p", "i", option.WithGRPCConn(dial(t, addr)))
+	c, err := localclient.Bigtable(ctx, "p", "i", option.WithGRPCConn(dial(t, addr)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +152,7 @@ func TestFrontRefusesWhatWouldCrashTheEmulator(t *testing.T) {
 	if err := ac.CreateColumnFamily(ctx, "kept", "cf"); err != nil {
 		t.Fatal(err)
 	}
-	c, err := bigtable.NewClient(ctx, "p", "i", option.WithGRPCConn(conn))
+	c, err := localclient.Bigtable(ctx, "p", "i", option.WithGRPCConn(conn))
 	if err != nil {
 		t.Fatal(err)
 	}
