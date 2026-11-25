@@ -288,7 +288,7 @@ func (g *GKE) join(ctx context.Context, kind, image, pool, name string) error {
 		out, err := r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "get", "node", name, "-o",
 			`jsonpath={.status.conditions[?(@.type=="Ready")].status}`)
 		if err == nil && strings.TrimSpace(out) == "True" {
-			return nil
+			break
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("node %s did not become Ready (%q, %v)", name, strings.TrimSpace(out), err)
@@ -299,6 +299,145 @@ func (g *GKE) join(ctx context.Context, kind, image, pool, name string) error {
 		case <-time.After(2 * time.Second):
 		}
 	}
+	return g.waitPodRoutes(ctx, kind, name, podRoutesWait)
+}
+
+// podRoutesWait bounds how long a joined node's pod network may take to
+// be routed: kindnet reconciles routes every 10 s.
+var podRoutesWait = 2 * time.Minute
+
+// waitPodRoutes waits until node name's pod range is routed to it from
+// every other node of kind's cluster, and every other node's pod range
+// from it. A node is Ready once its own kubelet and CNI are, while kindnet
+// adds the routes to its pod range on the other nodes on its next 10-second
+// tick: until then a pod made on it is Ready and in its Service's
+// endpoints, yet the control plane (the API server's service proxy) and
+// the other nodes' pods cannot reach it, and their connections hang. In a
+// surge upgrade that is the replacement pod of the first one drained,
+// while the PodDisruptionBudget lets the next go (main run 45555303799:
+// TestGKEUpgradeMasterThenNodePool's probe through the service proxy timed
+// out twice running). A GKE node's pod range is routed (its alias IP
+// range) before the node serves pods, so a node joins only once it is.
+func (g *GKE) waitPodRoutes(ctx context.Context, kind, name string, timeout time.Duration) error {
+	r := g.runner()
+	deadline := time.Now().Add(timeout)
+	missing := ""
+	for {
+		var err error
+		missing, err = g.unroutedPodRanges(ctx, r, kind, name)
+		if err == nil && missing == "" {
+			return nil
+		}
+		if err != nil {
+			missing = err.Error()
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("node %s's pod network is not routed after %s: %s", name, timeout, missing)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+// podNetNode is a node's address and pod ranges, from its Node.
+type podNetNode struct {
+	name   string
+	ips    []string
+	ranges []string
+}
+
+// unroutedPodRanges names the first route between node name and another
+// node that is not there yet, or is "" when every one is.
+func (g *GKE) unroutedPodRanges(ctx context.Context, r Runner, kind, name string) (string, error) {
+	out, err := r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "get", "nodes", "-o",
+		`jsonpath={range .items[*]}{.metadata.name}{"|"}{.status.addresses[?(@.type=="InternalIP")].address}{"|"}{.spec.podCIDRs[*]}{"\n"}{end}`)
+	if err != nil {
+		return "", fmt.Errorf("list the nodes: %w", err)
+	}
+	var nodes []podNetNode
+	var self *podNetNode
+	for _, l := range strings.Split(out, "\n") {
+		f := strings.Split(strings.TrimSpace(l), "|")
+		if len(f) != 3 {
+			continue
+		}
+		nodes = append(nodes, podNetNode{name: f[0], ips: strings.Fields(f[1]), ranges: strings.Fields(f[2])})
+	}
+	for i := range nodes {
+		if nodes[i].name == name {
+			self = &nodes[i]
+		}
+	}
+	if self == nil {
+		return "node " + name + " is not listed", nil
+	}
+	if len(self.ranges) == 0 {
+		return "node " + name + " has no pod range yet", nil
+	}
+	routes := map[string]string{}
+	routesOf := func(node string) (string, error) {
+		if s, ok := routes[node]; ok {
+			return s, nil
+		}
+		s, err := r.Run(ctx, "docker", "exec", node, "sh", "-c", "ip -o route show; ip -o -6 route show 2>/dev/null; true")
+		if err != nil {
+			return "", fmt.Errorf("read node %s's routes: %w", node, err)
+		}
+		routes[node] = s
+		return s, nil
+	}
+	for _, other := range nodes {
+		if other.name == name {
+			continue
+		}
+		for _, pair := range [][2]*podNetNode{{&other, self}, {self, &other}} {
+			from, to := pair[0], pair[1]
+			table, err := routesOf(from.name)
+			if err != nil {
+				return "", err
+			}
+			for _, cidr := range to.ranges {
+				via := sameFamily(to.ips, cidr)
+				if via == "" {
+					continue
+				}
+				if !routedVia(table, cidr, via) {
+					return fmt.Sprintf("node %s has no route to %s via %s (%s)", from.name, cidr, via, to.name), nil
+				}
+			}
+		}
+	}
+	return "", nil
+}
+
+// sameFamily is the address of ips in cidr's IP family, or "".
+func sameFamily(ips []string, cidr string) string {
+	v6 := strings.Contains(cidr, ":")
+	for _, ip := range ips {
+		if strings.Contains(ip, ":") == v6 {
+			return ip
+		}
+	}
+	return ""
+}
+
+// routedVia reports whether the `ip -o route` table routes cidr via gw.
+func routedVia(table, cidr, gw string) bool {
+	for _, l := range strings.Split(table, "\n") {
+		f := strings.Fields(l)
+		if len(f) < 3 || f[0] != cidr {
+			continue
+		}
+		for i := 1; i+1 < len(f); i++ {
+			if f[i] == "via" && f[i+1] == gw {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // joinConfig is kind's JoinConfiguration and KubeletConfiguration for a
