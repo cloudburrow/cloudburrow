@@ -210,9 +210,16 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 		mounts = []string{"-v", f.ProvidedDir + ":/t:ro"}
 		labels := fmt.Sprintf(`{"goog-dataflow-provided-template-name":"%s","goog-dataflow-provided-template-version":"%s","goog-dataflow-provided-template-type":"flex"}`,
 			strings.ToLower(f.Provided.Name), strings.ToLower(TemplatesRelease))
-		extra = []string{fmt.Sprintf("--pubsubRootUrl=http://%s:%d", relayName, pubsubPort), "--labels=" + labels}
+		// The program validates its BigQuery datasets and Pub/Sub topics
+		// before it submits the job, through the clients its options root
+		// (BigQueryOptions.bigQueryEndpoint, PubsubOptions.pubsubRootUrl),
+		// which default to Google's: they are the instance's, through the
+		// relay. Every DataflowTemplates module has Beam's Google Cloud
+		// I/O, whose options these are; an image's own program may not.
+		extra = []string{fmt.Sprintf("--pubsubRootUrl=http://%s:%d", relayName, pubsubPort),
+			fmt.Sprintf("--bigQueryEndpoint=http://%s:%d", relayName, bigqueryPort), "--labels=" + labels}
 		if bytes.Contains(f.Provided.Metadata, []byte(`"spannerHost"`)) {
-			extra = append(extra, fmt.Sprintf("--spannerHost=http://%s:%d", relayName, spannerPort))
+			extra = append(extra, "--spannerHost="+relaySpannerHost)
 		}
 	} else {
 		var err error

@@ -620,14 +620,28 @@ func (d *Docker) jobNetwork(ctx context.Context, network, relay, dir, image, lab
 	// the instance's Storage API port (a certificate of relayName, from a
 	// CA made for the job, which the Java workers trust) and any other
 	// with its REST port.
-	storageAPI := -1
-	if live["bigquery"] != "" && live["bigquery-storage"] != "" {
+	//
+	// Spanner's port answers TLS too, with the instance's Spanner: the
+	// Java SDK's SpannerIO (and DataflowTemplates' copy of it) is given a
+	// host (spannerHost, default https://batch-spanner.googleapis.com),
+	// and the Java client's SpannerOptions.Builder.setHost clears
+	// SPANNER_EMULATOR_HOST (java-spanner 6.113.0), so its channel is
+	// TLS; the Python and Go clients' plain connections still reach it.
+	tlsPorts := map[int]bool{}
+	if (live["bigquery"] != "" && live["bigquery-storage"] != "") || live["spanner"] != "" {
 		if err := writeRelayTLS(filepath.Join(dir, "tls")); err != nil {
 			return "", stop, err
 		}
-		storageAPI = len(targets)
+	}
+	if live["bigquery"] != "" && live["bigquery-storage"] != "" {
+		tlsPorts[len(targets)] = true
 		targets = append(targets, live["bigquery-storage"])
 		ports = append(ports, bigqueryPort)
+	}
+	if live["spanner"] != "" {
+		tlsPorts[len(targets)] = true
+		targets = append(targets, live["spanner"])
+		ports = append(ports, spannerPort)
 	}
 	host, stopHost, err := d.hostTargets(ctx, targets...)
 	if err != nil {
@@ -635,7 +649,7 @@ func (d *Docker) jobNetwork(ctx context.Context, network, relay, dir, image, lab
 	}
 	cleanup = append(cleanup, stopHost)
 	for i, p := range ports {
-		if i == storageAPI {
+		if tlsPorts[i] {
 			routes = append(routes, fmt.Sprintf("%d+tls=%s", p, host[i]))
 			continue
 		}
@@ -687,6 +701,11 @@ func (d *Docker) clientEnv(job Job, dir, relayIP string) []string {
 		"-e", fmt.Sprintf("DATASTORE_EMULATOR_HOST=%s:%d", relayIP, datastorePort),
 		"-e", fmt.Sprintf("BIGTABLE_EMULATOR_HOST=%s:%d", relayIP, bigtablePort),
 		"-e", fmt.Sprintf("SPANNER_EMULATOR_HOST=%s:%d", relayIP, spannerPort),
+		// The Java Spanner client given a host (SpannerIO's spannerHost)
+		// is not in emulator mode, and so exports built-in metrics to Cloud
+		// Monitoring unless this is set; the job's network has no route
+		// there, and no client should try.
+		"-e", "SPANNER_DISABLE_BUILTIN_METRICS=true",
 		"-e", fmt.Sprintf("BIGQUERY_EMULATOR_HOST=http://%s:%d", host, bigqueryPort),
 		"-e", fmt.Sprintf("CB_BIGQUERY_URL=http://%s:%d/bigquery/v2/", host, bigqueryPort),
 		"-e", "GOOGLE_CLOUD_PROJECT=" + job.Project,

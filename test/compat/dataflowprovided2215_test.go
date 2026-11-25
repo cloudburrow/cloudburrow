@@ -328,7 +328,14 @@ func TestDataflowProvidedTemplatesMore(t *testing.T) {
 		}
 		got := readPrefix(t, ctx, sc, bucket, "pstext/messages-")
 		if len(got) == 0 || got[0] != "kiwi" {
-			t.Errorf("the windowed files hold %v; want the kiwi messages", got)
+			// What the write left (its temporary files, under
+			// userTempLocation, say which of its stages did not run).
+			var left []string
+			it := sc.Bucket(bucket).Objects(ctx, &storage.Query{Prefix: "pstext"})
+			for a, err := it.Next(); err == nil; a, err = it.Next() {
+				left = append(left, a.Name)
+			}
+			t.Errorf("the windowed files hold %v; want the kiwi messages (objects: %v):\n%s", got, left, jobMessages(t, ctx, c, project, id))
 		}
 	})
 
@@ -379,9 +386,15 @@ func TestDataflowProvidedTemplatesMore(t *testing.T) {
 		done(t, "Spanner_to_GCS_Text", launch(t, "Spanner_to_GCS_Text", "provided-spanner-text", map[string]string{
 			"spannerProjectId": project, "spannerInstanceId": spInstance, "spannerDatabaseId": spDB, "spannerTable": "Fruit",
 			"textWritePrefix": "gs://" + bucket + "/spanner/fruit"}))
-		if got := readPrefix(t, ctx, sc, bucket, "spanner/fruit"); strings.Join(got, ",") != `"apple",3,"kiwi",2` &&
-			strings.Join(got, ",") != "apple,3,kiwi,2" {
+		// The template writes TEXTWRITEPREFIX-SHARD.csv, each value quoted
+		// (SpannerConverters.StructCsvPrinter, QuoteMode.ALL_NON_NULL), and
+		// its table's schema, column name to Spanner type, as
+		// TEXTWRITEPREFIXschema (exportSchema, on by default).
+		if got := readPrefix(t, ctx, sc, bucket, "spanner/fruit-"); strings.Join(got, ",") != `"apple","3","kiwi","2"` {
 			t.Errorf("the export holds %q; want the table's two rows as CSV", got)
+		}
+		if got := readPrefix(t, ctx, sc, bucket, "spanner/fruitschema"); strings.Join(got, ",") != `{"Name":"STRING(64)","N":"INT64"}` {
+			t.Errorf("the export's schema file holds %q; want the table's columns and types", got)
 		}
 	})
 }

@@ -29,14 +29,28 @@ type providedTemplates struct {
 	storage *dataprocStorage
 	project func() string
 
-	mu sync.Mutex
+	// mu guards names, each template's own lock, held while it is staged
+	// (which may build its module first), so that one template's staging
+	// does not hold up another's.
+	mu    sync.Mutex
+	names map[string]*sync.Mutex
 }
 
 var _ dataflow.Provided = (*providedTemplates)(nil)
 
 func (t *providedTemplates) Stage(ctx context.Context, name string) (string, error) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
+	if t.names == nil {
+		t.names = map[string]*sync.Mutex{}
+	}
+	l := t.names[name]
+	if l == nil {
+		l = &sync.Mutex{}
+		t.names[name] = l
+	}
+	t.mu.Unlock()
+	l.Lock()
+	defer l.Unlock()
 	flex := strings.HasPrefix(name, "flex/")
 	if _, isFlex := beamrun.ProvidedFlexNames[strings.TrimPrefix(name, "flex/")]; flex != isFlex {
 		// A classic template's name under flex/, or a Flex Template's

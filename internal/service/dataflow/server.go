@@ -125,7 +125,8 @@ type Server struct {
 	mu   sync.Mutex
 	// jobs by key (project/location/id).
 	jobs map[string]*jobRec
-	// base is cancelled by Close: it ends the snapshots being taken.
+	// base is cancelled by Close: it ends the snapshots being taken and
+	// the Flex Template launchers running.
 	base     context.Context
 	stopBase context.CancelFunc
 	// snaps are the snapshots by key (project/location/id).

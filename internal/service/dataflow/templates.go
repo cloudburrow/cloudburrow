@@ -458,7 +458,9 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		err := s.opts.Launcher.Launch(context.Background(), fl)
+		// The launcher ends with the server (Close cancels base), as a
+		// job's run does.
+		err := s.opts.Launcher.Launch(s.base, fl)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		// Unless the program's job took the launch's place (adopted).

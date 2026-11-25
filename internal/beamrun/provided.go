@@ -48,10 +48,14 @@ const (
 	buildTimeout = 45 * time.Minute
 )
 
+// relaySpannerHost is a Java SpannerIO's spannerHost on a job's network:
+// the relay's Spanner port, over TLS (jobNetwork).
+var relaySpannerHost = fmt.Sprintf("https://%s:%d", relayName, spannerPort)
+
 // StageVersion names the launch options Stage fixes in a staged template;
 // it changes whenever they do, so templates staged before are staged again
-// (2: --pubsubRootUrl; 3: --spannerHost).
-const StageVersion = "3"
+// (2: --pubsubRootUrl; 3: --spannerHost; 4: spannerHost over TLS).
+const StageVersion = "4"
 
 // ProvidedNames are the Google-provided classic templates CloudBurrow
 // builds, by name (their @Template name in DataflowTemplates' v1 module).
@@ -163,17 +167,35 @@ type Provided struct {
 	D     *Docker
 	Cache string
 
+	// mu guards modules; each module's own lock is held while it builds,
+	// so one module's build does not hold up another's templates.
+	mu      sync.Mutex
+	modules map[string]*providedModuleBuild
+}
+
+// providedModuleBuild is one module's build, once read.
+type providedModuleBuild struct {
 	mu    sync.Mutex
-	built map[string]map[string]ProvidedTemplate
+	built map[string]ProvidedTemplate
 }
 
 // Template answers name's build, building the templates first when they
 // are not in the cache. A name not built is ok false.
 func (p *Provided) Template(ctx context.Context, name string) (ProvidedTemplate, bool, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	module := providedModule(name)
-	if p.built[module] == nil {
+	p.mu.Lock()
+	if p.modules == nil {
+		p.modules = map[string]*providedModuleBuild{}
+	}
+	m := p.modules[module]
+	if m == nil {
+		m = &providedModuleBuild{}
+		p.modules[module] = m
+	}
+	p.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.built == nil {
 		dir, err := p.build(ctx, module)
 		if err != nil {
 			return ProvidedTemplate{}, false, err
@@ -182,12 +204,9 @@ func (p *Provided) Template(ctx context.Context, name string) (ProvidedTemplate,
 		if err != nil {
 			return ProvidedTemplate{}, false, err
 		}
-		if p.built == nil {
-			p.built = map[string]map[string]ProvidedTemplate{}
-		}
-		p.built[module] = built
+		m.built = built
 	}
-	t, ok := p.built[module][name]
+	t, ok := m.built[name]
 	return t, ok, nil
 }
 
@@ -486,11 +505,11 @@ func (p *Provided) Stage(ctx context.Context, t ProvidedTemplate, project, templ
 		opts = append(opts, "--autoscalingAlgorithm=THROUGHPUT_BASED", "--maxNumWorkers=5")
 	}
 	// A Spanner template's SpannerIO is given its spannerHost parameter
-	// (default batch-spanner.googleapis.com) and so ignores
+	// (default https://batch-spanner.googleapis.com), and so ignores
 	// SPANNER_EMULATOR_HOST: the template is staged with the instance's
-	// Spanner (plain gRPC, through the relay) as its value.
+	// Spanner, through the relay's TLS on its Spanner port, as its value.
 	if bytes.Contains(t.Metadata, []byte(`"spannerHost"`)) {
-		opts = append(opts, fmt.Sprintf("--spannerHost=http://%s:%d", relayName, spannerPort))
+		opts = append(opts, "--spannerHost="+relaySpannerHost)
 	}
 	keys := make([]string, 0, len(t.RuntimeParameters))
 	for k := range t.RuntimeParameters {
