@@ -2284,9 +2284,33 @@ UNVERIFIED (re-read 2026-11-19: <https://docs.cloud.google.com/speech-to-text/do
 
 Workbench instances (#2173), `notebooks.googleapis.com` v2's `NotebookService`, on the local
 Vertex AI endpoint over gRPC and JSON (`/v2/projects/*/locations/*/instances`, its operations under
-`/v2/projects/*/locations/*/operations`). An instance is a notebook runtime of the instance's
-(`internal/nbruntime`), as a Colab Enterprise runtime is: a kernel container on an internal Docker
-network whose one peer relays to the instance's BigQuery. Defaults and limits are Google's
+`/v2/projects/*/locations/*/operations`). An instance runs the real, unmodified Jupyter Server and
+JupyterLab (#2198; jupyterlab 4.6.4, jupyter-server 2.21.1, ipykernel, every PyPI package pinned
+and hash-locked in `internal/nbruntime/image/requirements.txt`) in a container on an internal Docker
+network whose one peer relays the instance's BigQuery, Cloud Storage, Dataproc API and the
+instance's own metadata server: Python 3 kernels with Google's client libraries and `%%bigquery`,
+the instance's service account (the Compute Engine default one when none is set) as
+`google.auth.default()`, JupyterLab's Terminal a shell in the instance, and `/home/jupyter` the data
+disk, a Docker volume kept across stop and start and deleted with the instance ("Local files in
+the `/home/jupyter` directory | Preserved",
+<https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/upgrade>, read 2026-11-23).
+`proxy_uri` ("The proxy endpoint that is used to access the Jupyter notebook", as Google's
+`HASH-dot-REGION.notebooks.googleusercontent.com`) is `HASH-dot-REGION.notebooks.localhost:PORT`,
+the console's port: the console proxies that host whole (WebSockets included) to the instance's
+JupyterLab, for a browser its Open JupyterLab gave a one-time link (a cookie for that host alone),
+or for a request with `Authorization: Bearer TOKEN` whose principal has `notebooks.instances.use`
+on the instance (#2198). Google's JupyterLab plugins are installed as on a Workbench VM
+(dataproc-jupyter-plugin 0.1.99, bigquery-jupyter-plugin 0.1.4, gcs-jupyter-plugin 0.1.3, with
+the Google Cloud CLI 594.0.1 they read): gcloud's project, region and credentials are the
+instance's, its `api_endpoint_overrides` the instance's APIs, the Dataproc plugin's remote kernels
+the instance's kernel gateway, and its browser-side API calls go through the instance's JupyterLab.
+The metadata server mints ID tokens (`instance/service-accounts/default/identity?audience=`,
+`format=standard|full`, `licenses`) as a Compute Engine VM's does, signed by the instance's local
+IAM keys.
+Idle shutdown stops an instance after its `idle-timeout-seconds` with "no kernel activity" (kernels
+and terminals, read from the Jupyter Server's API); the key present and empty turns it off, as
+`gcloud workbench instances update --metadata=idle-timeout-seconds=` does
+(<https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/idle-shutdown>, read 2026-11-23). Defaults and limits are Google's
 (<https://docs.cloud.google.com/vertex-ai/docs/workbench/reference/rest/v2/projects.locations.instances>,
 read 2026-11-22): an ID of a letter and up to 62 lowercase letters, numbers or hyphens, not ending
 in a hyphen; one owner, one service account and one data disk; a 150 GB boot disk and a 100 GB data
@@ -2301,10 +2325,11 @@ accepted paths, and the generated `id`.
 
 | Method | Status | Notes |
 |---|---|---|
-| `CreateInstance`, `GetInstance`, `ListInstances`, `DeleteInstance` | **Verified** (#2173) | `TestWorkbenchInstances` (official `notebooks/apiv2` client, gRPC and REST).  The operation completes when the kernel is connected (ACTIVE, HEALTHY); list's filter and `order_by` (`name`, `state`, `health_state`, `creator`, `labels`, `id`, `machine_type`), and `locations/-` for every zone; ALREADY_EXISTS for a taken ID; accelerators and `container_image` are FAILED_PRECONDITION (the kernel is this machine's CPU and the instance's runtime image). Unit `TestWorkbenchInstances`, `TestWorkbenchRESTClient` (official `notebooks` v1.20.1 REST client); compat `TestWorkbenchInstances` (gRPC and REST clients) and `TestIAMEnforcementWorkbench` are written, not yet run against an instance. |
+| `CreateInstance`, `GetInstance`, `ListInstances`, `DeleteInstance` | **Verified** (#2173) | `TestWorkbenchInstances` (official `notebooks/apiv2` client, gRPC and REST) and `TestWorkbenchJupyterLab` (#2198, measured 2026-11-24 on an instance: `proxy_uri` served through the console only after Open JupyterLab; a kernel's channels run a cell as the Compute Engine default service account that creates and queries a BigQuery table and uses `%%bigquery`, with no route to the internet; the Terminal's command writes a file; a file in `/home/jupyter` survives stop and start).  The operation completes when JupyterLab answers (ACTIVE, HEALTHY); list's filter and `order_by` (`name`, `state`, `health_state`, `creator`, `labels`, `id`, `machine_type`), and `locations/-` for every zone; ALREADY_EXISTS for a taken ID; accelerators and `container_image` are FAILED_PRECONDITION (the kernel is this machine's CPU and the instance's runtime image). Unit `TestWorkbenchInstances`, `TestWorkbenchRESTClient` (official `notebooks` v1.20.1 REST client); compat `TestWorkbenchInstances` (gRPC and REST clients) and `TestIAMEnforcementWorkbench` are written, not yet run against an instance. |
 | `UpdateInstance` | **Verified** (#2173) | `TestWorkbenchInstances` (official `notebooks/apiv2` client, gRPC and REST).  `update_mask` required: `labels`, `gce_setup.metadata`, `gce_setup.tags`, and `gce_setup.machine_type` only while STOPPED (FAILED_PRECONDITION otherwise); other paths INVALID_ARGUMENT. |
-| `StartInstance`, `StopInstance`, `ResetInstance` | **Verified** (#2173) | `TestWorkbenchInstances` (official `notebooks/apiv2` client, gRPC and REST).  Stop deletes the kernel container, the instance STOPPED; Start makes a new one; Reset stops and starts a running instance (its memory wiped), FAILED_PRECONDITION on a stopped one. |
+| `StartInstance`, `StopInstance`, `ResetInstance` | **Verified** (#2173) | `TestWorkbenchInstances` (official `notebooks/apiv2` client, gRPC and REST).  Stop deletes the instance's containers, its data disk kept, the instance STOPPED; Start makes new ones on the same disk; Reset stops and starts a running instance (its memory wiped), FAILED_PRECONDITION on a stopped one. |
 | `CheckInstanceUpgradability`, `UpgradeInstance` | **Verified** (#2173) | `TestWorkbenchInstances` (official `notebooks/apiv2` client, gRPC and REST).  Never upgradeable (the runtime image is the instance's); Upgrade is FAILED_PRECONDITION. |
+| `proxy_uri` bearer tokens, metadata ID tokens, Google's JupyterLab plugins | **Verified** (#2198) | `TestWorkbenchJupyterLabBearerAndIdentity` (official `notebooks/apiv2` client; measured 2026-11-24): no session and no token is 401, the instance's own access token reaches the server; `google.oauth2.id_token.fetch_id_token` in the kernel gets a full-format token, `identity?audience=` a standard one (aud, azp, sub, iss) and `format=full` adds email and `google.compute_engine`, every one verifying against the instance's keys; no audience is 400; the Dataproc plugin's credentials are the instance's project and region, its service URLs the instance's JupyterLab routes, which list clusters; the BigQuery plugin lists projects and datasets and the Cloud Storage plugin buckets; `gcloud config get project` is the instance's. `TestIAMEnforcementWorkbenchProxyBearer` (enforcement on): a bearer token with no role or Notebooks Viewer is 403, Notebooks Editor's (which has `notebooks.instances.use`) reaches the server. Browser `TestWorkbenchJupyterLabFromTheConsole`: the Dataproc plugin's Clusters page, the BigQuery Dataset explorer and the Cloud Storage browser in the instance's JupyterLab. |
 | `RollbackInstance`, `DiagnoseInstance`, and the v2 REST-only methods (`getConfig`, `resizeDisk`, `restore`, instances' IAM policies) | **Unimplemented** | UNIMPLEMENTED: there is no VM image history, diagnostic tool, disk or backup to act on. |
 
 ## Vertex AI PredictionService v1beta1 — `google.cloud.aiplatform.v1beta1`

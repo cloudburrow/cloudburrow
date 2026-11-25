@@ -267,6 +267,30 @@ func (c *Credentials) MintIDTokenWithClaims(email, audience string, extra map[st
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
+// MintIDTokenClaims is an identity token of the given claims (aud, sub,
+// azp, email, google, ...), with iss, iat and exp set, signed with the
+// instance's key, so it verifies against /certs as MintIDTokenFor's does:
+// a Compute Engine metadata server's identity token, whose claims follow
+// its format parameter (#2198).
+func (c *Credentials) MintIDTokenClaims(claims map[string]any, now time.Time, ttl time.Duration) (string, error) {
+	header := map[string]any{"alg": "RS256", "typ": "JWT", "kid": c.KeyID}
+	all := map[string]any{"iss": "https://accounts.google.com", "iat": now.Unix(), "exp": now.Add(ttl).Unix(),
+		"cloudburrow": "local-development-token"}
+	for k, v := range claims {
+		all[k] = v
+	}
+	signingInput, err := joinSegments(header, all)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(signingInput))
+	sig, err := rsa.SignPKCS1v15(rand.Reader, c.PrivateKey, cryptoSHA256, sum[:])
+	if err != nil {
+		return "", fmt.Errorf("sign id token: %w", err)
+	}
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
+}
+
 func joinSegments(header, claims map[string]any) (string, error) {
 	h, err := json.Marshal(header)
 	if err != nil {

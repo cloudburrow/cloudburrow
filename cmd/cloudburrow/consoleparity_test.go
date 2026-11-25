@@ -546,7 +546,7 @@ var parityRows = []parityRow{
 		Methods: []string{"ClusterController/CreateCluster", "ClusterController/GetCluster", "ClusterController/ListClusters", "ClusterController/UpdateCluster",
 			"ClusterController/StopCluster", "ClusterController/StartCluster", "ClusterController/DeleteCluster", "ClusterController/DiagnoseCluster"},
 		Provider: "dataproc-clusters", Offers: "Dataproc's Clusters page (#2162): every region's clusters (status, region, zone, total worker nodes, scheduled deletion and stop, staging bucket, created, labels); Create a Dataproc cluster on Compute Engine on a page of its own (Set up cluster: name, region, zone, Standard, Single Node or High Availability, image version, component gateway, optional components, autoscaling policy; Configure nodes, a driver node group and the manager and worker nodes' local SSDs and their interface among them (#2188); Customize cluster: scheduled deletion, properties, labels); a cluster's page with Jobs, VM instances, Configuration and Web interfaces (the Spark History Server); Submit job, Edit (worker nodes, autoscaling policy, labels), Start, Stop, Diagnose and Delete",
-		Tests: []string{"TestConsoleDataprocClusters", "TestDataprocClustersThroughThePage"}},
+		Tests: []string{"TestConsoleDataprocClusters", "TestDataprocClustersThroughThePage", "TestDataprocJupyterLabThroughComponentGateway"}},
 	{Resource: "Dataproc driver node groups", Service: "dataproc",
 		Methods:  []string{"NodeGroupController/CreateNodeGroup", "NodeGroupController/ResizeNodeGroup"},
 		Provider: "dataproc-clusters", Offers: "A cluster's page (#2162): Add driver node group (its ID and number of nodes) and Resize node group; Create cluster's Driver node group, its nodes listed in the cluster's Configuration",
@@ -2805,8 +2805,8 @@ var parityRows = []parityRow{
 		Methods: []string{"NotebookService/AssignNotebookRuntime", "NotebookService/GetNotebookRuntime", "NotebookService/ListNotebookRuntimes",
 			"NotebookService/StartNotebookRuntime", "NotebookService/StopNotebookRuntime", "NotebookService/DeleteNotebookRuntime"},
 		Provider: "colab-runtimes", Offers: "Runtimes: a Region menu, Create (Create Agent Platform runtime: Runtime template and Runtime name), " +
-			"Start, Stop and Delete with Confirm",
-		Tests: []string{"TestColabEnterpriseRuntimesThroughThePages"}},
+			"Start, Stop and Delete with Confirm, and Open JupyterLab (#2198: the runtime's Jupyter Server on its proxy_uri)",
+		Tests: []string{"TestColabEnterpriseRuntimesThroughThePages", "TestColabRuntimeJupyterLabFromTheConsole"}},
 	{Resource: "Colab Enterprise: notebook executions", Service: "vertexai",
 		Methods: []string{"NotebookService/CreateNotebookExecutionJob", "NotebookService/GetNotebookExecutionJob",
 			"NotebookService/ListNotebookExecutionJobs", "NotebookService/DeleteNotebookExecutionJob"},
@@ -2845,8 +2845,8 @@ var parityRows = []parityRow{
 			"NotebookService/StartInstance", "NotebookService/StopInstance", "NotebookService/ResetInstance", "NotebookService/DeleteInstance"},
 		Provider: "workbench-instances", Offers: "Instances: Create new (Create instance: Name, Zone, Labels, Machine type, idle shutdown, User email, " +
 			"Service account email), Open JupyterLab (the instance's page, whose Notebook tab runs Python on its kernel), Start, Stop, " +
-			"Reset confirmed with Reset, and Delete with Confirm",
-		Tests: []string{"TestWorkbenchInstancesThroughThePages"}},
+			"Reset confirmed with Reset, and Delete with Confirm; Open JupyterLab opens the instance's JupyterLab on its proxy_uri, with Google's JupyterLab plugins (#2198)",
+		Tests: []string{"TestWorkbenchInstancesThroughThePages", "TestWorkbenchJupyterLabFromTheConsole"}},
 	{Resource: "Vertex AI Workbench: instance update", Service: "workbench", Methods: []string{"NotebookService/UpdateInstance"},
 		Provider: "workbench-instances", Offers: "Create instance's Labels and idle shutdown (gce_setup.metadata), set at creation",
 		Tests: []string{"TestWorkbenchInstancesThroughThePages"}},

@@ -1,0 +1,4 @@
+dataproc-spark-connect==1.1.0 \
+    --hash=sha256:0202ebb8e3816b5d3f27642e17464a2d64c320776baaef0e6acee88ef45be557 \
+    --hash=sha256:c4d7337a422e80fe6c5cab7ca4e642de5948c6f5dcbe2e6d6ae4aafd32aad55e
+    # via -r spark.in

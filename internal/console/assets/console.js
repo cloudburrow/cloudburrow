@@ -5714,6 +5714,7 @@ function listActionButtons(route, data, onDone) {
     // One that is a link opens its page: the Datastore page's Indexes
     // (#1846).
     onclick: () => (a.href ? openHref(a.href)
+      : a.openWindow ? openMinted(a.openWindow)
       : a.panel ? openActionPanel(route, [], a, onDone, a.label)
       : openActionForm(route, [], a, onDone, data.noun || route.title)),
   }));
@@ -11641,6 +11642,8 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
   // An action that is a link opens its page (#1847): a topic row's Create
   // subscription.
   if (action.href) return openHref(action.href);
+  // Open JupyterLab (#2198): the page a console route mints a link to.
+  if (action.openWindow) return openMinted(action.openWindow);
   // Run in Cloud Shell (#2049): the command, in the terminal's active tab.
   if (action.terminal) return runInTerminal(action.terminal);
   const path = Array.isArray(target) ? target : null;
@@ -12773,6 +12776,18 @@ function openHref(href) {
   const url = new URL(href, location.origin);
   if (url.origin !== location.origin) return void window.open(url.href, "_blank", "noopener");
   return navigate(href);
+}
+
+// openMinted opens, in a new window, the page a console route answers a
+// one-time link to (Action.OpenWindow, #2198): Workbench's Open JupyterLab
+// opens the instance's JupyterLab on its proxy host.
+async function openMinted(path) {
+  try {
+    const r = await api(path, { method: "POST" });
+    if (r.url) window.open(r.url, "_blank", "noopener");
+  } catch (err) {
+    notify(err.message, "error");
+  }
 }
 
 function navigate(path) {

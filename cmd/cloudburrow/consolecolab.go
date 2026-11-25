@@ -18,7 +18,10 @@ package main
 //     allows.
 //   - Runtimes: a Region menu, Create (the "Create Agent Platform runtime"
 //     dialog: Runtime template and Runtime name), and Start, Stop and
-//     Delete (with Confirm).
+//     Delete (with Confirm). A running runtime's Open JupyterLab opens
+//     its proxy_uri, the runtime's own JupyterLab (#2198), as Workbench's
+//     does; Google's page has no such link (its notebooks reach the
+//     runtime's kernel), the user's way to the real JupyterLab here.
 //
 // UNVERIFIED (re-read 2026-11-22: https://docs.cloud.google.com/colab/docs/manage-runtimes):
 // both lists' columns, which Google does not list, are the API's fields a
@@ -37,6 +40,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -462,7 +466,7 @@ func colabRuntimeState(s aiplatformpb.NotebookRuntime_RuntimeState) string {
 func (p colabRuntimesProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	l := console.Listing{Columns: []string{"Runtime name", "Runtime template", "Runtime user", "Machine type", "Idle shutdown", "Expires", "Created"},
 		NameColumn: "ID", Noun: "runtimes", Scope: colabScope(ctx), AlwaysStatus: true,
-		Note: "Each runtime is a notebook runtime of this instance: a container whose only route is this instance's BigQuery. Stop deletes the container; Start makes a new one."}
+		Note: "Each runtime is a notebook runtime of this instance: a container running Jupyter Server whose only route is this instance's BigQuery. Open JupyterLab opens a running runtime's JupyterLab in a new window. Stop deletes the container; Start makes a new one."}
 	if project == "" {
 		l.Prompt = "Runtimes are listed per project. Choose one in the toolbar."
 		return l, nil
@@ -484,6 +488,10 @@ func (p colabRuntimesProvider) List(ctx context.Context, project string) (consol
 		var actions []console.Action
 		if state == aiplatformpb.NotebookRuntime_STOPPED || state == aiplatformpb.NotebookRuntime_ERROR {
 			actions = append(actions, console.Action{ID: "start", Label: "Start"})
+		}
+		if state == aiplatformpb.NotebookRuntime_RUNNING && r.GetProxyUri() != "" {
+			// The runtime's Jupyter Server (#2198), at its proxy_uri.
+			actions = append(actions, console.Action{ID: "open-jupyterlab", Label: "Open JupyterLab", OpenWindow: "/api/workbench/open?name=" + url.QueryEscape(r.GetName())})
 		}
 		if state == aiplatformpb.NotebookRuntime_RUNNING || state == aiplatformpb.NotebookRuntime_BEING_STARTED {
 			actions = append(actions, console.Action{ID: "stop", Label: "Stop"})

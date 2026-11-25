@@ -8,12 +8,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"cloud.google.com/go/dataform/apiv1/dataformpb"
@@ -32,7 +33,12 @@ import (
 type colabHost struct{ m *nbruntime.Manager }
 
 func nbOptions(o vertexai.NotebookRuntimeOptions) nbruntime.Options {
-	return nbruntime.Options{IdleTimeout: o.IdleTimeout, IdleDisabled: o.IdleDisabled, Env: o.Env, Token: o.Token}
+	n := nbruntime.Options{IdleTimeout: o.IdleTimeout, IdleDisabled: o.IdleDisabled, Env: o.Env, Token: o.Token}
+	if j := o.Jupyter; j != nil {
+		n.Jupyter = &nbruntime.Jupyter{Volume: j.Volume, Account: j.Account, Mint: j.Mint, MintID: j.MintID,
+			Name: j.Name, Zone: j.Zone, ID: j.ID, Attributes: j.Attributes, Created: j.Created}
+	}
+	return n
 }
 
 func (h colabHost) Start(key, project string, o vertexai.NotebookRuntimeOptions) {
@@ -63,15 +69,14 @@ func (h colabHost) Exec(ctx context.Context, key, code string) error {
 
 func (h colabHost) Stop(key string) error { return h.m.Disconnect(key) }
 
-// Outputs runs code and returns its outputs (vertexai.NotebookOutputs),
-// for a Workbench instance's console page (#2173).
-func (h colabHost) Outputs(ctx context.Context, key, code string) ([]json.RawMessage, error) {
-	r, err := h.m.Execute(ctx, key, code)
-	if err != nil {
-		return nil, err
-	}
-	return r.Outputs, nil
+// JupyterEndpoint is a Workbench instance's JupyterLab (#2198,
+// vertexai.JupyterHost).
+func (h colabHost) JupyterEndpoint(key string) (string, string, bool) {
+	return h.m.JupyterEndpoint(key)
 }
+
+// DeleteDisk deletes a Workbench instance's data disk.
+func (h colabHost) DeleteDisk(volume string) error { return h.m.DeleteDisk(volume) }
 
 func (h colabHost) Version() string { return nbruntime.Tag() }
 
@@ -270,3 +275,12 @@ func (t *tailBuffer) Write(p []byte) (int, error) {
 }
 
 func (t *tailBuffer) String() string { return string(t.b) }
+
+// loopbackPort is a bound REST port's address on the host's loopback, ""
+// for none.
+func loopbackPort(port int) string {
+	if port <= 0 {
+		return ""
+	}
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+}

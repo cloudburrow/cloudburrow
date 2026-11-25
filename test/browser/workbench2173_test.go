@@ -9,17 +9,15 @@ import (
 	"net/url"
 	"testing"
 	"time"
-
-	"github.com/chromedp/chromedp"
 )
 
 // TestWorkbenchInstancesThroughThePages (#2173): Agent Platform >
 // Notebooks > Workbench, as Google's "Create a Vertex AI Workbench
 // instance by using the Console" walks it: the Instances page's Create new
 // (Create instance: Name, Zone, Machine type, idle shutdown) makes an
-// instance listed Active; its row's Open JupyterLab opens the instance's
-// page, whose code box runs Python on the instance's kernel (CloudBurrow
-// does not serve JupyterLab); Stop and Start move it; Reset asks to
+// instance listed Active, whose page shows its details (its row's Open
+// JupyterLab, the instance's own JupyterLab, is
+// TestWorkbenchJupyterLabFromTheConsole's, #2198); Stop and Start move it; Reset asks to
 // confirm with Reset; Delete with Confirm removes it. The console API reads
 // each result back; every screen meets WCAG 2.1 AA.
 func TestWorkbenchInstancesThroughThePages(t *testing.T) {
@@ -81,19 +79,10 @@ func TestWorkbenchInstancesThroughThePages(t *testing.T) {
 	p.waitForWithin(listedRow("/agent-platform/workbench/instances", name), 30*time.Minute)
 	waitStatus("Active")
 
-	// Open JupyterLab: the instance's page, where Python runs on its kernel.
-	p.navigate(listPath)
-	p.waitFor(rowReady(name))
-	p.colabRowItem(name, "Open JupyterLab")
-	p.waitFor(fmt.Sprintf(`location.pathname === %q`, "/agent-platform/workbench/instances/"+name))
+	// The instance's page: its details.
 	instancePath := "/agent-platform/workbench/instances/" + url.PathEscape(name) + q
-	p.waitFor(`document.querySelector("#tab-query") !== null`)
-	p.run(chromedp.Click(chromedp.CSS(`#tab-query`)))
-	p.waitFor(`document.querySelector("#view .query-editor") !== null`)
-	p.eval(`(() => { const e = document.querySelector("#view .query-editor"); e.value = ""; return true; })()`, nil)
-	p.run(chromedp.SendKeys(chromedp.CSS(`#view .query-editor`), "x = 6 * 7\nprint(x)"))
-	p.clickText("#view .query-pane button.primary", "Run")
-	p.waitForWithin(`[...document.querySelectorAll("#view .query-results tbody td")].some((c) => c.textContent.trim() === "42")`, 5*time.Minute)
+	p.navigate(instancePath)
+	p.waitFor(`(document.querySelector("#view") || {textContent: ""}).textContent.includes("Data disk")`)
 
 	// Stop and Start from the row's menu.
 	p.navigate(listPath)
