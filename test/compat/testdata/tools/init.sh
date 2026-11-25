@@ -26,6 +26,11 @@ iptables -t nat -A OUTPUT -d 127.0.0.0/8 -p tcp -m multiport --dports 53,9997,99
 # root, the sink and toolDial, connects as root; the tools run as the test's
 # uid.
 iptables -t nat -A OUTPUT -d 127.0.0.0/8 -p tcp -m owner --uid-owner 0 -j RETURN
+# Port 1 is the tests' closed proxy (noGoogleEgress, HTTPS_PROXY=
+# 127.0.0.1:1): refused at once in the container, as on the host. Relayed,
+# the relay accepted it and then closed it, which a provider retries for
+# minutes (TestTerraformBigQueryTableDropColumnHardCoded took 638 s).
+iptables -t nat -A OUTPUT -d 127.0.0.0/8 -p tcp --dport 1 -j RETURN
 iptables -t nat -A OUTPUT -d 127.0.0.0/8 -p tcp -j REDIRECT --to-ports 9997
 iptables -t nat -A OUTPUT -d 127.0.0.0/8 -j RETURN
 iptables -t nat -A OUTPUT -d "$relay" -p tcp --dport 7000 -m owner --uid-owner 0 -j RETURN
