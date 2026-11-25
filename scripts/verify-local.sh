@@ -566,7 +566,7 @@ done
 
 # ci.yml's compat-coverage job: with every compat shard run, each compat
 # test passed or failed in one of them, but for the never-run list, read
-# from ci.yml so the two cannot drift.
+# from ci.yml so the two cannot drift, and the nightly spark shard's.
 compat_coverage() {
   local s never none
   for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
@@ -581,7 +581,9 @@ compat_coverage() {
   for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
     cat "$LOGS/$s"/compat.log "$LOGS/$s"/probe-*.log 2>/dev/null || true
   done | grep -oE -- '^--- (PASS|FAIL): Test[A-Za-z0-9_]+' | awk '{print $3}' | sort -u > "$WORK/ran.txt"
-  none=$(comm -23 "$WORK/all.txt" "$WORK/ran.txt" | grep -vE "${never:-^$}" || true)
+  # And the nightly spark shard's (COMPAT_SPARK_TESTS), which ci.yml's job
+  # leaves to nightly-sql-ephemeral.yml the same way (#2245).
+  none=$(comm -23 "$WORK/all.txt" "$WORK/ran.txt" | grep -vE "${never:-^$}" | grep -vE "$COMPAT_SPARK_TESTS" || true)
   printf '%s\n' "$none" > "$LOGS/ran-in-no-shard.txt"
   if [ -z "$never" ]; then
     check "every compat test ran in a shard" fail "no never= list in ci.yml"

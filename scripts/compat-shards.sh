@@ -228,18 +228,33 @@ COMPAT_GKE_UPGRADE_TESTS="^Test($(echo "$COMPAT_GKE_UPGRADE_TEST_NAMES" | tr -s 
 # (1,888 s of that run, plus three tests that never ran), vpcvms the VPC
 # networking tests that carry VM traffic (766 s, plus seven that never
 # ran), and served keeps about 940 s with the rest of its tests.
+# vpcvms has Cloud NAT's VM traffic tests too (#2245), whose echo target
+# runs in the VM image their own VM builds, and Shared VPC's, which make
+# their host and service projects through Resource Manager, which only
+# vpcvms of the served instance's shards exports. VM access scopes
+# (TestVMAccessScopesLimitTokens2179) need IAM enforcement: the iam shard.
 COMPAT_COMPUTE_VM_TEST_NAMES="ComputeRegionalDisksThroughTheGoClient ComputeVMsThroughTheGoClient
   ComputeLabelsSchedulingAndExternalIPsThroughTheGoClient ComputeRollingUpdatesThroughTheGoClient2139
   TerraformComputeInstance ComputeRegionalGroupsThroughTheGoClient GcloudComputeInstances
   ComputeOpsAgentWritesLogsAndMetrics ComputeAutoscalerScalesOnRealCPU
-  ShieldedVMHTTPSMetadataServer2179 VMAccessScopesLimitTokens2179 VMMetadataServerFromInsideTheVM2177"
+  ShieldedVMHTTPSMetadataServer2179 VMMetadataServerFromInsideTheVM2177"
 COMPAT_COMPUTE_VM_TESTS="^Test($(echo "$COMPAT_COMPUTE_VM_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 COMPAT_VPC_VM_TEST_NAMES="CloudRouterBGPWithARouterApplianceVM2140 ComputeVMNetworkingThroughTheGoClient
   RelayedConnectionsFollowTheEgressFirewall ComputeIPv6ThroughTheGoClient
   CloudNATGivesVMsWithoutExternalIPsEgress GcloudStartIAPTunnel
   RegionalAndInternalIPv6ForwardingRules2140 IPv6OnlyVMsAndGlobalIPv6LoadBalancing2140
-  InternalLBAndPSCEndpointCarryVMTraffic2140 VMIdentityThroughALoadBalancerAndSecureWebProxy"
+  InternalLBAndPSCEndpointCarryVMTraffic2140 VMIdentityThroughALoadBalancerAndSecureWebProxy
+  CloudNATTranslatesVMTraffic2140 CloudNATEndpointIndependentMappingAndDynamicPorts2140
+  SharedVPCThroughTheGoClient2140 SharedVPCIndividualSubnetsThroughTheGoClient2140"
 COMPAT_VPC_VM_TESTS="^Test($(echo "$COMPAT_VPC_VM_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
+
+# The nightly spark shard's tests (COMPAT_SPARK_TESTS): BigQuery's Spark
+# procedures and the Dataproc API's, which run spark-submit in the pinned
+# apache/spark images, so in nightly-sql-ephemeral.yml's spark job, not in
+# ci.yml's compat job. That job fails unless every one of them passed, and
+# ci.yml's compat-coverage leaves them to it by this pattern rather than by
+# name (#2245), so a new Dataproc test is checked there the night it lands.
+COMPAT_SPARK_TESTS='^Test(BigQuerySpark|BqSpark|Dataproc|GcloudDataproc)'
 
 # The shards, in the order ci.yml's matrix lists them.
 COMPAT_SHARDS="storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas acceptance iam localai localaispeech"
@@ -265,6 +280,12 @@ COMPAT_SHARDS="storage served gke gkeupgrade computevms vpcvms run crossservice 
 # BigQuery (#2112, Resource Manager with BigQuery), and its analysis of
 # Pub/Sub topics and Cloud Run services under a scope (#2112, Resource
 # Manager with Pub/Sub and Cloud Run), which no other shard serves together.
+# And Compute Engine with Cloud Storage or Cloud Run (#2245): image import
+# from a Cloud Storage tarball and a virtual disk, booted as VMs, and Cloud
+# Run's Serverless VPC Access connectors and Direct VPC egress to VMs
+# (TestRun*2140), as COMPUTE; and the Vertex AI Pipelines jobs and
+# schedules (#2173), whose tasks run in the pipeline task image ci.yml
+# pulls for this shard, on the Vertex AI endpoint Cloud Run starts.
 # And Cloud Run's own tests (TestRun*) with gcloud's and Terraform's of
 # Cloud Run and Cloud Functions (about 1,430 s): main run 44905534820 cancelled the run
 # shard at its 90m, its suite at 4,021 s (3,157 s in 44858607986) and its
@@ -279,7 +300,9 @@ COMPAT_CROSSSERVICE_TEST_NAMES="ArtifactRegistryCleanupPolicies
   ServiceDisabledFirestore StorageBatchOperationsRewriteToKMSKey
   StorageDataAccessAuditLogs StorageDataAccessAuditLogsOffByDefault
   StorageInsightsActivityViews StorageInsightsDatasetConfigChecks
-  StorageInsightsLinkedDataset TerraformStorageInsightsDatasetConfig"
+  StorageInsightsLinkedDataset TerraformStorageInsightsDatasetConfig
+  ComputeImageImportFromCloudStorageThroughTheGoClient ComputeImageImportFromAVirtualDiskThroughTheGoClient
+  VertexAIPipelineJobs VertexAIPipelineSchedules"
 COMPAT_CROSSSERVICE_TESTS="^Test((Gcloud|Terraform|GcloudAndTerraform)?Eventarc[A-Za-z0-9_]*|((Gcloud|Terraform)(Run|CloudRun|CloudFunctions)|Run)[A-Za-z0-9_]*|$(echo "$COMPAT_CROSSSERVICE_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 
 # The sqlreplicas shard's tests, by name: every Cloud SQL test of high
@@ -594,7 +617,10 @@ compat_shard() {
         COMPAT_RUN=$COMPAT_COMPUTE_VM_TESTS
       elif [ "$1" = vpcvms ]; then
         # The served shard's instance again, for the VPC tests that carry
-        # VM traffic (COMPAT_VPC_VM_TESTS).
+        # VM traffic (COMPAT_VPC_VM_TESTS), and Resource Manager, which every
+        # instance serves, for Shared VPC's host and service projects (#2245):
+        # COMPAT_RUN keeps its own suite in the storage shard.
+        TEST_VARS+=,RESOURCEMANAGER
         COMPAT_RUN=$COMPAT_VPC_VM_TESTS
       elif [ "$1" = gkeupgrade ]; then
         # The served shard's instance again, for Kubernetes Engine's
@@ -690,7 +716,7 @@ compat_shard() {
         # The run shard's instance again, for COMPAT_CROSSSERVICE_TESTS only, with
         # the plain names of the services they read: COMPAT_RUN keeps every
         # other suite those names would select to its own shard.
-        TEST_VARS+=,STORAGE,STORAGE_BATCH,STORAGE_INSIGHTS,PUBSUB,BIGQUERY,FIRESTORE,SERVICEUSAGE,KMS,LOGGING,RESOURCEMANAGER,MONITORING
+        TEST_VARS+=,STORAGE,STORAGE_BATCH,STORAGE_INSIGHTS,PUBSUB,BIGQUERY,FIRESTORE,SERVICEUSAGE,KMS,LOGGING,RESOURCEMANAGER,MONITORING,COMPUTE
         COMPAT_RUN=$COMPAT_CROSSSERVICE_TESTS
       else
         COMPAT_SKIP=$COMPAT_CROSSSERVICE_TESTS
@@ -754,7 +780,9 @@ compat_shard() {
       # (#2112): BigQuery, Spanner, Bigtable, Cloud KMS, Compute Engine and
       # Resource Manager's tags on one instance, which only this shard serves
       # together.
-      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$|CloudAssetAnalyzeIamPolicyEveryAssetType$)' ;;
+      # And a VM's access scopes, which limit its service account's tokens
+      # only where IAM is enforced (#2179, #2245).
+      COMPAT_RUN='^Test(IAMEnforcement|VMAccessScopesLimitTokens2179$|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$|CloudAssetAnalyzeIamPolicyEveryAssetType$)' ;;
     spark)
       # BigQuery's stored procedures for Apache Spark (#2104), nightly only
       # (nightly-sql-ephemeral.yml's spark job), not one of ci.yml's
@@ -767,15 +795,17 @@ compat_shard() {
       # for a procedure's customer-managed key. And Serverless for Apache
       # Spark (#2156), the Dataproc API's batches and Spark Connect
       # sessions, which run on the same Spark runner.
-      SERVICES=bigquery,storage,logging,run,kms,dataproc
+      # And Kubernetes Engine (#2245), whose cluster Dataproc on GKE's
+      # virtual cluster runs on (TestDataprocOnGKE), as GKE.
+      SERVICES=bigquery,storage,logging,run,kms,dataproc,gke
       # --allow-unconfined-containers (#2162): the Dataproc DOCKER component's
       # rootless daemons run unconfined, so only with it; TestDataprocDockerComponent
       # runs here, and TestDataprocDockerComponentOff, the refusal without
       # it, skips on this instance (it runs on any instance without the flag).
       FIXTURES=(--allow-unconfined-containers)
-      TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,KMS,GCLOUD,DATAPROC
+      TEST_VARS+=,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,RESOURCEMANAGER,STORAGE,LOGGING,RUN,KMS,GCLOUD,DATAPROC,GKE
       export CLOUDBURROW_TEST_SPARK=1
-      COMPAT_RUN='^Test(BigQuerySpark|BqSpark|Dataproc|GcloudDataproc)'
+      COMPAT_RUN=$COMPAT_SPARK_TESTS
       COMPAT_TIMEOUT=150m ;;
     localai|localaispeech)
       # The local AI tests (#1985): BigQuery and Cloud Storage for the AI

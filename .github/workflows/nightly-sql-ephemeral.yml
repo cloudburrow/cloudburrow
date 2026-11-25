@@ -21,8 +21,10 @@ name: Cloud SQL ephemeral nightly
 # already does on every push to main. Nothing here reaches Google: the compat harness's
 # egress guard stays on, and gcloud's update check is off as in ci.yml.
 #
-# The spark job runs BigQuery's stored procedures for Apache Spark (#2104),
-# which ci.yml's compat job leaves out (its never list): the spark shard of
+# The spark job runs BigQuery's stored procedures for Apache Spark (#2104)
+# and the Dataproc API's tests, which ci.yml's compat job leaves out (its
+# compat-coverage leaves COMPAT_SPARK_TESTS to this job, which fails unless
+# every one of them passed, #2245): the spark shard of
 # scripts/compat-shards.sh, with CLOUDBURROW_TEST_SPARK=1, on a persistent
 # instance. It pulls the pinned apache/spark images by digest first, and
 # keeps Google's BigQuery connector jars from Maven Central, which the CLI
@@ -293,13 +295,6 @@ jobs:
           set -e
           echo "== compat summary (spark): $(grep -c -- '--- PASS' compat.log) passed, $(grep -c -- '--- SKIP' compat.log) skipped"
           [ "$rc" -eq 0 ] || { echo "compat failed"; exit 1; }
-          # Every Spark test must have run and passed, not skipped.
-          for t in TestBigQuerySparkStoredProcedures TestBqSparkStoredProcedure TestBigQuerySparkProcedureRuntimesAndTypes \
-            TestBigQuerySparkProcedureContainerImage TestBigQuerySparkProcedureInvoker \
-            TestBigQuerySparkProcedureStagingAndCMEK; do
-            grep -q -- "^--- PASS: $t (" compat.log ||
-              { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" compat.log || echo 'no result')"; exit 1; }
-          done
           # A Dataproc cluster's HDFS across the instance's stop and up
           # (#2188): the setup leaves a cluster with a file in HDFS, and
           # the probe reads it once the restarted instance has started the
@@ -319,6 +314,32 @@ jobs:
             grep -q -- "^--- PASS: $t (" hdfs-restart.log || { echo "$t did not pass"; exit 1; }
           done
           ./bin/cloudburrow stop "${CB[@]}"
+          # The DOCKER component's refusal (#2162) on the same instance
+          # started without --allow-unconfined-containers, where
+          # TestDataprocDockerComponentOff runs rather than skips (#2245).
+          OFF=(--name ci --state-dir "$RUNNER_TEMP/cb" ${UP_FLAGS[@]+"${UP_FLAGS[@]}"}
+            --port-control 0 --port-storage 0 --port-pubsub 0 --port-run 0 --port-memorystore 0 --port-cloudsql-mysql 0 --port-cloudsql 0
+            --services "$SERVICES")
+          ./bin/cloudburrow up --detach --detach-timeout 10m "${OFF[@]}"
+          ./bin/cloudburrow wait --timeout 1m "${OFF[@]}"
+          ./bin/cloudburrow env "${OFF[@]}" --format json > env.json
+          COMPAT_ENV=$(scripts/compat-env.sh --strict --only "$TEST_VARS" --env-json env.json \
+            --cli "$PWD/bin/cloudburrow" --gcloud "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" -- "${OFF[@]}")
+          eval "$COMPAT_ENV"
+          go test -tags=compat -count=1 -timeout 15m -v -run '^TestDataprocDockerComponentOff$' ./test/compat/ | tee docker-off.log
+          ./bin/cloudburrow stop "${OFF[@]}"
+          # Every test of the shard (COMPAT_SPARK_TESTS) must have run and
+          # passed in one of the three, not skipped: ci.yml's compat-coverage
+          # leaves them to this job (#2245).
+          go test -tags=compat -list "$COMPAT_SPARK_TESTS" ./test/compat/ | grep '^Test' > spark-tests.txt
+          [ -s spark-tests.txt ] || { echo "COMPAT_SPARK_TESTS lists no test"; exit 1; }
+          bad=
+          while read -r t; do
+            grep -qh -- "^--- PASS: $t (" compat.log hdfs-restart.log docker-off.log ||
+              { echo "$t did not pass: $(grep -h -- "^--- [A-Z]*: $t (" compat.log hdfs-restart.log docker-off.log || echo 'no result')"; bad=1; }
+          done < spark-tests.txt
+          [ -z "$bad" ] || exit 1
+          echo "== all $(wc -l < spark-tests.txt) spark shard tests passed"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
@@ -327,6 +348,7 @@ jobs:
           path: |
             compat.log
             hdfs-restart.log
+            docker-off.log
             ${{ runner.temp }}/cb/ci/up.log
           retention-days: 7
           if-no-files-found: ignore

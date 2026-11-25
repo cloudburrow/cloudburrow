@@ -679,10 +679,12 @@ jobs:
       # The Vertex AI Pipelines tasks' image (#2173): CloudBurrow never pulls
       # a task's image, so TestVertexAIPipelinesThroughThePages and the
       # TestVertexAIPipeline* compat tests skip without one on the host. The
-      # crossservice shard runs them, with python:3.15.2-alpine3.24 pulled by
-      # its multi-platform index digest (realTools.pipelineTaskImage).
+      # crossservice shard runs them, and the iam shard
+      # TestIAMEnforcementVertexAIRunIdentity (#2245), with
+      # python:3.15.2-alpine3.24 pulled by its multi-platform index digest
+      # (realTools.pipelineTaskImage).
       - name: Pull the pipeline task image
-        if: matrix.shard == 'crossservice'
+        if: matrix.shard == 'crossservice' || matrix.shard == 'iam'
         run: |
           image="python@$(jq -er '.components.realTools.pipelineTaskImage.digest' dependencies.json)"
           docker pull -q "$image"
@@ -1461,14 +1463,13 @@ jobs:
           # on an --internal Docker network: CLOUDBURROW_TEST_SPARK, run
           # nightly by nightly-sql-ephemeral.yml's spark job (the spark
           # shard of scripts/compat-shards.sh) and locally. So do the
-          # Dataproc tests (#2162, #2234), which that job runs too. #2245:
-          # twelve tests from Landing 168 have no shard yet whose instance
-          # gives them what they need (Compute Engine VMs together with
-          # Cloud Run, Cloud Storage, Resource Manager or IAM enforcement,
-          # or the pipeline task image); they run locally, and each leaves
-          # this list once a shard runs it.
-          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|ModelGardenDeploysHuggingFaceModels|ModelGardenDeploysOnHuggingFacePyTorchInference|ModelGardenDeploysAnONNXModel|ModelGardenDeploysAnMLXModel|ModelGardenDeploysAGGUFModelOnTheAppleGPU|ModelGardenDeploysAnMLXModelOnTheAppleGPU|GenerateContentOnTheAppleGPU|CloudSQLServerInstance|BigQuerySparkStoredProcedures|BqSparkStoredProcedure|BigQuerySparkProcedureRuntimesAndTypes|BigQuerySparkProcedureContainerImage|BigQuerySparkProcedureInvoker|BigQuerySparkProcedureStagingAndCMEK|Dataproc[A-Za-z0-9_]*|GcloudDataproc|CloudNATTranslatesVMTraffic2140|CloudNATEndpointIndependentMappingAndDynamicPorts2140|SharedVPCThroughTheGoClient2140|SharedVPCIndividualSubnetsThroughTheGoClient2140|RunVPCEgressThroughTheGoClient2140|RunReachesVMsThroughConnectorsAndDirectVPCEgress2140|ComputeImageImportFromCloudStorageThroughTheGoClient|ComputeImageImportFromAVirtualDiskThroughTheGoClient|VMAccessScopesLimitTokens2179|VertexAIPipelineJobs|VertexAIPipelineSchedules|IAMEnforcementVertexAIRunIdentity)$'
-          none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
+          # Dataproc tests (#2162, #2234), which that job runs too. They are
+          # left to it by its pattern, COMPAT_SPARK_TESTS, not listed here:
+          # that job fails unless every test it matches passed (#2245).
+          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|ModelGardenDeploysHuggingFaceModels|ModelGardenDeploysOnHuggingFacePyTorchInference|ModelGardenDeploysAnONNXModel|ModelGardenDeploysAnMLXModel|ModelGardenDeploysAGGUFModelOnTheAppleGPU|ModelGardenDeploysAnMLXModelOnTheAppleGPU|GenerateContentOnTheAppleGPU|CloudSQLServerInstance)$'
+          # shellcheck source=scripts/compat-shards.sh
+          . scripts/compat-shards.sh
+          none=$(comm -23 all.txt ran.txt | grep -vE "$never" | grep -vE "$COMPAT_SPARK_TESTS" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1
           fi

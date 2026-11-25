@@ -37,7 +37,8 @@ func startNATTarget(ctx context.Context, t *testing.T, cluster string) natTarget
 		b, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 		return strings.TrimSpace(string(b)), err
 	}
-	// An image already on this machine: the VM image, which has nc.
+	// An image already on this machine: the VM image, which has nc, built
+	// for the test's VM, which callers make first.
 	imgs, err := docker("images", "--format", "{{.Repository}} {{.ID}}")
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +51,7 @@ func startNATTarget(ctx context.Context, t *testing.T, cluster string) natTarget
 		}
 	}
 	if img == "" {
-		t.Skip("no cloudburrow-vm-debian-12 image on this machine for the echo target")
+		t.Fatal("no cloudburrow-vm-debian-12 image on this machine for the echo target, though the test's VM was made")
 	}
 	var tg natTarget
 	for n := 0; n < 40 && tg.network == ""; n++ {
@@ -112,13 +113,15 @@ func TestCloudNATTranslatesVMTraffic2140(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	t.Cleanup(cancel)
-	tg := startNATTarget(ctx, t, cluster)
 	const region, zone = "us-east4", "us-east4-a"
 	p := h.Project()
 	v := newVPCVMs(ctx, t, h, zone)
 	sfx := strconv.Itoa(int(time.Now().UnixNano() % 1e6))
 	vm := "ct-nat-" + sfx
 	ips := v.make(map[string]*computepb.NetworkInterface{vm: {Network: proto.String("global/networks/default")}})
+	// The target after the VM, whose image it runs: the first VM of an
+	// instance builds it (#2245).
+	tg := startNATTarget(ctx, t, cluster)
 	probe := "nc -w 5 " + tg.ip + " 8080 </dev/null; echo rc=$?"
 	// Its firewall in force first: before it, the pod's own route would
 	// reach the target.
