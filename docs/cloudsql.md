@@ -1400,7 +1400,7 @@ groups (`cloudidentity.googleapis.com` on the Resource Manager port):
   (`gcloud sql users create GROUP_EMAIL --type=cloud_iam_group`) adds the group, with no privileges.
   PostgreSQL: a `NOLOGIN` role named by the email (at most 63 characters), `GRANT … TO "group@domain"`.
   MySQL: a role `'NAME'@'DOMAIN'`, NAME the part before the `@` (at most 32 characters), `GRANT … TO
-  'NAME'@'DOMAIN'`; `users.list` answers it with that host (UNVERIFIED: Google's sample lists only the
+  'NAME'@'DOMAIN'`; `users.list` answers it with that host (UNVERIFIED (docs re-read 2026-11-25: <https://docs.cloud.google.com/sql/docs/mysql/add-manage-iam-users>): Google's sample lists only the
   name). At most 200 groups; a duplicate is 409, a password or a host 400. A longer name is reached by
   nesting the group in a parent group with a shorter one.
 - A member of the group, directly or through nested groups, signs in with its own IAM account and an
