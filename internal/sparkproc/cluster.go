@@ -300,6 +300,14 @@ func (d *Docker) StartCluster(ctx context.Context, spec ClusterSpec) (_ *Cluster
 	if err := c.setupLake(ctx); err != nil {
 		return nil, err
 	}
+	// A --mount type=image source is not pulled by docker run (only the
+	// container's own image is): the DOCKER component's dind-rootless
+	// image, whose docker CLI every node mounts, must be present first.
+	if image := c.dockerImage(); image != "" {
+		if err := d.ensureImage(ctx, image); err != nil {
+			return nil, &Unavailable{Msg: "pull the DOCKER component's image: " + err.Error()}
+		}
+	}
 	role := "master"
 	switch {
 	case spec.HistoryOnly:

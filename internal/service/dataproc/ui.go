@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -160,6 +161,70 @@ func (s *Server) resolveApp(w string) string {
 	return ""
 }
 
+// resolveAppFromHistory is resolveApp through the History Server at addr,
+// for an event log this process cannot read: Spark writes each one 0660,
+// owned by the container's spark user, which on a Linux host is not the
+// CLI's. The REST API's environment of each application not yet looked
+// at (GET /api/v1/applications/ID/environment) has its WorkloadProperty.
+func (s *Server) resolveAppFromHistory(ctx context.Context, addr, w string) string {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	var list []struct {
+		ID string `json:"id"`
+	}
+	if historyAPI(ctx, "http://"+addr+"/api/v1/applications", &list) != nil {
+		return ""
+	}
+	for _, a := range list {
+		s.mu.Lock()
+		seen := s.appsSeen[a.ID]
+		s.mu.Unlock()
+		if seen {
+			continue
+		}
+		var env struct {
+			SparkProperties [][]string `json:"sparkProperties"`
+		}
+		if historyAPI(ctx, "http://"+addr+"/api/v1/applications/"+url.PathEscape(a.ID)+"/environment", &env) != nil {
+			continue
+		}
+		s.mu.Lock()
+		if s.appsSeen == nil {
+			s.appsSeen = map[string]bool{}
+		}
+		s.appsSeen[a.ID] = true
+		for _, kv := range env.SparkProperties {
+			if len(kv) == 2 && kv[0] == sparkproc.WorkloadProperty {
+				if s.apps == nil {
+					s.apps = map[string]string{}
+				}
+				s.apps[kv[1]] = a.ID
+			}
+		}
+		s.mu.Unlock()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.apps[w]
+}
+
+// historyAPI decodes the JSON a History Server REST API GET answers.
+func historyAPI(ctx context.Context, u string, v any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("GET %s: %s", u, resp.Status)
+	}
+	return json.NewDecoder(resp.Body).Decode(v)
+}
+
 // logRecords is whether an event log's lines up to its environment hold
 // needle.
 func logRecords(file string, needle []byte) bool {
@@ -210,6 +275,9 @@ func (s *Server) WebUI(next http.Handler) http.Handler {
 			}
 			if m := workloadRE.FindStringSubmatch(p); m != nil {
 				app := s.resolveApp(m[1])
+				if app == "" {
+					app = s.resolveAppFromHistory(r.Context(), a, m[1])
+				}
 				if app == "" {
 					http.Error(w, "No Spark application of this workload has been recorded yet: its Spark UI shows once its driver has started", http.StatusNotFound)
 					return

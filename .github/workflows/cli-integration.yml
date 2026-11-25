@@ -34,12 +34,23 @@ jobs:
   cli-integration:
     name: cmd/cloudburrow integration
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    # go test's own deadline is 40m; this leaves the emulator build its
+    # share when ci.yml's cache has none for these sources yet.
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27"
+      - id: go
+        run: echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+
+      # The embedded BigQuery emulator, from ci.yml's cache, read only and
+      # under ci.yml's key, as offline.yml restores it.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: internal/bigqueryimage/bin/bigquery-emulator-*
+          key: bigquery-emulator-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.version }}-${{ hashFiles('tools/bqengine/*.go', 'third_party/bigquery-emulator/sources.json', 'third_party/bigquery-emulator/go.mod', 'third_party/bigquery-emulator/go.sum', 'third_party/bigquery-emulator/patches/**') }}
 
       - name: Install kubectl
         run: |
@@ -52,10 +63,13 @@ jobs:
           version: v0.33.0
 
       # The CLI embeds the Linux storage server that `up` builds the storage
-      # image from (#514); both the in-process runUp and the tests' own
-      # `go build` need it in place.
-      - name: Build the embedded storage server
-        run: make storage-binaries
+      # image from (#514), and the BigQuery emulator, whose Spark runner
+      # Dataproc's batches run on (TestCancelledBatchLeavesNoContainers,
+      # #2211); both the in-process runUp and the tests' own `go build`
+      # need them in place. bigquery-binaries keeps a restored build whose
+      # stamps match the sources, and builds from source otherwise.
+      - name: Build the embedded binaries
+        run: make storage-binaries bigquery-binaries
 
       - name: Integration tests
         run: |

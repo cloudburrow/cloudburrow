@@ -90,10 +90,24 @@ func RangerImage(ctx context.Context, instance string) (string, error) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		// BuildKit's summary (the last lines) quotes the failed step, not
+		// why it failed: Maven's errors and the files m2.sha256 does not
+		// pin come first.
+		var why []string
+		unpinned := false
+		for _, l := range lines {
+			unpinned = unpinned || strings.Contains(l, "not in m2.sha256")
+			if unpinned || strings.Contains(l, "[ERROR]") {
+				why = append(why, l)
+			}
+		}
+		if len(why) > 30 {
+			why = why[:30]
+		}
 		if len(lines) > 15 {
 			lines = lines[len(lines)-15:]
 		}
-		return "", fmt.Errorf("docker build: %v: %s", err, strings.Join(lines, "\n"))
+		return "", fmt.Errorf("docker build: %v: %s", err, strings.Join(append(why, lines...), "\n"))
 	}
 	return tag, nil
 }

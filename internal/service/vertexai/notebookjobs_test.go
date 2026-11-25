@@ -223,7 +223,9 @@ func TestSchedulesRunNotebookExecutions(t *testing.T) {
 		t.Helper()
 		for i := 0; i < 300; i++ {
 			got, _ := sch.GetSchedule(ctx, &aiplatformpb.GetScheduleRequest{Name: sc.GetName()})
-			if got.GetStartedRunCount() >= want {
+			// A run is counted before its job is created and recorded in
+			// LastScheduledRunResponse, so wait for both.
+			if got.GetStartedRunCount() >= want && got.GetLastScheduledRunResponse() != nil {
 				return got
 			}
 			time.Sleep(10 * time.Millisecond)
