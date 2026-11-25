@@ -44,6 +44,13 @@ func pushFlexImage(t *testing.T, h *Harness, ctx context.Context, base string, f
 	repo := fmt.Sprintf("flex-%d", time.Now().UnixNano()%1e6)
 	formatRepo(t, actx, ar, runParent(h), repo, &arpb.Repository{Format: arpb.Repository_DOCKER})
 	saved := filepath.Join(t.TempDir(), "base.tar")
+	// docker save reads the local store: the pinned base, by digest, is
+	// pulled first when no earlier test ran it.
+	if exec.CommandContext(ctx, "docker", "image", "inspect", base).Run() != nil {
+		if out, err := exec.CommandContext(ctx, "docker", "pull", "--quiet", base).CombinedOutput(); err != nil {
+			t.Fatalf("docker pull %s: %v\n%s", base, err, out)
+		}
+	}
 	if out, err := exec.CommandContext(ctx, "docker", "save", "-o", saved, base).CombinedOutput(); err != nil {
 		t.Fatalf("docker save %s: %v\n%s", base, err, out)
 	}

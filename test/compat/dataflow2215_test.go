@@ -26,6 +26,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
 // EnvDataflow is Dataflow (#2215), gRPC and JSON on one port.
@@ -89,14 +91,9 @@ func beamNetwork(t *testing.T, ctx context.Context, addrs map[int]string) string
 	}
 	t.Cleanup(func() { _ = exec.Command("docker", "network", "rm", network).Run() })
 	assets := filepath.Join(moduleRoot(t), "internal", "beamrun", "assets")
-	args := append([]string{"run", "-d", "--name", relay, "-v", assets + ":/cb:ro", "--entrypoint", "python3"}, hostRelayArgs(t, ctx)...)
-	args = append(args, beamPythonImage, "/cb/relay.py")
+	args := []string{"run", "-d", "--name", relay, "-v", assets + ":/cb:ro", "--entrypoint", "python3", beamPythonImage, "/cb/relay.py"}
 	for listen, a := range addrs {
-		_, port, err := net.SplitHostPort(stripScheme(a))
-		if err != nil {
-			t.Fatal(err)
-		}
-		args = append(args, fmt.Sprintf("%d=host.docker.internal:%s", listen, port))
+		args = append(args, fmt.Sprintf("%d=%s", listen, beamHostTarget(t, ctx, stripScheme(a))))
 	}
 	if b, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput(); err != nil {
 		t.Fatalf("start the relay: %v\n%s", err, b)
@@ -116,6 +113,42 @@ func beamNetwork(t *testing.T, ctx context.Context, addrs map[int]string) string
 		t.Fatalf("connect the relay: %v\n%s", err, b)
 	}
 	return network
+}
+
+// beamHostTarget is the instance's loopback address a as a container on the
+// default bridge reaches it, as internal/beamrun's hostTargets does:
+// host.docker.internal on Docker Desktop; on Docker Engine, where the
+// bridge reaches the host's loopback not at all, a relay
+// (internal/hostrelay) on the bridge's gateway, closed when the test ends.
+func beamHostTarget(t *testing.T, ctx context.Context, a string) string {
+	t.Helper()
+	_, port, err := net.SplitHostPort(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	osName, err := exec.CommandContext(ctx, "docker", "info", "--format", "{{.OperatingSystem}}").Output()
+	if err != nil {
+		t.Fatalf("docker info: %v", err)
+	}
+	if strings.Contains(string(osName), "Docker Desktop") {
+		return "host.docker.internal:" + port
+	}
+	gw, err := exec.CommandContext(ctx, "docker", "network", "inspect", "bridge", "--format", "{{range .IPAM.Config}}{{.Gateway}} {{end}}").Output()
+	if err != nil {
+		t.Fatalf("find the default bridge's gateway: %v", err)
+	}
+	for _, f := range strings.Fields(string(gw)) {
+		if ip := net.ParseIP(f); ip != nil && ip.To4() != nil {
+			r := &hostrelay.Relay{Listen: net.JoinHostPort(f, "0"), Target: a}
+			if err := r.Start(context.Background()); err != nil {
+				t.Fatalf("relay %s on the bridge's gateway: %v", a, err)
+			}
+			t.Cleanup(func() { _ = r.Close() })
+			return r.Addr()
+		}
+	}
+	t.Fatalf("the default bridge has no IPv4 gateway (%q)", strings.TrimSpace(string(gw)))
+	return ""
 }
 
 // runBeamPython runs python with args in the Beam SDK container on
