@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"cloud.google.com/go/spanner"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestGcloudSpannerExecuteSQLQueryModes (#2029), in the emulators shard:
@@ -24,9 +26,9 @@ import (
 func TestGcloudSpannerExecuteSQLQueryModes(t *testing.T) {
 	f := newSpannerAdmin(t, "gc-plans", "gcplansdb") // skips without CLOUDBURROW_TEST_SPANNER
 	New(t).Endpoint(EnvSpannerREST)
-	c, err := spanner.NewClient(f.ctx, f.database, spannerOpts(f.addr)...)
+	c, err := localclient.Spanner(f.ctx, f.database, spannerOpts(f.addr)...)
 	if err != nil {
-		t.Fatalf("spanner.NewClient: %v", err)
+		t.Fatalf("localclient.Spanner: %v", err)
 	}
 	t.Cleanup(c.Close)
 	if _, err := c.Apply(f.ctx, []*spanner.Mutation{

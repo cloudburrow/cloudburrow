@@ -22,6 +22,8 @@ import (
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // covers: google.dataflow.v1beta3.TemplatesService/GetTemplate, google.dataflow.v1beta3.TemplatesService/LaunchTemplate
@@ -365,7 +367,7 @@ func TestDataflowProvidedTemplatesMore(t *testing.T) {
 		// Google once a minute. Both guards.
 		t.Setenv("SPANNER_EMULATOR_HOST", spannerAddr)
 		t.Setenv("SPANNER_DISABLE_BUILTIN_METRICS", "true")
-		sp, err := spanner.NewClientWithConfig(ctx, db, spanner.ClientConfig{DisableNativeMetrics: true}, spannerOpts(spannerAddr)...)
+		sp, err := localclient.SpannerWithConfig(ctx, db, spanner.ClientConfig{DisableNativeMetrics: true}, spannerOpts(spannerAddr)...)
 		if err != nil {
 			t.Fatal(err)
 		}

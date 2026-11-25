@@ -13431,8 +13431,10 @@
         "method": "google.spanner.v1.Spanner/ExecuteSql",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudspannerplans2029_test.go:24 TestGcloudSpannerExecuteSQLQueryModes",
           "test/compat/spannercmek1950_test.go:63 TestSpannerCMEK",
           "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback",
+          "test/compat/spannergraph2029c_test.go:140 TestSpannerGraphQueryPlansOfEveryStatement",
           "test/compat/spannerplans2029_test.go:230 TestSpannerQueryPlans",
           "test/compat/spannerplans2029b_test.go:182 TestSpannerQueryPlansForEveryShape",
           "test/compat/spannerplans2029b_test.go:323 TestSpannerGraphQueryPlans",
@@ -13446,6 +13448,7 @@
         "tests": [
           "test/compat/iamenforcementround9_1879_test.go:161 TestIAMEnforcementSpanner",
           "test/compat/optional_test.go:266 TestSpannerSchemaAndQuery",
+          "test/compat/spannergraph2029c_test.go:140 TestSpannerGraphQueryPlansOfEveryStatement",
           "test/compat/spannerplans2029_test.go:230 TestSpannerQueryPlans",
           "test/compat/spannerplans2029b_test.go:182 TestSpannerQueryPlansForEveryShape",
           "test/compat/spannerplans2029b_test.go:323 TestSpannerGraphQueryPlans",
@@ -13645,6 +13648,8 @@
         "tests": [
           "test/compat/bigqueryasyncjobs_test.go:60 TestBigQueryAsyncJobs",
           "test/compat/bigquerycontinuous2193_test.go:394 TestBigQueryContinuousQueryPubSub",
+          "test/compat/bigquerycontinuousstateful2193_test.go:226 TestBigQueryContinuousQueryJoin",
+          "test/compat/bigquerycontinuousstateful2193_test.go:60 TestBigQueryContinuousQueryTumblePubSub",
           "test/compat/bigqueryiam1774_test.go:42 TestBigQueryPerProjectIAMRest",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
         ]
@@ -13794,6 +13799,8 @@
           "test/compat/bigquerycontinuous2193_test.go:394 TestBigQueryContinuousQueryPubSub",
           "test/compat/bigquerycontinuous2193_test.go:525 TestBigQueryContinuousQueryInsert",
           "test/compat/bigquerycontinuous2193_test.go:589 TestBigQueryContinuousQueryBigtableAndSpanner",
+          "test/compat/bigquerycontinuousstateful2193_test.go:226 TestBigQueryContinuousQueryJoin",
+          "test/compat/bigquerycontinuousstateful2193_test.go:60 TestBigQueryContinuousQueryTumblePubSub",
           "test/compat/bigquerycopykey1762_test.go:33 TestBigQueryCopyKey1762",
           "test/compat/bigquerycopykey1822_test.go:35 TestBigQueryCopyKeyPartition1822",
           "test/compat/bigquerycopylayout1759_test.go:43 TestBigQueryCopyLayout1759",
@@ -15659,7 +15666,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr1922_test.go:46 TestBackupDRRestoreToANewInstance",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
           "test/compat/cloudsqlbluegreenha_test.go:28 TestCloudSQLBlueGreenDeploymentHA",
@@ -15735,7 +15742,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr1922_test.go:46 TestBackupDRRestoreToANewInstance",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqlbackupkeys_test.go:212 TestTerraformSQLBackupLocation",
           "test/compat/cloudsqlbluegreen_test.go:31 TestCloudSQLBlueGreenDeployment",
@@ -15865,7 +15872,7 @@
         "method": "sql.instances.pointInTimeRestore",
         "status": "Verified",
         "tests": [
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqlpitrrestore_test.go:33 TestCloudSQLPointInTimeRestoreFromBackupDR",
           "test/compat/cloudsqlpitrrestore_test.go:74 TestGcloudSQLPointInTimeRestoreRefused",
           "test/compat/sqladmin_test.go:104 TestSQLAdminRefusesWhatItCannotDoFaithfully"
@@ -15943,7 +15950,7 @@
         "tests": [
           "test/compat/backupdr1921_test.go:252 TestBackupDRJobLogsStoredBytesAndOnDemandRetention",
           "test/compat/backupdr1922_test.go:46 TestBackupDRRestoreToANewInstance",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
           "test/compat/cloudsqlbackupkeys_test.go:30 TestCloudSQLBackupLocationsAndReencryption",
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
@@ -16014,7 +16021,7 @@
         "method": "sql.operations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
           "test/compat/cloudsqlbackups_test.go:248 TestGcloudSQLBackups",
@@ -16545,9 +16552,9 @@
     "Key": "compute",
     "Title": "Compute Engine API (v1): VPC networking",
     "counts": {
-      "Implemented": 274,
-      "Unimplemented": 84,
-      "Verified": 226
+      "Implemented": 261,
+      "Unimplemented": 66,
+      "Verified": 259
     },
     "rows": [
       {
@@ -16745,7 +16752,8 @@
         "method": "compute.backendServices.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
+          "test/compat/connectiondraining2226_test.go:329 TestTerraformComputeConnectionDraining2226"
         ]
       },
       {
@@ -16760,6 +16768,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
+          "test/compat/connectiondraining2226_test.go:329 TestTerraformComputeConnectionDraining2226",
+          "test/compat/connectiondraining2226_test.go:61 TestComputeConnectionDraining2226",
           "test/compat/custommetrics2160_test.go:35 TestCustomMetricsBalancingThroughTheGoClient"
         ]
       },
@@ -16774,7 +16784,8 @@
         "method": "compute.backendServices.getHealth",
         "status": "Verified",
         "tests": [
-          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient"
+          "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
+          "test/compat/connectiondraining2226_test.go:61 TestComputeConnectionDraining2226"
         ]
       },
       {
@@ -16787,6 +16798,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/computelb2153_test.go:50 TestComputeExternalHTTPLoadBalancerThroughTheGoClient",
+          "test/compat/connectiondraining2226_test.go:329 TestTerraformComputeConnectionDraining2226",
+          "test/compat/connectiondraining2226_test.go:61 TestComputeConnectionDraining2226",
           "test/compat/proxylesssec2160_test.go:91 TestProxylessGRPCClientTLSOverXDSOverTLS"
         ]
       },
@@ -16807,6 +16820,8 @@
           "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient",
           "test/compat/computelb2160_test.go:337 TestCloudCDNCachesThroughTheGoClient",
           "test/compat/computelb2160_test.go:404 TestIAPGuardsALoadBalancerThroughTheGoClient",
+          "test/compat/connectiondraining2226_test.go:329 TestTerraformComputeConnectionDraining2226",
+          "test/compat/connectiondraining2226_test.go:61 TestComputeConnectionDraining2226",
           "test/compat/custommetrics2160_test.go:35 TestCustomMetricsBalancingThroughTheGoClient",
           "test/compat/iap2160_test.go:55 TestIAPBrowserSignInThroughAGoClient"
         ]
@@ -16840,8 +16855,10 @@
       },
       {
         "method": "compute.diskTypes.aggregatedList",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.diskTypes.get",
@@ -16855,8 +16872,11 @@
       },
       {
         "method": "compute.disks.addResourcePolicies",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
+          "test/compat/computediskzonalgroup_test.go:24 TestComputeZonalDiskGroupReplicationThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.disks.aggregatedList",
@@ -16865,13 +16885,16 @@
       },
       {
         "method": "compute.disks.bulkInsert",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskzonalgroup_test.go:24 TestComputeZonalDiskGroupReplicationThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.disks.createSnapshot",
         "status": "Verified",
         "tests": [
+          "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -16887,6 +16910,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance"
         ]
@@ -16900,6 +16924,8 @@
         "method": "compute.disks.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
+          "test/compat/computediskcmek_test.go:74 TestComputeDiskCMEKThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -16912,8 +16938,11 @@
       },
       {
         "method": "compute.disks.removeResourcePolicies",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
+          "test/compat/computediskzonalgroup_test.go:24 TestComputeZonalDiskGroupReplicationThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.disks.resize",
@@ -16934,18 +16963,24 @@
       },
       {
         "method": "compute.disks.startAsyncReplication",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.disks.stopAsyncReplication",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.disks.stopGroupAsyncReplication",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskzonalgroup_test.go:24 TestComputeZonalDiskGroupReplicationThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.disks.testIamPermissions",
@@ -16954,8 +16989,18 @@
       },
       {
         "method": "compute.disks.update",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
+          "test/compat/computediskupdate_test.go:26 TestComputeHyperdiskBalancedHAThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.disks.updateKmsKey",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskcmek_test.go:74 TestComputeDiskCMEKThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.firewalls.delete",
@@ -17465,13 +17510,17 @@
         "method": "compute.instanceGroupManagers.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU",
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
         "method": "compute.instanceGroupManagers.deleteInstances",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/connectiondraining2226_test.go:61 TestComputeConnectionDraining2226"
+        ]
       },
       {
         "method": "compute.instanceGroupManagers.deletePerInstanceConfigs",
@@ -17482,14 +17531,20 @@
         "method": "compute.instanceGroupManagers.get",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU",
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225",
+          "test/compat/computemigautoheal2225_test.go:30 TestComputeMIGAutohealing2225",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
         "method": "compute.instanceGroupManagers.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU"
+          "test/compat/computegroups2139_test.go:346 TestComputeAutoscalerScalesOnRealCPU",
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225",
+          "test/compat/computemigautoheal2225_test.go:30 TestComputeMIGAutohealing2225",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
@@ -17499,14 +17554,19 @@
       },
       {
         "method": "compute.instanceGroupManagers.listErrors",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computemigretry2220_test.go:77 TestComputeMIGCreationRetries2220"
+        ]
       },
       {
         "method": "compute.instanceGroupManagers.listManagedInstances",
         "status": "Verified",
         "tests": [
-          "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139"
+          "test/compat/computemigautoheal2225_test.go:30 TestComputeMIGAutohealing2225",
+          "test/compat/computemigretry2220_test.go:77 TestComputeMIGCreationRetries2220",
+          "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139",
+          "test/compat/connectiondraining2226_test.go:61 TestComputeConnectionDraining2226"
         ]
       },
       {
@@ -17518,7 +17578,10 @@
         "method": "compute.instanceGroupManagers.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139"
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225",
+          "test/compat/computemigautoheal2225_test.go:30 TestComputeMIGAutohealing2225",
+          "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
@@ -17678,8 +17741,10 @@
       },
       {
         "method": "compute.instances.addResourcePolicies",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.instances.aggregatedList",
@@ -17693,7 +17758,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/backupdrregiondisk_test.go:32 TestBackupDRRegionalDiskRoundTrip",
           "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
+          "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance"
         ]
@@ -17787,6 +17855,7 @@
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/computea1_test.go:410 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
           "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
           "test/compat/computeimagevdisk_test.go:40 TestComputeImageImportFromAVirtualDiskThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
@@ -17810,8 +17879,10 @@
       },
       {
         "method": "compute.instances.removeResourcePolicies",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.instances.reset",
@@ -17905,19 +17976,26 @@
         "status": "Verified",
         "tests": [
           "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
+          "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
+          "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
       {
         "method": "compute.instances.startWithEncryptionKey",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
+          "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.instances.stop",
         "status": "Verified",
         "tests": [
           "test/compat/computea1_test.go:101 TestComputeLabelsSchedulingAndExternalIPsThroughTheGoClient",
+          "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
+          "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -18325,13 +18403,16 @@
         "method": "compute.regionBackendServices.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/connectiondraining2226_test.go:329 TestTerraformComputeConnectionDraining2226",
           "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
         ]
       },
       {
         "method": "compute.regionBackendServices.get",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/connectiondraining2226_test.go:329 TestTerraformComputeConnectionDraining2226"
+        ]
       },
       {
         "method": "compute.regionBackendServices.getHealth",
@@ -18347,6 +18428,7 @@
         "method": "compute.regionBackendServices.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/connectiondraining2226_test.go:329 TestTerraformComputeConnectionDraining2226",
           "test/compat/lbipv6rules2140_test.go:33 TestRegionalAndInternalIPv6ForwardingRules2140",
           "test/compat/vpctraffic2140_test.go:162 TestInternalLBAndPSCEndpointCarryVMTraffic2140"
         ]
@@ -18390,114 +18472,154 @@
         "method": "compute.regionDiskTypes.get",
         "status": "Verified",
         "tests": [
-          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
         ]
       },
       {
         "method": "compute.regionDiskTypes.list",
         "status": "Verified",
         "tests": [
-          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
         ]
       },
       {
         "method": "compute.regionDisks.addResourcePolicies",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.bulkInsert",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.createSnapshot",
         "status": "Verified",
         "tests": [
-          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
         ]
       },
       {
         "method": "compute.regionDisks.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
         ]
       },
       {
         "method": "compute.regionDisks.get",
         "status": "Verified",
         "tests": [
-          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+          "test/compat/backupdrregiondisk_test.go:32 TestBackupDRRegionalDiskRoundTrip",
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
         ]
       },
       {
         "method": "compute.regionDisks.getIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+          "test/compat/backupdrregiondisk_test.go:32 TestBackupDRRegionalDiskRoundTrip",
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
+          "test/compat/computediskcmek_test.go:74 TestComputeDiskCMEKThroughTheGoClient",
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
         ]
       },
       {
         "method": "compute.regionDisks.list",
         "status": "Verified",
         "tests": [
-          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
         ]
       },
       {
         "method": "compute.regionDisks.removeResourcePolicies",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.resize",
         "status": "Verified",
         "tests": [
-          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
         ]
       },
       {
         "method": "compute.regionDisks.setIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.setLabels",
         "status": "Verified",
         "tests": [
-          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
         ]
       },
       {
         "method": "compute.regionDisks.startAsyncReplication",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.stopAsyncReplication",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.stopGroupAsyncReplication",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionDisks.update",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
+          "test/compat/computediskupdate_test.go:26 TestComputeHyperdiskBalancedHAThroughTheGoClient"
+        ]
+      },
+      {
+        "method": "compute.regionDisks.updateKmsKey",
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskcmek_test.go:74 TestComputeDiskCMEKThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.regionHealthChecks.delete",
@@ -18558,7 +18680,9 @@
         "method": "compute.regionInstanceGroupManagers.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient",
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
@@ -18577,14 +18701,18 @@
         "method": "compute.regionInstanceGroupManagers.get",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient",
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient"
+          "test/compat/computegroups2139_test.go:69 TestComputeRegionalGroupsThroughTheGoClient",
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
         ]
       },
       {
@@ -18596,8 +18724,10 @@
       },
       {
         "method": "compute.regionInstanceGroupManagers.listErrors",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computemigretry2220_test.go:77 TestComputeMIGCreationRetries2220"
+        ]
       },
       {
         "method": "compute.regionInstanceGroupManagers.listManagedInstances",
@@ -18615,6 +18745,7 @@
         "method": "compute.regionInstanceGroupManagers.patch",
         "status": "Verified",
         "tests": [
+          "test/compat/computemigautoheal2225_test.go:280 TestTerraformComputeMIGAutohealing2225",
           "test/compat/computeupdates2139_test.go:28 TestComputeRollingUpdatesThroughTheGoClient2139"
         ]
       },
@@ -18787,7 +18918,8 @@
         "tests": [
           "test/compat/compute_test.go:384 TestTerraformComputeNetworkAndSubnetwork",
           "test/compat/compute_test.go:57 TestComputeVPCNetworksThroughTheGoClient",
-          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient"
+          "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
         ]
       },
       {
@@ -19048,18 +19180,28 @@
       },
       {
         "method": "compute.resourcePolicies.aggregatedList",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.resourcePolicies.delete",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.resourcePolicies.get",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.resourcePolicies.getIamPolicy",
@@ -19068,18 +19210,27 @@
       },
       {
         "method": "compute.resourcePolicies.insert",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
+          "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient",
+          "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.resourcePolicies.list",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.resourcePolicies.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient"
+        ]
       },
       {
         "method": "compute.resourcePolicies.setIamPolicy",
@@ -20857,10 +21008,13 @@
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip",
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
           "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute",
-          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip"
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/backupdrfilestore_test.go:39 TestGKEFilestoreBackupDRRoundTrip",
+          "test/compat/backupdrregiondisk_test.go:32 TestBackupDRRegionalDiskRoundTrip"
         ]
       },
       {
@@ -20869,7 +21023,8 @@
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip",
           "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute"
         ]
       },
@@ -20886,7 +21041,7 @@
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute"
         ]
       },
@@ -20894,7 +21049,7 @@
         "method": "backupdr.projects.locations.backupPlanAssociations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/terraform_batch12_sql_test.go:207 TestTerraformBackupDRDataSources"
         ]
       },
@@ -20902,7 +21057,8 @@
         "method": "backupdr.projects.locations.backupPlanAssociations.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip"
         ]
       },
       {
@@ -20912,9 +21068,12 @@
           "test/compat/backupdr1921_test.go:252 TestBackupDRJobLogsStoredBytesAndOnDemandRetention",
           "test/compat/backupdr1922_test.go:46 TestBackupDRRestoreToANewInstance",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip",
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
-          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip"
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/backupdrfilestore_test.go:39 TestGKEFilestoreBackupDRRoundTrip",
+          "test/compat/backupdrregiondisk_test.go:32 TestBackupDRRegionalDiskRoundTrip"
         ]
       },
       {
@@ -20926,10 +21085,12 @@
           "test/compat/backupdr1921_test.go:435 TestGcloudBackupDRRetentionLockAndPlanDays",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
           "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute",
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/backupdrfilestore_test.go:39 TestGKEFilestoreBackupDRRoundTrip",
+          "test/compat/backupdrregiondisk_test.go:32 TestBackupDRRegionalDiskRoundTrip",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
@@ -20942,7 +21103,7 @@
           "test/compat/backupdr1921_test.go:435 TestGcloudBackupDRRetentionLockAndPlanDays",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
@@ -20955,7 +21116,7 @@
           "test/compat/backupdr1921_test.go:435 TestGcloudBackupDRRetentionLockAndPlanDays",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
@@ -20964,7 +21125,7 @@
         "method": "backupdr.projects.locations.backupPlans.list",
         "status": "Verified",
         "tests": [
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/iamenforcementround12_backup_1879_test.go:52 TestIAMEnforcementBackupDR"
         ]
       },
@@ -21000,7 +21161,7 @@
           "test/compat/backupdr1921_test.go:435 TestGcloudBackupDRRetentionLockAndPlanDays",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
           "test/compat/iamenforcementround12_backup_1879_test.go:52 TestIAMEnforcementBackupDR",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
@@ -21018,7 +21179,7 @@
         "method": "backupdr.projects.locations.backupVaults.dataSources.backups.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore"
         ]
       },
       {
@@ -21033,7 +21194,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr1921_test.go:252 TestBackupDRJobLogsStoredBytesAndOnDemandRetention",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore"
         ]
       },
       {
@@ -21042,8 +21203,11 @@
         "tests": [
           "test/compat/backupdr1922_test.go:46 TestBackupDRRestoreToANewInstance",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip",
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/backupdrfilestore_test.go:39 TestGKEFilestoreBackupDRRoundTrip",
+          "test/compat/backupdrregiondisk_test.go:32 TestBackupDRRegionalDiskRoundTrip",
           "test/compat/terraform_batch12_sql_test.go:207 TestTerraformBackupDRDataSources"
         ]
       },
@@ -21060,7 +21224,8 @@
         "tests": [
           "test/compat/backupdrcompute_test.go:305 TestGcloudBackupDRRestoreDisk",
           "test/compat/backupdrcompute_test.go:368 TestGcloudBackupDRRestoreCompute",
-          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip"
+          "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/backupdrregiondisk_test.go:32 TestBackupDRRegionalDiskRoundTrip"
         ]
       },
       {
@@ -21084,8 +21249,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr1921_test.go:252 TestBackupDRJobLogsStoredBytesAndOnDemandRetention",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip",
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
+          "test/compat/backupdrfilestore_test.go:39 TestGKEFilestoreBackupDRRoundTrip",
           "test/compat/terraform_batch12_sql_test.go:207 TestTerraformBackupDRDataSources"
         ]
       },
@@ -21102,7 +21269,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/terraform_batch12_sql_test.go:207 TestTerraformBackupDRDataSources"
         ]
       },
@@ -21138,7 +21305,7 @@
           "test/compat/backupdr1921_test.go:435 TestGcloudBackupDRRetentionLockAndPlanDays",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/iamenforcementround12_backup_1879_test.go:52 TestIAMEnforcementBackupDR",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
@@ -21160,7 +21327,7 @@
           "test/compat/backupdr1921_test.go:435 TestGcloudBackupDRRetentionLockAndPlanDays",
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
           "test/compat/iamenforcementround12_backup_1879_test.go:52 TestIAMEnforcementBackupDR",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
@@ -21171,7 +21338,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/iamenforcementround12_backup_1879_test.go:52 TestIAMEnforcementBackupDR"
         ]
       },
@@ -21220,7 +21387,7 @@
         "method": "backupdr.projects.locations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore"
         ]
       },
       {
@@ -21235,7 +21402,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr1921_test.go:36 TestBackupDRVaultLocationsAndRetentionLock",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore"
         ]
       },
       {
@@ -21321,7 +21488,7 @@
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/backupdrcompute_test.go:305 TestGcloudBackupDRRestoreDisk",
           "test/compat/backupdrcompute_test.go:368 TestGcloudBackupDRRestoreCompute",
           "test/compat/iamenforcementround12_backup_1879_test.go:52 TestIAMEnforcementBackupDR",
@@ -21332,7 +21499,7 @@
         "method": "backupdr.projects.locations.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
+          "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore"
         ]
       },
       {
@@ -25633,7 +25800,8 @@
         "method": "google.cloud.alloydb.v1.AlloyDBAdmin/GetCluster",
         "status": "Verified",
         "tests": [
-          "test/compat/alloydb_test.go:129 TestAlloyDBClusterLifecycle"
+          "test/compat/alloydb_test.go:129 TestAlloyDBClusterLifecycle",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip"
         ]
       },
       {
@@ -25733,7 +25901,8 @@
         "method": "google.cloud.alloydb.v1.AlloyDBAdmin/RestoreCluster",
         "status": "Verified",
         "tests": [
-          "test/compat/alloydb_test.go:214 TestAlloyDBInstancesConnectorAndBackups"
+          "test/compat/alloydb_test.go:214 TestAlloyDBInstancesConnectorAndBackups",
+          "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip"
         ]
       },
       {
@@ -25802,6 +25971,7 @@
         "method": "google.cloud.filestore.v1.CloudFilestoreManager/CreateInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/backupdrfilestore_test.go:39 TestGKEFilestoreBackupDRRoundTrip",
           "test/compat/filestore_test.go:96 TestFilestoreInstancesSnapshotsAndBackups",
           "test/compat/filestoretools_test.go:139 TestTerraformFilestore",
           "test/compat/filestoretools_test.go:55 TestGcloudFilestore"

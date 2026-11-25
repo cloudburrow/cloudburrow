@@ -21,6 +21,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // finGraphDDL is Google's FinGraph (Spanner Graph's "Set up and query"
@@ -106,7 +108,7 @@ func finGraphClient(t *testing.T, h *Harness, instanceID string) (context.Contex
 	}
 	db := instName + "/databases/fingraph"
 	t.Cleanup(func() { _ = da.DropDatabase(context.Background(), &databasepb.DropDatabaseRequest{Database: db}) })
-	client, err := spanner.NewClient(ctx, db, spannerOpts(addr)...)
+	client, err := localclient.Spanner(ctx, db, spannerOpts(addr)...)
 	if err != nil {
 		t.Fatal(err)
 	}
