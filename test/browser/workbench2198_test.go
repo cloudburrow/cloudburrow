@@ -141,26 +141,28 @@ func TestWorkbenchJupyterLabFromTheConsole(t *testing.T) {
 	cell := fmt.Sprintf(`from google.cloud import bigquery; client = bigquery.Client(); client.query("CREATE TABLE %[1]s.answers AS SELECT 42 AS answer UNION ALL SELECT 958").result(); print("total", list(client.query("SELECT SUM(answer) AS s FROM %[1]s.answers").result())[0].s)`, dataset)
 	lab.run(chromedp.Click(chromedp.CSS(`.jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .cm-content`)))
 	lab.run(chromedp.SendKeys(chromedp.CSS(`.jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .cm-content`), cell))
+	// Ready as a user waits for it before Shift+Enter: the whole cell typed
+	// into the notebook's editor, which has the focus, and the kernel idle.
+	// On a slow runner (main run 45680873104) a Shift+Enter sent without
+	// this left the cell unrun: its prompt [ ], the kernel idle, no output.
+	lab.waitForWithin(`(() => { const a = document.activeElement;
+		return !!a && !!a.closest(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .cm-editor") && /print\("total"/.test(a.closest(".cm-editor").textContent); })()`, time.Minute)
+	lab.waitForWithin(`(() => { const s = document.querySelector(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-Notebook-ExecutionIndicator");
+		return !!s && s.getAttribute("data-status") === "idle"; })()`, 2*time.Minute)
 	lab.run(chromedp.KeyEvent(kb.Enter, chromedp.KeyModifiers(chromedp.ModifierShift)))
-	// The cell's prompt leaves [ ] once the kernel takes it. On a slow
-	// runner (main run 45680873104) the Shift+Enter landed before the
-	// notebook's session had the kernel, and the cell was never run: the
-	// prompt stayed [ ] with the kernel idle. Once, then, and logged.
+	// The kernel takes the cell: its prompt leaves [ ]. Not resent: a page
+	// that drops the input is a failure.
 	const firstPrompt = `((document.querySelector(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .jp-InputPrompt") || {}).textContent || "")`
-	started := func() bool {
+	started := false
+	for deadline := time.Now().Add(time.Minute); !started && time.Now().Before(deadline); time.Sleep(time.Second) {
 		var p string
 		lab.eval(firstPrompt, &p)
-		return !strings.Contains(p, "[ ]")
+		started = !strings.Contains(p, "[ ]")
 	}
-	for deadline := time.Now().Add(time.Minute); !started() && time.Now().Before(deadline); {
-		time.Sleep(time.Second)
-	}
-	if !started() {
+	if !started {
 		var status string
 		lab.eval(`((document.querySelector(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-Notebook-ExecutionIndicator") || {getAttribute: () => ""}).getAttribute("data-status") || "")`, &status)
-		t.Logf("the cell was not run a minute after Shift+Enter (kernel status %q); running it again", status)
-		lab.run(chromedp.Click(chromedp.CSS(`.jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .cm-content`)))
-		lab.run(chromedp.KeyEvent(kb.Enter, chromedp.KeyModifiers(chromedp.ModifierShift)))
+		t.Fatalf("the cell was not run a minute after Shift+Enter on a ready notebook (kernel status %q)", status)
 	}
 	lab.waitForWithin(`[...document.querySelectorAll(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-OutputArea-output")].some((o) => /total 1000/.test(o.textContent) || /Error/.test(o.textContent))`, 5*time.Minute)
 	var output string
