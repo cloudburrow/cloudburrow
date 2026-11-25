@@ -26,6 +26,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // The Bigtable RPCs TestBigtableTableAndRows does not reach (#1198).
@@ -59,7 +61,7 @@ func bigtableTable(t *testing.T, h *Harness, table string) (*bigtable.AdminClien
 	if err := admin.CreateColumnFamily(ctx, table, "info"); err != nil {
 		t.Fatalf("CreateColumnFamily: %v", err)
 	}
-	c, err := bigtable.NewClient(ctx, h.Project(), bigtableInstance)
+	c, err := localclient.Bigtable(ctx, h.Project(), bigtableInstance)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -289,7 +291,7 @@ func TestBigtableSessions(t *testing.T) {
 	t.Setenv("BIGTABLE_EMULATOR_HOST", "")
 	bigtableDefaultClientStaysClassic(t, h, endpoint, table)
 	t.Setenv("CBT_FORCE_SESSION", "true")
-	c, err := bigtable.NewClientWithConfig(ctx, h.Project(), bigtableInstance,
+	c, err := localclient.BigtableWithConfig(ctx, h.Project(), bigtableInstance,
 		bigtable.ClientConfig{MetricsProvider: bigtable.NoopMetricsProvider{}, DisableDirectAccess: true},
 		option.WithEndpoint(endpoint), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
@@ -427,7 +429,7 @@ func bigtableDefaultClientStaysClassic(t *testing.T, h *Harness, endpoint, table
 	t.Helper()
 	ctx := h.Context()
 	start := bigtableLastCall(t, endpoint)
-	c, err := bigtable.NewClientWithConfig(ctx, h.Project(), bigtableInstance,
+	c, err := localclient.BigtableWithConfig(ctx, h.Project(), bigtableInstance,
 		bigtable.ClientConfig{MetricsProvider: bigtable.NoopMetricsProvider{}, DisableDirectAccess: true},
 		option.WithEndpoint(endpoint), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))

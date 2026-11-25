@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigtable"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // bigtablePage is the part of a console Bigtable page these tests read.
@@ -113,7 +115,7 @@ func TestConsoleBigtableFamiliesAndRowWrites(t *testing.T) {
 		t.Fatalf("NewAdminClient: %v", err)
 	}
 	defer admin.Close()
-	client, err := bigtable.NewClient(ctx, project, "cloudburrow")
+	client, err := localclient.Bigtable(ctx, project, "cloudburrow")
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

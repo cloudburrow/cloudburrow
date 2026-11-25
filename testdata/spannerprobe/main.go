@@ -26,6 +26,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"cloud.google.com/go/spanner"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 func main() {
@@ -97,7 +99,7 @@ func run() error {
 	}
 
 	dbName := fmt.Sprintf("projects/%s/instances/%s/databases/poddb", project, instanceID)
-	c, err := spanner.NewClient(ctx, dbName, opts...)
+	c, err := localclient.Spanner(ctx, dbName, opts...)
 	if err != nil {
 		return fmt.Errorf("spanner client: %w", err)
 	}

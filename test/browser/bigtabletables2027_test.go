@@ -12,6 +12,8 @@ import (
 
 	"cloud.google.com/go/bigtable"
 	"github.com/chromedp/chromedp"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestBigtableTablesAndExplorerActions2027 (#2027): the Tables page lists
@@ -63,7 +65,7 @@ func TestBigtableTablesAndExplorerActions2027(t *testing.T) {
 	t.Cleanup(func() {
 		_ = admin.UpdateTableWithDeletionProtection(context.Background(), "orders", bigtable.Unprotected)
 	})
-	client, err := bigtable.NewClient(ctx, project, id)
+	client, err := localclient.Bigtable(ctx, project, id)
 	if err != nil {
 		t.Fatal(err)
 	}

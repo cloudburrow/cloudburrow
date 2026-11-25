@@ -17,6 +17,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // describeChange is one DataChange's mutations in a short form.
@@ -76,7 +78,7 @@ func changeStreamClients(t *testing.T, addr string) (context.Context, *bigtable.
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := bigtable.NewClient(ctx, "p", "i", option.WithGRPCConn(conn))
+	c, err := localclient.Bigtable(ctx, "p", "i", option.WithGRPCConn(conn))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,7 +469,7 @@ func TestChangeLogSurvivesARestart(t *testing.T) {
 	// Writes after the restart continue the log.
 	m := bigtable.NewMutation()
 	m.Set("f", "q", bigtable.Timestamp(1000), []byte("after"))
-	c2, err := bigtable.NewClient(ctx, "p", "i", option.WithGRPCConn(dial(t, addr)))
+	c2, err := localclient.Bigtable(ctx, "p", "i", option.WithGRPCConn(dial(t, addr)))
 	if err != nil {
 		t.Fatal(err)
 	}
