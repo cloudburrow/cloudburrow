@@ -181,8 +181,15 @@ func TestWorkbenchJupyterLabBearerAndIdentity(t *testing.T) {
 		t.Errorf("the Dataproc plugin's service URLs = %v, want the instance's %s routes", urls, prefix)
 	} else {
 		path := strings.TrimPrefix(urls["dataproc_url"], "http://"+in.GetProxyUri()) + "v1/projects/" + project + "/regions/us-central1/clusters"
-		if code, body := getPath(path, bearer); code != http.StatusOK || !strings.HasPrefix(strings.TrimSpace(body), "{") {
-			t.Errorf("listing clusters from the page = %d %.300s", code, body)
+		code, body := getPath(path, bearer)
+		if os.Getenv(EnvDataproc) != "" {
+			if code != http.StatusOK || !strings.HasPrefix(strings.TrimSpace(body), "{") {
+				t.Errorf("listing clusters from the page = %d %.300s", code, body)
+			}
+		} else if code != http.StatusBadRequest || !strings.Contains(body, "refused this request locally") {
+			// An instance without Dataproc: the plugin's calls end at
+			// CloudBurrow's refusal, never at Google.
+			t.Errorf("listing clusters from the page, Dataproc not served = %d %.300s; want CloudBurrow's local refusal", code, body)
 		}
 	}
 	// Its principal is the instance's service account (OAuth 2.0
