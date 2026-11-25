@@ -107,6 +107,9 @@ func (s *Server) createInstance(req *alloydbpb.CreateInstanceRequest) (*longrunn
 	default:
 		return nil, apierror.InvalidArgument("instance.instance_type must be PRIMARY, READ_POOL or SECONDARY")
 	}
+	if err := checkInsights(in.GetQueryInsightsConfig()); err != nil {
+		return nil, err
+	}
 	if err := checkMachine(in); err != nil {
 		return nil, err
 	}
@@ -503,6 +506,9 @@ func (s *Server) UpdateInstance(ctx context.Context, req *alloydbpb.UpdateInstan
 	if next.GetMachineConfig().GetCpuCount() != cur.GetMachineConfig().GetCpuCount() && next.GetMachineConfig().GetMachineType() == cur.GetMachineConfig().GetMachineType() {
 		next.MachineConfig.MachineType = ""
 	}
+	if err := checkInsights(next.GetQueryInsightsConfig()); err != nil {
+		return nil, err
+	}
 	if err := checkMachine(next); err != nil {
 		return nil, err
 	}
@@ -830,4 +836,21 @@ func hostOnly(addr string) string {
 		return h
 	}
 	return addr
+}
+
+// checkInsights holds Query insights' configuration to Google's bounds:
+// query lengths of 256 to 4500 bytes (0 keeps the default 1024) and 0 to
+// 20 query plans a minute. UNVERIFIED: Google's messages.
+// (re-read 2026-11-25: docs.cloud.google.com/alloydb/docs/using-query-insights.)
+func checkInsights(c *alloydbpb.Instance_QueryInsightsInstanceConfig) error {
+	if c == nil {
+		return nil
+	}
+	if n := c.GetQueryStringLength(); n != 0 && (n < 256 || n > 4500) {
+		return apierror.InvalidArgument("query_insights_config.query_string_length must be between 256 and 4500")
+	}
+	if c.GetQueryPlansPerMinute() > 20 {
+		return apierror.InvalidArgument("query_insights_config.query_plans_per_minute must be between 0 and 20")
+	}
+	return nil
 }

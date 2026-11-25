@@ -884,6 +884,10 @@ td a { color: var(--accent); }
 /* A scope picker's options are full resource names; a select is as wide as
    its longest, so it shrinks to the card instead (#1604). */
 .scope-picker select { max-width: 100%; min-width: 0; }
+/* An Overview or System insights Chart list (#2141, #2251): a metric's
+   long name narrows the list to the card at 320px, never widening the page. */
+.overview-chart-pick { min-width: 0; max-width: 100%; }
+.overview-chart-pick select { max-width: 100%; min-width: 0; }
 .form-error {
   margin: 0 0 16px; padding: 10px 12px;
   background: color-mix(in srgb, var(--error) 12%, transparent);

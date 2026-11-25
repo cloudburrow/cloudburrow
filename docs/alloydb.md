@@ -20,6 +20,13 @@ a cluster's page creates its instances, read pools and secondary clusters, edits
 (machine, flags, Managed Connection Pooling), exports and imports, promotes and switches over a
 secondary, and backs up and restores.
 
+Since #2251 the cluster's page also has Google's System insights (a Cluster (all instances) view
+and one an instance: summary cards, charts and the events timeline), Query insights (an
+instance's Database load chart and its queries, with Edit), the Overview's metrics chart, the
+Maintenance window's Edit, an instance row's Edit with the database flags picker (Add flag, a flag
+from the supported list, its value), and Create backup's Description and Labels; the Backups page
+edits a backup's labels.
+
 ## The engine: PostgreSQL, or AlloyDB Omni
 
 Google publishes AlloyDB Omni, AlloyDB's own engine, as the
@@ -262,6 +269,31 @@ the protection windows, and `clusters.restore` with `backupdrBackupSource` or `b
 makes a new cluster from a vault's backup or at a point in time inside a window. Those fields are
 served over JSON (they are in AlloyDB's REST discovery document, not in the published
 `alloydbpb`). See [backupdr.md](backupdr.md#alloydb-clusters-and-filestore-instances-1524).
+
+## Monitoring and insights (#2251)
+
+With Cloud Monitoring served, every 60 seconds CloudBurrow reads each running instance's server
+and records Google's alloydb.googleapis.com metrics on the `alloydb.googleapis.com/Cluster`,
+`Instance` and `Database` monitored resources, so Metrics Explorer, alert policies,
+`ListTimeSeries` and the console read the same series:
+
+- the pod's CPU time and working set from the kubelet: `instance/cpu/average_utilization`,
+  `maximum_utilization`, `vcpus_allocated` and `memory/min_available_memory` (the machine's
+  8 GB a vCPU less the working set);
+- `pg_stat_activity` and `pg_stat_database`: connections by state and application, the
+  connection limit, transactions, commits and rollbacks, blocks, tuples, temporary files,
+  deadlocks and new connections, per instance and per database;
+- the transaction ID utilization and the oldest transaction's age, by type;
+- a read pool's replay lag, as `replication/maximum_lag` on its primary, labelled
+  `replica_instance_id`;
+- `pg_stat_statements` (preloaded on every server): `insights/aggregate` execution, IO and lock
+  time, rows and shared blocks, and the statements executed, by operation type, as DELTAs;
+- the cluster's storage (its primary's databases' size) and its last backups' times.
+
+Query insights lists the top 100 normalized queries by total time from `pg_stat_statements` on the
+chosen instance, with Google's Database and User filters. Its Edit sets `query_insights_config`
+(query lengths 256 to 4500, a sampling rate up to 20), which the API checks as Google's does.
+[gaps.md](gaps.md) lists what has no local reading.
 
 ## Not served
 

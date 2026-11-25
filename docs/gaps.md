@@ -36,14 +36,14 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | App Hub | 5 | 1 | 1 | 3 | 0 |
-| AlloyDB for PostgreSQL | 5 | 0 | 4 | 1 | 0 |
+| AlloyDB for PostgreSQL | 10 | 3 | 5 | 2 | 0 |
 | Filestore | 6 | 1 | 4 | 1 | 0 |
 | Dataflow | 4 | 2 | 1 | 1 | 0 |
 | Dataform | 8 | 0 | 3 | 5 | 0 |
 | Console | 11 | 5 | 5 | 1 | 0 |
 | Remote compute | 0 | 0 | 0 | 0 | 0 |
 | Bring your own cloud | 2 | 1 | 0 | 0 | 1 |
-| **Total** | **112** | **18** | **38** | **49** | **7** |
+| **Total** | **117** | **21** | **39** | **50** | **7** |
 
 ## Cloud Storage
 
@@ -366,7 +366,11 @@ point-in-time restore, users, databases, ExecuteSql, supported flags, connection
 certificates; the connectors' server-side proxy on port 5433 (TLS 1.3, metadata exchange,
 DB_NATIVE and AUTO_IAM) and direct TLS on 5432 and 6432; Google's Go, Java and Python connectors
 and Auth Proxy run against it; gcloud alloydb, Terraform google_alloydb_*, and the console's
-Clusters and Backups pages. See [alloydb.md](alloydb.md).
+Clusters and Backups pages. Since #2251: the cluster's alloydb.googleapis.com metrics in Cloud
+Monitoring, read from each running server every 60 seconds (the `Cluster`, `Instance` and
+`Database` monitored resources); the console's System insights, Query insights (pg_stat_statements)
+and Overview charts over them; maintenance windows and deny periods with Google's limits; the
+database flags picker; backup descriptions and labels. See [alloydb.md](alloydb.md).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -376,6 +380,11 @@ Clusters and Backups pages. See [alloydb.md](alloydb.md).
 | The AlloyDB Auth Proxy (v1.18.0) tries `monitoring.googleapis.com` once even with `--disable-built-in-telemetry`: its connector opens a Cloud Monitoring client regardless, and the proxy has no option that stops it (the Go connector's `WithHTTPClient` does) | no emulator support | S |
 | The AlloyDB connector's refusal of an IAM sign-in whose token is not valid reads `IAM authentication failed for user "…"` (FATAL 28P01), and so does AlloyDB Studio's of an IAM sign-in as a principal that is no IAM user of the cluster; Google documents no text (UNVERIFIED) | not built yet | S |
 | Google's error messages, the cluster etag (none), a bare network name written with the project's ID rather than its number, the flag bounds given in other units, the instance exports and imports run on (the primary), `pooler_count`'s sizing, and the deletes refused under replication are CloudBurrow's choices, dated UNVERIFIED in compatibility.md's AlloyDB section | not documented by Google | S |
+| The AlloyDB console's Database Migration Service entry points (Migrate, a cluster's migration jobs) are left out: CloudBurrow serves no `datamigration.googleapis.com` API for them to open (#2252) | not built yet | L |
+| AlloyDB System insights' Log errors card is left out: the clusters' PostgreSQL server logs are not written to Cloud Logging (#2253) | not built yet | M |
+| AlloyDB metrics no local reading backs are not published, and the console's charts of them are left out: the insights `latencies` distributions and query details' latency, `wait_time` and `wait_count`, query plans and application tags (the settings are kept and checked; nothing samples plans), the `client_addr` label (recorded as ""), `node/*`, ultra-fast cache, `mlintegration`, audit, autoscaler and quota metrics (#2253) | not built yet | M |
+| AlloyDB metrics read from one server where Google has a fleet: a read pool's nodes are one server, so `postgres/instances` reports its nodes up or down together; `cluster/storage/usage` is the primary's databases' size, not AlloyDB's storage layer; `insights/aggregate/lock_time` is estimated per user and database from the sessions waiting on a lock at each sample; the events timeline lists the Admin API's operations, with no user or maintenance events (#2253) | no emulator support | S |
+| AlloyDB's console has Labels on Create backup and a backup's Edit labels; Google's backup/create-on-demand page documents no labels field in its console (the API's `Backup.labels` is served; UNVERIFIED) (#2253) | not documented by Google | S |
 
 ## Filestore
 

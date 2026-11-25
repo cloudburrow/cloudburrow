@@ -103,6 +103,9 @@ func (s *Server) prepareCluster(project string, c *alloydbpb.Cluster) error {
 	if !supportedVersions[c.GetDatabaseVersion()] {
 		return apierror.InvalidArgument("database version %s is not supported for new clusters", c.GetDatabaseVersion())
 	}
+	if err := checkMaintenance(c.GetMaintenanceUpdatePolicy()); err != nil {
+		return err
+	}
 	network := c.GetNetworkConfig().GetNetwork()
 	if network == "" {
 		network = c.GetNetwork()
@@ -366,6 +369,8 @@ func (s *Server) UpdateCluster(_ context.Context, req *alloydbpb.UpdateClusterRe
 			p = "automated_backup_policy"
 		case strings.HasPrefix(p, "continuous_backup_config."):
 			p = "continuous_backup_config"
+		case strings.HasPrefix(p, "maintenance_update_policy."):
+			p = "maintenance_update_policy"
 		}
 		f, ok := clusterPaths[p]
 		if !ok {
@@ -376,6 +381,9 @@ func (s *Server) UpdateCluster(_ context.Context, req *alloydbpb.UpdateClusterRe
 	if cb := next.GetContinuousBackupConfig(); cb != nil && cb.RecoveryWindowDays != 0 &&
 		(cb.RecoveryWindowDays < 1 || cb.RecoveryWindowDays > 35) {
 		return nil, apierror.InvalidArgument("continuous_backup_config.recovery_window_days must be between 1 and 35")
+	}
+	if err := checkMaintenance(next.GetMaintenanceUpdatePolicy()); err != nil {
+		return nil, err
 	}
 	if req.GetValidateOnly() {
 		return s.validateOnly(locationOf(c.GetName()), "update", c.GetName()), nil
@@ -828,4 +836,45 @@ func (s *Server) UpgradeCluster(_ context.Context, req *alloydbpb.UpgradeCluster
 			Message: "Cluster upgraded from " + from.String() + " to " + c.GetDatabaseVersion().String()}, nil
 	})
 	return op, nil
+}
+
+// checkMaintenance holds a maintenance update policy to the proto's
+// limits: at most one maintenance window, on a day of the week, starting
+// at an hour 0 to 23 (gcloud's --maintenance-window-hour; Google's
+// maintenance-windows page), and at most one deny period, of one to 30
+// days. UNVERIFIED: Google's messages.
+// (re-read 2026-11-25: docs.cloud.google.com/alloydb/docs/maintenance-windows.)
+func checkMaintenance(p *alloydbpb.MaintenanceUpdatePolicy) error {
+	if p == nil {
+		return nil
+	}
+	if len(p.GetMaintenanceWindows()) > 1 {
+		return apierror.InvalidArgument("maintenance_update_policy.maintenance_windows is limited to 1 window")
+	}
+	for _, w := range p.GetMaintenanceWindows() {
+		if w.GetDay() == dayofweek.DayOfWeek_DAY_OF_WEEK_UNSPECIFIED {
+			return apierror.InvalidArgument("maintenance_update_policy.maintenance_windows.day must be a day of the week")
+		}
+		t := w.GetStartTime()
+		if t.GetHours() < 0 || t.GetHours() > 23 || t.GetMinutes() < 0 || t.GetMinutes() > 59 || t.GetSeconds() != 0 || t.GetNanos() != 0 {
+			return apierror.InvalidArgument("maintenance_update_policy.maintenance_windows.start_time must be an hour of the day, 0 to 23")
+		}
+	}
+	if len(p.GetDenyMaintenancePeriods()) > 1 {
+		return apierror.InvalidArgument("maintenance_update_policy.deny_maintenance_periods is limited to 1 period")
+	}
+	for _, d := range p.GetDenyMaintenancePeriods() {
+		start, end := d.GetStartDate(), d.GetEndDate()
+		if start.GetMonth() == 0 || end.GetMonth() == 0 {
+			continue // a recurring period without months is Google's to check
+		}
+		if start.GetYear() != 0 && end.GetYear() != 0 {
+			from := time.Date(int(start.GetYear()), time.Month(start.GetMonth()), int(start.GetDay()), 0, 0, 0, 0, time.UTC)
+			to := time.Date(int(end.GetYear()), time.Month(end.GetMonth()), int(end.GetDay()), 0, 0, 0, 0, time.UTC)
+			if days := to.Sub(from).Hours()/24 + 1; days < 1 || days > 30 {
+				return apierror.InvalidArgument("a deny maintenance period spans 1 to 30 days")
+			}
+		}
+	}
+	return nil
 }

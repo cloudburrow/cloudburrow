@@ -116,6 +116,9 @@ type alloyDBProvider struct {
 	// iamPrincipal the principal its IAM sign-in is made as (#2208).
 	savedQueries string
 	iamPrincipal string
+	// metrics reads the clusters' alloydb.googleapis.com metrics from
+	// the instance's Cloud Monitoring (#2251).
+	metrics monitoringAdmin
 }
 
 func (alloyDBProvider) ID() string    { return "alloydb" }
@@ -264,6 +267,16 @@ func (p alloyDBProvider) Detail(ctx context.Context, project string, path []stri
 			primary = in
 		}
 	}
+	// Each instance row's Edit, as Google's Instances in your cluster has
+	// (#2251), addressed as [cluster, "instances", instance].
+	for i := range instances.Items {
+		for _, in := range ins {
+			if lastSegment(in.GetName()) == instances.Items[i].Name {
+				instances.Items[i].Actions = alloyDBInstanceRowActions(ctx, s, c, in)
+				instances.Items[i].ActsOn = []string{path[0], "instances", instances.Items[i].Name}
+			}
+		}
+	}
 	cb := "Disabled"
 	if c.GetContinuousBackupConfig().GetEnabled() {
 		cb = fmt.Sprintf("Enabled, %d days", c.GetContinuousBackupConfig().GetRecoveryWindowDays())
@@ -292,6 +305,7 @@ func (p alloyDBProvider) Detail(ctx context.Context, project string, path []stri
 	if g, _ := alloyDBUpgradeStatus(ctx, s, c.GetName()); g != nil {
 		overview = append(overview, *g)
 	}
+	overview = append(overview, alloyDBMaintenanceGroup(c))
 	clusterType := "Primary"
 	repl := []console.Property{}
 	if c.GetClusterType() == alloydbpb.Cluster_SECONDARY {
@@ -329,7 +343,12 @@ func (p alloyDBProvider) Detail(ctx context.Context, project string, path []stri
 		Summary: []console.Property{{Label: "Region", Value: kmsLocation(c.GetName())}, {Label: "Status", Value: alloyDBState(c.GetState())},
 			{Label: "Version", Value: alloyDBVersionLabel(c.GetDatabaseVersion())}},
 		Sections: []console.Section{
-			{ID: "overview", Label: "Overview", Kind: console.KindProperties, Groups: overview, Listing: instances},
+			{ID: "overview", Label: "Overview", Kind: console.KindProperties, Groups: overview, Listing: instances,
+				Series: alloyDBOverviewSeries(ctx, p.metrics, c, lastSegment(primary.GetName())), Note: alloyDBMetricsNote},
+			// System insights and Query insights (#2251), as Google's
+			// cluster menu has them.
+			alloyDBSystemInsights(ctx, s, p.metrics, c, ins),
+			alloyDBQueryInsights(ctx, s, p.metrics, c, ins),
 			// AlloyDB Studio (#2208), as Google's cluster menu has it.
 			{ID: "studio", Label: "AlloyDB Studio", Kind: console.KindStudio},
 			{ID: "instances", Label: "Instances", Listing: instances},
@@ -379,7 +398,7 @@ func alloyDBDatabases(ctx context.Context, s *alloydb.Server, cluster string) co
 }
 
 func alloyDBBackupListing(ctx context.Context, s *alloydb.Server, cluster, region string) console.Listing {
-	l := console.Listing{Columns: []string{"Backup", "Status", "Type", "Cluster", "Created", "Size", "Expires"}, NameColumn: "Name", Noun: "backups"}
+	l := console.Listing{Columns: []string{"Backup", "Status", "Type", "Cluster", "Created", "Size", "Expires", "Labels"}, NameColumn: "Name", Noun: "backups"}
 	parent := strings.Join(strings.Split(cluster, "/")[:4], "/")
 	if region == "" {
 		parent = cluster
@@ -401,7 +420,7 @@ func alloyDBBackupListing(ctx context.Context, s *alloydb.Server, cluster, regio
 		}
 		l.Items = append(l.Items, console.Resource{Name: lastSegment(b.GetName()), Status: b.GetState().String(), Fields: map[string]string{
 			"Backup": lastSegment(b.GetName()), "Status": alloyDBState(b.GetState()), "Type": typ, "Cluster": lastSegment(b.GetClusterName()),
-			"Created": kmsTime(b.GetCreateTime()), "Size": consoleBytes(b.GetSizeBytes()), "Expires": exp}})
+			"Created": kmsTime(b.GetCreateTime()), "Size": consoleBytes(b.GetSizeBytes()), "Expires": exp, "Labels": alloyDBLabels(b.GetLabels())}})
 	}
 	l.Total = len(l.Items)
 	return l
@@ -420,6 +439,18 @@ func consoleBytes(n int64) string {
 }
 
 func (p alloyDBProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	if len(path) == 3 && path[1] == "instances" {
+		// An instance row's actions menu (#2251).
+		s, c, err := p.cluster(ctx, project, path[0])
+		if err != nil {
+			return nil
+		}
+		in, err := s.GetInstance(ctx, &alloydbpb.GetInstanceRequest{Name: c.GetName() + "/instances/" + path[2]})
+		if err != nil {
+			return nil
+		}
+		return alloyDBInstanceRowActions(ctx, s, c, in)
+	}
 	if len(path) == 2 {
 		// A Users row's actions menu (#2251).
 		s, c, err := p.cluster(ctx, project, path[0])
@@ -461,7 +492,11 @@ func (p alloyDBProvider) DetailActions(ctx context.Context, project string, path
 		readPool.Unavailable = "Create the cluster's primary instance first."
 	}
 	backup := console.Action{ID: "backup", Label: "Create backup", Fields: []console.Field{
-		{Name: "backupId", Label: "Backup ID", Type: "text", Required: true, Pattern: idPattern}}}
+		{Name: "backupId", Label: "Backup ID", Type: "text", Required: true, Pattern: idPattern},
+		// Google's optional Description (backup/create-on-demand), and
+		// the backup's labels (#2251).
+		{Name: "description", Label: "Description", Type: "text", Help: "Optional: to help you identify this backup."},
+		alloyDBLabelField("")}}
 	if !hasPrimary {
 		backup.Unavailable = "A backup is taken of the cluster's primary instance, which it does not have."
 	}
@@ -547,17 +582,43 @@ func (p alloyDBProvider) DetailActions(ctx context.Context, project string, path
 			{Name: "password", Label: "Password", Type: "password", ShowWhen: "type=ALLOYDB_BUILT_IN"},
 			{Name: "superuser", Label: "Grant alloydbsuperuser", Type: "checkbox"}}},
 		{ID: "delete", Label: "Delete cluster", Destructive: true, Leaves: true, Confirm: "The cluster and all its instances are deleted. Its backups are kept."},
-		alloyDBUpgradeAction(c, upgrading), alloyDBCancelUpgrade(upgrading),
-	}, alloyDBDataProtectionActions(c)...)
+		alloyDBUpgradeAction(c, upgrading), alloyDBCancelUpgrade(upgrading), alloyDBMaintenanceAction(c),
+	}, append(alloyDBDataProtectionActions(c), alloyDBInsightsActions(ins)...)...)
+}
+
+// alloyDBInsightsActions are Query insights' Edits, one an instance:
+// each drawn at the top of its instance's Query insights tab, so Linked
+// here, not a button beside the page's title.
+func alloyDBInsightsActions(ins []*alloydbpb.Instance) []console.Action {
+	out := make([]console.Action, 0, len(ins))
+	for _, in := range ins {
+		a := alloyDBEditInsightsAction(in)
+		a.Linked = true
+		out = append(out, a)
+	}
+	return out
 }
 
 func (p alloyDBProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
-	if len(path) != 1 && len(path) != 2 {
+	if len(path) < 1 || len(path) > 3 || len(path) == 3 && path[1] != "instances" {
 		return fmt.Errorf("no cluster")
 	}
 	s, c, err := p.cluster(ctx, project, path[0])
 	if err != nil {
 		return err
+	}
+	if len(path) == 3 {
+		if action != "edit" {
+			return fmt.Errorf("unknown action %q", action)
+		}
+		return p.editInstanceRow(ctx, s, c, path[2], values)
+	}
+	if strings.HasPrefix(action, "edit-query-insights-") {
+		if values == nil {
+			values = map[string]string{}
+		}
+		values["instance"] = strings.TrimPrefix(action, "edit-query-insights-")
+		return p.editQueryInsights(ctx, s, c, values)
 	}
 	if len(path) == 2 {
 		return p.userActions(ctx, s, c, path[1], action, values)
@@ -676,8 +737,15 @@ func (p alloyDBProvider) ActAt(ctx context.Context, project string, path []strin
 		op, err = s.DeleteInstance(ctx, &alloydbpb.DeleteInstanceRequest{Name: inst})
 	case "backup":
 		loc := strings.Join(strings.Split(c.GetName(), "/")[:4], "/")
+		labels, lerr := console.ParseMap(values["labels"])
+		if lerr != nil {
+			return fmt.Errorf("labels: %w", lerr)
+		}
+		if len(labels) == 0 {
+			labels = nil
+		}
 		op, err = s.CreateBackup(ctx, &alloydbpb.CreateBackupRequest{Parent: loc, BackupId: strings.TrimSpace(values["backupId"]),
-			Backup: &alloydbpb.Backup{ClusterName: c.GetName()}})
+			Backup: &alloydbpb.Backup{ClusterName: c.GetName(), Description: strings.TrimSpace(values["description"]), Labels: labels}})
 	case "restore-pitr":
 		at, perr := time.Parse(time.RFC3339, strings.TrimSpace(values["time"]))
 		if perr != nil {
@@ -707,6 +775,8 @@ func (p alloyDBProvider) ActAt(ctx context.Context, project string, path []strin
 		return p.editContinuousBackup(ctx, s, c, values)
 	case "edit-automated-backup":
 		return p.editAutomatedBackup(ctx, s, c, values)
+	case "edit-maintenance":
+		return p.editMaintenance(ctx, s, c, values)
 	case "delete":
 		op, err = s.DeleteCluster(ctx, &alloydbpb.DeleteClusterRequest{Name: c.GetName(), Force: true})
 		if err != nil {
@@ -741,10 +811,11 @@ func (p alloyDBBackupsProvider) List(ctx context.Context, project string) (conso
 	for i := range l.Items {
 		name := l.Items[i].Name
 		var full string
+		var backup *alloydbpb.Backup
 		if resp, err := s.ListBackups(ctx, &alloydbpb.ListBackupsRequest{Parent: "projects/" + project + "/locations/-", PageSize: 1000}); err == nil {
 			for _, b := range resp.GetBackups() {
 				if lastSegment(b.GetName()) == name {
-					full = b.GetName()
+					full, backup = b.GetName(), b
 				}
 			}
 		}
@@ -754,11 +825,38 @@ func (p alloyDBBackupsProvider) List(ctx context.Context, project string) (conso
 			{ID: "restore", Label: "Restore", Fields: []console.Field{
 				{Name: "clusterId", Label: "New cluster ID", Type: "text", Required: true, Pattern: `^[a-z]([a-z0-9\-]{0,61}[a-z0-9])?$`},
 				{Name: "network", Label: "Network", Type: "text", Default: "default"}}},
+			alloyDBEditBackupLabels(backup),
 			{ID: "delete", Label: "Delete", Destructive: true, Confirm: "The backup is deleted."},
 		}
 	}
 	l.Columns = append(l.Columns, "Region")
 	return l, nil
+}
+
+// DetailActions and ActAt take a row's actions whose dialogs have fields
+// (Restore, Edit labels, #2251): the console sends those addressed by
+// path, the backup's name its one segment.
+func (p alloyDBBackupsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	if len(path) != 1 {
+		return nil
+	}
+	l, err := p.List(ctx, project)
+	if err != nil {
+		return nil
+	}
+	for _, it := range l.Items {
+		if it.Name == path[0] {
+			return it.Actions
+		}
+	}
+	return nil
+}
+
+func (p alloyDBBackupsProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if len(path) != 1 {
+		return fmt.Errorf("no backup")
+	}
+	return p.Act(ctx, project, path[0], action, values)
 }
 
 func (p alloyDBBackupsProvider) Act(ctx context.Context, project, name, action string, values map[string]string) error {
@@ -780,6 +878,8 @@ func (p alloyDBBackupsProvider) Act(ctx context.Context, project, name, action s
 			Cluster: &alloydbpb.Cluster{NetworkConfig: &alloydbpb.Cluster_NetworkConfig{Network: network}},
 			Source:  &alloydbpb.RestoreClusterRequest_BackupSource{BackupSource: &alloydbpb.BackupSource{BackupName: name}}})
 		return err
+	case "edit-labels":
+		return alloyDBUpdateBackupLabels(ctx, s, name, values)
 	case "delete":
 		op, err := s.DeleteBackup(ctx, &alloydbpb.DeleteBackupRequest{Name: name})
 		if err != nil {

@@ -38,7 +38,7 @@ func TestConsoleAlloyDBParity2251(t *testing.T) {
 		t.Fatalf("List = %+v, %v", l, err)
 	}
 	if got := strings.Join(l.Columns, "|"); got != "Resource name|Resource type|Location|Status|Private IP address|High availability|"+
-		"Read pool nodes|Automated backups|Most recent backup|Labels|Created|Encryption" {
+		"Read pool nodes|Automated backups|Most recent backup|Maintenance|Labels|Created|Encryption" {
 		t.Errorf("columns = %s", got)
 	}
 	row := l.Items[0].Fields

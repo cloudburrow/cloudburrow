@@ -50,7 +50,7 @@ func TestAlloyDBParityThroughThePage2251(t *testing.T) {
 		t.Helper()
 		deadline := time.Now().Add(8 * time.Minute)
 		for d := detail(cluster); !strings.Contains(d, `"Ready"`) || strings.Contains(d, `"Creating"`) ||
-			strings.Contains(d, `"Maintenance"`) || strings.Contains(d, `"In progress"`); d = detail(cluster) {
+			strings.Contains(d, `"Status":"Maintenance"`) || strings.Contains(d, `{"label":"Status","value":"Maintenance"}`) || strings.Contains(d, `"In progress"`); d = detail(cluster) {
 			if time.Now().After(deadline) {
 				t.Fatalf("the cluster is not ready: %s", d)
 			}
