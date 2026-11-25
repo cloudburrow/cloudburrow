@@ -233,6 +233,14 @@ def options_struct(opts, args):
     if args.streaming:
         o["streaming"] = True
         o["checkpointing_interval"] = 10000
+        # Each operator finishes its bundle before a checkpoint's barrier
+        # (FlinkPipelineOptions.finishBundleBeforeCheckpointing). Otherwise
+        # what a bundle outputs as a checkpoint snapshots it is buffered
+        # until the operator's next element or watermark, which an
+        # operator past the end of its input (a read's SplitAndSize, once
+        # the Impulse's final watermark is through) never gets: the read's
+        # restriction was never processed and the job read nothing.
+        o["finish_bundle_before_checkpointing"] = True
         # The sources keep running until the job is drained (a source that
         # shut down when idle would leave its reads' operators finishing,
         # which no checkpoint or savepoint completes through): a drain
@@ -443,14 +451,55 @@ def savepoint(rest, snapshot_id, out):
     os.rename(tmp, out)
 
 
+# MAX_WATERMARK is Flink's end-of-time watermark (Long.MAX_VALUE).
+MAX_WATERMARK = 2 ** 63 - 1
+
+
+def _input_watermark(base, job):
+    """The lowest input watermark of the job's operators (Flink's
+    currentInputWatermark, the minimum over each vertex's subtasks), or
+    None if not known."""
+    low = None
+    for v in _rest(base, "GET", "/jobs/%s" % job).get("vertices", []):
+        ms = _rest(base, "GET", "/jobs/%s/vertices/%s/subtasks/metrics?get=currentInputWatermark&agg=min" % (job, v["id"]))
+        for m in ms:
+            if m.get("id") == "currentInputWatermark" and "min" in m:
+                w = int(m["min"])
+                low = w if low is None else min(low, w)
+    return low
+
+
+def await_reads_drained(base, timeout=60):
+    """Waits until the job's reads have stopped: each read (cbio's), once
+    it sees the drain file, ends its restriction, which releases its hold
+    on the watermark, and the end of time (the Impulse's final watermark)
+    reaches every operator, firing every window. Flink's stop --drain
+    alone would end the job with a read's hold still on (its windows
+    unfired, their elements only in the savepoint). Reads that do not
+    watch the drain file (the watermark stays below the end of time) are
+    stopped by the stop's own watermark when timeout passes."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            live = [j["id"] for j in _rest(base, "GET", "/jobs").get("jobs", []) if j.get("status") == "RUNNING"]
+            if not live or all((_input_watermark(base, j) or 0) >= MAX_WATERMARK for j in live):
+                # Let the bundles the windows fired finish.
+                time.sleep(2)
+                return
+        except Exception:
+            pass
+        time.sleep(1)
+
+
 def drain(rest):
-    """Drains the job server's Flink job: Flink's stop with --drain, which
-    takes a savepoint, stops the sources and advances the watermark to the
-    end of time, so every window fires before the job finishes (the reads,
-    which watch the drain file, stop with it). A stop is retried until it
-    completes: one asked for before every task runs (a drain just after
-    the job started, or a launched template's) fails its savepoint."""
+    """Drains the job server's Flink job: once its reads have stopped
+    (await_reads_drained), Flink's stop with --drain, which takes a
+    savepoint, stops the sources and advances the watermark to the end of
+    time, so every window fires before the job finishes. A stop is retried
+    until it completes: one asked for before every task runs (a drain just
+    after the job started, or a launched template's) fails its savepoint."""
     base = "http://" + rest
+    await_reads_drained(base)
     deadline = time.time() + 900
     last_error = ""
     while time.time() < deadline:

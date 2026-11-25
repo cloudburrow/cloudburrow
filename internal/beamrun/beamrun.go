@@ -57,11 +57,21 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed assets/relay.py assets/py/cblaunch.py assets/py/cbio.py assets/py/sitecustomize.py assets/py/cbfnproxy.py assets/java/pool.sh assets/java/CbCredentialFactory.java
+//go:embed assets/relay.py assets/py/cblaunch.py assets/py/cbio.py assets/py/sitecustomize.py assets/py/cbfnproxy.py assets/java/pool.sh assets/java/CbCredentialFactory.java assets/java/GreedyPCollectionFusers.java assets/java/FlinkBatchPortablePipelineTranslator.java assets/java/ExecutableStageDoFnOperator.java
 var assets embed.FS
 
 // The pinned images (dependencies.json components.dataflow).
 const (
+	// jobServerScript starts the job server (JobServerImage's
+	// flink-job-server.sh) with the patched classes before its jar, and
+	// with 70% of its container's memory as heap rather than the JVM's
+	// default quarter: Flink's local cluster clones the job graph as it
+	// submits it, and each fused stage of a large pipeline carries the
+	// pipeline's components (Text Files on Cloud Storage to Cloud
+	// Spanner's 933 steps came to about 200 MB of them, and its job failed
+	// with "Java heap space" in about half its runs).
+	jobServerScript = `javac -nowarn -d /tmp/cb-patch -cp "jars/*" /cb-patch/*.java >/tmp/cb-patch.log 2>&1 || { cat /tmp/cb-patch.log; exit 1; }
+exec java -XX:MaxRAMPercentage=70 -cp "/tmp/cb-patch:jars/*" org.apache.beam.runners.flink.FlinkJobServerDriver "$@"`
 	// JobServerImage is Beam 2.78.0's Flink 1.20 job server.
 	JobServerImage = "apache/beam_flink1.20_job_server@sha256:b1f7e43440a148151e9db001dfc0498eb4f87bdd4d6808904daf52ab0b532053"
 	// BeamVersion is the Beam release whose SDK harnesses are pinned.
@@ -372,7 +382,24 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 		}
 		jsArgs = append(jsArgs, "-v", d.Snapshots+":"+snapshotMount)
 	}
-	jsArgs = append(jsArgs, JobServerImage, "--flink-master=[local]", "--job-host=0.0.0.0", "--flink-conf-dir=/cb-flink")
+	// The job server runs with three of Beam's classes patched
+	// (third_party/apache-beam/PROVENANCE.md): the fuser
+	// (GreedyPCollectionFusers.java, apache/beam#34647), without which a
+	// Flatten one of whose inputs is also consumed elsewhere (a Spanner
+	// export's "Combine all files") fails the job's translation ("were
+	// consumed but never produced"), and the batch translator
+	// (FlinkBatchPortablePipelineTranslator.java), whose Flatten took only
+	// inputs of one coder, and the stateful stage's operator
+	// (ExecutableStageDoFnOperator.java), which never ran a DoFn's
+	// @OnWindowExpiration (GroupIntoBatches' last batch, so an auto-sharded
+	// file write's last files, were dropped at its window's end). They are
+	// compiled against the job server's jar and put before it on the
+	// classpath (as flink-job-server.sh runs it).
+	for _, f := range []string{"GreedyPCollectionFusers.java", "FlinkBatchPortablePipelineTranslator.java", "ExecutableStageDoFnOperator.java"} {
+		jsArgs = append(jsArgs, "-v", filepath.Join(dir, "java", f)+":/cb-patch/"+f+":ro")
+	}
+	jsArgs = append(jsArgs, "--entrypoint", "sh", JobServerImage, "-c", jobServerScript, "sh",
+		"--flink-master=[local]", "--job-host=0.0.0.0", "--flink-conf-dir=/cb-flink")
 	if out, err := d.docker(ctx, jsArgs...); err != nil {
 		return failed("start the Flink job server: " + out)
 	}
@@ -873,7 +900,7 @@ func writeRelayTLS(dir string) error {
 }
 
 func writeAssets(dir string) error {
-	for _, name := range []string{"relay.py", "py/cblaunch.py", "py/cbio.py", "py/sitecustomize.py", "py/cbfnproxy.py", "java/pool.sh", "java/CbCredentialFactory.java"} {
+	for _, name := range []string{"relay.py", "py/cblaunch.py", "py/cbio.py", "py/sitecustomize.py", "py/cbfnproxy.py", "java/pool.sh", "java/CbCredentialFactory.java", "java/GreedyPCollectionFusers.java", "java/FlinkBatchPortablePipelineTranslator.java", "java/ExecutableStageDoFnOperator.java"} {
 		b, err := assets.ReadFile("assets/" + name)
 		if err != nil {
 			return err

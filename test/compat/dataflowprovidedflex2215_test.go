@@ -12,6 +12,7 @@ import (
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/dataflow/apiv1beta3/dataflowpb"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"cloud.google.com/go/storage"
 )
 
 // covers: google.dataflow.v1beta3.FlexTemplatesService/LaunchFlexTemplate, google.dataflow.v1beta3.TemplatesService/GetTemplate
@@ -27,7 +28,10 @@ import (
 //     a CSV file through a JavaScript UDF into a new BigQuery table;
 //   - PubSub_to_BigQuery_Flex (templates/provided/pubsub-to-bigquery)
 //     through LaunchFlexTemplate, streaming a subscription's JSON messages
-//     into a table, then drained.
+//     into a table, then drained;
+//   - Cloud_PubSub_to_GCS_Text_Flex (templates/provided/pubsub-to-text,
+//     the Flex variant) through LaunchFlexTemplate, windowing a
+//     subscription's messages into text files, then drained.
 //
 // GetTemplate answers a FLEX template with its parameters, and a classic
 // template's name under flex/ is not a template.
@@ -116,8 +120,8 @@ func TestDataflowProvidedFlexTemplates(t *testing.T) {
 		}
 		resp, err := c.flex.LaunchFlexTemplate(ctx, &dataflowpb.LaunchFlexTemplateRequest{ProjectId: project, Location: "us-central1",
 			LaunchParameter: &dataflowpb.LaunchFlexTemplateParameter{JobName: "provided-flex-ps-" + suffix,
-				Template:   &dataflowpb.LaunchFlexTemplateParameter_ContainerSpecGcsPath{ContainerSpecGcsPath: base + "PubSub_to_BigQuery_Flex"},
-				Parameters: map[string]string{"inputSubscription": sub, "outputTableSpec": project + ":" + ds + ".people"},
+				Template:    &dataflowpb.LaunchFlexTemplateParameter_ContainerSpecGcsPath{ContainerSpecGcsPath: base + "PubSub_to_BigQuery_Flex"},
+				Parameters:  map[string]string{"inputSubscription": sub, "outputTableSpec": project + ":" + ds + ".people"},
 				Environment: &dataflowpb.FlexTemplateRuntimeEnvironment{TempLocation: "gs://" + bucket + "/tmp"}}})
 		if err != nil {
 			t.Fatalf("LaunchFlexTemplate: %v", err)
@@ -149,6 +153,63 @@ func TestDataflowProvidedFlexTemplates(t *testing.T) {
 		}
 		if j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DRAINED, dataflowpb.JobState_JOB_STATE_FAILED, dataflowpb.JobState_JOB_STATE_CANCELLED); j.CurrentState != dataflowpb.JobState_JOB_STATE_DRAINED {
 			t.Fatalf("the job ended %s:\n%s", j.CurrentState, jobMessages(t, ctx, c, project, id))
+		}
+	})
+
+	t.Run("Cloud_PubSub_to_GCS_Text_Flex", func(t *testing.T) {
+		topic := fmt.Sprintf("projects/%s/topics/provflextext-%s", project, suffix)
+		sub := fmt.Sprintf("projects/%s/subscriptions/provflextext-%s", project, suffix)
+		if _, err := ps.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: topic}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ps.SubscriptionAdminClient.CreateSubscription(ctx, &pubsubpb.Subscription{Name: sub, Topic: topic}); err != nil {
+			t.Fatal(err)
+		}
+		resp, err := c.flex.LaunchFlexTemplate(ctx, &dataflowpb.LaunchFlexTemplateRequest{ProjectId: project, Location: "us-central1",
+			LaunchParameter: &dataflowpb.LaunchFlexTemplateParameter{JobName: "provided-flex-pstext-" + suffix,
+				Template: &dataflowpb.LaunchFlexTemplateParameter_ContainerSpecGcsPath{ContainerSpecGcsPath: base + "Cloud_PubSub_to_GCS_Text_Flex"},
+				Parameters: map[string]string{"inputSubscription": sub, "outputDirectory": "gs://" + bucket + "/flextext/",
+					"outputFilenamePrefix": "messages-", "userTempLocation": "gs://" + bucket + "/flextexttmp/"},
+				Environment: &dataflowpb.FlexTemplateRuntimeEnvironment{TempLocation: "gs://" + bucket + "/tmp"}}})
+		if err != nil {
+			t.Fatalf("LaunchFlexTemplate: %v", err)
+		}
+		id := resp.GetJob().GetId()
+		j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_RUNNING, dataflowpb.JobState_JOB_STATE_FAILED)
+		if j.CurrentState != dataflowpb.JobState_JOB_STATE_RUNNING || j.Type != dataflowpb.JobType_JOB_TYPE_STREAMING {
+			t.Fatalf("Cloud_PubSub_to_GCS_Text_Flex's job is %s %s:\n%s", j.CurrentState, j.Type, jobMessages(t, ctx, c, project, id))
+		}
+		// Publish until the window step (WINDOWDURATION Window) has counted
+		// a message, then drain: the window's file is written as the job
+		// drains.
+		for deadline := time.Now().Add(5 * time.Minute); ; {
+			if _, err := ps.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: topic, Messages: []*pubsubpb.PubsubMessage{{Data: []byte("fig")}}}); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(10 * time.Second)
+			if read(t, ctx, c, project, id, " Window") > 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the job read none of the messages:\n%s", jobMessages(t, ctx, c, project, id))
+			}
+		}
+		if _, err := c.jobs.UpdateJob(ctx, &dataflowpb.UpdateJobRequest{ProjectId: project, Location: "us-central1", JobId: id,
+			Job: &dataflowpb.Job{RequestedState: dataflowpb.JobState_JOB_STATE_DRAINED}}); err != nil {
+			t.Fatalf("drain: %v", err)
+		}
+		if j := waitDataflowJob(t, ctx, c, project, id, dataflowpb.JobState_JOB_STATE_DRAINED, dataflowpb.JobState_JOB_STATE_FAILED, dataflowpb.JobState_JOB_STATE_CANCELLED); j.CurrentState != dataflowpb.JobState_JOB_STATE_DRAINED {
+			t.Fatalf("the job ended %s:\n%s", j.CurrentState, jobMessages(t, ctx, c, project, id))
+		}
+		if got := readPrefix(t, ctx, sc, bucket, "flextext/messages-"); len(got) == 0 || got[0] != "fig" {
+			// What the write left (its temporary files, under
+			// userTempLocation, say which of its stages did not run).
+			var left []string
+			it := sc.Bucket(bucket).Objects(ctx, &storage.Query{Prefix: "flextext"})
+			for a, err := it.Next(); err == nil; a, err = it.Next() {
+				left = append(left, a.Name)
+			}
+			t.Errorf("the windowed files hold %v; want the fig messages (objects: %v):\n%s", got, left, jobMessages(t, ctx, c, project, id))
 		}
 	})
 }

@@ -12555,6 +12555,7 @@
         "tests": [
           "test/compat/iamenforcementround9_1879_test.go:161 TestIAMEnforcementSpanner",
           "test/compat/optional_test.go:266 TestSpannerSchemaAndQuery",
+          "test/compat/spannerinfoschema2215_test.go:26 TestSpannerColumnOptionsIsInherited",
           "test/compat/spannerplans2029_test.go:230 TestSpannerQueryPlans",
           "test/compat/spannerplans2029b_test.go:182 TestSpannerQueryPlansForEveryShape",
           "test/compat/spannerplans2029b_test.go:323 TestSpannerGraphQueryPlans",
@@ -24230,7 +24231,8 @@
         "tests": [
           "test/compat/dataflowflex2215_test.go:134 TestPythonDataflowFlexTemplate",
           "test/compat/dataflowflexpkg2215_test.go:176 TestPythonDataflowFlexTemplatePackages",
-          "test/compat/dataflowflexpkg2215_test.go:268 TestJavaDataflowFlexTemplate"
+          "test/compat/dataflowflexpkg2215_test.go:268 TestJavaDataflowFlexTemplate",
+          "test/compat/dataflowprovidedflex2215_test.go:38 TestDataflowProvidedFlexTemplates"
         ]
       },
       {
@@ -24360,7 +24362,8 @@
         "method": "google.dataflow.v1beta3.TemplatesService/GetTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflowprovided2215_test.go:44 TestDataflowProvidedTemplates",
+          "test/compat/dataflowprovided2215_test.go:46 TestDataflowProvidedTemplates",
+          "test/compat/dataflowprovidedflex2215_test.go:38 TestDataflowProvidedFlexTemplates",
           "test/compat/dataflowtools_test.go:104 TestGcloudDataflow"
         ]
       },
@@ -24368,7 +24371,9 @@
         "method": "google.dataflow.v1beta3.TemplatesService/LaunchTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataflowprovided2215_test.go:44 TestDataflowProvidedTemplates",
+          "test/compat/dataflowprovided2215_test.go:46 TestDataflowProvidedTemplates",
+          "test/compat/dataflowprovidedio2215_test.go:163 TestDataflowProvidedBigQueryToTFRecord",
+          "test/compat/dataflowprovidedio2215_test.go:40 TestDataflowProvidedSpanner",
           "test/compat/dataflowtools_test.go:104 TestGcloudDataflow"
         ]
       }

@@ -34,6 +34,13 @@ The binary is linked with SLH-DSA code from Cloudflare's CIRCL
 the BSD 3-Clause License, copied with one added function into
 third_party/circl-slhdsa/, whose LICENSE and PROVENANCE.md say so.
 
+The binary embeds modified copies of Apache Beam 2.78.0's
+GreedyPCollectionFusers.java, FlinkBatchPortablePipelineTranslator.java and
+ExecutableStageDoFnOperator.java (https://github.com/apache/beam), Copyright The Apache Software Foundation,
+under the Apache License, Version 2.0, in internal/beamrun/assets/java/; a
+Dataflow job's Flink job server compiles and runs them. The change and the licence text are in
+third_party/apache-beam/.
+
 The binary is linked with Google's license classifier,
 github.com/google/licensecheck v0.3.1, Copyright (c) 2019 The Go Authors,
 under the BSD 3-Clause License.

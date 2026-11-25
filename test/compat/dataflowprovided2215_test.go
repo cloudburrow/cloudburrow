@@ -306,13 +306,15 @@ func TestDataflowProvidedTemplatesMore(t *testing.T) {
 			t.Fatalf("the job is %s %s:\n%s", j.CurrentState, j.Type, jobMessages(t, ctx, c, project, id))
 		}
 		// The job's subscription to the topic is made as it starts reading:
-		// publish until its read has counted one.
+		// publish until its window step (WINDOWDURATION Window, after Read
+		// PubSub Events) has counted one. Any step's count would not do:
+		// the read's Impulse counts its one element before a message is read.
 		for deadline := time.Now().Add(5 * time.Minute); ; {
 			if _, err := ps.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: topic, Messages: []*pubsubpb.PubsubMessage{{Data: []byte("kiwi")}}}); err != nil {
 				t.Fatal(err)
 			}
 			time.Sleep(10 * time.Second)
-			if read(t, ctx, c, project, id) > 0 {
+			if read(t, ctx, c, project, id, " Window") > 0 {
 				break
 			}
 			if time.Now().After(deadline) {
@@ -399,9 +401,9 @@ func TestDataflowProvidedTemplatesMore(t *testing.T) {
 	})
 }
 
-// read is the count of elements a job's first step has output so far
-// (its largest ElementCount), 0 for none.
-func read(t *testing.T, ctx context.Context, c dataflowClients, project, id string) float64 {
+// read is the count of elements the job's steps named with step have
+// output so far (their largest ElementCount), 0 for none.
+func read(t *testing.T, ctx context.Context, c dataflowClients, project, id, step string) float64 {
 	t.Helper()
 	m, err := c.metrics.GetJobMetrics(ctx, &dataflowpb.GetJobMetricsRequest{ProjectId: project, Location: "us-central1", JobId: id})
 	if err != nil {
@@ -409,7 +411,8 @@ func read(t *testing.T, ctx context.Context, c dataflowClients, project, id stri
 	}
 	n := 0.0
 	for _, u := range m.Metrics {
-		if u.GetName().GetName() == "ElementCount" && u.GetScalar().GetNumberValue() > n {
+		if u.GetName().GetName() == "ElementCount" && strings.Contains(u.GetName().GetContext()["output_user_name"], step) &&
+			u.GetScalar().GetNumberValue() > n {
 			n = u.GetScalar().GetNumberValue()
 		}
 	}
