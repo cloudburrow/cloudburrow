@@ -153,6 +153,8 @@ func (dataflowProvider) CreateForm() (string, []console.Field) {
 			Options: []string{"custom", "Bulk_Compress_GCS_Files", "Bulk_Decompress_GCS_Files", "Spanner_to_GCS_Text",
 				"Cloud_Spanner_to_GCS_Avro", "GCS_Avro_to_Cloud_Spanner", "GCS_Text_to_Cloud_Spanner", "Cloud_BigQuery_to_GCS_TensorFlow_Records",
 				"flex/GCS_Text_to_BigQuery_Flex", "flex/PubSub_to_BigQuery_Flex", "flex/Cloud_PubSub_to_GCS_Text_Flex",
+				"Jdbc_to_BigQuery", "flex/Jdbc_to_BigQuery_Flex", "flex/Jdbc_to_PubSub", "flex/Pubsub_to_Jdbc", "flex/BigQuery_to_Parquet",
+				"flex/File_Format_Conversion", "flex/Cloud_Spanner_to_BigQuery_Flex",
 				"GCS_Text_to_Cloud_PubSub", "Cloud_PubSub_to_GCS_Text", "PubSub_Subscription_to_BigQuery", "PubSub_to_BigQuery",
 				"GCS_Text_to_BigQuery", "Word_Count"},
 			OptionLabels: map[string]string{"custom": "Custom Template", "PubSub_Subscription_to_BigQuery": "Pub/Sub Subscription to BigQuery",
@@ -168,7 +170,14 @@ func (dataflowProvider) CreateForm() (string, []console.Field) {
 				"Cloud_BigQuery_to_GCS_TensorFlow_Records": "BigQuery to TensorFlow Records",
 				"flex/GCS_Text_to_BigQuery_Flex":           "Text Files on Cloud Storage to BigQuery with BigQuery Storage API support",
 				"flex/PubSub_to_BigQuery_Flex":             "Pub/Sub to BigQuery",
-				"flex/Cloud_PubSub_to_GCS_Text_Flex":       "Pub/Sub Subscription or Topic to Text Files on Cloud Storage"},
+				"flex/Cloud_PubSub_to_GCS_Text_Flex":       "Pub/Sub Subscription or Topic to Text Files on Cloud Storage",
+				"Jdbc_to_BigQuery":                         "JDBC to BigQuery (Legacy)",
+				"flex/Jdbc_to_BigQuery_Flex":               "JDBC to BigQuery with BigQuery Storage API support",
+				"flex/Jdbc_to_PubSub":                      "JDBC to Pub/Sub",
+				"flex/Pubsub_to_Jdbc":                      "Pub/Sub to JDBC",
+				"flex/BigQuery_to_Parquet":                 "BigQuery export to Parquet (via Storage API)",
+				"flex/File_Format_Conversion":              "Convert file formats between Avro, Parquet & CSV",
+				"flex/Cloud_Spanner_to_BigQuery_Flex":      "Spanner to BigQuery"},
 			Help: "A Google-provided template (gs://dataflow-templates-REGION/latest/NAME, built here from Google's DataflowTemplates sources), or a Custom Template: a classic template staged in Cloud Storage, such as one the Beam SDK writes with --template_location, or a Flex Template's spec. Give a template's parameters under Additional parameters."},
 		{Name: "gcsPath", Label: "Template path", Type: "text", Required: true, Pattern: `^gs://[^\/]+\/.+$`, Section: "Required parameters",
 			VisibleWhen: map[string]string{"template": "custom"},
@@ -181,6 +190,10 @@ func (dataflowProvider) CreateForm() (string, []console.Field) {
 			Help: "The most workers autoscaling may use, 1 to 1000."},
 		{Name: "numWorkers", Label: "Number of workers", Type: "number", Pattern: `^([1-9][0-9]{0,2}|1000)?$`, Section: "Optional parameters",
 			Help: "The workers the job starts with."},
+		{Name: "network", Label: "Network", Type: "text", Section: "Optional parameters",
+			Help: "The VPC network the workers run on (default: the network named default). They reach the private IPs of its Cloud SQL instances."},
+		{Name: "subnetwork", Label: "Subnetwork", Type: "text", Section: "Optional parameters",
+			Help: "The subnetwork the workers run on: regions/REGION/subnetworks/NAME, or its complete URL."},
 	}
 }
 
@@ -198,7 +211,8 @@ func (p dataflowProvider) Create(ctx context.Context, project string, values map
 	if err != nil {
 		return "", err
 	}
-	env := &dataflowpb.RuntimeEnvironment{TempLocation: strings.TrimSpace(values["tempLocation"])}
+	env := &dataflowpb.RuntimeEnvironment{TempLocation: strings.TrimSpace(values["tempLocation"]),
+		Network: strings.TrimSpace(values["network"]), Subnetwork: strings.TrimSpace(values["subnetwork"])}
 	for _, f := range []struct {
 		key string
 		to  *int32
@@ -224,8 +238,9 @@ func (p dataflowProvider) Create(ctx context.Context, project string, values map
 		Template: &dataflowpb.GetTemplateRequest_GcsPath{GcsPath: gcsPath}}); err == nil && t.GetTemplateType() == dataflowpb.GetTemplateResponse_FLEX {
 		resp, err := s.LaunchFlexTemplate(ctx, &dataflowpb.LaunchFlexTemplateRequest{ProjectId: project, Location: region,
 			LaunchParameter: &dataflowpb.LaunchFlexTemplateParameter{JobName: strings.TrimSpace(values["jobName"]), Parameters: params,
-				Template:    &dataflowpb.LaunchFlexTemplateParameter_ContainerSpecGcsPath{ContainerSpecGcsPath: gcsPath},
-				Environment: &dataflowpb.FlexTemplateRuntimeEnvironment{TempLocation: env.GetTempLocation(), MaxWorkers: env.GetMaxWorkers(), NumWorkers: env.GetNumWorkers()}}})
+				Template: &dataflowpb.LaunchFlexTemplateParameter_ContainerSpecGcsPath{ContainerSpecGcsPath: gcsPath},
+				Environment: &dataflowpb.FlexTemplateRuntimeEnvironment{TempLocation: env.GetTempLocation(), MaxWorkers: env.GetMaxWorkers(), NumWorkers: env.GetNumWorkers(),
+					Network: env.GetNetwork(), Subnetwork: env.GetSubnetwork()}}})
 		if err != nil {
 			return "", err
 		}

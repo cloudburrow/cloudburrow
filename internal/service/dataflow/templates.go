@@ -207,6 +207,14 @@ func fromTemplate(job *dataflowpb.Job, project, gcsPath, name string, params map
 		if env.ServiceAccountEmail != "" {
 			job.Environment.ServiceAccountEmail = env.ServiceAccountEmail
 		}
+		// The workers' network and subnetwork (RuntimeEnvironment's), as
+		// a submitted job's worker pool names them.
+		if env.Network != "" || env.Subnetwork != "" {
+			if len(job.Environment.WorkerPools) == 0 {
+				job.Environment.WorkerPools = []*dataflowpb.WorkerPool{{Kind: "harness"}}
+			}
+			job.Environment.WorkerPools[0].Network, job.Environment.WorkerPools[0].Subnetwork = env.Network, env.Subnetwork
+		}
 		if len(env.AdditionalUserLabels) > 0 {
 			if job.Labels == nil {
 				job.Labels = map[string]string{}
@@ -450,7 +458,7 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 	}
 	fl := FlexLaunch{Project: job.ProjectId, Location: loc, JobName: job.Name, Image: image, Args: args,
 		TempLocation: env.GetTempLocation(), StagingLocation: env.GetStagingLocation(), MaxWorkers: env.GetMaxWorkers(),
-		Update: lp.GetUpdate()}
+		Network: env.GetNetwork(), Subnetwork: env.GetSubnetwork(), Update: lp.GetUpdate()}
 	if len(lp.GetTransformNameMappings()) > 0 {
 		b, _ := json.Marshal(lp.GetTransformNameMappings())
 		fl.TransformNameMapping = string(b)

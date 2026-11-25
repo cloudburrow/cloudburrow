@@ -55,6 +55,9 @@ type Flex struct {
 	MaxWorkers                    int32
 	Update                        bool
 	TransformNameMapping          string
+	// Network and Subnetwork are the workers' VPC network and
+	// subnetwork, given to the program as its runner's options.
+	Network, Subnetwork string
 	// Provided, when set, is the Google-provided Flex Template f.Image
 	// stands for (ProvidedFlexImage), and ProvidedDir its module's build:
 	// the launcher runs its main class on that build, in the Java SDK
@@ -85,6 +88,12 @@ func (f Flex) pythonOptions() []string {
 	if f.TransformNameMapping != "" {
 		o = append(o, "--transform_name_mapping="+f.TransformNameMapping)
 	}
+	if f.Network != "" {
+		o = append(o, "--network="+f.Network)
+	}
+	if f.Subnetwork != "" {
+		o = append(o, "--subnetwork="+f.Subnetwork)
+	}
 	return o
 }
 
@@ -105,6 +114,12 @@ func (f Flex) javaOptions() []string {
 	}
 	if f.TransformNameMapping != "" {
 		o = append(o, "--transformNameMapping="+f.TransformNameMapping)
+	}
+	if f.Network != "" {
+		o = append(o, "--network="+f.Network)
+	}
+	if f.Subnetwork != "" {
+		o = append(o, "--subnetwork="+f.Subnetwork)
 	}
 	return o
 }
@@ -256,6 +271,15 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 			return err
 		}
 	}
+	if f.Provided != nil {
+		// Google's launcher VM has its metadata server, which a template's
+		// own clients' application default credentials come from, and a
+		// template's client may dial a Google host at its default endpoint
+		// (googleHosts): both are the instance's, through the relay.
+		if a := live["metadata"]; a != "" {
+			live[launcherMetadata] = a
+		}
+	}
 	relayIP, stop, err := d.jobNetwork(ctx, network, relay, dir, PythonImages["3.12"], label, live)
 	defer stop()
 	if err != nil {
@@ -269,13 +293,31 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 		}
 	}
 	args := append(append([]string{"run", "--rm", "--name", launch, "--label", label, "--network", network, "-v", dir + ":/cb:ro"}, mounts...), cenv...)
+	if f.Provided != nil {
+		if live[launcherMetadata] != "" {
+			args = append(args, "-e", fmt.Sprintf("GCE_METADATA_HOST=%s:%d", relayIP, metadataPort))
+		}
+	}
+	args = append(args, googleHostArgs(live, relayIP)...)
 	program := main
 	if main != "" {
 		cp := env["FLEX_TEMPLATE_JAVA_CLASSPATH"]
 		if cp == "" {
 			cp = "/template/*"
 		}
-		args = append(args, "--entrypoint", "java", local, "-cp", "/cb/cbcred:"+cp, main)
+		if f.Provided != nil {
+			// The launcher's JVM trusts the job's CA, whose certificate the
+			// relay answers a Google host's TLS with (pool.sh's trust).
+			script := `set -e; TRUST=""; if [ -f /cb/tls/ca.pem ]; then ` +
+				`JH="${JAVA_HOME:-$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")}"; ` +
+				`cp "$JH/lib/security/cacerts" /tmp/cb-trust.jks; chmod 600 /tmp/cb-trust.jks; ` +
+				`keytool -importcert -noprompt -alias cloudburrow-dataflow -file /cb/tls/ca.pem -keystore /tmp/cb-trust.jks -storepass changeit >/dev/null 2>&1; ` +
+				`TRUST="-Djavax.net.ssl.trustStore=/tmp/cb-trust.jks -Djavax.net.ssl.trustStorePassword=changeit"; fi; ` +
+				`exec java $TRUST "$@"`
+			args = append(args, "--entrypoint", "sh", local, "-c", script, "launch", "-cp", "/cb/cbcred:"+cp, main)
+		} else {
+			args = append(args, "--entrypoint", "java", local, "-cp", "/cb/cbcred:"+cp, main)
+		}
 		args = append(args, f.Args...)
 		args = append(args, f.javaOptions()...)
 		args = append(args, "--runner=DataflowRunner", "--apiRootUrl=http://"+relayName+"/",
@@ -305,10 +347,37 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 	}()
 	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("the template's program %s exited: %v: %s", program, err, lastLines(string(out), 3))
+		return fmt.Errorf("the template's program %s exited: %v: %s", program, err, launcherCause(string(out)))
 	}
 	return nil
 }
+
+// launcherCause is what a launcher's failed program said: a Java stack
+// trace's exception and its last cause (a trace's last lines are frames),
+// else its last lines.
+func launcherCause(text string) string {
+	var first, cause string
+	for _, l := range strings.Split(text, "\n") {
+		l = strings.TrimSpace(l)
+		switch {
+		case first == "" && (strings.HasPrefix(l, "Exception in thread ") || javaThrowRE.MatchString(l)):
+			first = l
+		case first != "" && strings.HasPrefix(l, "Caused by: "):
+			cause = l
+		}
+	}
+	if first == "" {
+		return lastLines(text, 3)
+	}
+	if cause != "" {
+		return first + " | " + cause
+	}
+	return first
+}
+
+// javaThrowRE is a stack trace's first line, a Throwable's class and
+// message (java.lang.IllegalArgumentException: ...).
+var javaThrowRE = regexp.MustCompile(`^([a-z][a-z0-9_]*\.)+[A-Z][A-Za-z0-9_$]*(Exception|Error)(: |$)`)
 
 // flexCredentials compiles CbCredentialFactory into dir/cbcred against a
 // Java template's own classpath (Beam's CredentialFactory and Google's

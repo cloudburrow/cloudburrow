@@ -44,6 +44,10 @@ type Run struct {
 	// SnapshotID is the snapshot the job is created from
 	// (createdFromSnapshotId): its state is restored from it.
 	SnapshotID string
+	// Network and Subnetwork are the VPC network and subnetwork the
+	// workers run on, as the job names them ("" both: the default
+	// network).
+	Network, Subnetwork string
 }
 
 // Outcome is how a run ended.

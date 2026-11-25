@@ -45,8 +45,11 @@ type dataflowService struct {
 	// registryToken is the token a Flex Template's image is read from
 	// the Artifact Registry with; nil reads it with none.
 	registryToken func() string
-	server        *grpctransport.Server
-	api           *dataflow.Server
+	// private answers the private services addresses on a job's VPC
+	// network (beamrun.Docker.Private); nil for none.
+	private func(project, network, subnetwork, region string) []beamrun.PrivateService
+	server  *grpctransport.Server
+	api     *dataflow.Server
 	// snapTmp is an ephemeral instance's snapshots directory, removed
 	// when it stops.
 	snapTmp string
@@ -120,6 +123,7 @@ func (s *dataflowService) Start(ctx context.Context) error {
 		Registry:      func() string { return s.liveAddrs()["run"] },
 		RegistryToken: s.registryToken,
 		Snapshots:     snaps,
+		Private:       s.private,
 		Logf:          func(format string, args ...any) { fmt.Printf("cloudburrow: "+format+"\n", args...) }}
 	launcher := flexLauncher{d: s.docker}
 	opts := dataflow.Options{State: state, Engine: dataflowEngine{d: s.docker},
@@ -166,6 +170,12 @@ func (s *dataflowService) Stop(ctx context.Context) error {
 		errs = append(errs, s.server.Stop(ctx))
 	}
 	if s.api != nil {
+		// A running job's containers are removed at once, not cancelled
+		// through the runner: stop has its shutdown timeout for every
+		// service.
+		if s.docker != nil {
+			s.docker.Shutdown()
+		}
 		s.api.Close()
 	}
 	// What a run's cleanup did not reach (the CLI stopping mid-run).
@@ -204,7 +214,7 @@ type flexLauncher struct {
 func (l flexLauncher) Launch(ctx context.Context, f dataflow.FlexLaunch) error {
 	fl := beamrun.Flex{Project: f.Project, Location: f.Location, JobName: f.JobName, Image: f.Image, Args: f.Args,
 		TempLocation: f.TempLocation, StagingLocation: f.StagingLocation, MaxWorkers: f.MaxWorkers, Update: f.Update,
-		TransformNameMapping: f.TransformNameMapping}
+		TransformNameMapping: f.TransformNameMapping, Network: f.Network, Subnetwork: f.Subnetwork}
 	if name, ok := beamrun.ProvidedFlexTemplate(f.Image); ok && l.provided != nil {
 		tpl, dir, found, err := l.provided.FlexTemplate(ctx, name)
 		if err != nil {
@@ -226,7 +236,8 @@ var pythonVersionRE = regexp.MustCompile(`Python (\d+\.\d+)`)
 func (e dataflowEngine) Run(ctx context.Context, run dataflow.Run, r dataflow.Reporter) dataflow.Outcome {
 	job := beamrun.Job{Project: run.Project, JobID: run.JobID, Name: run.Name, Streaming: run.Streaming,
 		PipelineURL: run.PipelineURL, Options: run.Options, SDK: run.SDK, SDKVersion: run.SDKVersion,
-		Workers: run.MaxWorkers, Drain: run.Drain, Snapshot: run.SnapshotID}
+		Workers: run.MaxWorkers, Drain: run.Drain, Snapshot: run.SnapshotID,
+		Network: run.Network, Subnetwork: run.Subnetwork, Region: run.Location}
 	if m := pythonVersionRE.FindStringSubmatch(sdkName(run)); m != nil {
 		job.PythonVersion = m[1]
 	}

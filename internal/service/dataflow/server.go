@@ -90,6 +90,9 @@ type FlexLaunch struct {
 	MaxWorkers                    int32
 	Update                        bool
 	TransformNameMapping          string
+	// Network and Subnetwork are the launch environment's, the workers'
+	// VPC network and subnetwork.
+	Network, Subnetwork string
 }
 
 // Options are the server's collaborators.

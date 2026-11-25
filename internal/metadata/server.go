@@ -166,7 +166,23 @@ func (s *Server) Handler() http.Handler {
 		http.NotFound(w, r)
 	})
 	mux.HandleFunc("/computeMetadata/v1/", func(w http.ResponseWriter, r *http.Request) {
-		s.text(w, "instance/\nproject/\n")
+		if r.URL.Path != "/computeMetadata/v1/" {
+			// An entry the server does not have is a 404, as Compute
+			// Engine's is: a client that reads an optional entry (the
+			// Java auth library's universe domain) takes its default on
+			// one, and an entry's listing in its place would be read as
+			// its value.
+			http.NotFound(w, r)
+			return
+		}
+		s.text(w, "instance/\nproject/\nuniverse/\n")
+	})
+	// The universe the instance's credentials are of: Google's, as on any
+	// Compute Engine VM outside a sovereign universe. The Java and Go auth
+	// libraries read it (ComputeEngineCredentials.getUniverseDomain) and
+	// refuse a client whose universe differs.
+	mux.HandleFunc("/computeMetadata/v1/universe/universe-domain", func(w http.ResponseWriter, r *http.Request) {
+		s.text(w, "googleapis.com")
 	})
 
 	mux.HandleFunc("/computeMetadata/v1/project/project-id", func(w http.ResponseWriter, r *http.Request) {

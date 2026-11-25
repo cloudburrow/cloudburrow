@@ -24232,7 +24232,10 @@
           "test/compat/dataflowflex2215_test.go:134 TestPythonDataflowFlexTemplate",
           "test/compat/dataflowflexpkg2215_test.go:176 TestPythonDataflowFlexTemplatePackages",
           "test/compat/dataflowflexpkg2215_test.go:268 TestJavaDataflowFlexTemplate",
-          "test/compat/dataflowprovidedflex2215_test.go:38 TestDataflowProvidedFlexTemplates"
+          "test/compat/dataflowjdbc2215_test.go:144 TestDataflowProvidedJdbcToBigQuery",
+          "test/compat/dataflowparquet2215_test.go:38 TestDataflowProvidedBigQueryToParquet",
+          "test/compat/dataflowprovidedflex2215_test.go:38 TestDataflowProvidedFlexTemplates",
+          "test/compat/dataflowprovidedflexmore2215_test.go:39 TestDataflowProvidedFlexTemplatesMore"
         ]
       },
       {
@@ -24371,6 +24374,7 @@
         "method": "google.dataflow.v1beta3.TemplatesService/LaunchTemplate",
         "status": "Verified",
         "tests": [
+          "test/compat/dataflowjdbc2215_test.go:144 TestDataflowProvidedJdbcToBigQuery",
           "test/compat/dataflowprovided2215_test.go:46 TestDataflowProvidedTemplates",
           "test/compat/dataflowprovidedio2215_test.go:163 TestDataflowProvidedBigQueryToTFRecord",
           "test/compat/dataflowprovidedio2215_test.go:40 TestDataflowProvidedSpanner",

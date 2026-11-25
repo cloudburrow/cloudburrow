@@ -61,7 +61,7 @@ const StageVersion = "4"
 // builds, by name (their @Template name in DataflowTemplates' v1 module).
 var ProvidedNames = []string{"Bulk_Compress_GCS_Files", "Bulk_Decompress_GCS_Files", "Cloud_BigQuery_to_GCS_TensorFlow_Records",
 	"Cloud_PubSub_to_GCS_Text", "Cloud_Spanner_to_GCS_Avro", "GCS_Avro_to_Cloud_Spanner", "GCS_Text_to_BigQuery", "GCS_Text_to_Cloud_PubSub",
-	"GCS_Text_to_Cloud_Spanner", "PubSub_Subscription_to_BigQuery", "PubSub_to_BigQuery", "Spanner_to_GCS_Text", "Word_Count"}
+	"GCS_Text_to_Cloud_Spanner", "Jdbc_to_BigQuery", "PubSub_Subscription_to_BigQuery", "PubSub_to_BigQuery", "Spanner_to_GCS_Text", "Word_Count"}
 
 // ProvidedFlexNames are the Google-provided Flex Templates CloudBurrow
 // builds (their @Template name), each with the DataflowTemplates module
@@ -71,9 +71,15 @@ var ProvidedNames = []string{"Bulk_Compress_GCS_Files", "Bulk_Decompress_GCS_Fil
 // build is the template's classpath, and the launcher runs its main class
 // in the Java SDK image (LaunchProvidedFlex).
 var ProvidedFlexNames = map[string]string{
-	"Cloud_PubSub_to_GCS_Text_Flex": "v2/googlecloud-to-googlecloud",
-	"GCS_Text_to_BigQuery_Flex":     "v2/googlecloud-to-googlecloud",
-	"PubSub_to_BigQuery_Flex":       "v2/googlecloud-to-googlecloud",
+	"BigQuery_to_Parquet":            "v2/googlecloud-to-googlecloud",
+	"Cloud_PubSub_to_GCS_Text_Flex":  "v2/googlecloud-to-googlecloud",
+	"Cloud_Spanner_to_BigQuery_Flex": "v2/googlecloud-to-googlecloud",
+	"File_Format_Conversion":         "v2/googlecloud-to-googlecloud",
+	"Jdbc_to_BigQuery_Flex":          "v2/jdbc-and-googlecloud",
+	"Jdbc_to_PubSub":                 "v2/jdbc-and-googlecloud",
+	"Pubsub_to_Jdbc":                 "v2/jdbc-and-googlecloud",
+	"GCS_Text_to_BigQuery_Flex":      "v2/googlecloud-to-googlecloud",
+	"PubSub_to_BigQuery_Flex":        "v2/googlecloud-to-googlecloud",
 }
 
 // providedModule is the DataflowTemplates module name is built in: v1 for
