@@ -60,15 +60,18 @@ func TestGraphPlansOfQuantifiedPathsCostsAndPathValues(t *testing.T) {
 			t.Errorf("%s: want %q in\n%s", c.gql, c.want, sql)
 		}
 	}
-	// still refused by name
-	for _, c := range []struct{ gql, what string }{
-		{"GRAPH FinGraph MATCH ((a:Account)-[t:Transfers]->(b:Account)){1,3} RETURN b.id", "group variable b"},
-		{"GRAPH FinGraph MATCH (TRAIL -[t1:Transfers]->()-[t2:Transfers]->()-[t3:Transfers]->){2} RETURN COUNT(*) AS n", "path mode in a quantified path pattern"},
-		{"GRAPH FinGraph MATCH ((a:Account)-[t:Transfers]->(b:Account)-[u:Transfers]->(c:Account)){1,2} RETURN COUNT(*) AS n", "more than one edge"},
+	// what the translation refused before #2029's fifth branch: a
+	// quantified path pattern's node read outside it, a path mode in one,
+	// and one of several edges plan as a Recursive Union of the subpath's
+	// reads
+	for _, gql := range []string{
+		"GRAPH FinGraph MATCH ((a:Account)-[t:Transfers]->(b:Account)){1,3} RETURN ARRAY_LENGTH(b) AS n",
+		"GRAPH FinGraph MATCH (TRAIL -[t1:Transfers]->()-[t2:Transfers]->()-[t3:Transfers]->){2} RETURN COUNT(*) AS n",
+		"GRAPH FinGraph MATCH ((a:Account)-[t:Transfers]->(b:Account)-[u:Transfers]->(c:Account)){1,2} RETURN COUNT(*) AS n",
 	} {
-		_, _, err := graphToSQLQuant(c.gql, finGraphs(t))
-		if _, ok := err.(unsupportedSQL); !ok || !strings.Contains(err.Error(), c.what) {
-			t.Errorf("%s: %v; want a refusal naming %q", c.gql, err, c.what)
+		sql, got := graphPlan(t, gql)
+		if !strings.Contains(got, "Recursive Union") || !strings.Contains(got, "RecursiveSpoolScan") {
+			t.Errorf("%s:\nSQL %s\nplan\n%s", gql, sql, got)
 		}
 	}
 }

@@ -798,6 +798,12 @@ func (ps *sqlParser) query() (*sqlQuery, error) {
 				return nil, err
 			}
 			o := sqlOrder{e: e}
+			if ps.acceptKw("COLLATE") {
+				// the key's collation: it orders the rows, it keeps them all
+				if t := ps.next(); t.kind != tkString {
+					return nil, ps.errAt("a collation name")
+				}
+			}
 			if ps.acceptKw("DESC") {
 				o.desc = true
 			} else {
@@ -998,8 +1004,31 @@ func (ps *sqlParser) selectStmt() (*sqlSelect, error) {
 		}
 		s.having = e
 	}
-	if ps.isKw("WINDOW") || ps.isKw("QUALIFY") {
-		return nil, unsupportedSQL{strings.ToUpper(ps.peek().text) + " clauses"}
+	// a WINDOW clause names windows for analytic functions, which the
+	// engine refuses (it runs no OVER), so an accepted one names windows
+	// nothing reads: it changes no row
+	if ps.acceptKw("WINDOW") {
+		for {
+			if _, ok := ps.ident(); !ok {
+				return nil, ps.errAt("a window's name")
+			}
+			if err := ps.expectKw("AS"); err != nil {
+				return nil, err
+			}
+			if ps.isP("(") {
+				if err := ps.skipBalanced("(", ")"); err != nil {
+					return nil, err
+				}
+			} else if _, ok := ps.ident(); !ok {
+				return nil, ps.errAt("a window specification")
+			}
+			if !ps.acceptP(",") {
+				break
+			}
+		}
+	}
+	if ps.isKw("QUALIFY") {
+		return nil, unsupportedSQL{"QUALIFY clauses"}
 	}
 	s.hi = ps.p
 	return s, nil
@@ -1244,9 +1273,6 @@ func (ps *sqlParser) fromItem() (*sqlFrom, error) {
 	f.hi = ps.p
 	f.sampleHi = ps.p
 	if ps.acceptKw("TABLESAMPLE") {
-		if f.kind != fromTable {
-			return nil, unsupportedSQL{"TABLESAMPLE on a subquery"}
-		}
 		s, err := ps.tableSample()
 		if err != nil {
 			return nil, err
@@ -1400,6 +1426,33 @@ func (ps *sqlParser) cmpExpr() (*sqlExpr, error) {
 					op = "IS NOT " + end + " OF"
 				}
 				l = ps.bin(op, l, r)
+				continue
+			}
+			if ps.acceptKw("LABELED") {
+				// GQL's element IS [NOT] LABELED label expression
+				for {
+					for ps.acceptP("!") {
+					}
+					switch {
+					case ps.acceptP("%"):
+					case ps.isP("("):
+						if err := ps.skipBalanced("(", ")"); err != nil {
+							return nil, err
+						}
+					default:
+						if _, ok := ps.ident(); !ok {
+							return nil, ps.errAt("a label expression")
+						}
+					}
+					if !ps.acceptP("|") && !ps.acceptP("&") {
+						break
+					}
+				}
+				op := "IS LABELED"
+				if neg {
+					op = "IS NOT LABELED"
+				}
+				l = &sqlExpr{kind: exUnary, op: op, args: []*sqlExpr{l}, lo: l.lo, hi: ps.p}
 				continue
 			}
 			v := ps.next()
@@ -1564,6 +1617,22 @@ func (ps *sqlParser) postfix() (*sqlExpr, error) {
 		switch {
 		case ps.isP("["):
 			ps.p++
+			// a[OFFSET(i)], a[ORDINAL(i)], a[SAFE_OFFSET(i)]: OFFSET is reserved
+			if (ps.isKw("OFFSET") || ps.isKw("ORDINAL") || ps.isKw("SAFE_OFFSET") || ps.isKw("SAFE_ORDINAL")) && ps.peekN(1).text == "(" {
+				ps.p += 2
+				i, err := ps.expr()
+				if err != nil {
+					return nil, err
+				}
+				if err := ps.expectP(")"); err != nil {
+					return nil, err
+				}
+				if err := ps.expectP("]"); err != nil {
+					return nil, err
+				}
+				e = &sqlExpr{kind: exFunc, op: "[]", args: []*sqlExpr{e, i}, lo: e.lo, hi: ps.p}
+				continue
+			}
 			i, err := ps.expr()
 			if err != nil {
 				return nil, err
@@ -1590,6 +1659,12 @@ func (ps *sqlParser) postfix() (*sqlExpr, error) {
 			if e.kind == exCol {
 				e.path = append(e.path, id)
 				e.hi = ps.p
+				if ps.isP("(") {
+					// a function in a namespace: NET.IPV4_TO_INT64(x)
+					if e, err = ps.maybeCall(e); err != nil {
+						return nil, err
+					}
+				}
 			} else {
 				e = &sqlExpr{kind: exFunc, op: ".", args: []*sqlExpr{e}, path: []string{id}, lo: e.lo, hi: ps.p}
 			}
@@ -1810,7 +1885,7 @@ func (ps *sqlParser) primary() (*sqlExpr, error) {
 		ps.p += 2
 		return done(exLit), nil
 	}
-	if reservedSQL[up] && !(ps.peekN(1).kind == tkPunct && ps.peekN(1).text == "(" && (up == "LEFT" || up == "RIGHT" || up == "IF")) {
+	if reservedSQL[up] && !(ps.peekN(1).kind == tkPunct && ps.peekN(1).text == "(" && (up == "LEFT" || up == "RIGHT" || up == "IF" || up == "CAST")) {
 		return nil, ps.errAt("an expression")
 	}
 	ps.p++
@@ -1869,6 +1944,24 @@ func (ps *sqlParser) args(lo int, name string) (*sqlExpr, error) {
 	for {
 		if ps.peek().kind == tkIdent && ps.peekN(1).kind == tkPunct && ps.peekN(1).text == "=>" {
 			ps.p += 2
+		}
+		// a lambda's parameters: e -> body, (a, b) -> body
+		arrow := func(i int) bool {
+			return i+1 < len(ps.toks) && ps.toks[i].text == "-" && ps.toks[i+1].text == ">" && ps.toks[i].end == ps.toks[i+1].start
+		}
+		if ps.peek().kind == tkIdent && arrow(ps.p+1) {
+			ps.p += 3
+		} else if ps.isP("(") {
+			j := ps.p + 1
+			for j+1 < len(ps.toks) && ps.toks[j].kind == tkIdent && (ps.toks[j+1].text == "," || ps.toks[j+1].text == ")") {
+				if ps.toks[j+1].text == ")" {
+					if arrow(j + 2) {
+						ps.p = j + 4
+					}
+					break
+				}
+				j += 2
+			}
 		}
 		a, err := ps.expr()
 		if err != nil {

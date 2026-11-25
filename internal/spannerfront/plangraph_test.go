@@ -39,12 +39,8 @@ func TestGraphToSQL(t *testing.T) {
 	for _, gql := range []string{
 		// the engine refuses unbounded quantifiers before a plan is asked for
 		"GRAPH MusicGraph MATCH (s:Singers)-[:Collabs]->+(o:Singers) RETURN o.FirstName",
-		"GRAPH MusicGraph MATCH (s:Singers)-[c:Collabs]->{1,2}(o:Singers) RETURN c.OtherId",
-		"GRAPH MusicGraph MATCH (s:Singers) RETURN s",
 		// ANY CHEAPEST with no COST (the engine refuses it first)
 		"GRAPH MusicGraph MATCH ANY CHEAPEST (s:Singers)-[:Collabs]->(o:Singers) RETURN o.FirstName",
-		// a quantified path pattern's node read outside it
-		"GRAPH MusicGraph MATCH (s:Singers) ((a:Singers)-[:Collabs]->(b:Singers)){1,2} RETURN b.FirstName",
 	} {
 		if _, err := graphToSQL(gql, musicGraphs(t)); err == nil {
 			t.Errorf("%s: translated, want it refused by name", gql)

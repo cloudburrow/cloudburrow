@@ -99,5 +99,6 @@ if [ "$test" = 1 ]; then
 fi
 mkdir -p "$out"
 archive="$out/spanner-emulator-$version-linux-$arch.tar.gz"
-tar -czf "$archive" -C "$bin" emulator_main gateway_main licenses.txt.gz
+# COPYFILE_DISABLE: macOS tar would add AppleDouble ._ entries for xattrs.
+COPYFILE_DISABLE=1 tar -czf "$archive" -C "$bin" emulator_main gateway_main licenses.txt.gz
 echo "$archive"

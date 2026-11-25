@@ -109,16 +109,13 @@ func (t *gqlTranslator) exportOf(name, from string) (*gqlExport, error) {
 			}
 		}
 	case bGroup:
-		x.suffixes = append(x.suffixes, "len")
-		ids := false
+		// its length, and its elements' identities (for its use as a value)
+		x.suffixes = append(x.suffixes, "len", "ids")
 		for _, br := range t.branches {
 			if b := br.binds[from]; b != nil && b.quant != nil {
 				b.quant.withLen = true
-				ids = ids || b.quant.withIDs
+				b.quant.withIDs = true
 			}
-		}
-		if ids {
-			x.suffixes = append(x.suffixes, "ids")
 		}
 		for _, p := range sortedKeys(props) {
 			x.suffixes = append(x.suffixes, "a_"+p)
@@ -136,6 +133,15 @@ func (t *gqlTranslator) exportOf(name, from string) (*gqlExport, error) {
 		}
 		if cost {
 			x.suffixes = append(x.suffixes, "cost")
+		}
+		els := false
+		for _, br := range t.branches {
+			if b := br.binds[from]; b != nil && b.pathFns != nil {
+				els = true
+			}
+		}
+		if els && t.pathElementsUsed(name, from) {
+			x.suffixes = append(x.suffixes, "fn", "fe", "fa", "ft", "fs")
 		}
 		if val && t.pathUsedAsValue(name, from) {
 			x.suffixes = append(x.suffixes, "v")
@@ -190,6 +196,13 @@ func (t *gqlTranslator) exportValue(x *gqlExport, b *gqlBind, suffix string) (st
 			return b.pathCost, nil
 		case "v":
 			return b.pathVal, nil
+		case "fn", "fe", "fa", "ft", "fs":
+			for fn, suf := range pathFuncSuffix {
+				if suf == suffix && b.pathFns != nil {
+					return b.pathFns[fn], nil
+				}
+			}
+			return "NULL", nil
 		}
 		return b.pathLen, nil
 	case bGroup:
@@ -198,12 +211,16 @@ func (t *gqlTranslator) exportValue(x *gqlExport, b *gqlBind, suffix string) (st
 			return b.alias + ".cb_len", nil
 		}
 		if suffix == "ids" {
-			if !b.quant.withIDs {
-				return "NULL", nil
+			if b.gvar != "" {
+				return b.alias + ".cb_arr_" + b.gvar + "__cb_id", nil
 			}
+			b.quant.withIDs = true
 			return b.alias + ".cb_ids", nil
 		}
 		p := strings.TrimPrefix(suffix, "a_")
+		if b.gvar != "" {
+			p = b.gvar + "__" + p
+		}
 		if !hasCol(b.quant.arrs, p) {
 			return "NULL", nil
 		}
@@ -244,6 +261,12 @@ func (x *gqlExport) materialize(qual string) *gqlBind {
 		if b.cols[b.prefix+"__v"] {
 			b.pathVal = qual + "." + b.prefix + "__v"
 		}
+		if b.cols[b.prefix+"__fn"] {
+			b.pathFns = map[string]string{}
+			for fn, suf := range pathFuncSuffix {
+				b.pathFns[fn] = qual + "." + b.prefix + "__" + suf
+			}
+		}
 	}
 	return b
 }
@@ -251,8 +274,13 @@ func (x *gqlExport) materialize(qual string) *gqlBind {
 // selectSQL is SELECT list FROM ... WHERE ... of a branch.
 func selectSQL(list []string, br *gqlBranch) string {
 	s := "SELECT " + strings.Join(list, ", ")
-	if len(br.from) > 0 {
-		s += " FROM " + strings.Join(br.from, ", ")
+	from := br.from
+	if len(from) == 0 && len(br.conds) > 0 {
+		// a query with no MATCH that filters: its one row, filtered
+		from = []string{"UNNEST([TRUE]) AS cb_one"}
+	}
+	if len(from) > 0 {
+		s += " FROM " + strings.Join(from, ", ")
 		if len(br.conds) > 0 {
 			s += " WHERE " + strings.Join(br.conds, " AND ")
 		}
@@ -418,8 +446,9 @@ type gqlTail struct {
 }
 
 type gqlOrderItem struct {
-	lo, hi int
-	dir    string
+	lo, hi  int
+	dir     string
+	collate string
 }
 
 func (t *gqlTranslator) tail(tl *gqlTail) error {
@@ -442,8 +471,12 @@ func (t *gqlTranslator) tail(tl *gqlTail) error {
 					return err
 				}
 				it := gqlOrderItem{lo: e.lo, hi: e.hi}
-				if ps.isKw("COLLATE") {
-					return unsupportedSQL{"COLLATE in a graph query's ORDER BY"}
+				if ps.acceptKw("COLLATE") {
+					c := ps.next()
+					if c.kind != tkString {
+						return ps.errAt("a collation name")
+					}
+					it.collate = " COLLATE " + ps.src[c.start:c.end]
 				}
 				switch {
 				case ps.acceptKw("ASC"), ps.acceptKw("ASCENDING"):
@@ -483,7 +516,7 @@ func (t *gqlTranslator) tailSQL(tl *gqlTail, br *gqlBranch) (string, error) {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString(s + o.dir)
+			b.WriteString(s + o.collate + o.dir)
 		}
 	}
 	if tl.limit[1] > 0 || tl.offset[1] > 0 {
@@ -851,6 +884,16 @@ func (t *gqlTranslator) finalReturn() (string, error) {
 		s = "SELECT DISTINCT" + strings.TrimPrefix(s, "SELECT")
 	}
 	var keys []string
+	for i, g := range group {
+		// GROUP BY a RETURN's alias: its expression
+		if n := t.bareName(g); n != "" && br.binds[n] == nil {
+			for _, it := range items {
+				if !it.star && strings.EqualFold(it.alias, n) {
+					group[i] = it.e
+				}
+			}
+		}
+	}
 	for _, g := range group {
 		k, err := t.groupKeys(br, g)
 		if err != nil {
@@ -946,6 +989,7 @@ func (t *gqlTranslator) render(br *gqlBranch, lo, hi int) (string, error) {
 		}
 		return br.binds[strings.ToLower(ps.toks[i].text)]
 	}
+	closed := func(i int) bool { return i < hi && ps.toks[i].text == ")" }
 	for i := lo; i < hi; i++ {
 		tk := ps.toks[i]
 		if !isNameTok(tk) || i > lo && ps.toks[i-1].text == "." {
@@ -1013,6 +1057,51 @@ func (t *gqlTranslator) render(br *gqlBranch, lo, hi int) (string, error) {
 				emit(i, i+3, labelsSQL(arg))
 				i += 3
 				continue
+			case fn == "ELEMENT_ID" && arg != nil && arg.kind == bElem && closed(i+3):
+				emit(i, i+3, elemIDSQL(arg))
+				i += 3
+				continue
+			case (fn == "SOURCE_NODE_ID" || fn == "DESTINATION_NODE_ID") && arg != nil && arg.kind == bElem && arg.edge && closed(i+3):
+				emit(i, i+3, t.endpointIDSQL(arg, fn == "SOURCE_NODE_ID"))
+				i += 3
+				continue
+			case fn == "PROPERTY_NAMES" && arg != nil && arg.kind == bElem && closed(i+3):
+				emit(i, i+3, propertyNamesSQL(arg))
+				i += 3
+				continue
+			case (fn == "TO_JSON" || fn == "SAFE_TO_JSON") && arg != nil && arg.kind == bElem && closed(i+3):
+				emit(i, i+3, fn+"("+elemJSONSQL(arg)+")")
+				i += 3
+				continue
+			case (fn == "TO_JSON" || fn == "SAFE_TO_JSON") && arg != nil && arg.kind == bGroup && closed(i+3):
+				v, err := t.exportValue(&gqlExport{kind: bGroup}, arg, "ids")
+				if err != nil {
+					return "", err
+				}
+				emit(i, i+3, fn+"("+v+")")
+				i += 3
+				continue
+			case pathFuncs[fn] && arg != nil && arg.kind == bPath && arg.pathFns != nil && closed(i+3):
+				emit(i, i+3, arg.pathFns[fn])
+				i += 3
+				continue
+			case (fn == "PATH_FIRST" || fn == "PATH_LAST") && arg != nil && arg.kind == bPath && closed(i+3) && (fn == "PATH_FIRST" && arg.first != nil || fn == "PATH_LAST" && arg.last != nil):
+				nd := arg.first
+				if fn == "PATH_LAST" {
+					nd = arg.last
+				}
+				if i+5 < hi && ps.toks[i+4].text == "." && isNameTok(ps.toks[i+5]) {
+					col, err := nd.prop(ps.toks[i+5].text)
+					if err != nil {
+						return "", err
+					}
+					emit(i, i+5, col)
+					i += 5
+					continue
+				}
+				emit(i, i+3, elemIDSQL(nd))
+				i += 3
+				continue
 			case aggregateFuncs[fn]:
 				j := i + 2
 				dist := ""
@@ -1042,9 +1131,23 @@ func (t *gqlTranslator) render(br *gqlBranch, lo, hi int) (string, error) {
 			emit(i, i, v.sql)
 			continue
 		case bGroup:
-			return "", unsupportedSQL{fmt.Sprintf("group variable %s, the edges of a quantified path, used other than in ARRAY_LENGTH or an aggregate of its property", tk.text)}
+			// as a value: its elements' identities, in order
+			s, err := t.exportValue(&gqlExport{kind: bGroup}, v, "ids")
+			if err != nil {
+				return "", err
+			}
+			emit(i, i, s)
+			continue
 		case bPath:
-			return "", unsupportedSQL{fmt.Sprintf("path variable %s used other than in PATH_LENGTH", tk.text)}
+			// as a value: its elements' identities, in order
+			if v.pathVal == "" {
+				return "", unsupportedSQL{fmt.Sprintf("path variable %s used as a value after the statement that made it", tk.text)}
+			}
+			for _, q := range v.quants {
+				q.withIDs = true
+			}
+			emit(i, i, v.pathVal)
+			continue
 		}
 		// an element: its property, or its comparison with another element
 		if i+2 < hi && ps.toks[i+1].text == "." && isNameTok(ps.toks[i+2]) {
@@ -1056,12 +1159,29 @@ func (t *gqlTranslator) render(br *gqlBranch, lo, hi int) (string, error) {
 			i += 2
 			continue
 		}
-		// node IS [NOT] SOURCE|DESTINATION [OF] edge
+		// node IS [NOT] SOURCE|DESTINATION [OF] edge, element IS [NOT] LABELED label
 		if i+3 < hi && strings.EqualFold(ps.toks[i+1].text, "IS") {
 			j := i + 2
 			neg := strings.EqualFold(ps.toks[j].text, "NOT")
 			if neg {
 				j++
+			}
+			if strings.EqualFold(ps.toks[j].text, "LABELED") && j+1 < hi {
+				save := ps.p
+				ps.p = j + 1
+				l, err := t.labelExpr()
+				end := ps.p
+				ps.p = save
+				if err != nil {
+					return "", err
+				}
+				c := isLabeledSQL(v, l)
+				if neg {
+					c = "(NOT " + c + ")"
+				}
+				emit(i, end-1, c)
+				i = end - 1
+				continue
 			}
 			end := strings.ToUpper(ps.toks[j].text)
 			if (end == "SOURCE" || end == "DESTINATION") && j+1 < hi {
@@ -1094,7 +1214,8 @@ func (t *gqlTranslator) render(br *gqlBranch, lo, hi int) (string, error) {
 				continue
 			}
 		}
-		return "", unsupportedSQL{fmt.Sprintf("graph element %s used as a value", tk.text)}
+		// as a value: its identity
+		emit(i, i, elemIDSQL(v))
 	}
 	b.WriteString(ps.src[pos:ps.toks[hi-1].end])
 	return b.String(), nil
