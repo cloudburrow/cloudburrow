@@ -152,6 +152,7 @@ require (
 
 require (
 	cloud.google.com/go/accesscontextmanager v1.15.0 // indirect
+	cloud.google.com/go/clouddms v1.16.1 // indirect
 	cloud.google.com/go/osconfig v1.22.0 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.13.0 // indirect
