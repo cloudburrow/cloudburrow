@@ -39,7 +39,13 @@ iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports 53
 iptables -t nat -A OUTPUT -p udp -j REDIRECT --to-ports 9998
 # Refused at once rather than dropped, so a client that tries ::1 first
 # falls back to 127.0.0.1 without waiting out a timeout. The network has no
-# IPv6 route out either way.
+# IPv6 route out either way. The refusals themselves (the RST, the ICMPv6
+# error) go back to the client over lo and pass through OUTPUT too: without
+# the two ACCEPTs the REJECT dropped its own RST, so a connect to [::1]
+# (gsutil's to localhost) sat in SYN-SENT until it timed out, and gsutil
+# retried each request for minutes (TestGsutilJSONAndHMACXML).
+ip6tables -A OUTPUT -o lo -p tcp --tcp-flags RST RST -j ACCEPT 2>/dev/null || true
+ip6tables -A OUTPUT -o lo -p ipv6-icmp -j ACCEPT 2>/dev/null || true
 ip6tables -A OUTPUT -p tcp -j REJECT --reject-with tcp-reset 2>/dev/null || true
 ip6tables -A OUTPUT -j REJECT 2>/dev/null || true
 echo "nameserver 127.0.0.1" > /etc/resolv.conf

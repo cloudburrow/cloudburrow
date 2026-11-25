@@ -145,7 +145,9 @@ func TestGcloudProjectsList(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(gcloud, "projects", "list", "--format=value(projectId)", "--access-token-file="+token)
-	cmd.Env = append(os.Environ(),
+	// noMetadataProbe: gcloud's GCE check would look up
+	// metadata.google.internal, an escape in the tools container (#2174).
+	cmd.Env = append(append(os.Environ(), noMetadataProbe()...),
 		"CLOUDSDK_CONFIG="+cfgDir,
 		"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER=http://"+endpoint+"/",
 		"CLOUDSDK_CORE_DISABLE_USAGE_REPORTING=true",
