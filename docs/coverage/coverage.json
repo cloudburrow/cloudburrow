@@ -21011,7 +21011,7 @@
           "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip",
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
-          "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute",
+          "test/compat/backupdrcompute_test.go:444 TestTerraformBackupDRCompute",
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/backupdrfilestore_test.go:39 TestGKEFilestoreBackupDRRoundTrip",
           "test/compat/backupdrregiondisk_test.go:32 TestBackupDRRegionalDiskRoundTrip"
@@ -21025,7 +21025,7 @@
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/backupdralloydb_test.go:78 TestBackupDRAlloyDBRoundTrip",
-          "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute"
+          "test/compat/backupdrcompute_test.go:444 TestTerraformBackupDRCompute"
         ]
       },
       {
@@ -21042,7 +21042,7 @@
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
-          "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute"
+          "test/compat/backupdrcompute_test.go:444 TestTerraformBackupDRCompute"
         ]
       },
       {
@@ -21087,7 +21087,7 @@
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/backupdrcmek_test.go:26 TestBackupDRVaultEncryptionConfig",
-          "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute",
+          "test/compat/backupdrcompute_test.go:444 TestTerraformBackupDRCompute",
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/backupdrfilestore_test.go:39 TestGKEFilestoreBackupDRRoundTrip",
           "test/compat/backupdrregiondisk_test.go:32 TestBackupDRRegionalDiskRoundTrip",
@@ -21104,7 +21104,7 @@
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
-          "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute",
+          "test/compat/backupdrcompute_test.go:444 TestTerraformBackupDRCompute",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
@@ -21117,7 +21117,7 @@
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
-          "test/compat/backupdrcompute_test.go:440 TestTerraformBackupDRCompute",
+          "test/compat/backupdrcompute_test.go:444 TestTerraformBackupDRCompute",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
@@ -21223,7 +21223,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdrcompute_test.go:305 TestGcloudBackupDRRestoreDisk",
-          "test/compat/backupdrcompute_test.go:368 TestGcloudBackupDRRestoreCompute",
+          "test/compat/backupdrcompute_test.go:372 TestGcloudBackupDRRestoreCompute",
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/backupdrregiondisk_test.go:32 TestBackupDRRegionalDiskRoundTrip"
         ]
@@ -21490,7 +21490,7 @@
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
           "test/compat/backupdr_test.go:88 TestBackupDRCloudSQLRestore",
           "test/compat/backupdrcompute_test.go:305 TestGcloudBackupDRRestoreDisk",
-          "test/compat/backupdrcompute_test.go:368 TestGcloudBackupDRRestoreCompute",
+          "test/compat/backupdrcompute_test.go:372 TestGcloudBackupDRRestoreCompute",
           "test/compat/iamenforcementround12_backup_1879_test.go:52 TestIAMEnforcementBackupDR",
           "test/compat/terraform_batch8_test.go:279 TestTerraformBackupDRVaultAndPlanUpdates"
         ]

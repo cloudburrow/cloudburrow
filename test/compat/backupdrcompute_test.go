@@ -306,7 +306,11 @@ func TestGcloudBackupDRRestoreDisk(t *testing.T) {
 	h := New(t)
 	_, computeAddr := backupDRComputeFixture(t, h)
 	g := newGcloudSession(t, h)
-	ctx := h.Context()
+	// The whole flow's budget, as its Backup and DR operations each wait
+	// up to 5 minutes (waitBackupDROp): h.Context()'s 60 seconds ran out
+	// across the backup and the restore on a loaded runner.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	t.Cleanup(cancel)
 	disks, err := computeapi.NewDisksRESTClient(ctx, option.WithEndpoint("http://"+computeAddr), option.WithoutAuthentication())
 	if err != nil {
 		t.Fatal(err)
