@@ -15,11 +15,21 @@ package sparkproc
 // NodeManager's and the jobs' drivers have the image's docker CLI at
 // /usr/bin/docker and DOCKER_HOST (a driver's: the master's daemon, as a
 // Dataproc job's driver runs on the master).
+//
+// On a Linux host whose kernel restricts unprivileged user namespaces to
+// the AppArmor profiles that allow them
+// (kernel.apparmor_restrict_unprivileged_userns=1, the default of Ubuntu
+// 24.04 and later), an unconfined container's RootlessKit cannot create
+// its namespace ("fork/exec /proc/self/exe: operation not permitted"): the
+// daemon runs under the distribution's own rootlesskit profile instead,
+// which allows everything and exists only to grant RootlessKit the
+// userns permission (#2248).
 
 import (
 	"context"
 	"errors"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -76,14 +86,59 @@ func (c *Cluster) startDockerd(ctx context.Context, node string) error {
 		return nil
 	}
 	name := dockerd(node)
+	apparmor, err := c.d.dockerdAppArmor(ctx, image)
+	if err != nil {
+		return &Unavailable{Msg: "probe the host's user namespace restriction: " + err.Error()}
+	}
 	args := []string{"run", "-d", "--name", name, "--label", c.label, "--label", "cloudburrow.dataproc.cluster=" + c.spec.ID,
 		"--network", "container:" + node, "--device", "/dev/net/tun",
-		"--security-opt", "seccomp=unconfined", "--security-opt", "apparmor=unconfined", "--security-opt", "systempaths=unconfined",
+		"--security-opt", "seccomp=unconfined", "--security-opt", "apparmor=" + apparmor, "--security-opt", "systempaths=unconfined",
 		"-e", "DOCKER_TLS_CERTDIR=", image}
 	if out, err := c.d.docker(ctx, args...); err != nil {
+		if apparmor == rootlesskitProfile {
+			return &Unavailable{Msg: "start the Docker daemon of " + node + ": this host's kernel restricts unprivileged user namespaces " +
+				"(kernel.apparmor_restrict_unprivileged_userns=1) and its AppArmor has no " + rootlesskitProfile +
+				" profile, which RootlessKit needs (install the distribution's AppArmor profiles, or set the sysctl to 0): " + out}
+		}
 		return &Unavailable{Msg: "start the Docker daemon of " + node + ": " + out}
 	}
 	return c.waitLog(ctx, name, regexp.MustCompile(`API listen on \[::\]:`+dockerPort+`|API listen on 0\.0\.0\.0:`+dockerPort), 3*time.Minute)
+}
+
+// rootlesskitProfile is the AppArmor profile Ubuntu's apparmor package
+// ships for RootlessKit: flags=(unconfined) with the userns permission.
+const rootlesskitProfile = "rootlesskit"
+
+// userns restriction sysctl, as a container (which shares the host's
+// kernel) reads it.
+const usernsRestriction = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
+
+// dockerdAppArmor is the AppArmor profile a node's daemon runs under:
+// unconfined, or rootlesskitProfile on a host whose kernel restricts
+// unprivileged user namespaces. The probe runs once per runner, in
+// image (the daemon's, already present).
+func (d *Docker) dockerdAppArmor(ctx context.Context, image string) (string, error) {
+	d.usernsMu.Lock()
+	defer d.usernsMu.Unlock()
+	if d.usernsProfile != "" {
+		return d.usernsProfile, nil
+	}
+	out, err := d.docker(ctx, "run", "--rm", "--entrypoint", "/bin/sh", image, "-c",
+		"cat "+usernsRestriction+" 2>/dev/null || echo absent")
+	if err != nil {
+		return "", errors.New(out)
+	}
+	d.usernsProfile = usernsProfileFor(out)
+	return d.usernsProfile, nil
+}
+
+// usernsProfileFor is the daemon's profile given the probe's output: the
+// sysctl's value, or "absent" on a kernel without it.
+func usernsProfileFor(probe string) string {
+	if strings.TrimSpace(probe) == "1" {
+		return rootlesskitProfile
+	}
+	return "unconfined"
 }
 
 // dockerdsLocked are the cluster's Docker daemon containers.
