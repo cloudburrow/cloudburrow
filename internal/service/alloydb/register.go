@@ -294,3 +294,7 @@ func NewRESTHandler(s *Server) http.Handler {
 	// The opt-in's headers (#2207) reach the methods as gRPC metadata does.
 	return restHeaders(t)
 }
+
+// Operations is the server's google.longrunning.Operations, in process,
+// for the console's Upgrade status (#2251).
+func (s *Server) Operations() longrunningpb.OperationsServer { return &operations{s: s} }

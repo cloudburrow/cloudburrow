@@ -82,6 +82,9 @@ func TestAlloyDBThroughThePage(t *testing.T) {
 	p.clickText(`#view [role="tab"]`, "Overview")
 	p.waitFor(`document.querySelector("#view").textContent.includes("primary")`)
 
+	// Add user account is at the top of Users, and Create backup of Data
+	// protection, as Google's are (#2251).
+	p.clickText(`#view [role="tab"]`, "Users")
 	where := p.findAction("Add user account")
 	if where == "" {
 		t.Fatal("the cluster's page offers no Add user account")
@@ -93,6 +96,7 @@ func TestAlloyDBThroughThePage(t *testing.T) {
 		t.Errorf("the user is not on the cluster's Users: %s", got)
 	}
 
+	p.clickText(`#view [role="tab"]`, "Data protection")
 	where = p.findAction("Create backup")
 	if where == "" {
 		t.Fatal("the cluster's page offers no Create backup")
