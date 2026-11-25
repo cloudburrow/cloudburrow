@@ -19,6 +19,15 @@
 // 127.0.0.1:P=relay:P serves the instance's port P on the container's
 // loopback, where the ADC fixture and the clients expect it.
 //
+// In the tools container (test/compat/toolscontainer_test.go, #2174) it
+// also carries the tools' loopback connections to the host: -loopback
+// 127.0.0.1:L=relay:R serves on L every TCP connection the nat table
+// redirects there from a loopback address, and dials R, the relay, with a
+// one-line header naming the original port and the token in the variable
+// -token-env names, which the test's host end checks. -log appends the
+// EGRESS lines to a file as well, and -ready names a file it creates once
+// every listener is up.
+//
 // Standard library only: it is built for linux by the test.
 package main
 
@@ -40,18 +49,51 @@ type forwards []string
 func (f *forwards) String() string     { return strings.Join(*f, ",") }
 func (f *forwards) Set(v string) error { *f = append(*f, v); return nil }
 
-var mu sync.Mutex
+var (
+	mu      sync.Mutex
+	logFile *os.File
+)
 
 func egress(format string, args ...any) {
 	mu.Lock()
 	defer mu.Unlock()
-	fmt.Printf("EGRESS "+format+"\n", args...)
+	line := fmt.Sprintf("EGRESS "+format+"\n", args...)
+	fmt.Print(line)
+	if logFile != nil {
+		_, _ = logFile.WriteString(line)
+	}
 }
 
 func main() {
 	var fw forwards
 	flag.Var(&fw, "forward", "listen=target, repeated")
+	loopback := flag.String("loopback", "", "listen=relay: carry redirected loopback connections to the relay")
+	tokenEnv := flag.String("token-env", "", "the variable holding the relay's token")
+	logPath := flag.String("log", "", "a file to append the EGRESS lines to")
+	ready := flag.String("ready", "", "a file to create once every listener is up")
 	flag.Parse()
+
+	if *logPath != "" {
+		f, err := os.OpenFile(*logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		logFile = f
+	}
+	if *loopback != "" {
+		listen, target, ok := strings.Cut(*loopback, "=")
+		if !ok {
+			fmt.Fprintln(os.Stderr, "bad -loopback", *loopback)
+			os.Exit(2)
+		}
+		ln, err := net.Listen("tcp", listen)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		go carryLoopback(ln, target, os.Getenv(*tokenEnv))
+	}
 
 	for _, f := range fw {
 		listen, target, ok := strings.Cut(f, "=")
@@ -92,8 +134,53 @@ func main() {
 	}
 	go catchUDP(udp)
 
+	if *ready != "" {
+		if err := os.WriteFile(*ready, []byte("ready\n"), 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
 	fmt.Fprintln(os.Stderr, "sink ready")
 	select {}
+}
+
+// carryLoopback takes each connection the nat table redirected from a
+// loopback address, and carries it to the relay, prefixed with the header
+// the test's host end reads: "CBTOOLS <token> <original port>".
+func carryLoopback(ln net.Listener, target, token string) {
+	for {
+		c, err := ln.Accept()
+		if err != nil {
+			continue
+		}
+		go func() {
+			defer c.Close()
+			_, port, err := net.SplitHostPort(originalDst(c))
+			if err != nil {
+				return
+			}
+			u, err := net.Dial("tcp", target)
+			if err != nil {
+				return
+			}
+			defer u.Close()
+			if _, err := fmt.Fprintf(u, "CBTOOLS %s %s\n", token, port); err != nil {
+				return
+			}
+			done := make(chan struct{}, 2)
+			pipe := func(dst, src net.Conn) {
+				_, _ = io.Copy(dst, src)
+				if tc, ok := dst.(*net.TCPConn); ok {
+					_ = tc.CloseWrite()
+				}
+				done <- struct{}{}
+			}
+			go pipe(u, c)
+			go pipe(c, u)
+			<-done
+			<-done
+		}()
+	}
 }
 
 func relay(ln net.Listener, target string) {

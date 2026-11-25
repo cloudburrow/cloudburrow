@@ -410,6 +410,10 @@ func TestGsutilJSONAndHMACXML(t *testing.T) {
 		t.Fatal(err)
 	}
 	guard := egressGuard(t)
+	// The metadata lookups at this instance, as `cloudburrow env` points
+	// them: otherwise gsutil looks up metadata.google.internal, which the
+	// tools container logs as an escape (#2174).
+	md := strings.TrimPrefix(h.Endpoint(EnvMetadata), "http://")
 	gs := func(boto string, args ...string) string {
 		t.Helper()
 		cfg := filepath.Join(dir, "boto")
@@ -420,6 +424,8 @@ func TestGsutilJSONAndHMACXML(t *testing.T) {
 		cmd.Env = append(append(gcloudTargetEnv(os.Environ()), guard...),
 			"BOTO_CONFIG="+cfg, "BOTO_PATH="+cfg, "CLOUDSDK_CONFIG="+t.TempDir(),
 			"CLOUDSDK_CORE_PASS_CREDENTIALS_TO_GSUTIL=false", "CLOUDSDK_CORE_DISABLE_PROMPTS=1",
+			"CLOUDSDK_CORE_CHECK_GCE_METADATA=false", "CLOUDSDK_METRICS_ENVIRONMENT=cloudburrow",
+			"GCE_METADATA_HOST="+md, "GCE_METADATA_ROOT="+md, "GCE_METADATA_IP="+md,
 			// The Cloud SDK's component update check, which goes to dl.google.com.
 			"CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK=true")
 		b, err := cmd.CombinedOutput()

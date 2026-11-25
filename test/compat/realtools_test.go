@@ -12,16 +12,18 @@ import (
 	"testing"
 )
 
-// The real tools behind compatibility.md's Verified rows, pinned (#694). CI
-// installs gcloud (which carries gsutil) from a checksum-verified release
-// archive and names it in EnvGcloud; the Terraform modules require one exact
-// hashicorp/google release and init against a committed lock file. Each test
-// logs the versions that ran, so its evidence names them.
+// The real tools behind compatibility.md's Verified rows, pinned (#694):
+// gcloud (with gsutil and bq), Terraform and OpenTofu are those of the tools
+// image (testdata/tools/Dockerfile, #2174), and run only in it, on an
+// internal Docker network; the Terraform modules require one exact
+// hashicorp/google release, from the image's filesystem mirror, and init
+// against a committed lock file. Each test logs the versions that ran, so
+// its evidence names them.
 
-// EnvGcloud names the gcloud binary the gcloud and gsutil tests run. CI sets
-// it in the shards whose services those tests need, so a missing gcloud fails
-// there rather than skipping, and the runner image's own gcloud is never the
-// one that ran. gsutil is the one beside it.
+// EnvGcloud, when set, says the run requires gcloud: CI sets it in the
+// shards whose services the gcloud tests need, so a missing tools container
+// fails there rather than skipping. The gcloud that runs is always the tools
+// image's, never the one it names or the runner's (#2174).
 const EnvGcloud = "CLOUDBURROW_TEST_GCLOUD"
 
 // googleProviderVersion is the hashicorp/google release every Terraform and
@@ -68,24 +70,13 @@ func bqBinary(t *testing.T) string {
 	return bin
 }
 
+// realTool is name's shim, which runs it in the tools container on an
+// internal Docker network (toolBinary, #2174), never on the host. EnvGcloud
+// set means the run requires it, so a missing Docker fails rather than
+// skips; the image's gcloud is the one that runs.
 func realTool(t *testing.T, name string) string {
 	t.Helper()
-	if v := os.Getenv(EnvGcloud); v != "" {
-		gcloud, err := exec.LookPath(v)
-		if err != nil {
-			t.Fatalf("%s=%s: %v", EnvGcloud, v, err)
-		}
-		bin := filepath.Join(filepath.Dir(gcloud), name)
-		if _, err := exec.LookPath(bin); err != nil {
-			t.Fatalf("%s=%s has no %s beside it: %v", EnvGcloud, v, name, err)
-		}
-		return bin
-	}
-	bin, err := exec.LookPath(name)
-	if err != nil {
-		t.Skipf("%s is not on PATH and %s is not set", name, EnvGcloud)
-	}
-	return bin
+	return toolBinary(t, name)
 }
 
 // toolVersions caches each tool's version output: the tools are fixed for a
@@ -108,7 +99,10 @@ func logToolVersion(t *testing.T, bin string, args ...string) {
 		}
 		cmd := exec.Command(bin, args...)
 		cmd.Env = append(append(os.Environ(), "CLOUDSDK_CONFIG="+filepath.Join(dir, "gcloud"), "BOTO_CONFIG="+boto,
-			"CLOUDSDK_CORE_DISABLE_PROMPTS=1", "CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK=true"), egressGuard(t)...)
+			"CLOUDSDK_CORE_DISABLE_PROMPTS=1", "CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK=true",
+			// An empty configuration would look up metadata.google.internal,
+			// which the tools container logs as an escape (#2174).
+			"CLOUDSDK_CORE_CHECK_GCE_METADATA=false"), egressGuard(t)...)
 		b, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("%s: %v\n%s", key, err, b)
@@ -126,6 +120,7 @@ func logToolVersion(t *testing.T, bin string, args ...string) {
 // init installed from.
 func useGoogleProviderLock(t *testing.T, dir string) {
 	t.Helper()
+	toolBinary(t, "terraform")
 	if err := os.WriteFile(filepath.Join(dir, ".terraform.lock.hcl"), googleProviderLock, 0o644); err != nil {
 		t.Fatal(err)
 	}

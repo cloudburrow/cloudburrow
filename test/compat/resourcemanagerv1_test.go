@@ -166,9 +166,7 @@ func TestGcloudProjectsList(t *testing.T) {
 // Cloud Billing endpoints here. Skipped where terraform is not installed.
 func TestTerraformGoogleProject(t *testing.T) {
 	h := New(t)
-	if _, err := exec.LookPath("terraform"); err != nil {
-		t.Skip("terraform is not on PATH")
-	}
+	toolBinary(t, "terraform") // in the tools container, never on the host (#2174)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
