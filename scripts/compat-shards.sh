@@ -291,7 +291,12 @@ COMPAT_CROSSSERVICE_TESTS="^Test((Gcloud|Terraform|GcloudAndTerraform)?Eventarc[
 # through them, and managed connection pooling, which the sql shard (near
 # its COMPAT_TIMEOUT) had no time left for.
 COMPAT_SQL_NETWORK_TESTS='^Test(CloudSQLZonesPrivateIPAndPSCEndpoints|CloudSQLPrivateIPAndPSCReachableFromAVM|CloudSQLPSCAutoConnections|CloudSQLManagedConnectionPooling|CloudSQLMySQLManagedConnectionPooling|CloudSQLConnectionPoolingMetrics|NetworkConnectivity[A-Za-z]*)$'
-COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica|BlueGreen|External|Switchover|Demote|Failover|Promote)|'"$COMPAT_SQL_NETWORK_TESTS"
+# And, for the same reason (the sql shard's suite reached its 60m in the
+# nightly ephemeral run of Landing 169, at 3,504 s of tests): the
+# password authentication test, an instance of every Cloud SQL version
+# (#2208), and Backup and DR's Compute Engine round trips (#1433, #2206).
+COMPAT_SQL_HEAVY_TESTS='^Test(CloudSQLPasswordAuthentication|BackupDRComputeVMAndDiskRoundTrip|BackupDRRegionalDiskRoundTrip)$'
+COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica|BlueGreen|External|Switchover|Demote|Failover|Promote)|'"$COMPAT_SQL_NETWORK_TESTS"'|'"$COMPAT_SQL_HEAVY_TESTS"
 
 # The console's headless-browser suite (#594) runs in the storage, run,
 # emulators, memorystore and sql shards: the Cloud KMS and Cloud Run

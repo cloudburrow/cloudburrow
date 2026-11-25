@@ -41,7 +41,8 @@ import (
 //     connection to a loopback address to the relay, and so to the same port
 //     on the host's loopback, where the instance and the tests' own servers
 //     listen; answers every DNS query, *.googleapis.com, *.google.com and
-//     metadata.google.internal among them, with 198.18.0.1, routed nowhere;
+//     metadata.google.internal among them, with 198.18.0.1, routed nowhere
+//     (a *.localhost name, the instance's, with 127.0.0.1, as on the host);
 //     and logs and refuses every other connection and datagram
 //     (testdata/egress/sink). Each is an EGRESS line, an escape the test that
 //     ran the tool fails on, and the run fails on at the end.

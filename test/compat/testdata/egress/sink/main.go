@@ -9,7 +9,8 @@
 //
 //   - a DNS query, to any server, reaches the resolver on :53, which logs the
 //     name and answers every A query with 198.18.0.1 (a benchmarking
-//     address, routed nowhere);
+//     address, routed nowhere), but localhost's and its subdomains',
+//     which are 127.0.0.1 and not logged;
 //   - a TCP connection to any non-loopback address reaches :9999, which logs
 //     its original destination and closes it, before a byte is read;
 //   - a UDP datagram to any non-loopback address reaches :9998 and is logged.
@@ -255,7 +256,7 @@ func originalDst(c net.Conn) string {
 }
 
 // serveDNS logs every question and answers A with 198.18.0.1, anything
-// else with no records.
+// else with no records; a localhost name is answered 127.0.0.1, unlogged.
 func serveDNS(pc net.PacketConn) {
 	buf := make([]byte, 1500)
 	for {
@@ -269,7 +270,18 @@ func serveDNS(pc net.PacketConn) {
 			continue
 		}
 		qtype := binary.BigEndian.Uint16(q[end:])
-		egress("dns %s type %d", name, qtype)
+		// localhost and every name under it are the loopback (RFC 6761
+		// 6.3), as on the host, where a tool reaches the instance by
+		// <service>.localhost: no query that leaves the machine.
+		lower := strings.ToLower(strings.TrimSuffix(name, "."))
+		local := lower == "localhost" || strings.HasSuffix(lower, ".localhost")
+		if !local {
+			egress("dns %s type %d", name, qtype)
+		}
+		answer := []byte{198, 18, 0, 1}
+		if local {
+			answer = []byte{127, 0, 0, 1}
+		}
 
 		resp := make([]byte, 0, end+4+16)
 		resp = append(resp, q[0], q[1])
@@ -283,7 +295,8 @@ func serveDNS(pc net.PacketConn) {
 		resp = append(resp, 0, 0, 0, 0)
 		resp = append(resp, q[12:end+4]...)
 		if qtype == 1 {
-			resp = append(resp, 0xc0, 12, 0, 1, 0, 1, 0, 0, 0, 5, 0, 4, 198, 18, 0, 1)
+			resp = append(resp, 0xc0, 12, 0, 1, 0, 1, 0, 0, 0, 5, 0, 4)
+			resp = append(resp, answer...)
 		}
 		_, _ = pc.WriteTo(resp, from)
 	}

@@ -140,13 +140,6 @@ func TestCloudSQLPasswordAuthentication(t *testing.T) {
 			version{"MYSQL_8_0", "mysql_native_password"}, version{"MYSQL_8_4", "caching_sha2_password"})
 	}
 	proxy := os.Getenv(EnvCloudSQLProxy)
-	proxied := map[string]int{}
-	type created struct {
-		v    version
-		in   *sqladmin.DatabaseInstance
-		port int
-	}
-	var made []created
 	t.Run("versions", func(t *testing.T) {
 		h := h.For(t)
 		for _, v := range versions {
@@ -209,8 +202,13 @@ func TestCloudSQLPasswordAuthentication(t *testing.T) {
 				if err := e.open(t, h, in.ConnectionName, "app", "App-pass2", db).PingContext(ctx); e.mysql && !myRefusedPassword(err, "app") || !e.mysql && !pgRefusedPassword(err, "app") {
 					t.Errorf("users.insert's user with a wrong password: %v", err)
 				}
+				// The Auth Proxy, while the instance is there: its subtest's
+				// cleanup deletes it.
 				if proxy != "" {
-					made = append(made, created{v: v, in: in})
+					t.Run("auth-proxy", func(t *testing.T) {
+						h := h.For(t)
+						passwordsThroughTheProxy(t, h, proxy, v.name, in.ConnectionName)
+					})
 				}
 			})
 		}
@@ -254,50 +252,47 @@ func TestCloudSQLPasswordAuthentication(t *testing.T) {
 		}
 	})
 
-	if proxy == "" || len(made) == 0 {
+	if proxy == "" {
 		t.Logf("%s is not set: the Auth Proxy binary is not run", EnvCloudSQLProxy)
+	}
+}
+
+// passwordsThroughTheProxy: Google's Cloud SQL Auth Proxy serves the
+// instance on a local port, where the right password signs in and a wrong
+// one is the server's refusal.
+func passwordsThroughTheProxy(t *testing.T, h *Harness, proxy, version, conn string) {
+	ctx := h.Context()
+	port := freeLocalPort(t)
+	startCloudSQLProxy(t, h, proxy, map[string]int{conn: port})
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	if strings.HasPrefix(version, "MYSQL_") {
+		open := func(password string) error {
+			cfg := mysql.NewConfig()
+			cfg.User, cfg.Passwd, cfg.Net, cfg.Addr, cfg.DBName = "root", password, "tcp", addr, "mysql"
+			cfg.AllowNativePasswords, cfg.Timeout = true, 10*time.Second
+			conn, err := mysql.NewConnector(cfg)
+			if err != nil {
+				return err
+			}
+			db := sql.OpenDB(conn)
+			defer db.Close()
+			return db.PingContext(ctx)
+		}
+		if err := open("Root-pass1"); err != nil {
+			t.Errorf("%s through the proxy, the right password: %v", version, err)
+		}
+		if err := open("Wrong-pass1"); !myRefusedPassword(err, "root") {
+			t.Errorf("%s through the proxy, a wrong password: %v", version, err)
+		}
 		return
 	}
-	t.Run("auth-proxy", func(t *testing.T) {
-		h := h.For(t)
-		ctx := h.Context()
-		for i := range made {
-			made[i].port = freeLocalPort(t)
-			proxied[made[i].in.ConnectionName] = made[i].port
-		}
-		startCloudSQLProxy(t, h, proxy, proxied)
-		for _, m := range made {
-			addr := fmt.Sprintf("127.0.0.1:%d", m.port)
-			if strings.HasPrefix(m.v.name, "MYSQL_") {
-				open := func(password string) error {
-					cfg := mysql.NewConfig()
-					cfg.User, cfg.Passwd, cfg.Net, cfg.Addr, cfg.DBName = "root", password, "tcp", addr, "mysql"
-					cfg.AllowNativePasswords, cfg.Timeout = true, 10*time.Second
-					conn, err := mysql.NewConnector(cfg)
-					if err != nil {
-						return err
-					}
-					db := sql.OpenDB(conn)
-					defer db.Close()
-					return db.PingContext(ctx)
-				}
-				if err := open("Root-pass1"); err != nil {
-					t.Errorf("%s through the proxy, the right password: %v", m.v.name, err)
-				}
-				if err := open("Wrong-pass1"); !myRefusedPassword(err, "root") {
-					t.Errorf("%s through the proxy, a wrong password: %v", m.v.name, err)
-				}
-				continue
-			}
-			c, err := pgDirect(ctx, addr, "postgres", "Root-pass1", "postgres")
-			if err != nil {
-				t.Errorf("%s through the proxy, the right password: %v", m.v.name, err)
-			} else {
-				_ = c.Close(ctx)
-			}
-			if _, err := pgDirect(ctx, addr, "postgres", "Wrong-pass1", "postgres"); !pgRefusedPassword(err, "postgres") {
-				t.Errorf("%s through the proxy, a wrong password: %v", m.v.name, err)
-			}
-		}
-	})
+	c, err := pgDirect(ctx, addr, "postgres", "Root-pass1", "postgres")
+	if err != nil {
+		t.Errorf("%s through the proxy, the right password: %v", version, err)
+	} else {
+		_ = c.Close(ctx)
+	}
+	if _, err := pgDirect(ctx, addr, "postgres", "Wrong-pass1", "postgres"); !pgRefusedPassword(err, "postgres") {
+		t.Errorf("%s through the proxy, a wrong password: %v", version, err)
+	}
 }

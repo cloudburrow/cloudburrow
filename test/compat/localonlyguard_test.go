@@ -178,7 +178,7 @@ func TestPinnedToolsGainNoUnmappedEndpoint(t *testing.T) {
 	t.Run("gcloud", func(t *testing.T) {
 		gcloud := gcloudBinary(t)
 		cmd := exec.Command(gcloud, "info", "--format=value(installation.sdk_root)")
-		cmd.Env = append(gcloudTargetEnv(noGoogleEgress()), "CLOUDSDK_CONFIG="+t.TempDir())
+		cmd.Env = append(append(gcloudTargetEnv(noGoogleEgress()), noMetadataProbe()...), "CLOUDSDK_CONFIG="+t.TempDir())
 		root, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("gcloud info: %v", err)

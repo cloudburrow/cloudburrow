@@ -102,7 +102,7 @@ func logToolVersion(t *testing.T, bin string, args ...string) {
 			"CLOUDSDK_CORE_DISABLE_PROMPTS=1", "CLOUDSDK_COMPONENT_MANAGER_DISABLE_UPDATE_CHECK=true",
 			// An empty configuration would look up metadata.google.internal,
 			// which the tools container logs as an escape (#2174).
-			"CLOUDSDK_CORE_CHECK_GCE_METADATA=false"), egressGuard(t)...)
+			"CLOUDSDK_CORE_CHECK_GCE_METADATA=false"), append(noMetadataProbe(), egressGuard(t)...)...)
 		b, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("%s: %v\n%s", key, err, b)
@@ -110,6 +110,16 @@ func logToolVersion(t *testing.T, bin string, args ...string) {
 		out, _ = toolVersions.LoadOrStore(key, strings.TrimSpace(string(b)))
 	}
 	t.Logf("%s %s (%s):\n%s", filepath.Base(bin), strings.Join(args, " "), bin, out)
+}
+
+// noMetadataProbe points a command that needs no metadata server at none:
+// in a shard that serves no metadata endpoint, gsutil's oauth2client and
+// gcloud's google-auth look for GCE at metadata.google.internal, which the
+// tools container logs as an escape (#2174), and gsutil does not read
+// CLOUDSDK_CORE_CHECK_GCE_METADATA. 127.0.0.1:1 refuses, on this machine.
+func noMetadataProbe() []string {
+	return []string{"CLOUDSDK_CORE_CHECK_GCE_METADATA=false",
+		"GCE_METADATA_HOST=127.0.0.1:1", "GCE_METADATA_ROOT=127.0.0.1:1", "GCE_METADATA_IP=127.0.0.1:1"}
 }
 
 // useGoogleProviderLock writes the committed lock file into a module's

@@ -324,7 +324,7 @@ func TestConsoleCloudSQLPointInTimeRestore(t *testing.T) {
 	project := h.Project()
 	name := fmt.Sprintf("console-pitr-%d", time.Now().UnixNano()%1e6)
 	code, out := consoleCreate(t, addr, "cloudsql-instances", project, map[string]string{
-		"name": name, "databaseVersion": "POSTGRES_17", "tier": "db-custom-1-3840", "pitr": "true"})
+		"name": name, "databaseVersion": "POSTGRES_17", "tier": "db-custom-1-3840", "pitr": "true", "rootPassword": pgRootPassword})
 	if code != http.StatusOK {
 		t.Fatalf("console create = %d: %s", code, out)
 	}
