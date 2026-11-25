@@ -49,7 +49,8 @@ section and add its link at the bottom.
 - BigQuery stateful continuous queries, exporting to Pub/Sub, Bigtable and Spanner (#2193).
 - Dataflow jobs, classic and Flex Templates, Google-provided templates, snapshots and the Jobs
   console with its Job graph, running Apache Beam pipelines (Python, Java, Go and Beam YAML) on a
-  local runner (part of #2215).
+  local runner (part of #2215). Beam YAML pipelines run from the Beam SDK (`apache_beam.yaml.main`);
+  Google's YAML template (`Yaml_Template`) is not served yet (#2255).
 - Real JupyterLab in Vertex AI Workbench instances, Colab Enterprise runtimes and Dataproc
   Component Gateway, with Google's JupyterLab plugins (#2198).
 
