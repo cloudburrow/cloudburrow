@@ -59,7 +59,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed assets/relay.py assets/py/cblaunch.py assets/py/cbio.py assets/py/sitecustomize.py assets/py/cbfnproxy.py assets/py/cbnet.py assets/java/pool.sh assets/java/CbCredentialFactory.java assets/java/GreedyPCollectionFusers.java assets/java/FlinkBatchPortablePipelineTranslator.java assets/java/ExecutableStageDoFnOperator.java
+//go:embed assets/relay.py assets/py/cblaunch.py assets/py/cbio.py assets/py/sitecustomize.py assets/py/cbfnproxy.py assets/py/cbnet.py assets/py/cbboot.sh assets/java/pool.sh assets/java/CbCredentialFactory.java assets/java/GreedyPCollectionFusers.java assets/java/FlinkBatchPortablePipelineTranslator.java assets/java/ExecutableStageDoFnOperator.java
 var assets embed.FS
 
 // The pinned images (dependencies.json components.dataflow).
@@ -487,7 +487,10 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	// The workers write their metrics' totals to metrics/ (sitecustomize).
 	poolArgs := append([]string{"run", "-d", "--name", pool, "--label", label, "--network", "container:" + js, "-v", dir + ":/cb:ro",
 		"-v", filepath.Join(dir, "metrics") + ":/cb/metrics", "-e", "CB_METRICS_DIR=/cb/metrics"}, env...)
-	poolArgs = append(append(poolArgs, pipEnv...), image, "--worker_pool")
+	// Beam's worker pool, as the image's boot --worker_pool runs it, each
+	// worker started by cbboot.sh in a directory of its own.
+	poolArgs = append(append(poolArgs, pipEnv...), "--entrypoint", "python", image, "-m", "apache_beam.runners.worker.worker_pool_main",
+		fmt.Sprintf("--service_port=%d", workerPoolPort), "--container_executable=/cb/py/cbboot.sh")
 	if out, err := d.docker(ctx, poolArgs...); err != nil {
 		return failed("start the job's SDK harness: " + out)
 	}
@@ -496,7 +499,23 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	// The SDK harness's lines are the job's worker logs.
 	logCtx, stopLogs := context.WithCancel(context.Background())
 	cleanup = append(cleanup, stopLogs)
-	go d.follow(logCtx, pool, ev.Log)
+	// A worker that cannot install the job's packages (Beam's boot:
+	// "failed to install required packages") never connects, and the job
+	// would wait for it: the job fails, with boot's reason, once one
+	// says so.
+	var setupErr atomic.Pointer[string]
+	poolLog := func(severity, text string) {
+		if i := strings.Index(text, setupFailure); i >= 0 && setupErr.Load() == nil {
+			msg := text[i:]
+			if setupErr.CompareAndSwap(nil, &msg) {
+				bg("rm", "-f", "-v", launch)
+			}
+		}
+		if ev.Log != nil {
+			ev.Log(severity, text)
+		}
+	}
+	go d.follow(logCtx, pool, poolLog)
 	// A Java pipeline's, and a Python pipeline's cross-language
 	// transforms' (Java environments the expansion service added): the
 	// Java worker pool starts once the launcher finds a Java environment
@@ -579,6 +598,9 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 		if ctx.Err() != nil {
 			return Result{State: "CANCELLED"}
 		}
+		if m := setupErr.Load(); m != nil {
+			return failed("A setup error was detected in the job's workers: " + *m) // UNVERIFIED (docs re-read 2026-11-25: Google's troubleshooting page quotes no job-level message)
+		}
 		msg := "the job's launcher ended without a result"
 		if waitErr != nil {
 			msg += ": " + waitErr.Error()
@@ -591,6 +613,10 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	}
 	return res
 }
+
+// setupFailure begins the line Beam's Python boot logs when a worker
+// cannot install the job's staged packages and requirements.
+const setupFailure = "failed to install required packages:"
 
 // javaPool starts the job's Java worker pool, in the job server's network
 // namespace, once the launcher has copied the job's jars and written its
@@ -1116,7 +1142,7 @@ func writeRelayTLS(dir string, names ...string) error {
 }
 
 func writeAssets(dir string) error {
-	for _, name := range []string{"relay.py", "py/cblaunch.py", "py/cbio.py", "py/sitecustomize.py", "py/cbfnproxy.py", "py/cbnet.py", "java/pool.sh", "java/CbCredentialFactory.java", "java/GreedyPCollectionFusers.java", "java/FlinkBatchPortablePipelineTranslator.java", "java/ExecutableStageDoFnOperator.java"} {
+	for _, name := range []string{"relay.py", "py/cblaunch.py", "py/cbio.py", "py/sitecustomize.py", "py/cbfnproxy.py", "py/cbnet.py", "py/cbboot.sh", "java/pool.sh", "java/CbCredentialFactory.java", "java/GreedyPCollectionFusers.java", "java/FlinkBatchPortablePipelineTranslator.java", "java/ExecutableStageDoFnOperator.java"} {
 		b, err := assets.ReadFile("assets/" + name)
 		if err != nil {
 			return err
@@ -1125,7 +1151,14 @@ func writeAssets(dir string) error {
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(p, b, 0o644); err != nil {
+		mode := os.FileMode(0o644)
+		if strings.HasSuffix(name, ".sh") {
+			mode = 0o755
+		}
+		if err := os.WriteFile(p, b, mode); err != nil {
+			return err
+		}
+		if err := os.Chmod(p, mode); err != nil {
 			return err
 		}
 	}

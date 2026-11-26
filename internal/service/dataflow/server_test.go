@@ -471,6 +471,19 @@ func TestFlexTemplates(t *testing.T) {
 		t.Errorf("ListJobs = %d jobs; want the launch's one", len(l.Jobs))
 	}
 
+	// The environment's additional pipeline options and experiments
+	// reach the program as its options.
+	if _, err := s.LaunchFlexTemplate(ctx, &dataflowpb.LaunchFlexTemplateRequest{ProjectId: "p", Location: DefaultLocation,
+		LaunchParameter: &dataflowpb.LaunchFlexTemplateParameter{JobName: "flex-opts", Parameters: map[string]string{"input": "x"},
+			Template: &dataflowpb.LaunchFlexTemplateParameter_ContainerSpecGcsPath{ContainerSpecGcsPath: "gs://b/flex.json"},
+			Environment: &dataflowpb.FlexTemplateRuntimeEnvironment{AdditionalPipelineOptions: []string{"extra_packages=gs://b/x.whl", "--save_main_session=true"},
+				AdditionalExperiments: []string{"use_runner_v2"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if f := <-got; strings.Join(f.Args, " ") != "--input=x --extra_packages=gs://b/x.whl --save_main_session=true --experiments=use_runner_v2" {
+		t.Errorf("the launcher of additional options was given %q", f.Args)
+	}
+
 	// A program that fails fails the launch's job, with its error.
 	s2 := newTestServer(t, Options{Storage: memStorage{"gs://b/flex.json": spec}, Launcher: fakeLauncher{s: &s, got: got, fail: true}})
 	r2, err := s2.LaunchFlexTemplate(ctx, &dataflowpb.LaunchFlexTemplateRequest{ProjectId: "p",

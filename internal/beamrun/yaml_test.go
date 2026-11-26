@@ -1,6 +1,7 @@
 package beamrun
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path"
@@ -115,5 +116,64 @@ print("ok")
 	out, err := exec.Command(py, "-I", "-c", script).CombinedOutput()
 	if err != nil || strings.TrimSpace(string(out)) != "ok" {
 		t.Fatalf("HostRewriter: %v\n%s", err, out)
+	}
+}
+
+// TestYAMLJavaJars: each expansion service Yaml_Template's launcher
+// stages is pinned (Beam's Maven Central URL of its file, at BeamVersion,
+// and a SHA-256), Apache-2.0, and named by Beam's gradle target; a
+// pipeline's transform types pick the jars that serve them, and a
+// pipeline of Python transforms needs none.
+func TestYAMLJavaJars(t *testing.T) {
+	sha := regexp.MustCompile(`^[0-9a-f]{64}$`)
+	seen := map[string]bool{}
+	for _, j := range YAMLJavaJars() {
+		artifact := "beam-" + strings.ReplaceAll(strings.TrimSuffix(j.Target, ":shadowJar"), ":", "-")
+		if j.File != artifact+"-"+BeamVersion+".jar" || j.URL != "https://repo.maven.apache.org/maven2/org/apache/beam/"+artifact+"/"+BeamVersion+"/"+j.File {
+			t.Errorf("%s: file %s, URL %s are not Beam's for its gradle target", j.Target, j.File, j.URL)
+		}
+		if !sha.MatchString(j.SHA256) || j.License != "Apache-2.0" || len(j.Transforms) == 0 {
+			t.Errorf("%+v is not pinned, Apache-2.0 and serving transforms", j)
+		}
+		for _, tr := range j.Transforms {
+			if seen[tr] {
+				t.Errorf("%s is served by two jars", tr)
+			}
+			seen[tr] = true
+		}
+	}
+	names := func(js []JavaJar) (out []string) {
+		for _, j := range js {
+			out = append(out, j.Target)
+		}
+		return out
+	}
+	for pipeline, want := range map[string][]string{
+		"transforms:\n  - type: Create\n  - type: MapToFields\n  - type: WriteToText\n": nil,
+		"transforms:\n  - type: ReadFromBigTable\n    config: {table: t}\n  - type: 'WriteToKafka'\n": {
+			"sdks:java:io:google-cloud-platform:expansion-service:shadowJar", "sdks:java:io:expansion-service:shadowJar"},
+		"- {type: \"ReadFromPostgres\", config: {}}": {"sdks:java:extensions:schemaio-expansion-service:shadowJar"},
+		"- type: ReadFromBigTableX":                  nil,
+	} {
+		if got := names(YAMLJarsFor(pipeline)); strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("YAMLJarsFor(%q) = %v; want %v", pipeline, got, want)
+		}
+	}
+}
+
+// TestYAMLDockerfile: the launcher image has the Java SDK container's
+// JDK on its PATH and the virtual environment Beam YAML's Python
+// providers clone, made at Beam's path for main.py's interpreter.
+func TestYAMLDockerfile(t *testing.T) {
+	df := fmt.Sprintf(yamlDockerfile, PythonImages[LauncherImage], JavaImages[providedJava])
+	for _, want := range []string{"FROM " + JavaImages[providedJava] + " AS jdk", "FROM " + PythonImages[LauncherImage] + "\n",
+		"COPY --from=jdk /opt/java/openjdk /opt/java/openjdk", "ENV PATH=/opt/java/openjdk/bin:$PATH",
+		"PypiExpansionService as P", "'apache_beam[dataframe,gcp,test,yaml]==' + v, 'virtualenv-clone'", "--system-site-packages"} {
+		if !strings.Contains(df, want) {
+			t.Errorf("the launcher's Dockerfile lacks %q:\n%s", want, df)
+		}
+	}
+	if strings.Contains(df, "%!") {
+		t.Errorf("the launcher's Dockerfile is misformatted:\n%s", df)
 	}
 }
