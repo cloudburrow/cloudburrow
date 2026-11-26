@@ -4604,18 +4604,26 @@ async function renderDetail(view, route, resourcePath) {
   const kindTitled = Boolean(route.kind) && segments.length === 1;
   const up = segments.length > 1 ? detailHref(route, segments.slice(0, -1)) : back.pathname + back.search;
   const nameLine = kindTitled ? el("p", { class: "resource-name", text: name }) : null;
+  // Inside BigQuery Studio's tab (#1861) the page is a tab's content,
+  // under the Studio's own h1.
+  const heading = el(view.dataset.embedded === "true" ? "h2" : "h1", { text: kindTitled ? `${route.kind} details` : name });
+  const backLink = backArrow(up, segments.length > 1 ? "Back" : `Back to ${route.title}`);
   const crumb = el("div", { class: "page-header" },
     // A breadcrumb, because a screen you can only leave with the browser
     // button is a screen you are stuck in.
     el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" }, ...trail),
     el("div", { class: "page-title-row" },
-      backArrow(up, segments.length > 1 ? "Back" : `Back to ${route.title}`),
-      // Inside BigQuery Studio's tab (#1861) the page is a tab's content,
-      // under the Studio's own h1.
-      el(view.dataset.embedded === "true" ? "h2" : "h1", { text: kindTitled ? `${route.kind} details` : name }),
+      backLink,
       el("div", { class: "page-header-actions" })),
     nameLine,
     el("p", { class: "subtitle", text: (project ? `Project ${project}` : "All projects") + scopeSubtitle(route.service) }));
+  // The heading is drawn once the resource has answered, as Google's
+  // resource pages draw "<Kind> details" and the details under it only when
+  // they have loaded: while it loads the page is the breadcrumb and the
+  // skeleton, so a loading page never reads as the loaded one (a Backup and
+  // DR data source's page was read as loaded while still loading). Every
+  // outcome — loaded, cancelled, failed, a prompt — draws it.
+  const showHeading = () => { if (!heading.parentNode) backLink.after(heading); };
   const header = [crumb];
   // A provider-drawn trail, for a page whose path is not its hierarchy: an
   // object's crumbs are its bucket and folders (#790).
@@ -4641,12 +4649,14 @@ async function renderDetail(view, route, resourcePath) {
   try {
     data = await api(path, { signal: cancel.signal });
   } catch (err) {
+    showHeading();
     return setChildren(view, ...header,
       isCancelled(err)
         ? cancelledState(`${name} not loaded`, () => renderDetail(view, route, segments))
         : errorState(`${name} unavailable`, String(err.message),
                      () => renderDetail(view, route, segments)));
   }
+  showHeading();
   // The prompt is checked first, for the same reason it is on the list
   // screen: needing a project is a precondition, not a failure, and it must
   // never be rendered as one.

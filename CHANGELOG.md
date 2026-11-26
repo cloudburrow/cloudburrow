@@ -89,6 +89,9 @@ section and add its link at the bottom.
   RECREATING with its last attempt, instead of sometimes dropping it or making one of a new name.
 - A Kubernetes Engine node's pods are reachable as soon as the node joins its pool, so a workload
   keeps serving while a surge upgrade drains the old node.
+- A console resource page, such as a Backup and DR data source's, shows its heading only once the
+  resource has loaded, as Google's console does; while it loads the page shows the breadcrumb and
+  a loading indicator, so a page still loading no longer looks like the loaded one.
 
 ## [0.7.0] - 2026-11-25
 
