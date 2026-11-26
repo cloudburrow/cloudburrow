@@ -21,7 +21,7 @@ import (
 // The console's AlloyDB pages (#2191), as Google's menu has them: Clusters
 // (a project's clusters in every region with their instances, Create
 // cluster with its primary instance; a cluster's page with its Overview
-// (the instances, Add read pool, Edit, Restart, Failover, Delete), Backups
+// (the instances, Add read pool, Edit, Restart, Failover, Delete, Upgrade), Data protection
 // (Create backup, Restore), Users (Add user account, Delete) and
 // Databases), and Backups (the project's backups, Restore and Delete).
 
@@ -126,26 +126,7 @@ func (p alloyDBProvider) List(ctx context.Context, project string) (console.List
 	if err != nil {
 		return console.Listing{}, err
 	}
-	listing := console.Listing{Columns: []string{"Resource name", "Resource type", "Region/Zone", "Status", "Version", "Instances", "Private IP"},
-		NameColumn: "Name", Noun: "clusters"}
-	if project == "" {
-		listing.Prompt = "AlloyDB lists a project's clusters. Choose one in the toolbar."
-		return listing, nil
-	}
-	resp, err := s.ListClusters(ctx, &alloydbpb.ListClustersRequest{Parent: "projects/" + project + "/locations/-", PageSize: 1000})
-	if err != nil {
-		return console.Listing{}, err
-	}
-	for _, c := range resp.GetClusters() {
-		ins, _ := s.ListInstances(ctx, &alloydbpb.ListInstancesRequest{Parent: c.GetName(), PageSize: 1000})
-		listing.Items = append(listing.Items, console.Resource{Name: c.GetName(), Status: c.GetState().String(), Fields: map[string]string{
-			"Resource name": lastSegment(c.GetName()), "Resource type": "Cluster", "Region/Zone": kmsLocation(c.GetName()),
-			"Status": alloyDBState(c.GetState()), "Version": alloyDBVersionLabel(c.GetDatabaseVersion()),
-			"Instances": strconv.Itoa(len(ins.GetInstances())), "Private IP": "-"}})
-	}
-	listing.Total = len(listing.Items)
-	listing.RowsOpenable = true
-	return listing, nil
+	return alloyDBClusterListing(ctx, s, project)
 }
 
 func (p alloyDBProvider) CreateForm() (string, []console.Field) {
@@ -301,11 +282,16 @@ func (p alloyDBProvider) Detail(ctx context.Context, project string, path []stri
 	}
 	overview := []console.PropertyGroup{{Heading: "Cluster", Properties: []console.Property{
 		{Label: "Cluster ID", Value: lastSegment(c.GetName())}, {Label: "Status", Value: alloyDBState(c.GetState())},
-		{Label: "Region", Value: kmsLocation(c.GetName())}, {Label: "Database version", Value: alloyDBVersionLabel(c.GetDatabaseVersion())},
+		{Label: "Region", Value: kmsLocation(c.GetName())},
+		{Label: "Database version", Value: alloyDBVersionLabel(c.GetDatabaseVersion()), Action: "upgrade", ActionText: "Upgrade"},
 		{Label: "Database engine", Value: omniEngineLabel(s.OmniOf(c.GetName()))},
 		{Label: "Network", Value: kmsOrDash(c.GetNetworkConfig().GetNetwork())}, {Label: "Encryption", Value: enc},
 		{Label: "Continuous backup and recovery", Value: cb}, {Label: "Earliest restore point", Value: earliest},
-		{Label: "Automated backups", Value: auto}, {Label: "Created", Value: kmsTime(c.GetCreateTime())}}}}
+		{Label: "Automated backups", Value: auto}, {Label: "Labels", Value: alloyDBLabels(c.GetLabels())},
+		{Label: "Created", Value: kmsTime(c.GetCreateTime())}}}}
+	if g, _ := alloyDBUpgradeStatus(ctx, s, c.GetName()); g != nil {
+		overview = append(overview, *g)
+	}
 	clusterType := "Primary"
 	repl := []console.Property{}
 	if c.GetClusterType() == alloydbpb.Cluster_SECONDARY {
@@ -330,6 +316,15 @@ func (p alloyDBProvider) Detail(ctx context.Context, project string, path []stri
 		}
 		overview = append(overview, console.PropertyGroup{Heading: "Connectivity", Properties: props})
 	}
+	// The tabs' own buttons, as Google's Data protection has Create backup
+	// and Users Add user account at their top (#2251).
+	byID := map[string]console.Action{}
+	for _, a := range p.DetailActions(ctx, project, path) {
+		byID[a.ID] = a
+	}
+	protection := alloyDBDataProtection(ctx, s, c)
+	protection.Actions = []console.Action{byID["backup"], byID["restore-pitr"]}
+	users := console.Section{ID: "users", Label: "Users", Listing: alloyDBUsers(ctx, s, c.GetName()), Actions: []console.Action{byID["add-user"]}}
 	return console.Detail{
 		Summary: []console.Property{{Label: "Region", Value: kmsLocation(c.GetName())}, {Label: "Status", Value: alloyDBState(c.GetState())},
 			{Label: "Version", Value: alloyDBVersionLabel(c.GetDatabaseVersion())}},
@@ -338,8 +333,9 @@ func (p alloyDBProvider) Detail(ctx context.Context, project string, path []stri
 			// AlloyDB Studio (#2208), as Google's cluster menu has it.
 			{ID: "studio", Label: "AlloyDB Studio", Kind: console.KindStudio},
 			{ID: "instances", Label: "Instances", Listing: instances},
-			{ID: "backups", Label: "Backups", Listing: alloyDBBackupListing(ctx, s, c.GetName(), kmsLocation(c.GetName()))},
-			{ID: "users", Label: "Users", Listing: alloyDBUsers(ctx, s, c.GetName())},
+			// Google's Data protection (#2251): the policies' Edit over
+			// the backups; "backups" stays its address.
+			protection, users,
 			{ID: "databases", Label: "Databases", Listing: alloyDBDatabases(ctx, s, c.GetName())},
 		},
 	}, nil
@@ -357,7 +353,7 @@ func alloyDBUsers(ctx context.Context, s *alloydb.Server, cluster string) consol
 		if u.GetUserType() == alloydbpb.User_ALLOYDB_IAM_USER {
 			auth = "Cloud IAM"
 		}
-		l.Items = append(l.Items, console.Resource{Name: lastSegment(u.GetName()), Fields: map[string]string{
+		l.Items = append(l.Items, console.Resource{Name: lastSegment(u.GetName()), Actions: alloyDBUserRowActions(u), Fields: map[string]string{
 			"User name": lastSegment(u.GetName()), "Authentication": auth, "Database roles": kmsOrDash(strings.Join(u.GetDatabaseRoles(), ", "))}})
 	}
 	l.Total = len(l.Items)
@@ -424,6 +420,18 @@ func consoleBytes(n int64) string {
 }
 
 func (p alloyDBProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	if len(path) == 2 {
+		// A Users row's actions menu (#2251).
+		s, c, err := p.cluster(ctx, project, path[0])
+		if err != nil {
+			return nil
+		}
+		u, err := s.GetUser(ctx, &alloydbpb.GetUserRequest{Name: c.GetName() + "/users/" + path[1]})
+		if err != nil {
+			return nil
+		}
+		return alloyDBUserRowActions(u)
+	}
 	if len(path) != 1 {
 		return nil
 	}
@@ -431,6 +439,7 @@ func (p alloyDBProvider) DetailActions(ctx context.Context, project string, path
 	if err != nil {
 		return nil
 	}
+	_, upgrading := alloyDBUpgradeStatus(ctx, s, c.GetName())
 	ins, _ := alloyDBInstances(ctx, s, c.GetName())
 	var names []string
 	hasPrimary := false
@@ -514,7 +523,7 @@ func (p alloyDBProvider) DetailActions(ctx context.Context, project string, path
 		promote.Unavailable = "Only a secondary cluster is promoted."
 		switchover.Unavailable = "Only a secondary cluster switches over."
 	}
-	return []console.Action{primary, readPool,
+	return append([]console.Action{primary, readPool,
 		{ID: "edit-instance", Label: "Edit instance", Fields: []console.Field{
 			{Name: "instance", Label: "Instance", Type: "select", Required: true, Options: names},
 			{Name: "cpu", Label: "Machine", Type: "select", Options: alloyDBCPUs, OptionLabels: alloyDBCPULabels(), Default: "2"},
@@ -537,18 +546,21 @@ func (p alloyDBProvider) DetailActions(ctx context.Context, project string, path
 			{Name: "user", Label: "User name", Type: "text", Required: true, Help: "For Cloud IAM, the principal's email address."},
 			{Name: "password", Label: "Password", Type: "password", ShowWhen: "type=ALLOYDB_BUILT_IN"},
 			{Name: "superuser", Label: "Grant alloydbsuperuser", Type: "checkbox"}}},
-		{ID: "delete-user", Label: "Delete user", Destructive: true, Fields: []console.Field{{Name: "user", Label: "User name", Type: "text", Required: true}}},
 		{ID: "delete", Label: "Delete cluster", Destructive: true, Leaves: true, Confirm: "The cluster and all its instances are deleted. Its backups are kept."},
-	}
+		alloyDBUpgradeAction(c, upgrading), alloyDBCancelUpgrade(upgrading),
+	}, alloyDBDataProtectionActions(c)...)
 }
 
 func (p alloyDBProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
-	if len(path) != 1 {
+	if len(path) != 1 && len(path) != 2 {
 		return fmt.Errorf("no cluster")
 	}
 	s, c, err := p.cluster(ctx, project, path[0])
 	if err != nil {
 		return err
+	}
+	if len(path) == 2 {
+		return p.userActions(ctx, s, c, path[1], action, values)
 	}
 	inst := c.GetName() + "/instances/" + strings.TrimSpace(values["instance"])
 	cpu, _ := strconv.Atoi(values["cpu"])
@@ -686,9 +698,15 @@ func (p alloyDBProvider) ActAt(ctx context.Context, project string, path []strin
 		}
 		_, err = s.CreateUser(ctx, &alloydbpb.CreateUserRequest{Parent: c.GetName(), UserId: strings.TrimSpace(values["user"]), User: u})
 		return err
-	case "delete-user":
-		_, err = s.DeleteUser(ctx, &alloydbpb.DeleteUserRequest{Name: c.GetName() + "/users/" + strings.TrimSpace(values["user"])})
-		return err
+	case "upgrade":
+		return p.upgrade(ctx, s, c, values)
+	case "cancel-upgrade":
+		_, running := alloyDBUpgradeStatus(ctx, s, c.GetName())
+		return alloyDBErrorOf(alloyDBCancelUpgrade(running).Unavailable)
+	case "edit-continuous-backup":
+		return p.editContinuousBackup(ctx, s, c, values)
+	case "edit-automated-backup":
+		return p.editAutomatedBackup(ctx, s, c, values)
 	case "delete":
 		op, err = s.DeleteCluster(ctx, &alloydbpb.DeleteClusterRequest{Name: c.GetName(), Force: true})
 		if err != nil {

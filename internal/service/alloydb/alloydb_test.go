@@ -448,6 +448,20 @@ func TestUsersAndDatabases(t *testing.T) {
 	if err != nil || len(list.GetUsers()) != 3 {
 		t.Fatalf("users = %v, %v", list, err)
 	}
+	// Change password, and the console's No password: an empty password
+	// the mask names leaves the role none; an empty mask keeps it (#2251).
+	if _, err := f.s.UpdateUser(ctx, &alloydbpb.UpdateUserRequest{User: &alloydbpb.User{Name: cluster + "/users/app", Password: "secret2"},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"password"}}}); err != nil || !f.pg.saw(`ALTER ROLE "app" WITH PASSWORD 'secret2'`) {
+		t.Fatalf("change password: %v %v", err, f.pg.queries)
+	}
+	if _, err := f.s.UpdateUser(ctx, &alloydbpb.UpdateUserRequest{User: &alloydbpb.User{Name: cluster + "/users/app"}}); err != nil ||
+		f.pg.saw(`WITH PASSWORD NULL`) {
+		t.Fatalf("an empty mask cleared the password: %v %v", err, f.pg.queries)
+	}
+	if _, err := f.s.UpdateUser(ctx, &alloydbpb.UpdateUserRequest{User: &alloydbpb.User{Name: cluster + "/users/app"},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"password"}}}); err != nil || !f.pg.saw(`ALTER ROLE "app" WITH PASSWORD NULL`) {
+		t.Fatalf("no password: %v %v", err, f.pg.queries)
+	}
 	if _, err := f.s.DeleteUser(ctx, &alloydbpb.DeleteUserRequest{Name: cluster + "/users/app"}); err != nil {
 		t.Fatal(err)
 	}

@@ -302,8 +302,17 @@ func (s *Server) UpdateUser(ctx context.Context, req *alloydbpb.UpdateUserReques
 				}
 				continue
 			}
-			if in.GetPassword() != "" {
+			switch {
+			case in.GetPassword() != "":
 				stmts = append(stmts, "ALTER ROLE "+quoteIdent(role)+" WITH PASSWORD "+quoteLiteral(in.GetPassword()))
+			case len(req.GetUpdateMask().GetPaths()) > 0:
+				// password named in the mask and empty: the console's
+				// Change password with No password checked, which leaves
+				// the user no password to sign in with (#2251). An empty
+				// mask (every field) keeps it. UNVERIFIED: Google's server
+				// answer to an empty password in the mask.
+				// (read 2026-11-25: docs.cloud.google.com/alloydb/docs/database-users/manage-roles.)
+				stmts = append(stmts, "ALTER ROLE "+quoteIdent(role)+" WITH PASSWORD NULL")
 			}
 		case "database_roles":
 			want := map[string]bool{}
