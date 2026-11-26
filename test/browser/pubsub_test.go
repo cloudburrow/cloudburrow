@@ -402,7 +402,7 @@ func TestPubSubIdleTimeAndPushAttributesThroughTheForms(t *testing.T) {
 	p.waitFor(`document.querySelector("#view").textContent.includes("Deleted by expiration")`)
 	var text string
 	p.eval(`document.querySelector("#view").textContent`, &text)
-	for _, want := range []string{"Expiration period", "31d", "Idle for", "did not restart the clock"} {
+	for _, want := range []string{"Expiration period", "31 days", "Idle for", "did not restart the clock"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the subscription's page does not show %q", want)
 		}
