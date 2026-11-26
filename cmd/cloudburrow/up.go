@@ -1414,6 +1414,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			svc := alloyDBSvc
 			monitoringSvc.alloyDB = svc.API
 		}
+		// The servers' logs in Cloud Logging (#2253).
+		if loggingSvc != nil {
+			ls := loggingSvc
+			alloyDBSvc.logging = func() *logging.Server { return ls.api }
+		}
 		alloyDBSvc.register(coord)
 	}
 	// The Backup and DR Service (#1433), over the Admin API's backups.

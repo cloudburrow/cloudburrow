@@ -45,6 +45,8 @@ type MetricInstance struct {
 	Serving bool
 	// Insights is Query insights' configuration.
 	Insights *alloydbpb.Instance_QueryInsightsInstanceConfig
+	// Flags are the instance's database flags.
+	Flags map[string]string
 }
 
 // MetricCluster is one cluster, with its newest READY backup of each type
@@ -71,7 +73,10 @@ func (s *Server) MetricInstances(project string) []MetricInstance {
 		mi := MetricInstance{Name: k, Project: m[2], Location: m[3], Cluster: m[4], Instance: m[5], Type: in.GetInstanceType(),
 			Server: serverName(k), CPUs: in.GetMachineConfig().GetCpuCount(), Nodes: 1,
 			Serving:  in.GetState() == alloydbpb.Instance_READY && in.GetActivationPolicy() != alloydbpb.Instance_NEVER,
-			Insights: clone(in.GetQueryInsightsConfig())}
+			Insights: clone(in.GetQueryInsightsConfig()), Flags: map[string]string{}}
+		for k, v := range in.GetDatabaseFlags() {
+			mi.Flags[k] = v
+		}
 		if in.GetInstanceType() == alloydbpb.Instance_READ_POOL {
 			mi.Nodes = in.GetReadPoolConfig().GetNodeCount()
 		}
@@ -177,11 +182,30 @@ type InstanceStats struct {
 	Statements []StatementCount
 	Waits      []WaitStat
 	HasLoad    bool
+	// Queries are the top 200 normalized queries' totals by execution
+	// time (#2253), for the perquery metrics.
+	Queries []QueryLoad
+	// WALBytes is the size of the server's WAL files (pg_ls_waldir), the
+	// rest of what it stores beside its databases; HasWAL whether it was
+	// read.
+	WALBytes int64
+	HasWAL   bool
+}
+
+// QueryLoad is one normalized query's totals for one user in one
+// database since pg_stat_statements was reset; times in microseconds.
+type QueryLoad struct {
+	QueryID                            int64
+	Query, User, Database              string
+	Calls, ExecUs, IOReadUs, IOWriteUs int64
+	Rows, SharedHit, SharedRead        int64
 }
 
 // QueryStat is one normalized query's totals since pg_stat_statements was
 // reset.
 type QueryStat struct {
+	// QueryID is pg_stat_statements' queryid.
+	QueryID               int64
 	Query, Database, User string
 	Calls                 int64
 	TotalMs, MeanMs       float64
@@ -260,7 +284,7 @@ func (s *Server) QueryInsights(ctx context.Context, name string) ([]QueryStat, e
 	defer c.Close(context.Background())
 	ensureStatements(ctx, c)
 	exec, read, write := statementsCols(pgVersionNum(ctx, c))
-	rows, err := c.Query(ctx, `SELECT /* `+insightsMarker+` */ s.query, d.datname, r.rolname, s.calls, `+exec+`, s.mean_exec_time, `+
+	rows, err := c.Query(ctx, `SELECT /* `+insightsMarker+` */ COALESCE(s.queryid, 0), s.query, d.datname, r.rolname, s.calls, `+exec+`, s.mean_exec_time, `+
 		read+` + `+write+`, s.rows
 		FROM pg_stat_statements s JOIN pg_database d ON d.oid = s.dbid JOIN pg_roles r ON r.oid = s.userid
 		WHERE `+s.statementsFilter()+` ORDER BY `+exec+` DESC LIMIT 100`)
@@ -274,7 +298,7 @@ func (s *Server) QueryInsights(ctx context.Context, name string) ([]QueryStat, e
 	var out []QueryStat
 	for rows.Next() {
 		var q QueryStat
-		if err := rows.Scan(&q.Query, &q.Database, &q.User, &q.Calls, &q.TotalMs, &q.MeanMs, &q.IOMs, &q.Rows); err != nil {
+		if err := rows.Scan(&q.QueryID, &q.Query, &q.Database, &q.User, &q.Calls, &q.TotalMs, &q.MeanMs, &q.IOMs, &q.Rows); err != nil {
 			return nil, err
 		}
 		q.CPUMs = q.TotalMs - q.IOMs
@@ -432,6 +456,22 @@ func (s *Server) readLoad(ctx context.Context, c *pgx.Conn, st *InstanceStats) {
 		for k, n := range ops {
 			st.Statements = append(st.Statements, StatementCount{Database: k[0], Operation: k[1], Calls: n})
 		}
+		if rows, err := c.Query(ctx, `SELECT `+m+`s.queryid, s.query, r.rolname, d.datname, s.calls, (`+exec+` * 1000)::bigint,
+			((`+read+`) * 1000)::bigint, ((`+write+`) * 1000)::bigint, s.rows, s.shared_blks_hit, s.shared_blks_read
+			FROM pg_stat_statements s JOIN pg_database d ON d.oid = s.dbid JOIN pg_roles r ON r.oid = s.userid
+			WHERE s.queryid IS NOT NULL AND `+s.statementsFilter()+` ORDER BY `+exec+` DESC LIMIT 200`); err == nil {
+			for rows.Next() {
+				var q QueryLoad
+				if rows.Scan(&q.QueryID, &q.Query, &q.User, &q.Database, &q.Calls, &q.ExecUs, &q.IOReadUs, &q.IOWriteUs, &q.Rows,
+					&q.SharedHit, &q.SharedRead) == nil {
+					st.Queries = append(st.Queries, q)
+				}
+			}
+			rows.Close()
+		}
+	}
+	if c.QueryRow(ctx, `SELECT `+m+`COALESCE(sum(size), 0)::bigint FROM pg_ls_waldir()`).Scan(&st.WALBytes) == nil {
+		st.HasWAL = true
 	}
 	rows, err = c.Query(ctx, `SELECT `+m+`COALESCE(usename, ''), COALESCE(datname, ''),
 		CASE wait_event_type WHEN 'LWLock' THEN 'lw' WHEN 'Lock' THEN 'hw' ELSE 'buffer_pin' END, count(*)

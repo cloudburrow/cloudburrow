@@ -434,7 +434,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, alloyDBProvider{svc: d.alloyDB,
 			savedQueries: filepath.Join(d.cfg.InstanceDir(), alloyDBSavedQueriesFile),
 			iamPrincipal: metadata.ServiceAccountEmail(d.cfg.DefaultProject()),
-			metrics:      monitoringAdmin{api: monitoringServerOf(d.monitoring)}}, alloyDBBackupsProvider{svc: d.alloyDB})
+			metrics:      monitoringAdmin{api: monitoringServerOf(d.monitoring)}, logs: d.logging}, alloyDBBackupsProvider{svc: d.alloyDB})
 	}
 	if enabled[config.ServiceAppHub] && d.appHub != nil {
 		providers = append(providers, appHubProvider{svc: d.appHub}, appHubDiscoveredProvider{svc: d.appHub}, appHubSettingsProvider{svc: d.appHub})
