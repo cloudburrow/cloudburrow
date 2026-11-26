@@ -20,6 +20,10 @@
 #       Azure VM), byocfakes, an instance of its own on this machine's
 #       Docker started with CLOUDBURROW_BYOC_FAKES, and the browser test,
 #       into <log>; it must pass. The instance is stopped and deleted after.
+#       A failed run keeps, in <log>'s directory under
+#       walkthrough-artifacts/: byocfakes's log, the instance's up log and
+#       its state directory's logs, and the page's network log, HTML and
+#       screenshot (CLOUDBURROW_TEST_BYOC_ARTIFACTS).
 #       The browser suite's variables (CLOUDBURROW_TEST_CHROME and the
 #       rest) come from the caller's environment.
 #   remote-compute-shard.sh cleanup <dir>
@@ -119,13 +123,23 @@ case "$cmd" in
     CLOUDBURROW_BYOC_FAKES=$fakes "$cli" up --detach --detach-timeout 15m "${WALK[@]}" > "$dir/walk-up.log" 2>&1 ||
       { tail -n 20 "$dir/walk-up.log" >&2; exit 1; }
     rc=0
+    artifacts="$(cd "$(dirname "$log")" && pwd)/walkthrough-artifacts"
     (
       eval "$("$root/scripts/compat-env.sh" --only CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER --cli "$cli" -- "${WALK[@]}" 2>/dev/null)"
+      export CLOUDBURROW_TEST_BYOC_ARTIFACTS=$artifacts
       export CLOUDBURROW_TEST_BYOC_WALKTHROUGH=$fakes CLOUDBURROW_TEST_BYOC_INSTANCE_DIR=$wstate/$name \
         CLOUDBURROW_TEST_REMOTE_STANDIN=cb-remotehost-23025 CLOUDBURROW_TEST_REMOTE_STANDIN_2=cb-remotehost-23026
       cd "$root" && go test -tags=browser -count=1 -timeout 120m -v -run '^TestByocFirstRunWalkThrough$' ./test/browser/
     ) > "$log" 2>&1 || rc=1
     grep -q -- '^--- PASS: TestByocFirstRunWalkThrough (' "$log" || rc=1
+    if [ "$rc" != 0 ]; then
+      # What the test cannot see itself: the fakes' side and the instance's.
+      mkdir -p "$artifacts"
+      cp "$dir/fakes.log" "$dir/walk-up.log" "$artifacts/" 2>/dev/null || true
+      find "$wstate/$name" -maxdepth 2 -name '*.log' -exec cp {} "$artifacts/" \; 2>/dev/null || true
+      cp "$wstate/$name/move.json" "$artifacts/" 2>/dev/null || true
+      echo "the walk-through's logs and the page's network log: $artifacts" >&2
+    fi
     CLOUDBURROW_BYOC_FAKES=$fakes "$cli" stop "${WALK[@]}" >> "$dir/walk-up.log" 2>&1 || true
     CLOUDBURROW_BYOC_FAKES=$fakes "$cli" delete "${WALK[@]}" >> "$dir/walk-up.log" 2>&1 || true
     [ "$rc" = 0 ] || { echo "TestByocFirstRunWalkThrough did not pass: $(grep -- '^--- [A-Z]*: TestByocFirstRunWalkThrough' "$log" || echo 'no result')" >&2; exit 1; }

@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +9,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/config"
 )
 
 // scripts/compat-shards.sh is what each shard of ci.yml's compat job starts
@@ -205,6 +209,80 @@ func TestVerifyLocalRefusesBeforeStarting(t *testing.T) {
 		if !ok || ee.ExitCode() != 2 || !strings.Contains(string(out), c.want) {
 			t.Errorf("verify-local.sh %v with %v: %v, %q; want exit 2 naming %q", c.args, c.env, err, out, c.want)
 		}
+	}
+}
+
+// Every shard's verify-local instance name is one `up` accepts (at most 32
+// characters, internal/config's rule): verify-<yymmddHHMMSS>-localaispeech
+// was 33 (#2259). The names are distinct, and two runs a second apart name
+// their instances apart.
+func TestVerifyLocalInstanceNamesFit(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is not on PATH")
+	}
+	script, err := filepath.Abs(filepath.Join("..", "..", "scripts", "verify-local.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shards := strings.Fields(compatShard(t, "")["COMPAT_SHARDS"])
+	names := func() map[string]string {
+		cmd := exec.Command(bash, script, "--names")
+		cmd.Dir = filepath.Join("..", "..")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("verify-local.sh --names: %v: %s", err, out)
+		}
+		got := map[string]string{}
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			shard, name, ok := strings.Cut(line, " ")
+			if !ok {
+				t.Fatalf("verify-local.sh --names printed %q", line)
+			}
+			got[shard] = name
+		}
+		return got
+	}
+	first := names()
+	if len(first) != len(shards) {
+		t.Fatalf("verify-local.sh --names named %d shards, COMPAT_SHARDS has %d: %v", len(first), len(shards), first)
+	}
+	shape := regexp.MustCompile(`^verify-([0-9a-z]+)-([a-z0-9]+)$`)
+	seen := map[string]string{}
+	run := ""
+	for _, shard := range shards {
+		name := first[shard]
+		m := shape.FindStringSubmatch(name)
+		if m == nil || m[2] != shard {
+			t.Errorf("shard %s's instance is %q; want verify-<run>-%s", shard, name, shard)
+			continue
+		}
+		if run == "" {
+			run = m[1]
+		} else if m[1] != run {
+			t.Errorf("shard %s's run %q differs from the others' %q", shard, m[1], run)
+		}
+		if len(name) > 32 {
+			t.Errorf("shard %s's instance name %s is %d characters; at most 32", shard, name, len(name))
+		}
+		c := config.Default()
+		c.Name = name
+		var ve *config.ValidationError
+		if err := c.Validate(); errors.As(err, &ve) {
+			for _, p := range ve.Problems {
+				if p.Field == "name" {
+					t.Errorf("up refuses shard %s's instance name: %v", shard, p)
+				}
+			}
+		}
+		if other, dup := seen[name]; dup {
+			t.Errorf("shards %s and %s share the instance name %s", other, shard, name)
+		}
+		seen[name] = shard
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if again := names(); again[shards[0]] == first[shards[0]] {
+		t.Errorf("two runs a second apart both name their %s instance %s", shards[0], first[shards[0]])
 	}
 }
 

@@ -265,7 +265,11 @@ bind mount becomes a volume holding the path (read on the source host, through a
 when the source is remote). A container or volume the target already has by that name stops the
 carry before anything is made. `Rollback` removes what was made on the target and starts the
 source's containers again; `RemoveSource` removes the source's (and the images an earlier move
-left there) once the instance is checked on the target. The state directory never moves: it is
+left there) once the instance is checked on the target. Each committed image
+(`cloudburrow.local/move-<instance>-<container>:<time>`) carries `io.cloudburrow.move-instance=<name>`:
+a finished or rolled-back move removes, on both ends, every such image of the instance that no
+container runs from, and the one the instance's nodes run from after a move goes with the next
+move away or with `cloudburrow delete` (#2259). The state directory never moves: it is
 this machine's, with the APIs.
 
 With `CarryOptions.Journal`, the carry records each finished unit (an image loaded, a volume

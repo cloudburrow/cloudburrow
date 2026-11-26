@@ -3,6 +3,7 @@
 package browser
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -14,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
 
@@ -39,12 +42,17 @@ import (
 //	CLOUDBURROW_TEST_REMOTE_STANDIN     the stand-in the AWS VM boots as
 //	CLOUDBURROW_TEST_REMOTE_STANDIN_2   the stand-in the Azure VM boots as
 //	CLOUDBURROW_TEST_CLUSTER            the instance's kind cluster
+//	CLOUDBURROW_TEST_BYOC_ARTIFACTS     where a failed run leaves the page's
+//	                                    network log, its HTML and a
+//	                                    screenshot (default: a directory
+//	                                    under the system's temp directory)
 const (
 	envWalkThrough     = "CLOUDBURROW_TEST_BYOC_WALKTHROUGH"
 	envWalkInstanceDir = "CLOUDBURROW_TEST_BYOC_INSTANCE_DIR"
 	envStandInA        = "CLOUDBURROW_TEST_REMOTE_STANDIN"
 	envStandInB        = "CLOUDBURROW_TEST_REMOTE_STANDIN_2"
 	envWalkCluster     = "CLOUDBURROW_TEST_CLUSTER"
+	envWalkArtifacts   = "CLOUDBURROW_TEST_BYOC_ARTIFACTS"
 )
 
 // walk is the walk-through's state.
@@ -55,6 +63,71 @@ type walk struct {
 	standA, standB     string
 	fakes              map[string]string
 	instance, vmA, vmB string
+	// trail is the page's network traffic and the test's own actions,
+	// timestamped, in order (under p.mu): what a failed run leaves.
+	trail []string
+}
+
+// note adds a line to the trail, under the tab's lock.
+func (w *walk) note(format string, args ...any) {
+	w.p.mu.Lock()
+	defer w.p.mu.Unlock()
+	w.noteLocked(format, args...)
+}
+
+func (w *walk) noteLocked(format string, args ...any) {
+	w.trail = append(w.trail, time.Now().Format("15:04:05.000")+" "+fmt.Sprintf(format, args...))
+}
+
+// record keeps every request the page makes, its response's status or its
+// failure, and each navigation, in the trail; on a failure the trail, the
+// page's HTML and a screenshot are written to the artifacts directory.
+func (w *walk) record() {
+	p := w.p
+	listen(p, p.ctx, network.RequestWillBeSent, func(ev network.EventRequestWillBeSent) {
+		w.noteLocked("net > %s %s %s", ev.RequestID, ev.Request.Method, ev.Request.URL)
+	})
+	listen(p, p.ctx, network.ResponseReceived, func(ev network.EventResponseReceived) {
+		w.noteLocked("net < %s %d %s", ev.RequestID, ev.Response.Status, ev.Response.URL)
+	})
+	listen(p, p.ctx, network.LoadingFailed, func(ev network.EventLoadingFailed) {
+		w.noteLocked("net ! %s %s canceled=%v", ev.RequestID, ev.ErrorText, ev.Canceled)
+	})
+	listen(p, p.ctx, page.FrameNavigated, func(ev page.EventFrameNavigated) {
+		if ev.Frame.ParentID == "" {
+			w.noteLocked("nav %s", ev.Frame.URL)
+		}
+	})
+	w.t.Cleanup(func() {
+		if !w.t.Failed() {
+			return
+		}
+		dir := os.Getenv(envWalkArtifacts)
+		if dir == "" {
+			dir = filepath.Join(os.TempDir(), "cloudburrow-byoc-walkthrough")
+		}
+		dir = filepath.Join(dir, time.Now().Format("20060102-150405"))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			w.t.Logf("artifacts: %v", err)
+			return
+		}
+		p.mu.Lock()
+		trail := strings.Join(w.trail, "\n") + "\n"
+		p.mu.Unlock()
+		_ = os.WriteFile(filepath.Join(dir, "network.log"), []byte(trail), 0o644)
+		if p.ctx.Err() == nil {
+			ctx, cancel := context.WithTimeout(p.ctx, 30*time.Second)
+			defer cancel()
+			var html string
+			if _, err := chromedp.Run(ctx, evaluateInto(`location.href + "\n" + document.documentElement.outerHTML`, &html)); err == nil {
+				_ = os.WriteFile(filepath.Join(dir, "page.html"), []byte(html), 0o644)
+			}
+			if png, err := chromedp.Run(ctx, chromedp.FullScreenshot(90)); err == nil {
+				_ = os.WriteFile(filepath.Join(dir, "page.png"), png, 0o644)
+			}
+		}
+		w.t.Logf("the failed walk-through's network log, page and screenshot: %s", dir)
+	})
 }
 
 func (w *walk) token() string {
@@ -112,9 +185,15 @@ func (w *walk) create(conn, name string) {
 	if !strings.Contains(price, "$") {
 		w.t.Errorf("the wizard shows no hourly price before Create for %s: %q", conn, price)
 	}
+	w.note("test: the form is ready for %s", conn)
 	p.setField("#compute-instance", name)
 	p.clickExpr(`document.querySelector('#compute-sizes input[value="small"]')`)
 	p.setField("#compute-autostop", "60")
+	var state string
+	p.eval(`JSON.stringify({ disabled: document.getElementById("compute-create-submit").disabled, busy: document.getElementById("compute-create-submit").getAttribute("aria-busy"), `+
+		`size: (document.querySelector("#compute-sizes input[name=compute-size]:checked") || {}).value || null, region: document.getElementById("compute-region").value, `+
+		`permissions: document.getElementById("compute-permissions").textContent })`, &state)
+	w.note("test: click Create for %s: %s", name, state)
 	p.run(chromedp.Click(chromedp.CSS(`#compute-create-submit`)))
 	p.waitForWithin(`location.pathname === "/settings/compute/operation" && (document.getElementById("compute-op-done") !== null || document.getElementById("compute-op-failed") !== null)`, 3*time.Minute)
 	var failed, steps string
@@ -262,6 +341,7 @@ func TestByocFirstRunWalkThrough(t *testing.T) {
 	}
 	w.p = openWithin(t, 150*time.Minute)
 	p := w.p
+	w.record()
 	// The console restarts with each move; the page's requests during it
 	// fail, as the page says.
 	p.expected = append(p.expected, "Failed to fetch", "ERR_CONNECTION_REFUSED", "ERR_EMPTY_RESPONSE", "401", "503")
@@ -277,12 +357,16 @@ func TestByocFirstRunWalkThrough(t *testing.T) {
 	w.fake("/approve") // the user confirms the code on AWS's page
 	p.waitForWithin(`document.getElementById("compute-aws-choose-form") !== null`, time.Minute)
 	p.run(chromedp.Click(chromedp.CSS(`#compute-aws-choose`)))
-	p.waitFor(`document.querySelector('#compute-aws-connections [data-connection="aws-` + awsfake.DefaultAccount + `"]') !== null`)
+	// Connect redraws the page. The connection may be listed already (a
+	// walk-through run again on the same instance): the choice form gone
+	// is the redraw, which would otherwise replace the Azure button under
+	// the next click.
+	p.waitFor(`document.getElementById("compute-aws-choose-form") === null && document.querySelector('#compute-aws-connections [data-connection="aws-` + awsfake.DefaultAccount + `"]') !== null`)
 	p.run(chromedp.Click(chromedp.CSS(`#compute-azure-signin`)))
 	p.waitForWithin(`document.getElementById("compute-azure-choose-form") !== null`, time.Minute)
 	p.clickExpr(`document.querySelector('#compute-azure-choose-form input[value="` + azurefake.Subscription2 + `"]')`)
 	p.run(chromedp.Click(chromedp.CSS(`#compute-azure-choose`)))
-	p.waitFor(`document.querySelector('#compute-azure-connections [data-connection="azure-` + azurefake.Subscription2 + `"]') !== null`)
+	p.waitFor(`document.getElementById("compute-azure-choose-form") === null && document.querySelector('#compute-azure-connections [data-connection="azure-` + azurefake.Subscription2 + `"]') !== null`)
 
 	// 2. Create a VM in each cloud, the price shown first.
 	w.create("aws-"+awsfake.DefaultAccount, w.vmA)

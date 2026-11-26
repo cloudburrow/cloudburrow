@@ -6,7 +6,8 @@ verified by running CI's compat job on a Mac: `make verify-local` (`scripts/veri
 environment from `scripts/compat-env.sh`, the compat suite, the acceptance tests and the
 restart probes, then `stop` and `delete`), reading what each shard starts and runs from
 `scripts/compat-shards.sh`, the file the compat job sources. It needs no CI variable and
-leaves a developer's own instance alone: its instances are named `verify-<time>-<shard>`, sit
+leaves a developer's own instance alone: its instances are named `verify-<run>-<shard>` (`<run>` is the start time in base 36, so
+every name fits an instance name's 32 characters; `--names` prints them), sit
 at `--port-base 41000` in a state directory of their own, and are deleted on exit, together
 with any Docker image the run pulled. It writes a dated JSON result.
 

@@ -9,7 +9,9 @@
 #
 # What each shard starts and runs is read from scripts/compat-shards.sh, the
 # file ci.yml's compat job sources, so the two cannot drift. It needs no CI
-# variable: it makes its own instances, each named verify-<time>-<shard> at
+# variable: it makes its own instances, each named verify-<run>-<shard> (<run>
+# is the run's start time in base 36, so every shard's name fits an
+# instance name's 32 characters) at
 # --port-base (default 41000, clear of a default instance's 9000-9090), in a
 # state directory of its own, so a running instance is never touched.
 #
@@ -19,7 +21,7 @@
 #   --shards A,B,...  the shards to run, in order; default every one:
 #                     storage,served,gke,gkeupgrade,computevms,vpcvms,run,crossservice,scale,emulators,
 #                     memorystore,sql,
-#                     sqlreplicas,acceptance,iam,localai,localaispeech
+#                     sqlreplicas,acceptance,iam,localai,localaispeech,remotehosts
 #                     (localai and localaispeech, #1985, need make build-onnx's CLI, which it builds
 #                     unless --no-build, ONNXRUNTIME_LIB, and the pinned
 #                     generation model at CLOUDBURROW_LOCALAI_MODEL:
@@ -30,6 +32,7 @@
 #   --no-sdk-suites   skip the Node.js and Python client suites
 #   --no-browser      skip the console's headless-browser suite
 #   --keep-images     keep the Docker images this run pulled or built
+#   --names           print each shard's instance name and exit
 #
 # The result is <out>/<UTC time>-<os>-<arch>.json, with each suite's pass,
 # fail and skip counts and the failed tests, and the logs beside it. Exit 0
@@ -53,7 +56,7 @@ cd "$ROOT"
 . scripts/compat-shards.sh
 
 shards=${COMPAT_SHARDS// /,} port_base=41000 out=verify-local
-build=1 sdk=1 browser=1 keep_images=""
+build=1 sdk=1 browser=1 keep_images="" names=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --shards) shards=${2:?--shards needs a list}; shift 2 ;;
@@ -66,6 +69,7 @@ while [ $# -gt 0 ]; do
     --no-sdk-suites) sdk=""; shift ;;
     --no-browser) browser=""; shift ;;
     --keep-images) keep_images=1; shift ;;
+    --names) names=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "verify-local: unknown argument $1" >&2; usage; exit 2 ;;
   esac
@@ -86,6 +90,29 @@ for s in "${SHARD_LIST[@]}"; do
     *) echo "verify-local: unknown shard $s (one of: $COMPAT_SHARDS)" >&2; exit 2 ;;
   esac
 done
+
+# Each shard's instance is verify-<run>-<shard>. <run> is this run's start,
+# UTC seconds since 1970 in base 36: 6 characters until 2039, unique to the
+# second as the date stamp it replaces was, and short enough that every
+# shard's name fits an instance name's 32 characters (internal/config;
+# verify-<yymmddHHMMSS>-localaispeech was 33, and up refused it).
+base36() {
+  local n=$1 digits=0123456789abcdefghijklmnopqrstuvwxyz s=""
+  while [ "$n" -gt 0 ]; do s=${digits:n%36:1}$s; n=$((n / 36)); done
+  printf '%s' "${s:-0}"
+}
+RUN_ID=$(base36 "$(date -u +%s)")
+instance_name() { printf 'verify-%s-%s' "$RUN_ID" "$1"; }
+for s in $COMPAT_SHARDS; do
+  n=$(instance_name "$s")
+  if [ "${#n}" -gt 32 ]; then
+    echo "verify-local: shard $s's instance name $n is ${#n} characters; an instance name is at most 32" >&2; exit 2
+  fi
+done
+if [ -n "$names" ]; then
+  for s in "${SHARD_LIST[@]}"; do echo "$s $(instance_name "$s")"; done
+  exit 0
+fi
 
 # The harness refuses these (test/compat/harness.go), and a run with them set
 # could reach Google with a developer's own account; refuse before starting
@@ -116,7 +143,6 @@ docker info >/dev/null 2>&1 || { echo "verify-local: docker is not running" >&2;
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-RUN_ID=$(date -u +%y%m%d%H%M%S)
 OS=$(go env GOOS) ARCH=$(go env GOARCH)
 LOGS="$out/$STAMP-$OS-$ARCH"
 RESULT="$LOGS.json"
@@ -227,7 +253,8 @@ settle_retries() {  # <log>
 }
 
 run_shard() {
-  local shard=$1 name="verify-$RUN_ID-$1" dir="$LOGS/$1" t0 rc
+  local shard=$1 name dir="$LOGS/$1" t0 rc
+  name=$(instance_name "$1")
   t0=$(date +%s)
   mkdir -p "$dir"
   SUITES="$WORK/$shard.suites" CHECKS="$WORK/$shard.checks"
