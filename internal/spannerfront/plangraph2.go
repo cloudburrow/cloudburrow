@@ -52,8 +52,19 @@ type gqlBind struct {
 	sql string
 	// a group variable: its quantified path
 	quant *graphQuant
-	// a path variable: its length
-	pathLen string
+	// a path variable: its length, its cost (ANY CHEAPEST's sum of its
+	// edges' COST) and its value (TO_JSON(p): its elements' keys, in order)
+	pathLen  string
+	pathCost string
+	pathVal  string
+	quants   []*graphQuant // its quantified edges, whose keys pathVal reads
+	// a path variable's nodes' and edges' identities, in order
+	// (plangraph5.go), and its first and last nodes
+	pathFns     map[string]string
+	first, last *gqlBind
+	// a group variable of a quantified path pattern of several edges: its
+	// name in the subpath (plangraph6.go)
+	gvar string
 }
 
 func (b *gqlBind) materialized() bool { return b.qual != "" }
@@ -90,11 +101,7 @@ func (b *gqlBind) prop(p string) (string, error) {
 	if !b.table.hasProperty(p) {
 		return "NULL", nil
 	}
-	c, err := b.table.column(p)
-	if err != nil {
-		return "", err
-	}
-	return b.alias + "." + c, nil
+	return b.table.column(p, b.alias)
 }
 
 // isTable is the SQL condition that it is of element table t.
@@ -213,6 +220,7 @@ type gqlPatVar struct {
 	edge   bool
 	labels []*gqlLabel
 	quant  *gqlQuantSpec
+	cost   [2]int // an edge pattern's COST expression, {0, 0} without one
 	// restrict are the element tables an OPTIONAL MATCH's variable can be:
 	// those it is in the working table
 	restrict []*graphElement
@@ -222,6 +230,15 @@ type gqlQuantSpec struct {
 	lo, hi int
 	props  []gqlProp
 	conds  [][2]int
+	cost   [2]int // the edge's COST expression, per edge
+	// a quantified path pattern, ((src)-[e]->(dst) WHERE ...){m,n}: its
+	// node patterns, their inline filters, and the conditions (the nodes'
+	// and the subpath's WHERE) each edge's endpoints are held to
+	src, dst  *gqlPatVar
+	nodeProps []gqlProp
+	nodeConds [][2]int
+	// a quantified path pattern read as rows of its subpath
+	seg *quantSeg
 }
 
 // gqlProp is an inline property filter, {prop: value}.
@@ -238,7 +255,7 @@ type gqlPatEdge struct {
 }
 
 type gqlPath struct {
-	search  string // ANY, ANY SHORTEST: one path per pair of endpoints
+	search  string // ANY, ANY SHORTEST, ANY CHEAPEST: one path per pair of endpoints
 	mode    string // WALK, TRAIL, ACYCLIC
 	edges   []int  // its edges, in t.pat.edges
 	nodes   []*gqlPatVar
@@ -246,12 +263,14 @@ type gqlPath struct {
 }
 
 type gqlPattern struct {
-	vars   []*gqlPatVar
-	byName map[string]*gqlPatVar
-	edges  []gqlPatEdge
-	props  []gqlProp
-	conds  [][2]int
-	paths  []gqlPath
+	same     [][2]*gqlPatVar // juxtaposed node patterns: one node
+	subModes []gqlPath       // parts of paths with a path mode of their own
+	vars     []*gqlPatVar
+	byName   map[string]*gqlPatVar
+	edges    []gqlPatEdge
+	props    []gqlProp
+	conds    [][2]int
+	paths    []gqlPath
 }
 
 type gqlTranslator struct {
@@ -269,6 +288,7 @@ type gqlTranslator struct {
 	precededByEdge bool
 	lastProps      []gqlProp
 	lastConds      [][2]int
+	lastCost       [2]int
 	err            error // a failure while collapsing
 	parens         bool  // COLUMNS (...): the final list is parenthesized
 }
@@ -360,7 +380,6 @@ func (t *gqlTranslator) compositeQuery() (string, error) {
 
 func (t *gqlTranslator) linearQuery() (string, error) {
 	ps := t.ps
-	matched := false
 	for {
 		switch {
 		case ps.isKw("MATCH"), ps.isKw("OPTIONAL") && ps.isKwN(1, "MATCH"):
@@ -383,7 +402,6 @@ func (t *gqlTranslator) linearQuery() (string, error) {
 			if err != nil {
 				return "", err
 			}
-			matched = true
 		case ps.acceptKw("FILTER"):
 			ps.acceptKw("WHERE")
 			e, err := ps.expr()
@@ -416,9 +434,6 @@ func (t *gqlTranslator) linearQuery() (string, error) {
 		case ps.isKw("RETURN"), t.columns && ps.isKw("COLUMNS"):
 			t.parens = ps.isKw("COLUMNS")
 			ps.p++
-			if !matched {
-				return "", unsupportedSQL{"a graph query with no MATCH statement"}
-			}
 			// a RETURN NEXT is a projection
 			save := ps.p
 			if err := t.skipReturn(); err != nil {
@@ -509,9 +524,15 @@ func (t *gqlTranslator) pathPattern(pat *gqlPattern) error {
 		if ps.isKw("SHORTEST") {
 			return unsupportedSQL{"the path search prefix ALL SHORTEST"}
 		}
+		if !ps.acceptKw("PATHS") {
+			ps.acceptKw("PATH")
+		}
 	case ps.isKw("ANY") && ps.isKwN(1, "SHORTEST"):
 		ps.p += 2
 		path.search = "ANY SHORTEST"
+	case ps.isKw("ANY") && ps.isKwN(1, "CHEAPEST") && ps.peekN(2).kind != tkNumber:
+		ps.p += 2
+		path.search = "ANY CHEAPEST"
 	case ps.isKw("ANY") && ps.peekN(1).kind != tkNumber && !ps.isKwN(1, "CHEAPEST"):
 		ps.p++
 		path.search = "ANY"
@@ -520,9 +541,6 @@ func (t *gqlTranslator) pathPattern(pat *gqlPattern) error {
 	}
 	if ps.peek().kind == tkIdent && gqlPathModes[strings.ToUpper(ps.peek().text)] {
 		path.mode = strings.ToUpper(ps.next().text)
-		if path.mode == "SIMPLE" {
-			return unsupportedSQL{"the SIMPLE path mode"}
-		}
 		ps.acceptKw("PATH")
 		ps.acceptKw("PATHS")
 	}
@@ -544,24 +562,33 @@ func (t *gqlTranslator) pathSeq(pat *gqlPattern, path *gqlPath, last **gqlPatVar
 	ps := t.ps
 	for {
 		switch {
+		case ps.isP("(") && t.isSubpath() && t.quantifiedSubpath():
+			if err := t.quantSubpath(pat, path, last); err != nil {
+				return err
+			}
 		case ps.isP("(") && t.isSubpath():
 			ps.p++
 			mode := ""
-			whole := len(path.edges) == 0 && *last == nil
 			if ps.peek().kind == tkIdent && gqlPathModes[strings.ToUpper(ps.peek().text)] {
 				mode = strings.ToUpper(ps.next().text)
 				ps.acceptKw("PATH")
-				switch {
-				case mode == "WALK" || mode == path.mode:
-				case whole && depth == 0 && path.mode == "WALK" && mode != "SIMPLE":
-					// the subpath is the whole path: its mode is the path's
-					path.mode = mode
-				default:
-					return unsupportedSQL{"a path mode on a part of a path"}
+				if mode == "WALK" {
+					mode = ""
 				}
 			}
+			// a path mode on a part of the path holds that part's elements
+			sub := gqlPath{mode: mode}
+			if *last != nil {
+				sub.nodes = append(sub.nodes, *last)
+			}
+			n0, e0 := len(path.nodes), len(path.edges)
 			if err := t.pathSeq(pat, path, last, depth+1); err != nil {
 				return err
+			}
+			if mode != "" {
+				sub.nodes = append(sub.nodes, path.nodes[n0:]...)
+				sub.edges = append(sub.edges, path.edges[e0:]...)
+				pat.subModes = append(pat.subModes, sub)
 			}
 			if ps.acceptKw("WHERE") {
 				e, err := ps.expr()
@@ -574,10 +601,8 @@ func (t *gqlTranslator) pathSeq(pat *gqlPattern, path *gqlPath, last **gqlPatVar
 				return err
 			}
 			if ps.isP("{") || ps.isP("+") || ps.isP("*") {
-				return unsupportedSQL{"a quantified path pattern of more than one edge"}
-			}
-			if mode != "" && mode != "WALK" && whole && (ps.isP("-") || ps.isP("<") || ps.isP("(")) {
-				return unsupportedSQL{"a path mode on a part of a path"}
+				// the engine refuses an unbounded or nested quantifier first
+				return unsupportedSQL{"a quantified path pattern inside another"}
 			}
 		case ps.isP("("):
 			n, err := t.element(pat, false, "(", ")")
@@ -585,10 +610,13 @@ func (t *gqlTranslator) pathSeq(pat *gqlPattern, path *gqlPath, last **gqlPatVar
 				return err
 			}
 			if *last != nil && !t.precededByEdge {
-				// juxtaposed node patterns are one node
+				// juxtaposed node patterns are one node (Google's graph
+				// patterns page): the two variables, one element
 				if n != *last {
-					return unsupportedSQL{"two node patterns side by side"}
+					pat.same = append(pat.same, [2]*gqlPatVar{*last, n})
 				}
+				*last = n
+				continue
 			}
 			if t.pendingEdge != nil {
 				t.pendingEdge.right = n
@@ -725,13 +753,18 @@ func (t *gqlTranslator) element(pat *gqlPattern, edge bool, open, close string) 
 		}
 		conds = append(conds, [2]int{e.lo, e.hi})
 	}
-	if ps.isKw("COST") {
-		return nil, unsupportedSQL{"an edge pattern's COST"}
+	var cost [2]int
+	if edge && ps.acceptKw("COST") {
+		e, err := ps.expr()
+		if err != nil {
+			return nil, err
+		}
+		cost = [2]int{e.lo, e.hi}
 	}
 	if err := ps.expectP(close); err != nil {
 		return nil, err
 	}
-	t.lastProps, t.lastConds = props, conds
+	t.lastProps, t.lastConds, t.lastCost = props, conds, cost
 	if !edge {
 		pat.props = append(pat.props, props...)
 		pat.conds = append(pat.conds, conds...)
@@ -753,12 +786,13 @@ func (t *gqlTranslator) edge(pat *gqlPattern) (*gqlPatVar, int, error) {
 	var v *gqlPatVar
 	var props []gqlProp
 	var conds [][2]int
+	var cost [2]int
 	if ps.isP("[") {
 		var err error
 		if v, err = t.element(pat, true, "[", "]"); err != nil {
 			return nil, 0, err
 		}
-		props, conds = t.lastProps, t.lastConds
+		props, conds, cost = t.lastProps, t.lastConds, t.lastCost
 		if err := ps.expectP("-"); err != nil {
 			return nil, 0, err
 		}
@@ -780,10 +814,11 @@ func (t *gqlTranslator) edge(pat *gqlPattern) (*gqlPatVar, int, error) {
 		if err != nil {
 			return nil, 0, err
 		}
-		q.props, q.conds = props, conds
+		q.props, q.conds, q.cost = props, conds, cost
 		v.quant = q
 		return v, dir, nil
 	}
+	v.cost = cost
 	pat.props = append(pat.props, props...)
 	pat.conds = append(pat.conds, conds...)
 	return v, dir, nil
@@ -957,9 +992,44 @@ func (t *gqlTranslator) choices(pat *gqlPattern, br *gqlBranch) ([]gqlChoice, er
 
 // match adds a MATCH statement's pattern to every branch.
 func (t *gqlTranslator) match(pat *gqlPattern) error {
-	for _, p := range pat.paths {
+	var searched []int
+	for i, p := range pat.paths {
 		if p.search != "" {
-			return t.searchMatch(pat)
+			searched = append(searched, i)
+		}
+	}
+	if len(searched) > 0 && len(pat.paths) == 1 {
+		return t.searchMatch(pat)
+	}
+	if len(searched) > 0 {
+		// each path pattern with a search prefix keeps its own paths
+		// (one per pair of endpoints); the others, and the MATCH's WHERE,
+		// then join them
+		var rest []int
+		for i := range pat.paths {
+			if pat.paths[i].search == "" {
+				rest = append(rest, i)
+			}
+		}
+		for _, i := range searched {
+			if err := t.searchMatch(pat.subPattern([]int{i}, false)); err != nil {
+				return err
+			}
+		}
+		pat = pat.subPattern(rest, true)
+		if len(pat.paths) == 0 {
+			if len(pat.conds) > 0 {
+				for _, br := range t.branches {
+					for _, c := range pat.conds {
+						s, err := t.render(br, c[0], c[1])
+						if err != nil {
+							return err
+						}
+						br.conds = append(br.conds, "("+s+")")
+					}
+				}
+			}
+			return nil
 		}
 	}
 	var out []*gqlBranch
@@ -971,10 +1041,37 @@ func (t *gqlTranslator) match(pat *gqlPattern) error {
 		out = append(out, bs...)
 	}
 	if len(out) == 0 {
-		return unsupportedSQL{"a pattern that no element table matches"}
+		// no element table matches: no rows (the engine's are none)
+		for _, br := range t.branches {
+			out = append(out, noMatch(pat, br, true))
+		}
 	}
 	t.branches = out
 	return nil
+}
+
+// noMatch is the branch of a pattern no element table matches, after the
+// rows of br: its new names NULL, and, when empty, no rows.
+func noMatch(pat *gqlPattern, br *gqlBranch, empty bool) *gqlBranch {
+	nb := &gqlBranch{from: append([]string(nil), br.from...), conds: append([]string(nil), br.conds...), binds: map[string]*gqlBind{}}
+	if empty {
+		nb.from = append(nb.from, "(SELECT 1 AS cb_none LIMIT 0) AS cb_none")
+	}
+	for _, n := range br.names {
+		nb.bind(n, br.binds[n])
+	}
+	for _, v := range pat.vars {
+		if v.name != "" && br.binds[v.name] == nil && nb.binds[v.name] == nil {
+			nb.bind(v.name, &gqlBind{kind: bElem, edge: v.edge, qual: "cb_none", prefix: "cb_none", cols: map[string]bool{}})
+		}
+	}
+	for _, p := range pat.paths {
+		if p.pathVar != "" && br.binds[p.pathVar] == nil {
+			nb.bind(p.pathVar, &gqlBind{kind: bPath, pathLen: "NULL", pathVal: "NULL",
+				pathFns: map[string]string{"NODES": "NULL", "EDGES": "NULL", "IS_ACYCLIC": "NULL", "IS_TRAIL": "NULL", "IS_SIMPLE": "NULL"}})
+		}
+	}
+	return nb
 }
 
 // matchIn is the branches of the pattern's matches in br.
@@ -1000,10 +1097,18 @@ func (t *gqlTranslator) matchIn(pat *gqlPattern, br *gqlBranch) ([]*gqlBranch, e
 			}
 			b := &gqlBind{kind: bElem, edge: v.edge, alias: v.alias, table: tab}
 			if q := v.quant; q != nil {
-				gq := &graphQuant{alias: fmt.Sprintf("cb_q%d", len(t.quants)), table: tab, node: t.nodeTable(tab.Source.Node), min: q.lo, max: q.hi}
+				gq := &graphQuant{alias: fmt.Sprintf("cb_q%d", len(t.quants)), table: tab, node: t.nodeTable(tab.Source.Node),
+					dnode: t.nodeTable(tab.Dest.Node), min: q.lo, max: q.hi}
 				t.quants[gq.alias] = gq
 				b = &gqlBind{kind: bGroup, edge: true, alias: gq.alias, table: tab, quant: gq}
 				nb.from = append(nb.from, "(?"+gq.alias+") AS "+gq.alias)
+				if sg := q.seg; sg != nil {
+					// its variables: group variables, one element per repetition
+					gq.seg = sg
+					for _, n := range sg.names {
+						nb.bind(n, &gqlBind{kind: bGroup, edge: sg.isEdgeName(n), alias: gq.alias, table: tab, quant: gq, gvar: n})
+					}
+				}
 			} else {
 				nb.from = append(nb.from, tab.BaseTableName+" AS "+v.alias)
 			}
@@ -1038,6 +1143,9 @@ func (t *gqlTranslator) matchIn(pat *gqlPattern, br *gqlBranch) ([]*gqlBranch, e
 				nb.conds = append(nb.conds, dstCol(c)+" = "+dst.col(et.Dest.NodeCols[j]))
 			}
 		}
+		for _, sm := range pat.same {
+			nb.conds = append(nb.conds, elemEqual(bindOf(sm[0]), bindOf(sm[1])))
+		}
 		for _, p := range pat.props {
 			s, err := t.propCond(nb, bindOf(p.v), p)
 			if err != nil {
@@ -1059,6 +1167,15 @@ func (t *gqlTranslator) matchIn(pat *gqlPattern, br *gqlBranch) ([]*gqlBranch, e
 			}
 			gb := bindOf(v)
 			gq := gb.quant
+			if sg := gq.seg; sg != nil {
+				gq.arrs = segGroupArrs(t, sg, gb.table)
+				for _, e := range sg.edges {
+					if hasCost(e.cost) {
+						gq.cost = "cb_c"
+					}
+				}
+				continue
+			}
 			hop := &gqlBind{kind: bElem, edge: true, alias: "cb_hop", table: gb.table}
 			hb := nb.copy()
 			if v.name != "" {
@@ -1079,9 +1196,23 @@ func (t *gqlTranslator) matchIn(pat *gqlPattern, br *gqlBranch) ([]*gqlBranch, e
 				}
 				gq.hopConds = append(gq.hopConds, "("+s+")")
 			}
+			if v.quant.src != nil {
+				s, err := t.subpathHopCond(hb, gb, v.quant)
+				if err != nil {
+					return nil, err
+				}
+				gq.hopConds = append(gq.hopConds, s)
+			}
+			if c := v.quant.cost; hasCost(c) {
+				s, err := t.render(hb, c[0], c[1])
+				if err != nil {
+					return nil, err
+				}
+				gq.cost = "(" + s + ")"
+			}
 			for p := range t.refProps[v.name] {
 				if gb.table.hasProperty(p) {
-					if _, err := gb.table.column(p); err != nil {
+					if _, err := gb.table.column(p, gb.alias); err != nil {
 						return nil, err
 					}
 					gq.arrs = append(gq.arrs, p)
@@ -1092,22 +1223,61 @@ func (t *gqlTranslator) matchIn(pat *gqlPattern, br *gqlBranch) ([]*gqlBranch, e
 		if err := t.pathModes(pat, nb, bindOf); err != nil {
 			return nil, err
 		}
+		for _, sp := range pat.subModes {
+			nb.conds = append(nb.conds, t.pathMode(sp.mode, pat, sp, bindOf))
+		}
 		for _, p := range pat.paths {
 			if p.pathVar == "" {
 				continue
 			}
-			var parts []string
+			var parts, costs, vals []string
+			var quants []*graphQuant
 			fixed := 0
-			for _, i := range p.edges {
-				if gb := bindOf(pat.edges[i].e); gb.kind == bGroup {
+			for k, n := range p.nodes {
+				if nbd := bindOf(n); nbd != nil && nbd.table != nil && !nbd.materialized() {
+					vals = append(vals, "["+elemKeySQL(nbd)+"]")
+				}
+				if k >= len(p.edges) {
+					continue
+				}
+				pe := pat.edges[p.edges[k]]
+				if gb := bindOf(pe.e); gb.kind == bGroup {
 					gb.quant.withLen = true
-					parts = append(parts, gb.alias+".cb_len")
+					if sg := gb.quant.seg; sg != nil {
+						// each repetition is the subpath's edges
+						parts = append(parts, fmt.Sprintf("%s.cb_len * %d", gb.alias, len(sg.edges)))
+					} else {
+						parts = append(parts, gb.alias+".cb_len")
+					}
+					if gb.quant.cost != "" {
+						costs = append(costs, gb.alias+".cb_cost")
+					}
+					quants = append(quants, gb.quant)
+					vals = append(vals, gb.alias+".cb_ids")
 				} else {
 					fixed++
+					if hasCost(pe.e.cost) {
+						s, err := t.render(nb, pe.e.cost[0], pe.e.cost[1])
+						if err != nil {
+							return nil, err
+						}
+						costs = append(costs, "("+s+")")
+					}
+					if gb.table != nil && !gb.materialized() {
+						vals = append(vals, "["+elemKeySQL(gb)+"]")
+					}
 				}
 			}
 			parts = append(parts, fmt.Sprint(fixed))
-			nb.bind(p.pathVar, &gqlBind{kind: bPath, pathLen: "(" + strings.Join(parts, " + ") + ")"})
+			pb := &gqlBind{kind: bPath, pathLen: "(" + strings.Join(parts, " + ") + ")", quants: quants, pathVal: pathValueSQL(vals)}
+			if t.pathElementsUsed(p.pathVar) {
+				pb.pathFns = t.pathFuncsSQL(pat, p, bindOf)
+			}
+			pb.first, pb.last = bindOf(p.nodes[0]), bindOf(p.nodes[len(p.nodes)-1])
+			if len(costs) > 0 {
+				pb.pathCost = "(" + strings.Join(costs, " + ") + ")"
+			}
+			nb.bind(p.pathVar, pb)
 		}
 		out = append(out, nb)
 	}
@@ -1141,12 +1311,14 @@ func (t *gqlTranslator) pathModes(pat *gqlPattern, br *gqlBranch, bindOf func(*g
 			}
 		}
 		if quants > 0 {
-			if quants > 1 || len(p.edges) > 1 {
-				return unsupportedSQL{"a " + p.mode + " path with a quantified edge and other edges"}
+			if quants == 1 && len(p.edges) == 1 && p.mode != "SIMPLE" {
+				// the quantified edge alone: its paths are held to the mode
+				gb := bindOf(pat.edges[p.edges[0]].e)
+				gb.quant.trail = p.mode == "TRAIL"
+				gb.quant.acyc = p.mode == "ACYCLIC"
+				continue
 			}
-			gb := bindOf(pat.edges[p.edges[0]].e)
-			gb.quant.trail = p.mode == "TRAIL"
-			gb.quant.acyc = p.mode == "ACYCLIC"
+			br.conds = append(br.conds, t.pathMode(p.mode, pat, p, bindOf))
 			continue
 		}
 		var elems []*gqlBind
@@ -1161,6 +1333,10 @@ func (t *gqlTranslator) pathModes(pat *gqlPattern, br *gqlBranch, bindOf func(*g
 		}
 		for i := range elems {
 			for j := i + 1; j < len(elems); j++ {
+				if p.mode == "SIMPLE" && i == 0 && j == len(elems)-1 {
+					// a SIMPLE path's first node may be its last
+					continue
+				}
 				if elems[i] == elems[j] {
 					// a variable twice on the path: the same element
 					br.conds = append(br.conds, "FALSE")
@@ -1221,7 +1397,10 @@ func (t *gqlTranslator) optionalMatch(pat *gqlPattern) error {
 		return err
 	}
 	if len(obs) == 0 {
-		return unsupportedSQL{"an OPTIONAL MATCH that no element table matches"}
+		// nothing can match: every row of the working table, its new
+		// names NULL
+		t.branches = []*gqlBranch{noMatch(pat, wb, false)}
+		return nil
 	}
 	var names []string
 	for _, v := range pat.vars {
@@ -1296,7 +1475,12 @@ func (t *gqlTranslator) searchMatch(pat *gqlPattern) error {
 		return err
 	}
 	if len(obs) == 0 {
-		return unsupportedSQL{"a pattern that no element table matches"}
+		var out []*gqlBranch
+		for _, br := range t.branches {
+			out = append(out, noMatch(pat, br, true))
+		}
+		t.branches = out
+		return nil
 	}
 	key := func(v *gqlPatVar) string {
 		if v.name != "" {
@@ -1330,6 +1514,9 @@ func (t *gqlTranslator) searchMatch(pat *gqlPattern) error {
 		}
 		if c.kind == bPath {
 			c.pathLen = strings.Replace(c.pathLen, qa+".", qb+".", 1)
+			c.pathCost = strings.Replace(c.pathCost, qa+".", qb+".", 1)
+			c.pathVal = strings.Replace(c.pathVal, qa+".", qb+".", 1)
+			c.pathFns = replaceQual(c.pathFns, qa, qb)
 		}
 		return &c
 	}
@@ -1348,9 +1535,16 @@ func (t *gqlTranslator) searchMatch(pat *gqlPattern) error {
 	sortPairs(ida, idb)
 	idA, idB := "CONCAT("+strings.Join(ida, ", '|', ")+")", "CONCAT("+strings.Join(idb, ", '|', ")+")"
 	better := idB + " < " + idA
-	if path.search == "ANY SHORTEST" {
+	switch path.search {
+	case "ANY SHORTEST":
 		la, lb := ob.binds[path.pathVar].pathLen, other(ob.binds[path.pathVar]).pathLen
 		better = "(" + lb + " < " + la + " OR " + lb + " = " + la + " AND " + idB + " < " + idA + ")"
+	case "ANY CHEAPEST":
+		ca, cb := ob.binds[path.pathVar].pathCost, other(ob.binds[path.pathVar]).pathCost
+		if ca == "" {
+			return unsupportedSQL{"ANY CHEAPEST with no edge COST"}
+		}
+		better = "(" + cb + " < " + ca + " OR " + cb + " = " + ca + " AND " + idB + " < " + idA + ")"
 	}
 	var cols []string
 	for _, n := range names {
@@ -1375,6 +1569,9 @@ func (t *gqlTranslator) searchMatch(pat *gqlPattern) error {
 		b.qual = qs
 		if b.kind == bPath {
 			b.pathLen = strings.Replace(b.pathLen, qa+".", qs+".", 1)
+			b.pathCost = strings.Replace(b.pathCost, qa+".", qs+".", 1)
+			b.pathVal = strings.Replace(b.pathVal, qa+".", qs+".", 1)
+			b.pathFns = replaceQual(b.pathFns, qa, qs)
 		}
 		if wb != nil && wb.binds[n] != nil {
 			on = append(on, elemEqual(wb.binds[n], &b))

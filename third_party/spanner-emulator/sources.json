@@ -1,0 +1,25 @@
+{
+  "$comment": "What scripts/spanner-emulator-binaries.sh builds (#2029): Google's Cloud Spanner emulator at emulator.tag (its commit checked), with CloudBurrow's patches applied in this order. The googlesql patches are copied into the emulator's build/bazel/ (as cloudburrow_googlesql.patch, which emulator patch 0001 lists in MODULE.bazel) and applied by Bazel to the GoogleSQL archive the emulator pins. PROVENANCE.md says what each patch changes and why.",
+  "emulator": {
+    "repository": "https://github.com/GoogleCloudPlatform/cloud-spanner-emulator",
+    "tag": "v1.5.58",
+    "commit": "a081a7e71aba5f4d05fc8c6b21ef1a269dcbac28",
+    "license": "Apache-2.0",
+    "dockerfile": "build/docker/Dockerfile.ubuntu",
+    "patches": [
+      "patches/cloud-spanner-emulator/0001-apply-cloudburrow-googlesql-patch.patch",
+      "patches/cloud-spanner-emulator/0002-graph-predicates-and-cheapest-path.patch",
+      "patches/cloud-spanner-emulator/0003-graph-regression-tests.patch"
+    ]
+  },
+  "googlesql": {
+    "repository": "https://github.com/google/googlesql",
+    "tag": "2026.7.2",
+    "archiveSha256": "f734fae677d672c61a278d562473bf8ae2d017f47d4dd2b37fa261e513685278",
+    "license": "Apache-2.0",
+    "bazelPatch": "build/bazel/cloudburrow_googlesql.patch",
+    "patches": [
+      "patches/googlesql/0001-gql-order-and-graph-element-arguments.patch"
+    ]
+  }
+}

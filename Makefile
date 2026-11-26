@@ -64,6 +64,19 @@ BQENGINE_FLAGS ?=
 bigquery-binaries:
 	go run ./tools/bqengine -out internal/bigqueryimage/bin $(BQENGINE_FLAGS)
 
+## spanner-binaries: Build the patched Linux Spanner emulator the CLI embeds, from source (#2029)
+# Google's emulator v1.5.58 and the GoogleSQL it builds, with the patches in
+# third_party/spanner-emulator, for SPANNER_ARCH (default: the Docker
+# server's), into internal/spannerimage/bin; the next go build embeds it.
+# Not part of make build: GoogleSQL alone takes over an hour on 8 Docker
+# CPUs, and a CLI without it runs Google's image, with a warning. BAZEL_JOBS
+# (default 4) bounds the compilers' memory; an interrupted build resumes.
+# SPANNER_PATCH_TESTS=1 also runs the patches' C++ regression tests.
+SPANNER_ARCH ?= $(shell docker version --format '{{.Server.Arch}}' 2>/dev/null)
+.PHONY: spanner-binaries
+spanner-binaries:
+	bash scripts/spanner-emulator-binaries.sh -arch $(SPANNER_ARCH) $(if $(SPANNER_PATCH_TESTS),-test)
+
 ## bigquery-patch-tests: Run the BigQuery emulator patches' regression tests and the patched modules' suites (#1132)
 # In the patched copies tools/bqengine writes under
 # third_party/bigquery-emulator/build/, which `go test ./...` here does not

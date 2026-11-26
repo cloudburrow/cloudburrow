@@ -71,10 +71,12 @@ type Artifact struct {
 	Unpinned bool
 	// Built marks an image this CLI builds rather than pulls: the builtin
 	// storage server's, or with BigQuery set the BigQuery emulator's
-	// (#1061).
+	// (#1061), or with Spanner set the patched Spanner emulator's (#2029).
 	Built bool
 	// BigQuery marks the built image as the BigQuery emulator's.
 	BigQuery bool
+	// Spanner marks the built image as the patched Spanner emulator's.
+	Spanner bool
 	// Optional marks an artifact `up --offline` can start without: the
 	// console terminal's image, which only the terminal drawer uses (#824).
 	// It is prefetched and, when cached, imported by `up` in the
@@ -173,6 +175,10 @@ type Plan struct {
 	// BigQueryImage is its image as this CLI builds it for Arch; empty
 	// when this CLI embeds no emulator for Arch.
 	BigQueryImage string
+	// SpannerImage is the patched Spanner emulator's image as this CLI
+	// builds it for Arch (#2029); empty when Spanner is off or this CLI
+	// embeds no build for Arch, when Images has Google's image instead.
+	SpannerImage string
 	// Arch is the Docker daemon's architecture, which is a kind node's.
 	Arch string
 	// Images are the backend images, by the service names that use each.
@@ -216,6 +222,11 @@ func (c Cache) Artifacts(p Plan) []Artifact {
 		out = append(out, Artifact{Kind: HostImage, Built: true, BigQuery: true,
 			What: "BigQuery emulator image (built by this CLI for linux/" + p.Arch + ")",
 			Ref:  p.BigQueryImage})
+	}
+	if p.SpannerImage != "" {
+		out = append(out, Artifact{Kind: HostImage, Built: true, Spanner: true,
+			What: "patched Spanner emulator image (built by this CLI for linux/" + p.Arch + ")",
+			Ref:  p.SpannerImage})
 	}
 	refs := make([]string, 0, len(p.Images))
 	for ref := range p.Images {
@@ -303,6 +314,9 @@ type Prefetcher struct {
 	BuildStorage func(ctx context.Context) (string, error)
 	// BuildBigQuery builds the BigQuery emulator image and returns its tag.
 	BuildBigQuery func(ctx context.Context) (string, error)
+	// BuildSpanner builds the patched Spanner emulator image and returns
+	// its tag.
+	BuildSpanner func(ctx context.Context) (string, error)
 	// Node starts a throwaway kind node from the pinned node image and
 	// returns its container and a function that removes it. Node images
 	// are pulled and exported by that node's containerd, the runtime that
@@ -392,6 +406,9 @@ func (p *Prefetcher) storeHost(ctx context.Context, a Artifact) error {
 		build, name := p.BuildStorage, "storage"
 		if a.BigQuery {
 			build, name = p.BuildBigQuery, "BigQuery emulator"
+		}
+		if a.Spanner {
+			build, name = p.BuildSpanner, "Spanner emulator"
 		}
 		if build == nil {
 			return fmt.Errorf("no way to build the %s image", name)

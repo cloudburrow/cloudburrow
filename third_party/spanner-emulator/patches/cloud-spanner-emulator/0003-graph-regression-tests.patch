@@ -1,0 +1,135 @@
+CloudBurrow patch 3 of 3 to the Cloud Spanner emulator v1.5.58
+(GoogleCloudPlatform/cloud-spanner-emulator, commit
+a081a7e71aba5f4d05fc8c6b21ef1a269dcbac28, Apache-2.0).
+
+Upstream file: backend/query/query_engine_test.cc.
+
+Why (cloudburrow/cloudburrow#2029): regression tests for the patches above,
+on the emulator's own test graph (nodes 1, 2, 4; edges 1->2, 2->4, 4->1,
+1->4): a GQL RETURN ... ORDER BY (ascending, descending, two keys) comes back
+in order, not with its first two rows swapped; PROPERTY_EXISTS on a node and
+an edge; COUNT of a group variable; ANY CHEAPEST with an edge COST.
+
+diff --git a/backend/query/query_engine_test.cc b/backend/query/query_engine_test.cc
+index fb2761d..019282c 100644
+--- a/backend/query/query_engine_test.cc
++++ b/backend/query/query_engine_test.cc
+@@ -2805,6 +2805,118 @@ TEST_P(QueryEngineTest, TestPropertyGraphWithDistinct) {
+                                                 ElementsAre(Int64(4)))));
+ }
+ 
++// CloudBurrow (#2029): a GQL RETURN ... ORDER BY keeps its order.
++TEST_P(QueryEngineTest, GqlReturnOrderByKeepsItsOrder) {
++  if (GetParam() == database_api::DatabaseDialect::POSTGRESQL) {
++    GTEST_SKIP();
++  }
++  Query query{"GRAPH test_graph MATCH (a) RETURN a.id AS node_id ORDER BY node_id"};
++  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
++      QueryResult result,
++      query_engine().ExecuteSql(query, QueryContext{property_graph_schema(),
++                                                    property_graph_reader()}));
++
++  ASSERT_NE(result.rows, nullptr);
++  EXPECT_THAT(GetAllColumnValues(std::move(result.rows)),
++              IsOkAndHolds(ElementsAre(ElementsAre(Int64(1)), ElementsAre(Int64(2)),
++                                       ElementsAre(Int64(4)))));
++}
++
++TEST_P(QueryEngineTest, GqlReturnOrderByDescKeepsItsOrder) {
++  if (GetParam() == database_api::DatabaseDialect::POSTGRESQL) {
++    GTEST_SKIP();
++  }
++  Query query{"GRAPH test_graph MATCH (a) RETURN a.id AS node_id ORDER BY node_id DESC"};
++  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
++      QueryResult result,
++      query_engine().ExecuteSql(query, QueryContext{property_graph_schema(),
++                                                    property_graph_reader()}));
++
++  ASSERT_NE(result.rows, nullptr);
++  EXPECT_THAT(GetAllColumnValues(std::move(result.rows)),
++              IsOkAndHolds(ElementsAre(ElementsAre(Int64(4)), ElementsAre(Int64(2)),
++                                       ElementsAre(Int64(1)))));
++}
++
++TEST_P(QueryEngineTest, GqlOrderByThenReturnKeepsItsOrder) {
++  if (GetParam() == database_api::DatabaseDialect::POSTGRESQL) {
++    GTEST_SKIP();
++  }
++  Query query{"GRAPH test_graph MATCH (a)-[e]->(b) "
++            "RETURN a.id AS a_id, b.id AS b_id ORDER BY a_id DESC, b_id"};
++  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
++      QueryResult result,
++      query_engine().ExecuteSql(query, QueryContext{property_graph_schema(),
++                                                    property_graph_reader()}));
++
++  ASSERT_NE(result.rows, nullptr);
++  EXPECT_THAT(GetAllColumnValues(std::move(result.rows)),
++              IsOkAndHolds(ElementsAre(ElementsAre(Int64(4), Int64(1)),
++                                       ElementsAre(Int64(2), Int64(4)),
++                                       ElementsAre(Int64(1), Int64(2)),
++                                       ElementsAre(Int64(1), Int64(4)))));
++}
++
++// CloudBurrow (#2029): PROPERTY_EXISTS, as Spanner documents it.
++TEST_P(QueryEngineTest, GqlPropertyExists) {
++  if (GetParam() == database_api::DatabaseDialect::POSTGRESQL) {
++    GTEST_SKIP();
++  }
++  Query query{"GRAPH test_graph MATCH (a)-[e]->(b) WHERE a.id = 1 "
++            "RETURN PROPERTY_EXISTS(a, id) AS on_node, "
++            "PROPERTY_EXISTS(e, id) AS on_edge, b.id AS b_id ORDER BY b_id"};
++  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
++      QueryResult result,
++      query_engine().ExecuteSql(query, QueryContext{property_graph_schema(),
++                                                    property_graph_reader()}));
++
++  ASSERT_NE(result.rows, nullptr);
++  EXPECT_THAT(GetAllColumnValues(std::move(result.rows)),
++              IsOkAndHolds(ElementsAre(
++                  ElementsAre(Bool(true), Bool(false), Int64(2)),
++                  ElementsAre(Bool(true), Bool(false), Int64(4)))));
++}
++
++// CloudBurrow (#2029): COUNT of a group variable (horizontal aggregation).
++TEST_P(QueryEngineTest, GqlCountOfGroupVariable) {
++  if (GetParam() == database_api::DatabaseDialect::POSTGRESQL) {
++    GTEST_SKIP();
++  }
++  Query query{"GRAPH test_graph MATCH (a {id: 1})-[e]->{1,2}(b) "
++            "LET hops = COUNT(e) RETURN b.id AS b_id, hops ORDER BY b_id, hops"};
++  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
++      QueryResult result,
++      query_engine().ExecuteSql(query, QueryContext{property_graph_schema(),
++                                                    property_graph_reader()}));
++
++  ASSERT_NE(result.rows, nullptr);
++  EXPECT_THAT(GetAllColumnValues(std::move(result.rows)),
++              IsOkAndHolds(ElementsAre(ElementsAre(Int64(1), Int64(2)),
++                                       ElementsAre(Int64(2), Int64(1)),
++                                       ElementsAre(Int64(4), Int64(1)),
++                                       ElementsAre(Int64(4), Int64(2)))));
++}
++
++// CloudBurrow (#2029): ANY CHEAPEST with an edge COST.
++TEST_P(QueryEngineTest, GqlAnyCheapest) {
++  if (GetParam() == database_api::DatabaseDialect::POSTGRESQL) {
++    GTEST_SKIP();
++  }
++  Query query{"GRAPH test_graph MATCH ANY CHEAPEST "
++            "(a {id: 1})-[e COST e.to_id]->{1,2}(b) "
++            "LET cost = SUM(e.to_id) RETURN b.id AS b_id, cost ORDER BY b_id"};
++  GOOGLESQL_ASSERT_OK_AND_ASSIGN(
++      QueryResult result,
++      query_engine().ExecuteSql(query, QueryContext{property_graph_schema(),
++                                                    property_graph_reader()}));
++
++  ASSERT_NE(result.rows, nullptr);
++  EXPECT_THAT(GetAllColumnValues(std::move(result.rows)),
++              IsOkAndHolds(ElementsAre(ElementsAre(Int64(1), Int64(5)),
++                                       ElementsAre(Int64(2), Int64(2)),
++                                       ElementsAre(Int64(4), Int64(4)))));
++}
++
+ TEST_P(QueryEngineTest, TestPropertyGraphBasicQueryWithDynamicLabel) {
+   // Property graphs are not supported in PostgreSQL.
+   if (GetParam() == database_api::DatabaseDialect::POSTGRESQL) {

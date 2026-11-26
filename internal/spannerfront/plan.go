@@ -36,6 +36,7 @@ package spannerfront
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"cloud.google.com/go/spanner/apiv1/spannerpb"
@@ -540,7 +541,10 @@ func (b *planBuilder) planQuery(q *sqlQuery, outer *planScope, cc *countCtx) (*f
 func (b *planBuilder) atMost(count string, q *sqlQuery) string {
 	n := "(" + b.text(q.limit) + ")"
 	if q.offset != nil {
-		n += " + (" + b.text(q.offset) + ")"
+		// LIMIT plus OFFSET, held to INT64's largest: a GQL OFFSET with no
+		// LIMIT is that limit, and the sum would overflow
+		off := "(" + b.text(q.offset) + ")"
+		n = "(CASE WHEN " + off + " > 9223372036854775807 - " + n + " THEN 9223372036854775807 ELSE " + n + " + " + off + " END)"
 	}
 	return "SELECT CASE WHEN (" + count + ") < " + n + " THEN (" + count + ") ELSE " + n + " END"
 }
@@ -728,7 +732,7 @@ func (b *planBuilder) planSelect(sel *sqlSelect, outer *planScope, cc *countCtx)
 	}
 	// BERNOULLI keeps a different share of the rows each run, so when a
 	// sample is all the query returns, its rows are the rows returned
-	if sel == b.topSel && sel.from.kind == fromTable && sel.from.sample != nil && sel.from.sample.method == "BERNOULLI" &&
+	if sel == b.topSel && (sel.from.kind == fromTable || sel.from.kind == fromSub) && sel.from.sample != nil && sel.from.sample.method == "BERNOULLI" &&
 		sel.where == nil && len(sel.groupBy) == 0 && sel.having == nil && !sel.distinct && !b.aggregates(sel) {
 		f.op.rows = rowsReturned
 	}
@@ -870,7 +874,22 @@ func (b *planBuilder) planOutput(sel *sqlSelect, f *frag, scope *planScope, cc *
 		if len(perGroup) > 0 {
 			var group []string
 			for _, g := range sel.groupBy {
-				group = append(group, b.text(g))
+				// the count reads no select list: a GROUP BY of a select
+				// list's alias or ordinal is its expression
+				ge := g
+				if g.kind == exCol && len(g.path) == 1 {
+					for _, it := range sel.list {
+						if it.alias != "" && strings.EqualFold(it.alias, g.path[0]) {
+							ge = it.e
+						}
+					}
+				}
+				if g.kind == exLit {
+					if n, err := strconv.Atoi(b.text(g)); err == nil && n >= 1 && n <= len(sel.list) {
+						ge = sel.list[n-1].e
+					}
+				}
+				group = append(group, b.text(ge))
 			}
 			having := ""
 			if sel.having != nil {
@@ -1486,7 +1505,12 @@ func (b *planBuilder) planLeaf(f *sqlFrom, scope *planScope, conds *[]*cond, nee
 		return nil, err
 	}
 	o := b.gather(sub)
-	return &frag{op: o, items: []*planItem{it}, from: b.itemSQL(f)}, nil
+	out := &frag{op: o, items: []*planItem{it}, from: b.itemSQL(f)}
+	if f.sample != nil {
+		// TABLESAMPLE on a subquery samples its rows as a table's
+		b.sample(out, it, cc, bound)
+	}
+	return out, nil
 }
 
 // access reads a table: from the table or an index, seeking on its key.
@@ -2012,6 +2036,9 @@ func planNodes(root *planOp) ([]*spannerpb.PlanNode, map[*planOp]*spannerpb.Plan
 // on the edge table's source key. It runs until the upper bound; a lower
 // bound above 1 is a Filter on the paths' length.
 func (b *planBuilder) recursiveUnion(f *sqlFrom, it *planItem, q *graphQuant, cc *countCtx) *frag {
+	if q.seg != nil {
+		return b.segRecursiveUnion(f, it, q, cc)
+	}
 	e := q.table
 	count := func(lo, hi int) string {
 		if lo > hi {

@@ -225,7 +225,7 @@ type planStats struct {
 func (s *Instances) measure(ctx context.Context, p *builtPlan, req *spannerpb.ExecuteSqlRequest, tx *spannerpb.TransactionSelector, returned int64) (*planStats, error) {
 	st := &planStats{rows: map[*planOp]int64{}, execs: map[*planOp]int64{}, cum: map[*planOp]time.Duration{}}
 	count := func(sql string) (int64, time.Duration, error) {
-		rows, d, err := s.engineSQL(ctx, req.GetSession(), tx, sql, req.GetParams(), req.GetParamTypes())
+		rows, d, err := s.engineSQL(ctx, req.GetSession(), tx, hoistWith(sql), req.GetParams(), req.GetParamTypes())
 		if err != nil {
 			return 0, 0, fmt.Errorf("counting an operator's rows (%s): %w", sql, err)
 		}

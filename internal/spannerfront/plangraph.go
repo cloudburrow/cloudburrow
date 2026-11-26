@@ -73,18 +73,74 @@ func (e *graphElement) hasProperty(prop string) bool {
 	return false
 }
 
-// column is the column a property reads.
-func (e *graphElement) column(prop string) (string, error) {
+// column is the SQL of a property of the element table's row alias: its
+// column, or the expression the graph defines it by (PROPERTIES (expr AS
+// name)), its columns read from alias.
+func (e *graphElement) column(prop, alias string) (string, error) {
 	for _, p := range e.PropertyDefs {
 		if strings.EqualFold(p.Name, prop) {
 			c := strings.Trim(p.SQL, "`")
-			if !isPlainName(c) {
-				return "", unsupportedSQL{fmt.Sprintf("property %s, which element table %s defines by the expression %s", prop, e.Name, p.SQL)}
+			if isPlainName(c) {
+				return alias + "." + c, nil
 			}
-			return c, nil
+			return qualifyColumns(p.SQL, alias)
 		}
 	}
 	return "", unsupportedSQL{fmt.Sprintf("property %s, which element table %s does not have", prop, e.Name)}
+}
+
+// sqlWords are the reserved words and type names an expression has that
+// are not column names.
+var sqlWords = map[string]bool{}
+
+func init() {
+	for _, w := range strings.Fields(`ALL AND ANY ARRAY AS ASC AT BETWEEN BY CASE CAST COLLATE CONTAINS CROSS CURRENT DEFAULT DESC DISTINCT
+		ELSE END ENUM ESCAPE EXCEPT EXCLUDE EXISTS EXTRACT FALSE FOLLOWING FOR FROM FULL GROUP GROUPING HASH HAVING IF IGNORE IN INNER
+		INTERSECT INTERVAL INTO IS JOIN LATERAL LEFT LIKE LIMIT LOOKUP MERGE NATURAL NEW NO NOT NULL NULLS OF ON OR ORDER OUTER OVER
+		PARTITION PRECEDING PROTO RANGE RECURSIVE RESPECT RIGHT ROLLUP ROWS SELECT SET SOME STRUCT TABLESAMPLE THEN TO TREAT TRUE
+		UNBOUNDED UNION UNNEST USING WHEN WHERE WINDOW WITH WITHIN SAFE_CAST
+		INT64 FLOAT64 FLOAT32 NUMERIC BOOL STRING BYTES DATE TIMESTAMP JSON INTERVAL TOKENLIST
+		MICROSECOND MILLISECOND SECOND MINUTE HOUR DAY DAYOFWEEK DAYOFYEAR WEEK ISOWEEK MONTH QUARTER YEAR ISOYEAR`) {
+		sqlWords[w] = true
+	}
+}
+
+// qualifyColumns reads an expression's column names from alias: each
+// name that is not a function, a field (after a dot), a reserved word or
+// a type.
+func qualifyColumns(expr, alias string) (string, error) {
+	toks, err := lexSQL(expr, false)
+	if err != nil {
+		return "", err
+	}
+	var out strings.Builder
+	last := 0
+	for i, t := range toks {
+		if t.kind != tkIdent && t.kind != tkQIdent {
+			continue
+		}
+		if i > 0 && toks[i-1].kind == tkPunct && toks[i-1].text == "." {
+			continue
+		}
+		// a function, or a namespaced one (NET.IPV4_TO_INT64(...)); a
+		// column's fields (s.f) are read from the column
+		j := i + 1
+		for j+1 < len(toks) && toks[j].kind == tkPunct && toks[j].text == "." && toks[j+1].kind == tkIdent {
+			j += 2
+		}
+		if t.kind == tkIdent && j < len(toks) && toks[j].kind == tkPunct && toks[j].text == "(" {
+			continue
+		}
+		if t.kind == tkIdent && sqlWords[strings.ToUpper(t.text)] {
+			continue
+		}
+		out.WriteString(expr[last:t.start])
+		out.WriteString(alias + ".")
+		out.WriteString(expr[t.start:t.end])
+		last = t.end
+	}
+	out.WriteString(expr[last:])
+	return "(" + out.String() + ")", nil
 }
 
 func isPlainName(s string) bool {
@@ -135,8 +191,17 @@ type graphQuant struct {
 	arrs     []string // properties collected as arrays
 	withLen  bool     // the paths' lengths are read (cb_len)
 	withIDs  bool     // the paths' edges' keys are read (cb_ids)
+	cost     string   // the edge pattern's COST, on cb_hop: each path's sum is cb_cost
 	trail    bool     // no edge twice (TRAIL)
 	acyc     bool     // no node twice (ACYCLIC)
+	// withPath: each path's elements' identities are read: its edges'
+	// (cb_pe), and the nodes its hops reach (cb_pn) and leave (cb_ps)
+	withPath bool
+	dnode    *graphElement // the node table its edges reach
+	// seg is a quantified path pattern of several edges, or one with a
+	// path mode or an edge either way: table is then its subpath's rows
+	// (plangraph6.go)
+	seg *quantSeg
 }
 
 // hopsSQL is the SQL for the paths of k edges.
@@ -160,7 +225,16 @@ func (q *graphQuant) hopsSQL(k int) string {
 		if q.withIDs {
 			cols = append(cols, "ARRAY<STRING>[] AS cb_ids")
 		}
+		if q.cost != "" {
+			cols = append(cols, "0 AS cb_cost")
+		}
+		if q.withPath {
+			cols = append(cols, emptyIDs+" AS cb_pe", emptyIDs+" AS cb_pn", emptyIDs+" AS cb_ps", "TRUE AS cb_ped", "TRUE AS cb_pnd", "TRUE AS cb_psd")
+		}
 		return "SELECT " + strings.Join(cols, ", ") + " FROM " + n.BaseTableName + " AS cb_e0"
+	}
+	if q.seg != nil {
+		return q.segHopsSQL(k)
 	}
 	for _, c := range e.Source.EdgeCols {
 		cols = append(cols, "cb_e1."+c+" AS cb_src_"+c)
@@ -172,10 +246,10 @@ func (q *graphQuant) hopsSQL(k int) string {
 		cols = append(cols, fmt.Sprintf("%d AS cb_len", k))
 	}
 	for _, p := range q.arrs {
-		col, _ := e.column(p)
 		var vals []string
 		for i := 1; i <= k; i++ {
-			vals = append(vals, fmt.Sprintf("cb_e%d.%s", i, col))
+			v, _ := e.column(p, fmt.Sprintf("cb_e%d", i))
+			vals = append(vals, v)
 		}
 		cols = append(cols, "["+strings.Join(vals, ", ")+"] AS cb_arr_"+p)
 	}
@@ -189,6 +263,29 @@ func (q *graphQuant) hopsSQL(k int) string {
 			ids = append(ids, "FORMAT('%T', STRUCT("+strings.Join(ks, ", ")+"))")
 		}
 		cols = append(cols, "["+strings.Join(ids, ", ")+"] AS cb_ids")
+	}
+	if q.cost != "" {
+		var cs []string
+		for i := 1; i <= k; i++ {
+			cs = append(cs, strings.ReplaceAll(q.cost, "cb_hop.", fmt.Sprintf("cb_e%d.", i)))
+		}
+		cols = append(cols, "("+strings.Join(cs, " + ")+") AS cb_cost")
+	}
+	if q.withPath {
+		var pe, pn, ps []string
+		for i := 1; i <= k; i++ {
+			a := fmt.Sprintf("cb_e%d.", i)
+			col := func(c string) string { return a + c }
+			var ks []string
+			for _, c := range e.KeyColumns {
+				ks = append(ks, a+c)
+			}
+			pe = append(pe, idSQL(e.Name, ks))
+			pn = append(pn, idSQL(e.Dest.Node, endpointKeyVals(q.dnode, e.Dest, col)))
+			ps = append(ps, idSQL(e.Source.Node, endpointKeyVals(q.node, e.Source, col)))
+		}
+		cols = append(cols, "["+strings.Join(pe, ", ")+"] AS cb_pe", "["+strings.Join(pn, ", ")+"] AS cb_pn", "["+strings.Join(ps, ", ")+"] AS cb_ps",
+			pairwiseDistinct(pe)+" AS cb_ped", pairwiseDistinct(pn)+" AS cb_pnd", pairwiseDistinct(ps)+" AS cb_psd")
 	}
 	for i := 1; i <= k; i++ {
 		froms = append(froms, fmt.Sprintf("%s AS cb_e%d", e.BaseTableName, i))
@@ -249,7 +346,13 @@ func (q *graphQuant) pathsSQL(lo, hi int) string {
 	for k := lo; k <= hi; k++ {
 		parts = append(parts, q.hopsSQL(k))
 	}
-	return strings.Join(parts, " UNION ALL ")
+	s := strings.Join(parts, " UNION ALL ")
+	if q.seg != nil {
+		// the subpath's rows once, for every repetition to read: Spanner
+		// counts a WITH clause's joins once (its limit is 20 a query)
+		s = q.segWith() + s
+	}
+	return s
 }
 
 // graphToSQL rewrites a graph query, or each GRAPH_TABLE of a SQL query,

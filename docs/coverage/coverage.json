@@ -13434,7 +13434,9 @@
           "test/compat/gcloudspannerplans2029_test.go:26 TestGcloudSpannerExecuteSQLQueryModes",
           "test/compat/spannercmek1950_test.go:63 TestSpannerCMEK",
           "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback",
-          "test/compat/spannergraph2029c_test.go:142 TestSpannerGraphQueryPlansOfEveryStatement",
+          "test/compat/spannergraph2029c_test.go:140 TestSpannerGraphQueryPlansOfEveryStatement",
+          "test/compat/spannergraph2029d_test.go:27 TestSpannerGraphOnThePatchedEmulator",
+          "test/compat/spannergraph2029e_test.go:31 TestSpannerGraphQueryPlansOfEveryPattern",
           "test/compat/spannerplans2029_test.go:230 TestSpannerQueryPlans",
           "test/compat/spannerplans2029b_test.go:182 TestSpannerQueryPlansForEveryShape",
           "test/compat/spannerplans2029b_test.go:323 TestSpannerGraphQueryPlans",
@@ -13448,7 +13450,9 @@
         "tests": [
           "test/compat/iamenforcementround9_1879_test.go:161 TestIAMEnforcementSpanner",
           "test/compat/optional_test.go:266 TestSpannerSchemaAndQuery",
-          "test/compat/spannergraph2029c_test.go:142 TestSpannerGraphQueryPlansOfEveryStatement",
+          "test/compat/spannergraph2029c_test.go:140 TestSpannerGraphQueryPlansOfEveryStatement",
+          "test/compat/spannergraph2029d_test.go:27 TestSpannerGraphOnThePatchedEmulator",
+          "test/compat/spannergraph2029e_test.go:31 TestSpannerGraphQueryPlansOfEveryPattern",
           "test/compat/spannerplans2029_test.go:230 TestSpannerQueryPlans",
           "test/compat/spannerplans2029b_test.go:182 TestSpannerQueryPlansForEveryShape",
           "test/compat/spannerplans2029b_test.go:323 TestSpannerGraphQueryPlans",
@@ -17775,6 +17779,7 @@
         "method": "compute.instances.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/computeconcurrentboot2250_test.go:34 TestComputeConcurrentVMBootsAnswerSSH2250",
           "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
           "test/compat/computeimagevdisk_test.go:40 TestComputeImageImportFromAVirtualDiskThroughTheGoClient",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
@@ -17805,6 +17810,7 @@
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/computea1_test.go:411 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/computeconcurrentboot2250_test.go:34 TestComputeConcurrentVMBootsAnswerSSH2250",
           "test/compat/computevmnet_test.go:33 TestComputeVMNetworkingThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient",
           "test/compat/computevmstools_test.go:178 TestTerraformComputeInstance",
@@ -17837,6 +17843,7 @@
         "method": "compute.instances.getSerialPortOutput",
         "status": "Verified",
         "tests": [
+          "test/compat/computeconcurrentboot2250_test.go:34 TestComputeConcurrentVMBootsAnswerSSH2250",
           "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
           "test/compat/computeimagevdisk_test.go:40 TestComputeImageImportFromAVirtualDiskThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
@@ -17855,6 +17862,7 @@
         "tests": [
           "test/compat/backupdrcompute_test.go:57 TestBackupDRComputeVMAndDiskRoundTrip",
           "test/compat/computea1_test.go:411 TestComputeIPv6ThroughTheGoClient",
+          "test/compat/computeconcurrentboot2250_test.go:34 TestComputeConcurrentVMBootsAnswerSSH2250",
           "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
           "test/compat/computeimageimport_test.go:42 TestComputeImageImportFromCloudStorageThroughTheGoClient",
           "test/compat/computeimagevdisk_test.go:40 TestComputeImageImportFromAVirtualDiskThroughTheGoClient",
@@ -19253,7 +19261,7 @@
         "method": "compute.routers.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
+          "test/compat/cloudnat2140_test.go:104 TestCloudNATTranslatesVMTraffic2140",
           "test/compat/cloudnateim2140_test.go:35 TestCloudNATEndpointIndependentMappingAndDynamicPorts2140",
           "test/compat/routerbgp2140_test.go:37 TestCloudRouterBGPWithARouterApplianceVM2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
@@ -19289,7 +19297,7 @@
         "method": "compute.routers.getNatIpInfo",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
+          "test/compat/cloudnat2140_test.go:104 TestCloudNATTranslatesVMTraffic2140",
           "test/compat/routers2140_test.go:34 TestCloudRouterAndNATThroughTheGoClient"
         ]
       },
@@ -19297,7 +19305,7 @@
         "method": "compute.routers.getNatMappingInfo",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
+          "test/compat/cloudnat2140_test.go:104 TestCloudNATTranslatesVMTraffic2140",
           "test/compat/cloudnateim2140_test.go:35 TestCloudNATEndpointIndependentMappingAndDynamicPorts2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
           "test/compat/routers2140_test.go:34 TestCloudRouterAndNATThroughTheGoClient"
@@ -19323,7 +19331,7 @@
         "method": "compute.routers.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
+          "test/compat/cloudnat2140_test.go:104 TestCloudNATTranslatesVMTraffic2140",
           "test/compat/cloudnateim2140_test.go:35 TestCloudNATEndpointIndependentMappingAndDynamicPorts2140",
           "test/compat/routerbgp2140_test.go:37 TestCloudRouterBGPWithARouterApplianceVM2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
