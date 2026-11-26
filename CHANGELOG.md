@@ -72,6 +72,9 @@ section and add its link at the bottom.
 
 ### Fixed
 
+- A VM's internal load balancer and Private Service Connect addresses stay reachable after the
+  guest's VPC agent restarts or one of its relays exits; the agent now restarts relays that are no
+  longer running.
 - A GKE node pool upgrade or rollback no longer fails on a new node with a truncated image
   archive: the images carried to it are exported and imported directly, checked as a whole tar
   and compared by checksum before import.
