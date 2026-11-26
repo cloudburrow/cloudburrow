@@ -74,6 +74,11 @@ section and add its link at the bottom.
 
 - Official Spanner, Bigtable and Cloud Storage gRPC clients made by CloudBurrow no longer export
   their built-in metrics to Google; `cloudburrow env` sets `SPANNER_DISABLE_BUILTIN_METRICS=true`.
+- A Vertex AI model whose container image is a short Docker Hub name, by tag or by digest
+  (`python@sha256:…`), now deploys to endpoints and runs batch predictions; it was looked for
+  as a locally built image and never started.
+- A Compute Engine VM answers SSH as soon as it boots, even while its guest agent waits for the
+  metadata server, so a managed instance group no longer gives up on a VM that booted slowly (#2250).
 
 ## [0.7.0] - 2026-11-25
 
