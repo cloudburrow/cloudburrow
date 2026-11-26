@@ -41,13 +41,14 @@ func TestCloudNATEndpointIndependentMappingAndDynamicPorts2140(t *testing.T) {
 	opts := computeOpts(t, h)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
 	t.Cleanup(cancel)
-	tg := startNATTarget(ctx, t, cluster)
 	const region, zone = "us-east4", "us-east4-a"
 	p := h.Project()
 	v := newVPCVMs(ctx, t, h, zone)
 	sfx := strconv.Itoa(int(time.Now().UnixNano() % 1e6))
 	vm := "ct-eim-" + sfx
 	v.make(map[string]*computepb.NetworkInterface{vm: {Network: proto.String("global/networks/default")}})
+	// The target after the VM, whose image it runs (#2245).
+	tg := startNATTarget(ctx, t, cluster)
 	routers, err := computeapi.NewRoutersRESTClient(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
