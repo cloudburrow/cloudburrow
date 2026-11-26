@@ -22,7 +22,8 @@
 #       into <log>; it must pass. The instance is stopped and deleted after.
 #       A failed run keeps, in <log>'s directory under
 #       walkthrough-artifacts/: byocfakes's log, the instance's up log and
-#       its state directory's logs, and the page's network log, HTML and
+#       its state directory's logs, its cluster's pods, Cloud Run services
+#       and events, and the page's network log, HTML and
 #       screenshot (CLOUDBURROW_TEST_BYOC_ARTIFACTS).
 #       The browser suite's variables (CLOUDBURROW_TEST_CHROME and the
 #       rest) come from the caller's environment.
@@ -138,6 +139,15 @@ case "$cmd" in
       cp "$dir/fakes.log" "$dir/walk-up.log" "$artifacts/" 2>/dev/null || true
       find "$wstate/$name" -maxdepth 2 -name '*.log' -exec cp {} "$artifacts/" \; 2>/dev/null || true
       cp "$wstate/$name/move.json" "$artifacts/" 2>/dev/null || true
+      # The cluster as the failure left it, wherever it runs now (the
+      # instance's kubeconfig reaches a VM's through up's forward).
+      if [ -s "$wstate/$name/kubeconfig" ] && command -v kubectl >/dev/null; then
+        for what in "get pods -A -o wide" "get ksvc,revisions,configurations -A" "get events -A --sort-by=.lastTimestamp"; do
+          echo "== kubectl $what"
+          # shellcheck disable=SC2086 # $what is the command's words
+          timeout 60 kubectl --kubeconfig "$wstate/$name/kubeconfig" $what 2>&1 || true
+        done > "$artifacts/cluster.txt" 2>&1
+      fi
       echo "the walk-through's logs and the page's network log: $artifacts" >&2
     fi
     CLOUDBURROW_BYOC_FAKES=$fakes "$cli" stop "${WALK[@]}" >> "$dir/walk-up.log" 2>&1 || true

@@ -392,7 +392,12 @@ func TestByocFirstRunWalkThrough(t *testing.T) {
 	p.setField("#view #f-name", service)
 	p.clickText("#view .is-radio label", "Allow public access")
 	p.clickText(`#view button[type="submit"]`, "Create")
-	p.waitForWithin(`location.pathname === "/run"`, 6*time.Minute)
+	p.waitForWithin(`location.pathname === "/run" || [...document.querySelectorAll("#view .form-error")].some((e) => !e.hidden && e.textContent)`, 6*time.Minute)
+	var runErr string
+	p.eval(`location.pathname === "/run" ? "" : [...document.querySelectorAll("#view .form-error")].map((e) => e.textContent).join("; ")`, &runErr)
+	if runErr != "" {
+		t.Fatalf("Create the Cloud Run service %s on the AWS VM: %s", service, runErr)
+	}
 	p.waitForWithin(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, service), time.Minute)
 	if !w.revisionOn(w.standA) {
 		t.Fatal("the Cloud Run revision's container is not on the AWS VM's node")
@@ -524,6 +529,14 @@ func TestByocFirstRunWalkThrough(t *testing.T) {
 	w.awaitMove("local", "capacity-instance-move-steps")
 	if !w.nodeOn("") || w.nodeOn(w.standB) {
 		t.Fatal("after the move back the node is not on this machine's Docker alone")
+	}
+
+	// The service the walk-through deployed goes too, as the VMs do below:
+	// an instance the walk-through runs on again (-count) would otherwise
+	// carry, and restart after each move, every earlier run's service, and
+	// a fifth run's Create outlasted the console's 70 s on them (#2259).
+	if code, body := consoleDo(t, http.MethodDelete, "/api/resources/run?project="+project+"&name="+service, ""); code != http.StatusOK {
+		t.Errorf("delete the Cloud Run service %s: %d %s", service, code, body)
 	}
 
 	// 8. Delete both VMs: nothing tagged is left in either cloud.
