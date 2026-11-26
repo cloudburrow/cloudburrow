@@ -251,6 +251,18 @@ func TestIssuanceConfigsAndTrustConfigs(t *testing.T) {
 	if tc.GetEtag() == "" {
 		t.Error("trust config etag")
 	}
+	// No update_mask, as hashicorp/google's trust config sends (#1578):
+	// the fields the request populates change, the rest stay.
+	op, err = s.UpdateTrustConfig(ctx, &cmpb.UpdateTrustConfigRequest{TrustConfig: &cmpb.TrustConfig{Name: tc.GetName(), Description: "no mask",
+		Labels: map[string]string{"env": "prod"}}})
+	wait(t, op, err)
+	if got, _ := s.GetTrustConfig(ctx, &cmpb.GetTrustConfigRequest{Name: tc.GetName()}); got.GetDescription() != "no mask" || got.GetLabels()["env"] != "prod" || len(got.GetTrustStores()) != 1 {
+		t.Errorf("an update without a mask: %v", got)
+	}
+	if _, err := s.UpdateTrustConfig(ctx, &cmpb.UpdateTrustConfigRequest{TrustConfig: &cmpb.TrustConfig{Name: tc.GetName()}}); code(err) != codes.InvalidArgument {
+		t.Errorf("an update that changes nothing, without a mask: %v", err)
+	}
+	tc, _ = s.GetTrustConfig(ctx, &cmpb.GetTrustConfigRequest{Name: tc.GetName()})
 	if _, err := s.DeleteTrustConfig(ctx, &cmpb.DeleteTrustConfigRequest{Name: tc.GetName(), Etag: "stale"}); code(err) != codes.Aborted {
 		t.Errorf("stale etag: %v", err)
 	}
