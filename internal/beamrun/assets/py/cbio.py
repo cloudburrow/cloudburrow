@@ -336,6 +336,16 @@ def rewrite(pipeline, env_id, options=None):
             _drop(pipeline, s, boundary)
         del t.subtransforms[:]
         t.environment_id = ""
+        # The replacement's PCollections are named under the read's or
+        # write's own name: unique in the pipeline (two Pub/Sub writes'
+        # replacements each have a "Write.None" output, which the job
+        # server's validator refuses as one name), and the same in every
+        # submission of the pipeline (n follows the order of a protobuf
+        # map), as a job restored from a snapshot maps its state to its
+        # operators by their names.
+        for pid, pc in mini.components.pcollections.items():
+            if prefix + pid in pipeline.components.pcollections:
+                pipeline.components.pcollections[prefix + pid].unique_name = t.unique_name + "/" + pc.unique_name
         for k in keep:
             nid = prefix + k
             added[k].unique_name = t.unique_name + "/" + mini.components.transforms[k].unique_name

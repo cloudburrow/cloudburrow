@@ -71,15 +71,25 @@ var ProvidedNames = []string{"Bulk_Compress_GCS_Files", "Bulk_Decompress_GCS_Fil
 // build is the template's classpath, and the launcher runs its main class
 // in the Java SDK image (LaunchProvidedFlex).
 var ProvidedFlexNames = map[string]string{
-	"BigQuery_to_Parquet":            "v2/googlecloud-to-googlecloud",
-	"Cloud_PubSub_to_GCS_Text_Flex":  "v2/googlecloud-to-googlecloud",
-	"Cloud_Spanner_to_BigQuery_Flex": "v2/googlecloud-to-googlecloud",
-	"File_Format_Conversion":         "v2/googlecloud-to-googlecloud",
-	"Jdbc_to_BigQuery_Flex":          "v2/jdbc-and-googlecloud",
-	"Jdbc_to_PubSub":                 "v2/jdbc-and-googlecloud",
-	"Pubsub_to_Jdbc":                 "v2/jdbc-and-googlecloud",
-	"GCS_Text_to_BigQuery_Flex":      "v2/googlecloud-to-googlecloud",
-	"PubSub_to_BigQuery_Flex":        "v2/googlecloud-to-googlecloud",
+	"BigQuery_to_Bigtable":             "v2/googlecloud-to-googlecloud",
+	"BigQuery_to_Parquet":              "v2/googlecloud-to-googlecloud",
+	"Cloud_PubSub_to_Avro_Flex":        "v2/googlecloud-to-googlecloud",
+	"PubSub_Avro_to_BigQuery":          "v2/googlecloud-to-googlecloud",
+	"PubSub_Proto_to_BigQuery_Flex":    "v2/googlecloud-to-googlecloud",
+	"Stream_GCS_Text_to_BigQuery_Flex": "v2/googlecloud-to-googlecloud",
+	"Cloud_PubSub_to_GCS_Text_Flex":    "v2/googlecloud-to-googlecloud",
+	"Cloud_Spanner_to_BigQuery_Flex":   "v2/googlecloud-to-googlecloud",
+	"File_Format_Conversion":           "v2/googlecloud-to-googlecloud",
+	"Jdbc_to_BigQuery_Flex":            "v2/jdbc-and-googlecloud",
+	"Jdbc_to_PubSub":                   "v2/jdbc-and-googlecloud",
+	"Pubsub_to_Jdbc":                   "v2/jdbc-and-googlecloud",
+	"GCS_Text_to_BigQuery_Flex":        "v2/googlecloud-to-googlecloud",
+	"PubSub_to_BigQuery_Flex":          "v2/googlecloud-to-googlecloud",
+	"MySQL_to_BigQuery":                "v2/mysql-to-googlecloud",
+	"PostgreSQL_to_BigQuery":           "v2/postgresql-to-googlecloud",
+	"Streaming_Data_Generator":         "v2/streaming-data-generator",
+	// Google's YAML template, a Python program (yaml.go).
+	YAMLTemplateName: "python",
 }
 
 // providedModule is the DataflowTemplates module name is built in: v1 for
@@ -157,6 +167,9 @@ type ProvidedTemplate struct {
 	Module    string
 	Flex      bool
 	Container string
+	// Language is a Flex Template's spec's sdkInfo language: JAVA, or
+	// YAML for Google's YAML template.
+	Language string
 	// Metadata is the template's metadata file's content.
 	Metadata []byte
 	// MainClass is the pipeline's main class; RuntimeParameters the
@@ -177,6 +190,11 @@ type Provided struct {
 	// so one module's build does not hold up another's templates.
 	mu      sync.Mutex
 	modules map[string]*providedModuleBuild
+
+	// yamlMu guards yamlBuilt, Yaml_Template's launcher as built by this
+	// process (BuildYAMLLauncher).
+	yamlMu    sync.Mutex
+	yamlBuilt *YAMLLauncher
 }
 
 // providedModuleBuild is one module's build, once read.
@@ -422,7 +440,7 @@ func readProvided(dir, module string) (map[string]ProvidedTemplate, error) {
 		t := ProvidedTemplate{Name: m.InternalName, Module: module, Flex: module != "v1", Metadata: b, MainClass: m.MainClass,
 			RuntimeParameters: m.RuntimeParameters, Streaming: m.Streaming}
 		if t.Flex {
-			t.Container = flexContainer(f, m.InternalName)
+			t.Container, t.Language = flexSpecOf(f, m.InternalName)
 		}
 		out[m.InternalName] = t
 	}
@@ -439,27 +457,35 @@ func readProvided(dir, module string) (map[string]ProvidedTemplate, error) {
 	return out, nil
 }
 
-// flexContainer is a Flex Template's launcher image's name: the last path
-// element of the image its spec file (beside metadata, NAME-spec-generated-
-// metadata.json) names, without its tag, or else its name as templateDash
-// spells it.
-func flexContainer(metadata, name string) string {
+// flexSpecOf is a Flex Template's launcher image's name and its SDK's
+// language, from its spec file (beside metadata, NAME-spec-generated-
+// metadata.json): the last path element of the image it names, without
+// its tag, or else its name as templateDash spells it; its sdkInfo's
+// language, or else JAVA.
+func flexSpecOf(metadata, name string) (container, language string) {
+	container, language = templateDash(name), "JAVA"
 	spec := strings.TrimSuffix(metadata, "-generated-metadata.json") + "-spec-generated-metadata.json"
 	if b, err := os.ReadFile(spec); err == nil {
 		var s struct {
-			Image string `json:"image"`
+			Image   string `json:"image"`
+			SDKInfo struct {
+				Language string `json:"language"`
+			} `json:"sdkInfo"`
 		}
-		if json.Unmarshal(b, &s) == nil && s.Image != "" {
+		if json.Unmarshal(b, &s) == nil {
 			img := s.Image[strings.LastIndex(s.Image, "/")+1:]
 			if i := strings.Index(img, ":"); i >= 0 {
 				img = img[:i]
 			}
 			if img != "" {
-				return img
+				container = img
+			}
+			if s.SDKInfo.Language != "" {
+				language = s.SDKInfo.Language
 			}
 		}
 	}
-	return templateDash(name)
+	return container, language
 }
 
 // Stage stages t at templatePath (gs://BUCKET/latest/NAME), its libraries

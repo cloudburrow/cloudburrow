@@ -48,6 +48,9 @@ type Run struct {
 	// workers run on, as the job names them ("" both: the default
 	// network).
 	Network, Subnetwork string
+	// Labels are the job's labels (a Google-provided template's job has
+	// goog-dataflow-provided-template-name).
+	Labels map[string]string
 }
 
 // Outcome is how a run ended.

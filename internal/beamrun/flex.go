@@ -64,6 +64,9 @@ type Flex struct {
 	// image, instead of reading an image from Artifact Registry.
 	Provided    *ProvidedTemplate
 	ProvidedDir string
+	// ProvidedImage is the launcher image of a provided template whose
+	// program is Python (Google's YAML template: BuildYAMLLauncher).
+	ProvidedImage string
 }
 
 // flexTimeout bounds a launcher's run: its program submits the job and,
@@ -215,7 +218,21 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 	var local string
 	var env map[string]string
 	var mounts, extra []string
-	if f.Provided != nil {
+	if f.Provided != nil && f.Provided.Language == "YAML" {
+		// Google's YAML template's launcher image (yaml.go): main.py, run
+		// as Google's Python launcher runs FLEX_TEMPLATE_PYTHON_PY_FILE.
+		// Its pip, and the SDK's stager's, read the packages the
+		// instance's Python index is seeded with (ProvidedPythonIndex),
+		// as a launcher with internet access reads PyPI.
+		if f.ProvidedImage == "" {
+			return fmt.Errorf("the Google-provided template %s has no launcher image", f.Provided.Name)
+		}
+		local = f.ProvidedImage
+		env = map[string]string{"FLEX_TEMPLATE_PYTHON_PY_FILE": "main.py", "PIP_INDEX_URL": ProvidedPythonIndex}
+		for _, l := range providedLabels(f.Provided.Name) {
+			extra = append(extra, "--labels="+l)
+		}
+	} else if f.Provided != nil {
 		// Google's Java launcher image, built by its templates-maven-plugin
 		// with Jib, puts the module's classes and libraries under /template
 		// and sets FLEX_TEMPLATE_JAVA_MAIN_CLASS; here they are the
@@ -333,6 +350,7 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 		run = append(run, f.pythonOptions()...)
 		run = append(run, pythonPackageOptions(env)...)
 		run = append(run, "--runner=DataflowRunner", "--dataflow_endpoint=http://"+relayName)
+		run = append(run, extra...)
 		// The requirements are installed in the launcher before its
 		// program runs, so that the program can import them.
 		script := `set -e; if [ -n "$FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE" ]; then ` +
@@ -350,6 +368,15 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 		return fmt.Errorf("the template's program %s exited: %v: %s", program, err, launcherCause(string(out)))
 	}
 	return nil
+}
+
+// providedLabels are the labels Dataflow gives a Google-provided Flex
+// Template's job, as key=value (the templates-maven-plugin's spec files'
+// defaultEnvironment.additionalUserLabels, with the release).
+func providedLabels(name string) []string {
+	return []string{"goog-dataflow-provided-template-name=" + strings.ToLower(name),
+		"goog-dataflow-provided-template-type=flex",
+		"goog-dataflow-provided-template-version=" + strings.ToLower(TemplatesRelease)}
 }
 
 // launcherCause is what a launcher's failed program said: a Java stack

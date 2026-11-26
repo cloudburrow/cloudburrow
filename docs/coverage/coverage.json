@@ -25334,7 +25334,10 @@
           "test/compat/dataflowjdbc2215_test.go:144 TestDataflowProvidedJdbcToBigQuery",
           "test/compat/dataflowparquet2215_test.go:38 TestDataflowProvidedBigQueryToParquet",
           "test/compat/dataflowprovidedflex2215_test.go:38 TestDataflowProvidedFlexTemplates",
-          "test/compat/dataflowprovidedflexmore2215_test.go:39 TestDataflowProvidedFlexTemplatesMore"
+          "test/compat/dataflowprovidedflexmore2215_test.go:39 TestDataflowProvidedFlexTemplatesMore",
+          "test/compat/dataflowprovidedflexv2255_test.go:49 TestDataflowProvidedFlexTemplatesV2",
+          "test/compat/dataflowprovidedmodules2255_test.go:87 TestDataflowProvidedFlexModules",
+          "test/compat/dataflowyaml2255_test.go:80 TestGcloudDataflowYAMLRun"
         ]
       },
       {

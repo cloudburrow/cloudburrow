@@ -133,8 +133,10 @@ func (s *dataflowService) Start(ctx context.Context) error {
 		opts.Storage = st
 		// Google-provided templates, built once per state directory.
 		launcher.provided = &beamrun.Provided{D: s.docker, Cache: s.cfg.StateDir}
-		opts.Provided = &providedTemplates{p: launcher.provided, storage: st,
-			project: func() string { return s.cfg.DefaultProject() }}
+		pt := &providedTemplates{p: launcher.provided, storage: st,
+			project: func() string { return s.cfg.DefaultProject() }, runAddr: func() string { return s.liveAddrs()["run"] }}
+		opts.Provided = pt
+		launcher.seedYAML = pt.seedYAML
 	}
 	opts.Launcher = launcher
 	if s.live != nil {
@@ -209,6 +211,9 @@ func (r *dataflowResetter) ResetProject(_ context.Context, project string) error
 type flexLauncher struct {
 	d        *beamrun.Docker
 	provided *beamrun.Provided
+	// seedYAML readies Google's YAML template's packages
+	// (providedTemplates.seedYAML).
+	seedYAML func(context.Context) error
 }
 
 func (l flexLauncher) Launch(ctx context.Context, f dataflow.FlexLaunch) error {
@@ -224,6 +229,18 @@ func (l flexLauncher) Launch(ctx context.Context, f dataflow.FlexLaunch) error {
 			return fmt.Errorf("the image %s is not a Google-provided Flex Template's", f.Image)
 		}
 		fl.Provided, fl.ProvidedDir = &tpl, dir
+		if tpl.Language == "YAML" {
+			if l.seedYAML != nil {
+				if err := l.seedYAML(ctx); err != nil {
+					return err
+				}
+			}
+			y, err := l.provided.BuildYAMLLauncher(ctx)
+			if err != nil {
+				return err
+			}
+			fl.ProvidedImage = y.Image
+		}
 	}
 	return l.d.LaunchFlex(ctx, fl)
 }
@@ -238,6 +255,11 @@ func (e dataflowEngine) Run(ctx context.Context, run dataflow.Run, r dataflow.Re
 		PipelineURL: run.PipelineURL, Options: run.Options, SDK: run.SDK, SDKVersion: run.SDKVersion,
 		Workers: run.MaxWorkers, Drain: run.Drain, Snapshot: run.SnapshotID,
 		Network: run.Network, Subnetwork: run.Subnetwork, Region: run.Location}
+	// A Google-provided template's Python workers install its
+	// requirements' dependencies from the packages seeded for it.
+	if run.Labels["goog-dataflow-provided-template-name"] != "" && run.SDK == "Python" {
+		job.PipIndex = beamrun.ProvidedPythonIndex
+	}
 	if m := pythonVersionRE.FindStringSubmatch(sdkName(run)); m != nil {
 		job.PythonVersion = m[1]
 	}

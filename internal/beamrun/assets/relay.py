@@ -13,7 +13,10 @@
 # to the relay's port for it. A LISTEN+tls@NAME=HOST:PORT route sends a
 # TLS connection whose client named NAME (its SNI) to HOST:PORT: a Google
 # API host the job's containers resolve to the relay, which its
-# certificate names, answered by the instance's service.
+# certificate names, answered by the instance's service. A route whose
+# target ends ";host" (LISTEN+tls@NAME=HOST:PORT;host) sends each HTTP/1.1
+# request with the Host it dials, HOST:PORT: the instance's services
+# answer only their own names (internal/hostguard), not a Google host's.
 import asyncio
 import socket
 import ssl
@@ -33,11 +36,12 @@ def listen_addr(listen):
 
 for arg in sys.argv[1:]:
     listen, target = arg.split("=", 1)
+    target, _, flag = target.partition(";")
     host, port = target.rsplit(":", 1)
     listen, _, sni = listen.partition("@")
     if listen.endswith("+tls"):
         by_name = TLS_ROUTES.setdefault(listen_addr(listen[:-len("+tls")]), {})
-        by_name[sni or None] = (socket.gethostbyname(host), int(port))
+        by_name[sni or None] = (socket.gethostbyname(host), int(port), flag == "host")
     else:
         ROUTES[listen_addr(listen)] = (socket.gethostbyname(host), int(port))
 
@@ -54,6 +58,83 @@ if TLS_ROUTES:
         return None
 
     TLS.sni_callback = sni_callback
+
+
+class HostRewriter:
+    """Rewrites the Host header of each HTTP/1.1 request of a stream to
+    host, passing bodies (Content-Length or chunked) through as they are;
+    after an Upgrade, or a head it cannot read, it passes everything."""
+
+    def __init__(self, host):
+        self.host = host.encode()
+        self.buf = b""
+        self.state = "head"
+        self.left = 0
+
+    def feed(self, data):
+        self.buf += data
+        out = []
+        while self.buf:
+            if self.state == "raw":
+                out.append(self.buf)
+                self.buf = b""
+            elif self.state == "head":
+                i = self.buf.find(b"\r\n\r\n")
+                if i < 0:
+                    if len(self.buf) > 1 << 16:
+                        self.state = "raw"
+                        continue
+                    break
+                head, self.buf = self.buf[:i], self.buf[i + 4:]
+                lines = head.split(b"\r\n")
+                length, chunked, upgrade = 0, False, False
+                for j in range(1, len(lines)):
+                    key, _, value = lines[j].partition(b":")
+                    key = key.strip().lower()
+                    if key == b"host":
+                        lines[j] = b"Host: " + self.host
+                    elif key == b"content-length":
+                        try:
+                            length = int(value.strip())
+                        except ValueError:
+                            upgrade = True
+                    elif key == b"transfer-encoding" and b"chunked" in value.lower():
+                        chunked = True
+                    elif key == b"upgrade":
+                        upgrade = True
+                out.append(b"\r\n".join(lines) + b"\r\n\r\n")
+                if upgrade:
+                    self.state = "raw"
+                elif chunked:
+                    self.state = "size"
+                elif length > 0:
+                    self.state, self.left = "body", length
+            elif self.state in ("body", "chunk"):
+                n = min(len(self.buf), self.left)
+                out.append(self.buf[:n])
+                self.buf, self.left = self.buf[n:], self.left - n
+                if self.left == 0:
+                    self.state = "head" if self.state == "body" else "size"
+            else:  # "size" or "trailer": one line at a time
+                i = self.buf.find(b"\r\n")
+                if i < 0:
+                    break
+                line, self.buf = self.buf[:i + 2], self.buf[i + 2:]
+                out.append(line)
+                if self.state == "trailer":
+                    if line == b"\r\n":
+                        self.state = "head"
+                    continue
+                try:
+                    size = int(line.split(b";")[0].strip(), 16)
+                except ValueError:
+                    self.state = "raw"
+                    continue
+                if size == 0:
+                    self.state = "trailer"
+                else:
+                    self.state, self.left = "chunk", size + 2
+        return b"".join(out)
 
 
 async def pipe(reader, writer, first=b""):
@@ -113,7 +194,10 @@ async def tls_relay(first, reader, writer, targets):
         if target is None:
             writer.close()
             return
-        r, w = await asyncio.open_connection(*target)
+        rewrite = None
+        if target[2] and tls.selected_alpn_protocol() != "h2":
+            rewrite = HostRewriter("%s:%d" % (target[0], target[1]))
+        r, w = await asyncio.open_connection(target[0], target[1])
     except Exception:
         SNI.pop(id(tls), None)
         writer.close()
@@ -132,6 +216,10 @@ async def tls_relay(first, reader, writer, targets):
                 if not data:
                     break
                 await flush()
+                if rewrite is not None:
+                    data = rewrite.feed(data)
+                    if not data:
+                        continue
                 w.write(data)
                 await w.drain()
         except Exception:
@@ -176,13 +264,64 @@ def handler(listen, target):
         if target is None:
             writer.close()
             return
+        opened = await dial(target, reader, first)
+        if opened is None:
+            writer.close()
+            return
+        r, w, to_up, to_down = opened
+        await asyncio.gather(pipe(reader, w, to_up), pipe(r, writer, to_down))
+    return handle
+
+
+# How long a connection's target is dialled again for while nothing has
+# gone either way on it.
+DIAL_FOR = 15.0
+
+
+async def dial(target, reader, first):
+    """Connects to target for a client that has sent first (b"" if
+    nothing yet): (upstream reader, writer, bytes for upstream, bytes for
+    the client), or None. A host target is often a tunnel
+    (internal/netfwd's kubectl port forward) that is briefly being
+    re-established: a connection it refuses, or closes before a byte has
+    gone either way, is dialled again, for DIAL_FOR seconds, as nothing of
+    the client's is lost; a server that speaks first (MySQL) is then
+    answered rather than the client cut off."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + DIAL_FOR
+    while True:
         try:
             r, w = await asyncio.open_connection(*target)
         except Exception:
-            writer.close()
-            return
-        await asyncio.gather(pipe(reader, w, first), pipe(r, writer))
-    return handle
+            r = None
+        if r is not None:
+            if first:
+                # The client spoke first: the rest is its exchange.
+                return r, w, first, b""
+            up = asyncio.ensure_future(r.read(65536))
+            down = asyncio.ensure_future(reader.read(65536))
+            await asyncio.wait({up, down}, return_when=asyncio.FIRST_COMPLETED)
+            if down.done():
+                # The client spoke (or left) first. A pending read
+                # cancelled takes nothing from the stream's buffer.
+                greeting = b""
+                if up.done():
+                    greeting = b"" if up.exception() else up.result()
+                else:
+                    up.cancel()
+                data = b"" if down.exception() else down.result()
+                if not data:
+                    w.close()
+                    return None
+                return r, w, data, greeting
+            down.cancel()
+            data = b"" if up.exception() else up.result()
+            if data:
+                return r, w, b"", data
+            w.close()
+        if loop.time() >= deadline:
+            return None
+        await asyncio.sleep(0.5)
 
 
 async def main():

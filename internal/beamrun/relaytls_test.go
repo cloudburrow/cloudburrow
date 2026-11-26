@@ -69,4 +69,9 @@ func TestWriteRelayTLS(t *testing.T) {
 	if _, err := leaf.Verify(x509.VerifyOptions{DNSName: "storage.googleapis.com", Roots: roots}); err == nil {
 		t.Error("the job's certificate verifies for storage.googleapis.com")
 	}
+	// With the instance's Cloud Storage live, storage.googleapis.com
+	// (a pip requirement's public URL) is the relay's too.
+	if got := jobGoogleHosts(map[string]string{"storage": "127.0.0.1:3"}); strings.Join(got, ",") != "storage.googleapis.com" || !googleHTTPHosts[got[0]] {
+		t.Errorf("jobGoogleHosts(storage only) = %v; want storage.googleapis.com, its requests' Host rewritten", got)
+	}
 }

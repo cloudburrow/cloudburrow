@@ -43,6 +43,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 	"net"
 	"os"
@@ -204,6 +205,13 @@ type Job struct {
 	// .subnetwork), and Region its regional endpoint: Dataflow's default
 	// network, "default", when neither is set.
 	Network, Subnetwork, Region string
+	// PipIndex is the Python package index the job's workers install its
+	// staged requirements' dependencies from (an Artifact Registry Python
+	// repository's https://LOCATION-python.pkg.dev/... URL, read through
+	// the relay), "" none: a Google-provided template's job reads the
+	// packages the instance seeds for it (ProvidedPythonIndex), as its
+	// workers on Google read PyPI.
+	PipIndex string
 }
 
 // Events receives what a job does.
@@ -333,10 +341,17 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	}
 	live := map[string]string{}
 	if d.Live != nil {
-		live = d.Live()
+		live = maps.Clone(d.Live())
 	}
 	if live["storage"] == "" {
 		return failed("The job's staged pipeline is in Cloud Storage, which this instance does not serve.")
+	}
+	var pipEnv []string
+	if job.PipIndex != "" && d.Registry != nil {
+		if a := d.Registry(); a != "" {
+			live["registry"] = a
+			pipEnv, _ = pipIndexEnv(map[string]string{"PIP_INDEX_URL": job.PipIndex})
+		}
 	}
 	var cleanup []func()
 	defer func() {
@@ -472,7 +487,7 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	// The workers write their metrics' totals to metrics/ (sitecustomize).
 	poolArgs := append([]string{"run", "-d", "--name", pool, "--label", label, "--network", "container:" + js, "-v", dir + ":/cb:ro",
 		"-v", filepath.Join(dir, "metrics") + ":/cb/metrics", "-e", "CB_METRICS_DIR=/cb/metrics"}, env...)
-	poolArgs = append(poolArgs, image, "--worker_pool")
+	poolArgs = append(append(poolArgs, pipEnv...), image, "--worker_pool")
 	if out, err := d.docker(ctx, poolArgs...); err != nil {
 		return failed("start the job's SDK harness: " + out)
 	}
@@ -771,7 +786,11 @@ func (d *Docker) jobNetwork(ctx context.Context, network, relay, dir, image, lab
 	cleanup = append(cleanup, stopHost)
 	for i, p := range ports {
 		if n := sni[i]; n != "" {
-			routes = append(routes, fmt.Sprintf("%d+tls@%s=%s", p, n, host[i]))
+			r := fmt.Sprintf("%d+tls@%s=%s", p, n, host[i])
+			if googleHTTPHosts[n] {
+				r += ";host"
+			}
+			routes = append(routes, r)
 			continue
 		}
 		if tlsPorts[i] {
@@ -854,7 +873,7 @@ func (d *Docker) clientEnv(job Job, dir, relayIP string) []string {
 		}
 	}
 	host := relayName
-	return []string{
+	env := []string{
 		"-e", "CB_DATAFLOW=1", "-e", "CB_PROJECT=" + job.Project, "-e", "CB_ACCESS_TOKEN=" + token,
 		"-e", "PYTHONPATH=/cb/py", "-e", "CB_DRAIN=/cb/ctl/drain",
 		"-e", fmt.Sprintf("STORAGE_EMULATOR_HOST=http://%s:%d", host, storagePort),
@@ -871,6 +890,13 @@ func (d *Docker) clientEnv(job Job, dir, relayIP string) []string {
 		"-e", fmt.Sprintf("CB_BIGQUERY_URL=http://%s:%d/bigquery/v2/", host, bigqueryPort),
 		"-e", "GOOGLE_CLOUD_PROJECT=" + job.Project,
 	}
+	// pip trusts the job's CA, whose certificate the relay answers a
+	// Google host's TLS with (googleHosts: a requirement's
+	// https://storage.googleapis.com/ URL).
+	if _, err := os.Stat(filepath.Join(dir, "tls", "ca.pem")); err == nil {
+		env = append(env, "-e", "PIP_CERT=/cb/tls/ca.pem")
+	}
+	return env
 }
 
 // launcherEvent is one line the launcher prints.
@@ -1007,7 +1033,17 @@ var googleHosts = map[string]string{
 	"bigquerystorage.googleapis.com": "bigquery-storage",
 	"batch-spanner.googleapis.com":   "spanner",
 	"spanner.googleapis.com":         "spanner",
+	// Cloud Storage's public URLs (https://storage.googleapis.com/BUCKET/
+	// OBJECT), which a pip requirement may name: Google's YAML template's
+	// job_builder_util_transforms (yaml.go), read by the launcher's
+	// stager and by each worker.
+	"storage.googleapis.com": "storage",
 }
+
+// googleHTTPHosts are the googleHosts whose clients speak HTTP/1.1 to a
+// service that answers only its own names (internal/hostguard): the relay
+// sends their requests with the Host it dials.
+var googleHTTPHosts = map[string]bool{"storage.googleapis.com": true}
 
 // jobGoogleHosts are the googleHosts whose service the instance serves
 // (live), sorted.
