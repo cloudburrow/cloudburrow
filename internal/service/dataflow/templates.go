@@ -207,6 +207,14 @@ func fromTemplate(job *dataflowpb.Job, project, gcsPath, name string, params map
 		if env.ServiceAccountEmail != "" {
 			job.Environment.ServiceAccountEmail = env.ServiceAccountEmail
 		}
+		// The workers' network and subnetwork (RuntimeEnvironment's), as
+		// a submitted job's worker pool names them.
+		if env.Network != "" || env.Subnetwork != "" {
+			if len(job.Environment.WorkerPools) == 0 {
+				job.Environment.WorkerPools = []*dataflowpb.WorkerPool{{Kind: "harness"}}
+			}
+			job.Environment.WorkerPools[0].Network, job.Environment.WorkerPools[0].Subnetwork = env.Network, env.Subnetwork
+		}
 		if len(env.AdditionalUserLabels) > 0 {
 			if job.Labels == nil {
 				job.Labels = map[string]string{}
@@ -382,7 +390,11 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 		if s.opts.Storage == nil {
 			return nil, apierror.FailedPrecondition("Templates are read from Cloud Storage, which this instance does not serve.")
 		}
-		b, err := s.opts.Storage.Read(ctx, lp.GetContainerSpecGcsPath())
+		local, err := s.templatePath(ctx, lp.GetContainerSpecGcsPath())
+		if err != nil {
+			return nil, err
+		}
+		b, err := s.opts.Storage.Read(ctx, local)
 		if err != nil {
 			return nil, apierror.InvalidArgument("(%s): Unable to open template file: %s.", lp.GetContainerSpecGcsPath(), lp.GetContainerSpecGcsPath())
 		}
@@ -449,7 +461,7 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 	}
 	fl := FlexLaunch{Project: job.ProjectId, Location: loc, JobName: job.Name, Image: image, Args: args,
 		TempLocation: env.GetTempLocation(), StagingLocation: env.GetStagingLocation(), MaxWorkers: env.GetMaxWorkers(),
-		Update: lp.GetUpdate()}
+		Network: env.GetNetwork(), Subnetwork: env.GetSubnetwork(), Update: lp.GetUpdate()}
 	if len(lp.GetTransformNameMappings()) > 0 {
 		b, _ := json.Marshal(lp.GetTransformNameMappings())
 		fl.TransformNameMapping = string(b)
@@ -457,7 +469,9 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		err := s.opts.Launcher.Launch(context.Background(), fl)
+		// The launcher ends with the server (Close cancels base), as a
+		// job's run does.
+		err := s.opts.Launcher.Launch(s.base, fl)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		// Unless the program's job took the launch's place (adopted).

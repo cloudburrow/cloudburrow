@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 
 	"cloud.google.com/go/storage"
@@ -27,14 +29,34 @@ type providedTemplates struct {
 	storage *dataprocStorage
 	project func() string
 
-	mu sync.Mutex
+	// mu guards names, each template's own lock, held while it is staged
+	// (which may build its module first), so that one template's staging
+	// does not hold up another's.
+	mu    sync.Mutex
+	names map[string]*sync.Mutex
 }
 
 var _ dataflow.Provided = (*providedTemplates)(nil)
 
 func (t *providedTemplates) Stage(ctx context.Context, name string) (string, error) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
+	if t.names == nil {
+		t.names = map[string]*sync.Mutex{}
+	}
+	l := t.names[name]
+	if l == nil {
+		l = &sync.Mutex{}
+		t.names[name] = l
+	}
+	t.mu.Unlock()
+	l.Lock()
+	defer l.Unlock()
+	flex := strings.HasPrefix(name, "flex/")
+	if _, isFlex := beamrun.ProvidedFlexNames[strings.TrimPrefix(name, "flex/")]; flex != isFlex {
+		// A classic template's name under flex/, or a Flex Template's
+		// outside it: Google has no such file.
+		return "", dataflow.ErrNoProvidedTemplate
+	}
 	path := "gs://" + providedBucket + "/latest/" + name
 	// A template staged by an older launcher (another StageVersion) is
 	// staged again: its pipeline options are fixed in the template file.
@@ -45,7 +67,7 @@ func (t *providedTemplates) Stage(ctx context.Context, name string) (string, err
 			}
 		}
 	}
-	tpl, ok, err := t.p.Template(ctx, name)
+	tpl, ok, err := t.p.Template(ctx, strings.TrimPrefix(name, "flex/"))
 	if err != nil {
 		return "", err
 	}
@@ -54,6 +76,27 @@ func (t *providedTemplates) Stage(ctx context.Context, name string) (string, err
 	}
 	if err := t.bucket(ctx); err != nil {
 		return "", err
+	}
+	if tpl.Flex {
+		// A Flex Template's spec file (templates/configuring-flex-templates):
+		// its launcher image, which stands for the template's build, its
+		// SDK and its metadata, as Google's templates-maven-plugin writes
+		// it.
+		spec, err := json.Marshal(map[string]any{"image": beamrun.ProvidedFlexImage(tpl),
+			"sdkInfo": map[string]string{"language": "JAVA"}, "metadata": json.RawMessage(tpl.Metadata)})
+		if err != nil {
+			return "", err
+		}
+		if err := t.storage.Write(ctx, path, spec); err != nil {
+			return "", err
+		}
+		if err := t.storage.Write(ctx, path+"_metadata", tpl.Metadata); err != nil {
+			return "", err
+		}
+		if err := t.storage.Write(ctx, path+"_cbstage", []byte(beamrun.StageVersion)); err != nil {
+			return "", err
+		}
+		return path, nil
 	}
 	if err := t.p.Stage(ctx, tpl, t.project(), path, "gs://"+providedBucket+"/staging/"+beamrun.TemplatesRelease+"/"); err != nil {
 		return "", err

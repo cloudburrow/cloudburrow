@@ -15,8 +15,9 @@ import (
 // from Google's open-source DataflowTemplates sources and stages them in
 // the instance's own Cloud Storage.
 type Provided interface {
-	// Stage stages the provided template name (Word_Count, ...) and
-	// answers its local template path, gs://BUCKET/latest/NAME, beside
+	// Stage stages the provided template name (Word_Count, ...; a Flex
+	// Template's as flex/NAME) and answers its local template path,
+	// gs://BUCKET/latest/NAME (a Flex Template's spec file), beside
 	// which its NAME_metadata file is. A name it does not have is
 	// ErrNoProvidedTemplate.
 	Stage(ctx context.Context, name string) (string, error)
@@ -28,8 +29,9 @@ var ErrNoProvidedTemplate = errors.New("no such Google-provided template")
 
 // providedPath is a Google-provided template's path: Google's global
 // bucket or a regional one, a version folder (latest, or a release such as
-// 2026-11-18-00_RC00) and the template's name.
-var providedPath = regexp.MustCompile(`^gs://dataflow-templates(-[a-z]+-[a-z]+[0-9]+)?/([A-Za-z0-9_.-]+)/([A-Za-z0-9_]+)$`)
+// 2026-11-18-00_RC00) and the template's name, under flex/ for a Flex
+// Template's spec file.
+var providedPath = regexp.MustCompile(`^gs://dataflow-templates(-[a-z]+-[a-z]+[0-9]+)?/([A-Za-z0-9_.-]+)/((?:flex/)?[A-Za-z0-9_]+)$`)
 
 // templatePath is where gcsPath's template is read: a Google-provided
 // template's local copy (staged first), any other path itself.

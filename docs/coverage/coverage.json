@@ -13453,6 +13453,7 @@
           "test/compat/spannergraph2029c_test.go:140 TestSpannerGraphQueryPlansOfEveryStatement",
           "test/compat/spannergraph2029d_test.go:27 TestSpannerGraphOnThePatchedEmulator",
           "test/compat/spannergraph2029e_test.go:31 TestSpannerGraphQueryPlansOfEveryPattern",
+          "test/compat/spannerinfoschema2215_test.go:26 TestSpannerColumnOptionsIsInherited",
           "test/compat/spannerplans2029_test.go:230 TestSpannerQueryPlans",
           "test/compat/spannerplans2029b_test.go:182 TestSpannerQueryPlansForEveryShape",
           "test/compat/spannerplans2029b_test.go:323 TestSpannerGraphQueryPlans",
@@ -25329,7 +25330,11 @@
         "tests": [
           "test/compat/dataflowflex2215_test.go:134 TestPythonDataflowFlexTemplate",
           "test/compat/dataflowflexpkg2215_test.go:183 TestPythonDataflowFlexTemplatePackages",
-          "test/compat/dataflowflexpkg2215_test.go:275 TestJavaDataflowFlexTemplate"
+          "test/compat/dataflowflexpkg2215_test.go:275 TestJavaDataflowFlexTemplate",
+          "test/compat/dataflowjdbc2215_test.go:144 TestDataflowProvidedJdbcToBigQuery",
+          "test/compat/dataflowparquet2215_test.go:38 TestDataflowProvidedBigQueryToParquet",
+          "test/compat/dataflowprovidedflex2215_test.go:38 TestDataflowProvidedFlexTemplates",
+          "test/compat/dataflowprovidedflexmore2215_test.go:39 TestDataflowProvidedFlexTemplatesMore"
         ]
       },
       {
@@ -25460,6 +25465,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataflowprovided2215_test.go:46 TestDataflowProvidedTemplates",
+          "test/compat/dataflowprovidedflex2215_test.go:38 TestDataflowProvidedFlexTemplates",
           "test/compat/dataflowtools_test.go:104 TestGcloudDataflow"
         ]
       },
@@ -25467,7 +25473,10 @@
         "method": "google.dataflow.v1beta3.TemplatesService/LaunchTemplate",
         "status": "Verified",
         "tests": [
+          "test/compat/dataflowjdbc2215_test.go:144 TestDataflowProvidedJdbcToBigQuery",
           "test/compat/dataflowprovided2215_test.go:46 TestDataflowProvidedTemplates",
+          "test/compat/dataflowprovidedio2215_test.go:163 TestDataflowProvidedBigQueryToTFRecord",
+          "test/compat/dataflowprovidedio2215_test.go:40 TestDataflowProvidedSpanner",
           "test/compat/dataflowtools_test.go:104 TestGcloudDataflow"
         ]
       }

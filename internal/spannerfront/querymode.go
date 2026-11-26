@@ -99,6 +99,16 @@ func (d cacheData) execute(ctx context.Context, req *spannerpb.ExecuteSqlRequest
 	}
 	req, strip := emulatorMode(req)
 	rs, err := d.s.data.ExecuteSql(ctx, req)
+	// Refused for a view or view column the emulator lacks (infoschema.go):
+	// run again with it added.
+	for i, r := 0, req; i < maxInfoSchemaRewrites; i++ {
+		next, ok := d.s.withInfoSchemaColumns(ctx, r, err)
+		if !ok {
+			break
+		}
+		r = next
+		rs, err = d.s.data.ExecuteSql(ctx, r)
+	}
 	if err == nil && strip {
 		withoutPlan(rs.GetStats())
 	}
@@ -164,8 +174,24 @@ func (d cacheData) executeStreaming(ctx context.Context, req *spannerpb.ExecuteS
 	if err != nil {
 		return err
 	}
-	for {
+	for sent := false; ; sent = true {
 		m, err := in.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		// Refused before any result for a view or view column the emulator
+		// lacks (infoschema.go): run again with it added.
+		for i, r := 0, req; !sent && i < maxInfoSchemaRewrites; i++ {
+			next, ok := d.s.withInfoSchemaColumns(ctx, r, err)
+			if !ok {
+				break
+			}
+			r = next
+			if in, err = d.s.data.ExecuteStreamingSql(ctx, r); err != nil {
+				return err
+			}
+			m, err = in.Recv()
+		}
 		if err == io.EOF {
 			return nil
 		}

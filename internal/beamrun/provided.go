@@ -48,21 +48,115 @@ const (
 	buildTimeout = 45 * time.Minute
 )
 
+// relaySpannerHost is a Java SpannerIO's spannerHost on a job's network:
+// the relay's Spanner port, over TLS (jobNetwork).
+var relaySpannerHost = fmt.Sprintf("https://%s:%d", relayName, spannerPort)
+
 // StageVersion names the launch options Stage fixes in a staged template;
 // it changes whenever they do, so templates staged before are staged again
-// (2: --pubsubRootUrl; 3: --spannerHost).
-const StageVersion = "3"
+// (2: --pubsubRootUrl; 3: --spannerHost; 4: spannerHost over TLS).
+const StageVersion = "4"
 
 // ProvidedNames are the Google-provided classic templates CloudBurrow
 // builds, by name (their @Template name in DataflowTemplates' v1 module).
-var ProvidedNames = []string{"Bulk_Compress_GCS_Files", "Bulk_Decompress_GCS_Files", "Cloud_PubSub_to_GCS_Text", "GCS_Text_to_BigQuery",
-	"GCS_Text_to_Cloud_PubSub", "PubSub_Subscription_to_BigQuery", "PubSub_to_BigQuery", "Spanner_to_GCS_Text", "Word_Count"}
+var ProvidedNames = []string{"Bulk_Compress_GCS_Files", "Bulk_Decompress_GCS_Files", "Cloud_BigQuery_to_GCS_TensorFlow_Records",
+	"Cloud_PubSub_to_GCS_Text", "Cloud_Spanner_to_GCS_Avro", "GCS_Avro_to_Cloud_Spanner", "GCS_Text_to_BigQuery", "GCS_Text_to_Cloud_PubSub",
+	"GCS_Text_to_Cloud_Spanner", "Jdbc_to_BigQuery", "PubSub_Subscription_to_BigQuery", "PubSub_to_BigQuery", "Spanner_to_GCS_Text", "Word_Count"}
+
+// ProvidedFlexNames are the Google-provided Flex Templates CloudBurrow
+// builds (their @Template name), each with the DataflowTemplates module
+// it is in. Google ships each as a launcher image (built with Jib, from
+// gcr.io/dataflow-templates-base's Java launcher) whose spec is
+// gs://dataflow-templates-REGION/VERSION/flex/NAME; here the module's
+// build is the template's classpath, and the launcher runs its main class
+// in the Java SDK image (LaunchProvidedFlex).
+var ProvidedFlexNames = map[string]string{
+	"BigQuery_to_Parquet":            "v2/googlecloud-to-googlecloud",
+	"Cloud_PubSub_to_GCS_Text_Flex":  "v2/googlecloud-to-googlecloud",
+	"Cloud_Spanner_to_BigQuery_Flex": "v2/googlecloud-to-googlecloud",
+	"File_Format_Conversion":         "v2/googlecloud-to-googlecloud",
+	"Jdbc_to_BigQuery_Flex":          "v2/jdbc-and-googlecloud",
+	"Jdbc_to_PubSub":                 "v2/jdbc-and-googlecloud",
+	"Pubsub_to_Jdbc":                 "v2/jdbc-and-googlecloud",
+	"GCS_Text_to_BigQuery_Flex":      "v2/googlecloud-to-googlecloud",
+	"PubSub_to_BigQuery_Flex":        "v2/googlecloud-to-googlecloud",
+}
+
+// providedModule is the DataflowTemplates module name is built in: v1 for
+// the classic templates, a v2 module for a Flex Template.
+func providedModule(name string) string {
+	if m, ok := ProvidedFlexNames[name]; ok {
+		return m
+	}
+	return "v1"
+}
+
+// moduleNames are the templates built in module, sorted.
+func moduleNames(module string) []string {
+	if module == "v1" {
+		return ProvidedNames
+	}
+	var out []string
+	for n, m := range ProvidedFlexNames {
+		if m == module {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ProvidedFlexImage is the launcher image a provided Flex Template's spec
+// names, which is never pulled: it stands for the template's local build.
+// Google's templates share one image per container (flexContainerName,
+// gcr.io/dataflow-templates/CONTAINER), and its launcher picks the
+// template by the command spec in it; here the template's own name
+// follows the container's, so the image names the template:
+// gcr.io/dataflow-templates/CONTAINER/TEMPLATE-NAME:VERSION.
+func ProvidedFlexImage(t ProvidedTemplate) string {
+	return "gcr.io/dataflow-templates/" + t.Container + "/" + templateDash(t.Name) + ":" + strings.ToLower(TemplatesRelease)
+}
+
+// ProvidedFlexTemplate answers whether image is a provided Flex
+// Template's (ProvidedFlexImage), and which, by name.
+func ProvidedFlexTemplate(image string) (name string, ok bool) {
+	rest, ok := strings.CutPrefix(image, "gcr.io/dataflow-templates/")
+	if !ok {
+		return "", false
+	}
+	path, version, ok := strings.Cut(rest, ":")
+	if !ok || version != strings.ToLower(TemplatesRelease) {
+		return "", false
+	}
+	_, dash, ok := strings.Cut(path, "/")
+	if !ok {
+		return "", false
+	}
+	for n := range ProvidedFlexNames {
+		if templateDash(n) == dash {
+			return n, true
+		}
+	}
+	return "", false
+}
+
+// templateDash is a template's name as Google's spec files spell it:
+// lowercase, with dashes.
+func templateDash(name string) string {
+	return strings.ReplaceAll(strings.ToLower(name), "_", "-")
+}
 
 // ProvidedTemplate is one built template: its generated metadata (the
 // TEMPLATE_metadata file, as Google's plugin writes it) and what its
 // staging runs.
 type ProvidedTemplate struct {
 	Name string
+	// Module is the DataflowTemplates module it is built in; Flex whether
+	// it is a Flex Template (a v2 module's), and Container its launcher
+	// image's name (the @Template's flexContainerName).
+	Module    string
+	Flex      bool
+	Container string
 	// Metadata is the template's metadata file's content.
 	Metadata []byte
 	// MainClass is the pipeline's main class; RuntimeParameters the
@@ -79,6 +173,14 @@ type Provided struct {
 	D     *Docker
 	Cache string
 
+	// mu guards modules; each module's own lock is held while it builds,
+	// so one module's build does not hold up another's templates.
+	mu      sync.Mutex
+	modules map[string]*providedModuleBuild
+}
+
+// providedModuleBuild is one module's build, once read.
+type providedModuleBuild struct {
 	mu    sync.Mutex
 	built map[string]ProvidedTemplate
 }
@@ -86,34 +188,63 @@ type Provided struct {
 // Template answers name's build, building the templates first when they
 // are not in the cache. A name not built is ok false.
 func (p *Provided) Template(ctx context.Context, name string) (ProvidedTemplate, bool, error) {
+	module := providedModule(name)
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.built == nil {
-		dir, err := p.build(ctx)
-		if err != nil {
-			return ProvidedTemplate{}, false, err
-		}
-		built, err := readProvided(dir)
-		if err != nil {
-			return ProvidedTemplate{}, false, err
-		}
-		p.built = built
+	if p.modules == nil {
+		p.modules = map[string]*providedModuleBuild{}
 	}
-	t, ok := p.built[name]
+	m := p.modules[module]
+	if m == nil {
+		m = &providedModuleBuild{}
+		p.modules[module] = m
+	}
+	p.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.built == nil {
+		dir, err := p.build(ctx, module)
+		if err != nil {
+			return ProvidedTemplate{}, false, err
+		}
+		built, err := readProvided(dir, module)
+		if err != nil {
+			return ProvidedTemplate{}, false, err
+		}
+		m.built = built
+	}
+	t, ok := m.built[name]
 	return t, ok, nil
 }
 
-// Dir is the build's directory: classes/, deps/ and metadata/.
-func (p *Provided) Dir() string {
-	return filepath.Join(p.Cache, "dataflow-templates", TemplatesRelease)
+// FlexTemplate answers the provided Flex Template name and its module's
+// build directory, building it first when it is not in the cache.
+func (p *Provided) FlexTemplate(ctx context.Context, name string) (ProvidedTemplate, string, bool, error) {
+	if _, ok := ProvidedFlexNames[name]; !ok {
+		return ProvidedTemplate{}, "", false, nil
+	}
+	t, ok, err := p.Template(ctx, name)
+	if err != nil || !ok {
+		return ProvidedTemplate{}, "", false, err
+	}
+	return t, p.Dir(t.Module), true, nil
 }
 
-// build builds DataflowTemplates' v1 module into Dir, unless a build is
-// there: the release's sources (checked against templatesSHA256), Maven's
-// install of v1, Google's templates-maven-plugin and the modules they need, its runtime libraries, and the
-// templates' metadata (the templates-maven-plugin's spec goal).
-func (p *Provided) build(ctx context.Context) (string, error) {
-	dir := p.Dir()
+// Dir is module's build's directory: classes/, deps/ and metadata/.
+func (p *Provided) Dir(module string) string {
+	if module == "v1" {
+		return filepath.Join(p.Cache, "dataflow-templates", TemplatesRelease)
+	}
+	return filepath.Join(p.Cache, "dataflow-templates", TemplatesRelease+"-"+strings.ReplaceAll(module, "/", "-"))
+}
+
+// build builds DataflowTemplates' module (v1, or a v2 module) into Dir,
+// unless a build is there: the release's sources (checked against
+// templatesSHA256), Maven's install of the module, Google's
+// templates-maven-plugin and the modules they need, its runtime
+// libraries, and the templates' metadata (the templates-maven-plugin's
+// spec goal).
+func (p *Provided) build(ctx context.Context, module string) (string, error) {
+	dir := p.Dir(module)
 	if _, err := os.Stat(filepath.Join(dir, "ok")); err == nil {
 		return dir, nil
 	}
@@ -145,11 +276,11 @@ func (p *Provided) build(ctx context.Context) (string, error) {
 	skip := " -DskipTests -Dmaven.test.skip=true -Djib.skip=true -Dspotless.skip=true -Dspotless.check.skip=true" +
 		" -Dcheckstyle.skip=true -Djacoco.skip=true -Dmdep.analyze.skip=true"
 	script := "set -e; cd /src" +
-		"; mvn -B -q -Dmaven.repo.local=/m2 -pl v1,plugins/templates-maven-plugin -am" + skip + " install" +
-		"; mvn -B -q -Dmaven.repo.local=/m2 -pl v1" + skip + " dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory=/out/deps" +
-		"; mvn -B -q -Dmaven.repo.local=/m2 -pl v1" + skip + " com.google.cloud.teleport:templates-maven-plugin:1.0-SNAPSHOT:spec" +
-		"; mkdir -p /out/classes /out/metadata; cp -r v1/target/classes/. /out/classes/" +
-		"; find v1/target -maxdepth 2 -name '*-generated-metadata.json' -exec cp {} /out/metadata/ \\;" +
+		"; mvn -B -q -Dmaven.repo.local=/m2 -pl " + module + ",plugins/templates-maven-plugin -am" + skip + " install" +
+		"; mvn -B -q -Dmaven.repo.local=/m2 -pl " + module + skip + " dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory=/out/deps" +
+		"; mvn -B -q -Dmaven.repo.local=/m2 -pl " + module + skip + " com.google.cloud.teleport:templates-maven-plugin:1.0-SNAPSHOT:spec" +
+		"; mkdir -p /out/classes /out/metadata; cp -r " + module + "/target/classes/. /out/classes/" +
+		"; find " + module + "/target -maxdepth 2 -name '*-generated-metadata.json' -exec cp {} /out/metadata/ \\;" +
 		"; chmod -R a+rwX /out /m2"
 	name := "cb-df-templates-build-" + fmt.Sprint(time.Now().UnixNano()%1e9)
 	args := []string{"run", "--rm", "--name", name, "--label", InstanceLabel + "=" + p.D.Instance,
@@ -159,9 +290,9 @@ func (p *Provided) build(ctx context.Context) (string, error) {
 		defer cancel()
 		_, _ = p.D.docker(c, "rm", "-f", "-v", name)
 	}()
-	p.D.logf("dataflow: building Google-provided templates (DataflowTemplates %s) with Maven", TemplatesRelease)
+	p.D.logf("dataflow: building Google-provided templates (DataflowTemplates %s %s) with Maven", TemplatesRelease, module)
 	if b, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("build DataflowTemplates %s: %v: %s", TemplatesRelease, err, lastLines(string(b), 5))
+		return "", fmt.Errorf("build DataflowTemplates %s %s: %v: %s", TemplatesRelease, module, err, lastLines(string(b), 5))
 	}
 	if err := os.WriteFile(filepath.Join(out, "ok"), []byte(templatesCommit+"\n"), 0o644); err != nil {
 		return "", err
@@ -255,15 +386,18 @@ func untar(r io.Reader, dir string) error {
 	}
 }
 
-// readProvided reads the built templates' metadata, keeping
-// ProvidedNames.
-func readProvided(dir string) (map[string]ProvidedTemplate, error) {
+// readProvided reads module's built templates' metadata, keeping the
+// names it builds (moduleNames). A Flex Template's metadata names its
+// launcher image's container (flexContainerName, in its spec file
+// NAME-spec-generated-metadata.json's image, or else its metadata's).
+func readProvided(dir, module string) (map[string]ProvidedTemplate, error) {
 	files, err := filepath.Glob(filepath.Join(dir, "metadata", "*-generated-metadata.json"))
 	if err != nil {
 		return nil, err
 	}
+	names := moduleNames(module)
 	want := map[string]bool{}
-	for _, n := range ProvidedNames {
+	for _, n := range names {
 		want[n] = true
 	}
 	out := map[string]ProvidedTemplate{}
@@ -285,20 +419,47 @@ func readProvided(dir string) (map[string]ProvidedTemplate, error) {
 		if !want[m.InternalName] {
 			continue
 		}
-		out[m.InternalName] = ProvidedTemplate{Name: m.InternalName, Metadata: b, MainClass: m.MainClass,
+		t := ProvidedTemplate{Name: m.InternalName, Module: module, Flex: module != "v1", Metadata: b, MainClass: m.MainClass,
 			RuntimeParameters: m.RuntimeParameters, Streaming: m.Streaming}
+		if t.Flex {
+			t.Container = flexContainer(f, m.InternalName)
+		}
+		out[m.InternalName] = t
 	}
 	var missing []string
-	for _, n := range ProvidedNames {
+	for _, n := range names {
 		if _, ok := out[n]; !ok {
 			missing = append(missing, n)
 		}
 	}
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		return nil, fmt.Errorf("the DataflowTemplates %s build has no metadata for %s", TemplatesRelease, strings.Join(missing, ", "))
+		return nil, fmt.Errorf("the DataflowTemplates %s %s build has no metadata for %s", TemplatesRelease, module, strings.Join(missing, ", "))
 	}
 	return out, nil
+}
+
+// flexContainer is a Flex Template's launcher image's name: the last path
+// element of the image its spec file (beside metadata, NAME-spec-generated-
+// metadata.json) names, without its tag, or else its name as templateDash
+// spells it.
+func flexContainer(metadata, name string) string {
+	spec := strings.TrimSuffix(metadata, "-generated-metadata.json") + "-spec-generated-metadata.json"
+	if b, err := os.ReadFile(spec); err == nil {
+		var s struct {
+			Image string `json:"image"`
+		}
+		if json.Unmarshal(b, &s) == nil && s.Image != "" {
+			img := s.Image[strings.LastIndex(s.Image, "/")+1:]
+			if i := strings.Index(img, ":"); i >= 0 {
+				img = img[:i]
+			}
+			if img != "" {
+				return img
+			}
+		}
+	}
+	return templateDash(name)
 }
 
 // Stage stages t at templatePath (gs://BUCKET/latest/NAME), its libraries
@@ -350,11 +511,11 @@ func (p *Provided) Stage(ctx context.Context, t ProvidedTemplate, project, templ
 		opts = append(opts, "--autoscalingAlgorithm=THROUGHPUT_BASED", "--maxNumWorkers=5")
 	}
 	// A Spanner template's SpannerIO is given its spannerHost parameter
-	// (default batch-spanner.googleapis.com) and so ignores
+	// (default https://batch-spanner.googleapis.com), and so ignores
 	// SPANNER_EMULATOR_HOST: the template is staged with the instance's
-	// Spanner (plain gRPC, through the relay) as its value.
+	// Spanner, through the relay's TLS on its Spanner port, as its value.
 	if bytes.Contains(t.Metadata, []byte(`"spannerHost"`)) {
-		opts = append(opts, fmt.Sprintf("--spannerHost=http://%s:%d", relayName, spannerPort))
+		opts = append(opts, "--spannerHost="+relaySpannerHost)
 	}
 	keys := make([]string, 0, len(t.RuntimeParameters))
 	for k := range t.RuntimeParameters {
@@ -368,7 +529,7 @@ func (p *Provided) Stage(ctx context.Context, t ProvidedTemplate, project, templ
 		"; javac -nowarn -d /tmp/cbcred -cp \"$CP\" /cb/java/CbCredentialFactory.java" +
 		"; exec java -cp \"/tmp/cbcred:$CP\" \"$@\""
 	args := append([]string{"run", "--rm", "--name", run, "--label", label, "--network", network,
-		"-v", tmp + ":/cb:ro", "-v", p.Dir() + ":/t:ro"}, d.clientEnv(Job{Project: project}, tmp, relayIP)...)
+		"-v", tmp + ":/cb:ro", "-v", p.Dir("v1") + ":/t:ro"}, d.clientEnv(Job{Project: project}, tmp, relayIP)...)
 	args = append(args, "--entrypoint", "sh", JavaImages[providedJava], "-c", script, "stage", t.MainClass)
 	args = append(args, opts...)
 	defer func() {

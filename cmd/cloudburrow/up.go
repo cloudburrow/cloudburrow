@@ -22,6 +22,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
+	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/firebaserules"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
@@ -1377,6 +1378,15 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			// pscAutoConnections, through the Network Connectivity API's
 			// service connection policies (#2141).
 			sqlAdminSrv.SetAutoConnector(sqlAutoConnections{svc: computeSvc})
+		}
+		// A Dataflow job's workers reach the private IPs on their network
+		// (#2215).
+		if dataflowSvc != nil {
+			var api func() *compute.Server
+			if computeSvc != nil {
+				api = computeSvc.API
+			}
+			dataflowSvc.private = dataflowPrivateServices(func() *sqladmin.Server { return sqlAdminRef }, api)
 		}
 		// executeSql reads a user's password from Secret Manager (#1462).
 		if secretsSvc != nil {

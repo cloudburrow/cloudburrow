@@ -77,7 +77,7 @@ func TestPythonDataflowDatabases(t *testing.T) {
 	// 2026-11-24 this client dialed Google once a minute. Both guards.
 	t.Setenv("SPANNER_EMULATOR_HOST", spannerAddr)
 	t.Setenv("SPANNER_DISABLE_BUILTIN_METRICS", "true")
-	sp, err := localclient.SpannerWithConfig(ctx, db, spanner.ClientConfig{DisableNativeMetrics: true}, spannerOpts(spannerAddr)...)
+	sp, err := localclient.Spanner(ctx, db, spannerOpts(spannerAddr)...)
 	if err != nil {
 		t.Fatal(err)
 	}

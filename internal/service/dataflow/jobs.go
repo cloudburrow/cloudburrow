@@ -221,6 +221,20 @@ func maxWorkers(job *dataflowpb.Job) int {
 	return 1
 }
 
+// workerNetwork is the VPC network and subnetwork the job's workers run
+// on, as the job names them: environment.workerPools[0].network and
+// .subnetwork, as the SDKs' DataflowRunners set them, else the network
+// and subnetwork pipeline options; "" for Dataflow's default network.
+func workerNetwork(job *dataflowpb.Job) (network, subnetwork string) {
+	for _, p := range job.GetEnvironment().GetWorkerPools() {
+		if p.GetNetwork() != "" || p.GetSubnetwork() != "" {
+			return p.GetNetwork(), p.GetSubnetwork()
+		}
+	}
+	opts := pipelineOptions(job)
+	return optString(opts, "network"), optString(opts, "subnetwork")
+}
+
 // pipelineOptions are the job's environment.sdkPipelineOptions.options.
 func pipelineOptions(job *dataflowpb.Job) map[string]any {
 	o := job.GetEnvironment().GetSdkPipelineOptions().GetFields()["options"].GetStructValue()

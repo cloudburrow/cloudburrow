@@ -22,7 +22,7 @@
   "components": {
     "dataflow": {
       "beamFlinkJobServer": {
-        "$comment": "Dataflow (#2215): internal/beamrun runs each job's Beam pipeline on this Apache Beam 2.78.0 portable runner for Flink 1.20 (--flink-master=[local]), on a per-job docker network create --internal network whose one other peer is a relay to the instance's Cloud Storage, Pub/Sub, BigQuery and Dataflow ports.",
+        "$comment": "Dataflow (#2215): internal/beamrun runs each job's Beam pipeline on this Apache Beam 2.78.0 portable runner for Flink 1.20 (--flink-master=[local]), on a per-job docker network create --internal network whose one other peer is a relay to the instance's Cloud Storage, Pub/Sub, BigQuery and Dataflow ports. It runs with Beam 2.78.0's GreedyPCollectionFusers, FlinkBatchPortablePipelineTranslator and ExecutableStageDoFnOperator patched (internal/beamrun/assets/java/, compiled against its jar as it starts; third_party/apache-beam/PROVENANCE.md: apache/beam#34647, and @OnWindowExpiration never run).",
         "image": "apache/beam_flink1.20_job_server:2.78.0",
         "digest": "sha256:b1f7e43440a148151e9db001dfc0498eb4f87bdd4d6808904daf52ab0b532053",
         "license": "Apache-2.0 (Apache Beam, Apache Flink) and the Debian and Eclipse Temurin packages it is built on",
