@@ -494,9 +494,9 @@ func parseRows(out string, fieldSep string) [][]string {
 
 var (
 	pgAuthRE    = regexp.MustCompile(`password authentication failed|no pg_hba\.conf entry|role "[^"]*" does not exist|authentication failed`)
-	pgConnRE    = regexp.MustCompile(`could not connect|could not translate host name|Connection refused|timeout expired|No route to host|Network is unreachable|server closed the connection`)
+	pgConnRE    = regexp.MustCompile(`could not connect|could not translate host name|Connection refused|timeout expired|No route to host|Network is unreachable|server closed the connection|SSL error|certificate verify failed|server does not support SSL`)
 	mysqlAuthRE = regexp.MustCompile(`Access denied`)
-	mysqlConnRE = regexp.MustCompile(`Can't connect|Unknown MySQL server host|Lost connection|timed out`)
+	mysqlConnRE = regexp.MustCompile(`Can't connect|Unknown MySQL server host|Lost connection|timed out|SSL connection error|certificate verify failed`)
 )
 
 // classify is a source query's failure as the verification reports it.

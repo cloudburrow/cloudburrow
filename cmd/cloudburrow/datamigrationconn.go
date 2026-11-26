@@ -35,7 +35,7 @@ func dmsTunnelManifest(name, namespace, image string, src datamigration.Source) 
 	t := src.SSH
 	labels := map[string]string{"app": name, "app.kubernetes.io/managed-by": "cloudburrow", "cloudburrow.dev/component": "dms-tunnel"}
 	secret := map[string]any{"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
-		"metadata": map[string]any{"name": name, "namespace": namespace, "labels": labels},
+		"metadata":   map[string]any{"name": name, "namespace": namespace, "labels": labels},
 		"stringData": map[string]string{dmstunnel.EnvPassword: t.Password, dmstunnel.EnvPrivateKey: t.PrivateKey}}
 	env := []map[string]any{}
 	for _, k := range []string{dmstunnel.EnvPassword, dmstunnel.EnvPrivateKey} {

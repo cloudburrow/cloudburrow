@@ -16,6 +16,7 @@ import (
 
 	dmspb "cloud.google.com/go/clouddms/apiv1/clouddmspb"
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -632,4 +633,123 @@ func checkDump(j *dmspb.MigrationJob, mysql bool) error {
 	}
 	_, err := dumpFlagsOf(j)
 	return err
+}
+
+// ---- For the console ----
+
+// DemoteDestination is migrationJobs.demoteDestination, for the console.
+func (s *Server) DemoteDestination(name string) (*longrunningpb.Operation, error) {
+	return s.demoteDestination(name)
+}
+
+// FetchSourceObjects is migrationJobs.fetchSourceObjects, for the console.
+func (s *Server) FetchSourceObjects(name string) (*longrunningpb.Operation, error) {
+	return s.fetchSourceObjects(name)
+}
+
+// Demoted reports whether a job's existing destination is demoted.
+func (s *Server) Demoted(job string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.demoted[job]
+}
+
+// ExistingDestination reports whether p names an existing destination,
+// and its instance or cluster ID.
+func ExistingDestination(p *dmspb.ConnectionProfile) (string, bool) {
+	if !existingDestination(p) {
+		return "", false
+	}
+	_, id := existingID(p)
+	return id, true
+}
+
+// ObjectRow is a migration job object as the console lists it.
+type ObjectRow struct {
+	Name, Database, State, Phase string
+}
+
+// Objects are a job's objects.
+func (s *Server) Objects(job string) []ObjectRow {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	j := s.jobs[job]
+	if j == nil {
+		return nil
+	}
+	var out []ObjectRow
+	for _, o := range s.objects[job] {
+		m := s.objectJSON(j, o)
+		ph, _ := m["phase"].(string)
+		out = append(out, ObjectRow{Name: m["name"].(string), Database: o.Database, State: m["state"].(string), Phase: ph})
+	}
+	return out
+}
+
+// SetObjectsConfig sets a job's objectsConfig to the databases named
+// (SPECIFIED_OBJECTS), for the console's Databases to migrate.
+func SetObjectsConfig(j *dmspb.MigrationJob, databases []string) error {
+	if len(databases) == 0 {
+		return nil
+	}
+	var cfgs []any
+	for _, d := range databases {
+		cfgs = append(cfgs, map[string]any{"objectIdentifier": map[string]any{"database": d, "type": "DATABASE"}})
+	}
+	return editJSON(j, func(m map[string]any) {
+		m["objectsConfig"] = map[string]any{"sourceObjectsConfig": map[string]any{"objectsSelectionType": "SPECIFIED_OBJECTS", "objectConfigs": cfgs}}
+	})
+}
+
+// SelectedDatabases are the databases a job's objectsConfig selects, nil
+// for every one.
+func SelectedDatabases(j *dmspb.MigrationJob) []string {
+	c, ok := objectsOf(j)
+	if !ok || c.Type != "SPECIFIED_OBJECTS" {
+		return nil
+	}
+	var out []string
+	for _, o := range c.Included {
+		out = append(out, o.ID.Database)
+	}
+	return out
+}
+
+// SetForwardSSH sets a mysql or postgresql profile's
+// forwardSshConnectivity, for the console.
+func SetForwardSSH(m proto.Message, host string, port int, user, password, key string) error {
+	f := map[string]any{"hostname": host, "username": user, "port": port}
+	if password != "" {
+		f["password"] = password
+	}
+	if key != "" {
+		f["privateKey"] = key
+	}
+	return editJSON(m, func(j map[string]any) { j["forwardSshConnectivity"] = f })
+}
+
+// ForwardSSH is a profile's forward SSH host:port and user, "" for none.
+func ForwardSSH(m proto.Message) (string, string) {
+	t := sshOf(m)
+	if t == nil {
+		return "", ""
+	}
+	return fmt.Sprintf("%s:%d", t.Host, t.Port), t.User
+}
+
+// SetExistingRole marks an existing destination's mysql or postgresql
+// profile role DESTINATION, as gcloud's --role does.
+func SetExistingRole(p *dmspb.ConnectionProfile) { setStr(p, "role", "DESTINATION") }
+
+// SetAlloyDBClusterID sets a postgresql profile's alloydbClusterId.
+func SetAlloyDBClusterID(m *dmspb.PostgreSqlConnectionProfile, id string) {
+	setStr(m, "alloydb_cluster_id", id)
+}
+
+// AlloyDBClusterID is a postgresql profile's alloydbClusterId.
+func AlloyDBClusterID(p *dmspb.ConnectionProfile) string {
+	if p.GetPostgresql() == nil {
+		return ""
+	}
+	return str(p.GetPostgresql(), "alloydb_cluster_id")
 }

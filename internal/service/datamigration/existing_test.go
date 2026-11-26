@@ -374,7 +374,7 @@ func TestReverseSSH(t *testing.T) {
 	}
 	if _, err := s.CreateMigrationJob(ctx, &dmspb.CreateMigrationJobRequest{Parent: parent, MigrationJobId: "k",
 		MigrationJob: &dmspb.MigrationJob{Type: dmspb.MigrationJob_CONTINUOUS, Source: parent + "/connectionProfiles/src",
-			Destination: parent + "/connectionProfiles/dst",
+			Destination:  parent + "/connectionProfiles/dst",
 			Connectivity: &dmspb.MigrationJob_ReverseSshConnectivity{ReverseSshConnectivity: &dmspb.ReverseSshConnectivity{VmPort: 5433}}}}); apierror.From(err).Code != codes.InvalidArgument {
 		t.Fatalf("reverse SSH without vmIp: %v", err)
 	}

@@ -58,7 +58,7 @@ func (*unreachableDMSBackend) Existing(context.Context, datamigration.Target) (s
 func (*unreachableDMSBackend) Demote(context.Context, datamigration.Target, datamigration.Source) error {
 	return nil
 }
-func (*unreachableDMSBackend) Release(context.Context, datamigration.Source) error { return nil }
+func (*unreachableDMSBackend) Release(context.Context, datamigration.Source) error     { return nil }
 func (*unreachableDMSBackend) Pause(context.Context, datamigration.Target, bool) error { return nil }
 func (*unreachableDMSBackend) Promote(context.Context, datamigration.Target) error     { return nil }
 func (*unreachableDMSBackend) Reset(context.Context, datamigration.Target, datamigration.Source, []string) error {

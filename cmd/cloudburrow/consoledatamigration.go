@@ -11,6 +11,7 @@ import (
 
 	dmspb "cloud.google.com/go/clouddms/apiv1/clouddmspb"
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -110,6 +111,15 @@ func dmsDuration(j *dmspb.MigrationJob) string {
 
 // dmsEngine is a profile's database engine as the console names it.
 func dmsEngine(p *dmspb.ConnectionProfile) string {
+	if _, ok := datamigration.ExistingDestination(p); ok {
+		switch {
+		case p.GetMysql() != nil:
+			return "Cloud SQL for MySQL"
+		case p.GetAlloydb() != nil, datamigration.AlloyDBClusterID(p) != "":
+			return "AlloyDB for PostgreSQL"
+		}
+		return "Cloud SQL for PostgreSQL"
+	}
 	switch {
 	case p.GetMysql() != nil:
 		return "MySQL"
@@ -133,10 +143,14 @@ func dmsEngine(p *dmspb.ConnectionProfile) string {
 }
 
 func dmsIsSource(p *dmspb.ConnectionProfile) bool {
-	return p.GetMysql() != nil || p.GetPostgresql() != nil
+	_, existing := datamigration.ExistingDestination(p)
+	return (p.GetMysql() != nil || p.GetPostgresql() != nil) && !existing
 }
 
 func dmsHostPort(p *dmspb.ConnectionProfile) string {
+	if id, ok := datamigration.ExistingDestination(p); ok {
+		return id
+	}
 	switch {
 	case p.GetMysql() != nil:
 		return p.GetMysql().GetHost() + ":" + strconv.Itoa(int(p.GetMysql().GetPort()))
@@ -244,10 +258,20 @@ func (p dmsJobsProvider) jobFields(srcs, dsts []string) []console.Field {
 			Help: "For a PostgreSQL source: no pglogical extension is needed on it (a quick-start migration)."},
 		{Name: "destination", Label: "Destination connection profile", Type: "select", Required: true, Section: dest, Options: dsts, OptionLabels: label(dsts),
 			Help: "A Cloud SQL destination created for this source, or an AlloyDB destination. Create one on Connection profiles."},
-		{Name: "connectivity", Label: "Connectivity method", Type: "radio", Section: conn, Options: []string{"static", "peering"}, Default: "static",
-			OptionLabels: map[string]string{"static": "IP allowlist", "peering": "VPC peering"},
-			Help:         "With an IP allowlist, allow the destination's outgoing address (Fetch static IPs) on the source."},
+		{Name: "databases", Label: "Databases to migrate", Type: "text", Section: source,
+			Help: "Comma-separated database names; empty migrates all databases (Specific databases, #2257)."},
+		{Name: "dumpFlags", Label: "Dump flags", Type: "text", Section: source,
+			Help: "For a MySQL source: mysqldump flags as name=value, comma-separated (max-allowed-packet=64M,add-locks=)."},
+		{Name: "dumpPath", Label: "Manual dump file", Type: "text", Section: source,
+			Help: "For a MySQL source with GTIDs: gs://BUCKET/OBJECT, a dump loaded instead of Database Migration Service's own; excludes dump flags."},
+		{Name: "connectivity", Label: "Connectivity method", Type: "radio", Section: conn, Options: []string{"static", "peering", "reverse"}, Default: "static",
+			OptionLabels: map[string]string{"static": "IP allowlist", "peering": "VPC peering", "reverse": "Reverse-SSH tunnel via cloud-hosted VM"},
+			Help:         "With an IP allowlist, allow the destination's outgoing address (Fetch static IPs) on the source; with a reverse-SSH tunnel, the destination connects to the bastion's port, which the source's side forwards to the source."},
 		{Name: "vpc", Label: "VPC network", Type: "text", Section: conn, ShowWhen: "connectivity=peering", Help: "projects/PROJECT/global/networks/NETWORK"},
+		{Name: "vm", Label: "VM instance name", Type: "text", Section: conn, ShowWhen: "connectivity=reverse"},
+		{Name: "vmIp", Label: "VM IP address", Type: "text", Section: conn, ShowWhen: "connectivity=reverse", Help: "The bastion's address the destination reaches."},
+		{Name: "vmPort", Label: "VM port", Type: "number", Section: conn, ShowWhen: "connectivity=reverse", Help: "The bastion's forwarding port."},
+		{Name: "vmVpc", Label: "VPC", Type: "text", Section: conn, ShowWhen: "connectivity=reverse", Help: "projects/PROJECT/global/networks/NETWORK"},
 		{Name: "startNow", Label: "Start the job once it is created (Create & start job)", Type: "checkbox", Section: test},
 	}
 }
@@ -267,15 +291,31 @@ func (p dmsJobsProvider) Create(ctx context.Context, project string, v map[strin
 		typ = dmspb.MigrationJob_ONE_TIME
 	}
 	j := &dmspb.MigrationJob{DisplayName: v["displayName"], Type: typ, Source: v["source"], Destination: v["destination"]}
-	if v["connectivity"] == "peering" {
+	switch v["connectivity"] {
+	case "peering":
 		j.Connectivity = &dmspb.MigrationJob_VpcPeeringConnectivity{VpcPeeringConnectivity: &dmspb.VpcPeeringConnectivity{Vpc: strings.TrimSpace(v["vpc"])}}
-	} else {
+	case "reverse":
+		port, _ := strconv.Atoi(strings.TrimSpace(v["vmPort"]))
+		j.Connectivity = &dmspb.MigrationJob_ReverseSshConnectivity{ReverseSshConnectivity: &dmspb.ReverseSshConnectivity{
+			Vm: strings.TrimSpace(v["vm"]), VmIp: strings.TrimSpace(v["vmIp"]), VmPort: int32(port), Vpc: strings.TrimSpace(v["vmVpc"])}}
+	default:
 		j.Connectivity = &dmspb.MigrationJob_StaticIpConnectivity{StaticIpConnectivity: &dmspb.StaticIpConnectivity{}}
 	}
 	if v["native"] == "true" || v["native"] == "on" {
 		if err := datamigration.SetNativeLogical(j, true); err != nil {
 			return "", err
 		}
+	}
+	j.DumpPath = strings.TrimSpace(v["dumpPath"])
+	for _, kv := range splitList(v["dumpFlags"]) {
+		name, value, _ := strings.Cut(kv, "=")
+		if j.DumpFlags == nil {
+			j.DumpFlags = &dmspb.MigrationJob_DumpFlags{}
+		}
+		j.DumpFlags.DumpFlags = append(j.DumpFlags.DumpFlags, &dmspb.MigrationJob_DumpFlag{Name: strings.TrimSpace(name), Value: strings.TrimSpace(value)})
+	}
+	if err := datamigration.SetObjectsConfig(j, splitList(v["databases"])); err != nil {
+		return "", err
 	}
 	if err := dmsWait(s)(s.CreateMigrationJob(ctx, &dmspb.CreateMigrationJobRequest{Parent: parent, MigrationJobId: id, MigrationJob: j})); err != nil {
 		return "", err
@@ -317,6 +357,31 @@ func (p dmsJobsProvider) Detail(ctx context.Context, project string, path []stri
 	if v := j.GetVpcPeeringConnectivity(); v != nil {
 		conn = "VPC peering: " + v.GetVpc()
 	}
+	if r := j.GetReverseSshConnectivity(); r != nil {
+		conn = fmt.Sprintf("Reverse-SSH tunnel: %s:%d (VM %s)", r.GetVmIp(), r.GetVmPort(), kmsOrDash(r.GetVm()))
+	}
+	dbs := "All databases"
+	if d := datamigration.SelectedDatabases(j); len(d) > 0 {
+		dbs = strings.Join(d, ", ")
+	}
+	var flags []string
+	for _, f := range j.GetDumpFlags().GetDumpFlags() {
+		flags = append(flags, f.GetName()+"="+f.GetValue())
+	}
+	demoted := "-"
+	if dst, err := s.GetConnectionProfile(ctx, &dmspb.GetConnectionProfileRequest{Name: j.GetDestination()}); err == nil {
+		if _, ok := datamigration.ExistingDestination(dst); ok {
+			demoted = "No"
+			if s.Demoted(j.GetName()) {
+				demoted = "Yes"
+			}
+		}
+	}
+	objects := console.Listing{Columns: []string{"Database", "Status", "Phase"}, NameColumn: "Object", Noun: "source objects (Fetch source objects reads them)"}
+	for _, o := range s.Objects(j.GetName()) {
+		objects.Items = append(objects.Items, console.Resource{Name: o.Name, Fields: map[string]string{"Database": o.Database, "Status": o.State, "Phase": kmsOrDash(o.Phase)}})
+	}
+	objects.Total = len(objects.Items)
 	native := "No"
 	if datamigration.NativeLogical(j) {
 		native = "Yes"
@@ -334,11 +399,14 @@ func (p dmsJobsProvider) Detail(ctx context.Context, project string, path []stri
 				{Label: "Duration", Value: dmsDuration(j)}, {Label: "Created", Value: kmsTime(j.GetCreateTime())}, {Label: "Last updated", Value: kmsTime(j.GetUpdateTime())},
 				{Label: "Ended", Value: kmsTime(j.GetEndTime())}}},
 			{Heading: "Source", Properties: []console.Property{{Label: "Connection profile", Value: j.GetSource()},
-				{Label: "Database engine", Value: j.GetSourceDatabase().GetEngine().String()}, {Label: "Native logical replication", Value: native}}},
+				{Label: "Database engine", Value: j.GetSourceDatabase().GetEngine().String()}, {Label: "Native logical replication", Value: native},
+				{Label: "Databases to migrate", Value: dbs}, {Label: "Dump flags", Value: kmsOrDash(strings.Join(flags, ", "))},
+				{Label: "Manual dump file", Value: kmsOrDash(j.GetDumpPath())}}},
 			{Heading: "Destination", Properties: []console.Property{{Label: "Connection profile", Value: j.GetDestination()},
-				{Label: "Database engine", Value: j.GetDestinationDatabase().GetProvider().String() + " " + j.GetDestinationDatabase().GetEngine().String()}}},
+				{Label: "Database engine", Value: j.GetDestinationDatabase().GetProvider().String() + " " + j.GetDestinationDatabase().GetEngine().String()},
+				{Label: "Existing destination demoted", Value: demoted}}},
 			{Heading: "Connectivity", Properties: []console.Property{{Label: "Method", Value: conn}, {Label: "Outgoing IP addresses", Value: ips}}},
-		}}},
+		}}, {ID: "objects", Label: "Objects", Listing: objects}},
 	}, nil
 }
 
@@ -368,7 +436,30 @@ func (p dmsJobsProvider) DetailActions(ctx context.Context, project string, path
 		}
 		return why
 	}
-	return []console.Action{
+	s, _ := dmsAPI(p.svc)
+	existing, demoted := "", false
+	if s != nil {
+		if dst, err := s.GetConnectionProfile(ctx, &dmspb.GetConnectionProfileRequest{Name: j.GetDestination()}); err == nil {
+			existing, _ = datamigration.ExistingDestination(dst)
+		}
+		demoted = s.Demoted(j.GetName())
+	}
+	var out []console.Action
+	if existing != "" {
+		// Google's console: "Select and continue", then "the destination
+		// instance will be demoted ... enter the destination instance ID
+		// and click Confirm and continue" (mysql/create-migration-job-existing-instance,
+		// read 2026-11-25).
+		out = append(out, console.Action{ID: "demote", Label: "Demote destination", Destructive: true,
+			Unavailable:  unavail(notStarted && !demoted, "Only a job not started yet, whose destination is not demoted, demotes it."),
+			ConfirmTitle: "Demote the destination instance?",
+			Confirm:      "The destination " + existing + " becomes a read replica of the source: its data, backups, point-in-time recovery and replicas are suspended or replaced by the migration.",
+			ConfirmWord:  existing})
+	}
+	if j.GetSourceDatabase().GetEngine() == dmspb.DatabaseEngine_POSTGRESQL {
+		out = append(out, console.Action{ID: "fetchObjects", Label: "Fetch source objects"})
+	}
+	return append(out, []console.Action{
 		{ID: "verify", Label: "Test job"},
 		{ID: "start", Label: "Start", Unavailable: unavail(notStarted, "Only a job not started yet is started.")},
 		{ID: "stop", Label: "Stop", Unavailable: unavail(st == dmspb.MigrationJob_RUNNING, "Only a running job is stopped."),
@@ -391,7 +482,7 @@ func (p dmsJobsProvider) DetailActions(ctx context.Context, project string, path
 		{ID: "delete", Label: "Delete", Destructive: true, Leaves: true, Fields: []console.Field{
 			{Name: "force", Label: "Also delete the destination Cloud SQL instance", Type: "checkbox"}},
 			Confirm: "A Cloud SQL destination's connection profile is deleted with the job.", ConfirmWord: lastSegment(j.GetName())},
-	}
+	}...)
 }
 
 func (p dmsJobsProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
@@ -404,6 +495,10 @@ func (p dmsJobsProvider) ActAt(ctx context.Context, project string, path []strin
 	}
 	n := j.GetName()
 	switch action {
+	case "demote":
+		return dmsWait(s)(s.DemoteDestination(n))
+	case "fetchObjects":
+		return dmsWait(s)(s.FetchSourceObjects(n))
 	case "verify":
 		return dmsWait(s)(s.VerifyMigrationJob(ctx, &dmspb.VerifyMigrationJobRequest{Name: n}))
 	case "start":
@@ -487,8 +582,9 @@ func (p dmsProfilesProvider) profileFields(srcs []string) []console.Field {
 	}
 	return []console.Field{
 		{Name: "kind", Label: "Database engine", Type: "select", Required: true, Section: what, Default: "postgresql",
-			Options:      []string{"postgresql", "mysql", "cloudsql", "alloydb"},
-			OptionLabels: map[string]string{"postgresql": "PostgreSQL (source)", "mysql": "MySQL (source)", "cloudsql": "Cloud SQL (destination)", "alloydb": "AlloyDB for PostgreSQL (destination)"}},
+			Options: []string{"postgresql", "mysql", "cloudsql", "alloydb", "cloudsql-existing", "alloydb-existing"},
+			OptionLabels: map[string]string{"postgresql": "PostgreSQL (source)", "mysql": "MySQL (source)", "cloudsql": "Cloud SQL (destination)", "alloydb": "AlloyDB for PostgreSQL (destination)",
+				"cloudsql-existing": "Existing Cloud SQL instance (destination)", "alloydb-existing": "Existing AlloyDB cluster (destination)"}},
 		{Name: "displayName", Label: "Connection profile name", Type: "text", Section: what},
 		{Name: "profileId", Label: "Connection profile ID", Type: "text", Required: true, Section: what, Pattern: `^[a-z]([a-z0-9\-]{0,61}[a-z0-9])?$`,
 			Help: "A Cloud SQL destination's instance takes this ID."},
@@ -498,8 +594,24 @@ func (p dmsProfilesProvider) profileFields(srcs []string) []console.Field {
 		{Name: "port", Label: "Port", Type: "number", Section: conn, ShowWhen: "kind=postgresql|mysql", Help: "5432 for PostgreSQL, 3306 for MySQL."},
 		{Name: "username", Label: "Username", Type: "text", Section: conn, ShowWhen: "kind=postgresql|mysql"},
 		{Name: "password", Label: "Password", Type: "password", Section: conn, ShowWhen: "kind=postgresql|mysql"},
-		{Name: "ssl", Label: "Encryption type", Type: "select", Section: conn, ShowWhen: "kind=postgresql|mysql", Options: []string{"NONE", "REQUIRED"}, Default: "NONE",
-			OptionLabels: map[string]string{"NONE": "None", "REQUIRED": "Basic (encrypted, the certificate not verified)"}},
+		{Name: "ssl", Label: "Encryption type", Type: "select", Section: conn, ShowWhen: "kind=postgresql|mysql", Options: []string{"NONE", "REQUIRED", "SERVER_ONLY", "SERVER_CLIENT"}, Default: "NONE",
+			OptionLabels: map[string]string{"NONE": "None", "REQUIRED": "Basic (encrypted, the certificate not verified)",
+				"SERVER_ONLY": "TLS (the source's certificate verified)", "SERVER_CLIENT": "mTLS (the source's certificate verified, a client certificate presented)"}},
+		{Name: "caCertificate", Label: "Source CA certificate", Type: "textarea", Section: conn, ShowWhen: "ssl=SERVER_ONLY|SERVER_CLIENT",
+			Help: "PEM: the CA that signed the source's certificate."},
+		{Name: "clientCertificate", Label: "Client certificate", Type: "textarea", Section: conn, ShowWhen: "ssl=SERVER_CLIENT", Help: "PEM."},
+		{Name: "clientKey", Label: "Client private key", Type: "textarea", Section: conn, ShowWhen: "ssl=SERVER_CLIENT", Help: "PEM, unencrypted."},
+		{Name: "sshTunnel", Label: "Connect through a forward-SSH tunnel", Type: "checkbox", Section: conn, ShowWhen: "kind=postgresql|mysql",
+			Help: "The destination reaches the source through an SSH host that can reach it."},
+		{Name: "sshHost", Label: "SSH hostname", Type: "text", Section: conn, ShowWhen: "sshTunnel"},
+		{Name: "sshPort", Label: "SSH port", Type: "number", Section: conn, ShowWhen: "sshTunnel", Default: "22"},
+		{Name: "sshUser", Label: "SSH username", Type: "text", Section: conn, ShowWhen: "sshTunnel"},
+		{Name: "sshPassword", Label: "SSH password", Type: "password", Section: conn, ShowWhen: "sshTunnel", Help: "Or a private key below."},
+		{Name: "sshKey", Label: "SSH private key", Type: "textarea", Section: conn, ShowWhen: "sshTunnel", Help: "PEM, unencrypted."},
+		{Name: "existingId", Label: "Instance or cluster ID", Type: "text", Section: what, ShowWhen: "kind=cloudsql-existing|alloydb-existing",
+			Help: "The existing destination, in the profile's region. It must be standalone and hold no user data; a migration job demotes it."},
+		{Name: "existingEngine", Label: "Destination engine", Type: "select", Section: what, ShowWhen: "kind=cloudsql-existing", Options: []string{"mysql", "postgresql"},
+			Default: "mysql", OptionLabels: map[string]string{"mysql": "MySQL", "postgresql": "PostgreSQL"}},
 		{Name: "sourceId", Label: "Source connection profile", Type: "select", Section: cs, ShowWhen: "kind=cloudsql", Options: srcs, OptionLabels: srcLabels,
 			Help: "The destination instance is created as a replica of this source."},
 		{Name: "version", Label: "Database version", Type: "text", Section: cs, ShowWhen: "kind=cloudsql|alloydb", Help: "POSTGRES_16, MYSQL_8_4, ..."},
@@ -526,22 +638,56 @@ func (p dmsProfilesProvider) Create(ctx context.Context, project string, v map[s
 	pr := &dmspb.ConnectionProfile{DisplayName: v["displayName"]}
 	port, _ := strconv.Atoi(strings.TrimSpace(v["port"]))
 	ssl := (*dmspb.SslConfig)(nil)
-	if v["ssl"] == "REQUIRED" {
+	switch v["ssl"] {
+	case "REQUIRED":
 		ssl = &dmspb.SslConfig{Type: dmspb.SslConfig_SslType(datamigration.SSLRequired)}
+	case "SERVER_ONLY":
+		ssl = &dmspb.SslConfig{Type: dmspb.SslConfig_SERVER_ONLY, CaCertificate: v["caCertificate"]}
+	case "SERVER_CLIENT":
+		ssl = &dmspb.SslConfig{Type: dmspb.SslConfig_SERVER_CLIENT, CaCertificate: v["caCertificate"],
+			ClientCertificate: v["clientCertificate"], ClientKey: v["clientKey"]}
+	}
+	tunnel := func(m interface{ ProtoReflect() protoreflect.Message }) error {
+		if v["sshTunnel"] != "true" && v["sshTunnel"] != "on" {
+			return nil
+		}
+		sp, _ := strconv.Atoi(strings.TrimSpace(v["sshPort"]))
+		if sp == 0 {
+			sp = 22
+		}
+		return datamigration.SetForwardSSH(m, strings.TrimSpace(v["sshHost"]), sp, strings.TrimSpace(v["sshUser"]), v["sshPassword"], v["sshKey"])
 	}
 	switch v["kind"] {
 	case "mysql":
 		if port == 0 {
 			port = 3306
 		}
-		pr.ConnectionProfile = &dmspb.ConnectionProfile_Mysql{Mysql: &dmspb.MySqlConnectionProfile{Host: strings.TrimSpace(v["host"]), Port: int32(port),
-			Username: v["username"], Password: v["password"], Ssl: ssl}}
+		m := &dmspb.MySqlConnectionProfile{Host: strings.TrimSpace(v["host"]), Port: int32(port),
+			Username: v["username"], Password: v["password"], Ssl: ssl}
+		if err := tunnel(m); err != nil {
+			return "", err
+		}
+		pr.ConnectionProfile = &dmspb.ConnectionProfile_Mysql{Mysql: m}
 	case "postgresql":
 		if port == 0 {
 			port = 5432
 		}
-		pr.ConnectionProfile = &dmspb.ConnectionProfile_Postgresql{Postgresql: &dmspb.PostgreSqlConnectionProfile{Host: strings.TrimSpace(v["host"]), Port: int32(port),
-			Username: v["username"], Password: v["password"], Ssl: ssl}}
+		m := &dmspb.PostgreSqlConnectionProfile{Host: strings.TrimSpace(v["host"]), Port: int32(port),
+			Username: v["username"], Password: v["password"], Ssl: ssl}
+		if err := tunnel(m); err != nil {
+			return "", err
+		}
+		pr.ConnectionProfile = &dmspb.ConnectionProfile_Postgresql{Postgresql: m}
+	case "cloudsql-existing":
+		id := strings.TrimSpace(v["existingId"])
+		if v["existingEngine"] == "postgresql" {
+			pr.ConnectionProfile = &dmspb.ConnectionProfile_Postgresql{Postgresql: &dmspb.PostgreSqlConnectionProfile{CloudSqlId: id}}
+		} else {
+			pr.ConnectionProfile = &dmspb.ConnectionProfile_Mysql{Mysql: &dmspb.MySqlConnectionProfile{CloudSqlId: id}}
+		}
+		datamigration.SetExistingRole(pr)
+	case "alloydb-existing":
+		pr.ConnectionProfile = &dmspb.ConnectionProfile_Alloydb{Alloydb: &dmspb.AlloyDbConnectionProfile{ClusterId: strings.TrimSpace(v["existingId"])}}
 	case "cloudsql":
 		st := &dmspb.CloudSqlSettings{SourceId: v["sourceId"], Tier: strings.TrimSpace(v["tier"]), RootPassword: v["rootPassword"]}
 		datamigration.SetCloudSQLVersionName(st, strings.TrimSpace(v["version"]))
@@ -597,13 +743,36 @@ func (p dmsProfilesProvider) Detail(ctx context.Context, project string, path []
 		props = append(props, console.Property{Label: "Error", Value: e.GetMessage()})
 	}
 	var conn []console.Property
+	sslOf := func(c *dmspb.SslConfig) string {
+		switch c.GetType() {
+		case dmspb.SslConfig_SERVER_ONLY:
+			return "TLS (the source's certificate verified)"
+		case dmspb.SslConfig_SERVER_CLIENT:
+			return "mTLS"
+		case dmspb.SslConfig_SslType(datamigration.SSLRequired):
+			return "Basic"
+		}
+		return "None"
+	}
+	sshOf := func(m interface{ ProtoReflect() protoreflect.Message }) []console.Property {
+		hp, user := datamigration.ForwardSSH(m)
+		if hp == "" {
+			return nil
+		}
+		return []console.Property{{Label: "Forward-SSH tunnel", Value: user + "@" + hp}}
+	}
 	switch {
+	case func() bool { _, ok := datamigration.ExistingDestination(pr); return ok }():
+		id, _ := datamigration.ExistingDestination(pr)
+		conn = []console.Property{{Label: "Existing destination", Value: id}, {Label: "Database engine", Value: dmsEngine(pr)}}
 	case pr.GetMysql() != nil:
 		m := pr.GetMysql()
-		conn = []console.Property{{Label: "Hostname or IP address", Value: m.GetHost()}, {Label: "Port", Value: strconv.Itoa(int(m.GetPort()))}, {Label: "Username", Value: m.GetUsername()}}
+		conn = append([]console.Property{{Label: "Hostname or IP address", Value: m.GetHost()}, {Label: "Port", Value: strconv.Itoa(int(m.GetPort()))}, {Label: "Username", Value: m.GetUsername()},
+			{Label: "Encryption type", Value: sslOf(m.GetSsl())}}, sshOf(m)...)
 	case pr.GetPostgresql() != nil:
 		m := pr.GetPostgresql()
-		conn = []console.Property{{Label: "Hostname or IP address", Value: m.GetHost()}, {Label: "Port", Value: strconv.Itoa(int(m.GetPort()))}, {Label: "Username", Value: m.GetUsername()}}
+		conn = append([]console.Property{{Label: "Hostname or IP address", Value: m.GetHost()}, {Label: "Port", Value: strconv.Itoa(int(m.GetPort()))}, {Label: "Username", Value: m.GetUsername()},
+			{Label: "Encryption type", Value: sslOf(m.GetSsl())}}, sshOf(m)...)
 	case pr.GetCloudsql() != nil:
 		c := pr.GetCloudsql()
 		conn = []console.Property{{Label: "Cloud SQL instance", Value: lastSegment(pr.GetName())}, {Label: "Source connection profile", Value: c.GetSettings().GetSourceId()},
