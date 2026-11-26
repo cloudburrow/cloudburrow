@@ -1001,13 +1001,13 @@ func (s *Server) remakeManagedNowLocked(project, mgr string, m obj, vm string, o
 	mgrAction(o, "RECREATING")
 	opRel := str(op, "selfLink")
 	// The group is re-making it: a pending member until it is made
-	// (#2220), listed RECREATING.
-	if pendingEntry(m, vm) == nil {
-		if m["_pending"] == nil {
-			m["_pending"] = map[string]any{}
-		}
-		pendingOf(m)[vm] = map[string]any{"zone": zone, "name": name, "action": "RECREATING", "template": tpl, "inFlight": true}
+	// (#2220), listed RECREATING. An entry left from the attempt that
+	// made the VM (its outcome not yet seen) is replaced, so that
+	// attempt's outcome neither drops nor relabels this one.
+	if m["_pending"] == nil {
+		m["_pending"] = map[string]any{}
 	}
+	pendingOf(m)[vm] = map[string]any{"zone": zone, "name": name, "action": "RECREATING", "template": tpl, "inFlight": true}
 	// Until it is made again, the VM is pending (queued under its own
 	// name), so no loop takes the group for settled and short of a VM
 	// in between and makes one of a new name.
