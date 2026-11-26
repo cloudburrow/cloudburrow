@@ -59,7 +59,7 @@ section and add its link at the bottom.
 - Agent Platform Pipelines run nested DAGs, `ParallelFor`, conditions, exit handlers, importers and
   caching (#2205), Google Cloud Pipeline Components and `template_uri` (#2210), with the run's
   runtime graph and Pipeline run analysis in the console.
-- Vertex AI hyperparameter tuning jobs, managed datasets and batch predictions, and BigQuery ML
+- Agent Platform hyperparameter tuning jobs, managed datasets and batch predictions, and BigQuery ML
   `EXPORT MODEL` of TRANSFORM models to SavedModels that import back (#2210).
 - Agent Platform Model Monitoring (v1 and v2), Neural Architecture Search and data labeling, with a
   local mail sink for email notifications (the console's Mail page) and console clocks to advance
@@ -74,7 +74,7 @@ section and add its link at the bottom.
 
 - Official Spanner, Bigtable and Cloud Storage gRPC clients made by CloudBurrow no longer export
   their built-in metrics to Google; `cloudburrow env` sets `SPANNER_DISABLE_BUILTIN_METRICS=true`.
-- A Vertex AI model whose container image is a short Docker Hub name, by tag or by digest
+- An Agent Platform model whose container image is a short Docker Hub name, by tag or by digest
   (`python@sha256:…`), now deploys to endpoints and runs batch predictions; it was looked for
   as a locally built image and never started.
 - A Compute Engine VM answers SSH as soon as it boots, even while its guest agent waits for the
