@@ -41,7 +41,10 @@ func diskKeys(t *testing.T, h *Harness, ring string, locations ...string) (map[s
 	}
 	return keys, func(version string, st kmspb.CryptoKeyVersion_CryptoKeyVersionState) {
 		t.Helper()
-		if _, err := kc.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{
+		// Each call gets its own budget: the ring's 60 s context is long gone by
+		// the time a test on a loaded runner disables a version (main run
+		// 45731759763 hit it after 89 s).
+		if _, err := kc.UpdateCryptoKeyVersion(h.Context(), &kmspb.UpdateCryptoKeyVersionRequest{
 			CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: version, State: st},
 			UpdateMask:       &fieldmaskpb.FieldMask{Paths: []string{"state"}}}); err != nil {
 			t.Fatalf("UpdateCryptoKeyVersion %s %v: %v", version, st, err)
