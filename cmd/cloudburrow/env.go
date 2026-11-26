@@ -695,6 +695,15 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{cliEndpointVar("dataflow"), df,
 				"Dataflow v1b3, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint, or --dataflow_endpoint=http://localhost:PORT to the Beam SDKs"})
 	}
+	// Database Migration Service (#2252): gcloud database-migration and
+	// the Go client.
+	if dataMigrationEnabled(cfg) && cfg.Endpoints.DataMigration != 0 {
+		dm := addr(cfg.Endpoints.DataMigration)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_DATAMIGRATION", "http://" + dm + "/", "read by gcloud; gcloud database-migration"},
+			envVar{cliEndpointVar("datamigration"), dm,
+				"Database Migration Service v1, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint"})
+	}
 	// Filestore (#2192): the Go client and gcloud filestore (file).
 	if filestoreEnabled(cfg) && cfg.Endpoints.Filestore != 0 {
 		fs := addr(cfg.Endpoints.Filestore)
@@ -965,6 +974,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"alloydb":                &e.AlloyDB,
 		"filestore":              &e.Filestore,
 		"dataflow":               &e.Dataflow,
+		"datamigration":          &e.DataMigration,
 		"trace":                  &e.Trace,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
 		// and Endpoints (#1940) to gcloud-setup and terraform, and Document

@@ -125,6 +125,9 @@ type consoleDeps struct {
 	filestore *filestoreService
 	// dataflow is Dataflow (#2215), nil unless enabled.
 	dataflow *dataflowService
+	// dataMigration is Database Migration Service (#2252), nil unless
+	// enabled.
+	dataMigration *dataMigrationService
 	// trace is Cloud Trace (#2118), nil unless enabled.
 	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
@@ -434,7 +437,15 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		providers = append(providers, alloyDBProvider{svc: d.alloyDB,
 			savedQueries: filepath.Join(d.cfg.InstanceDir(), alloyDBSavedQueriesFile),
 			iamPrincipal: metadata.ServiceAccountEmail(d.cfg.DefaultProject()),
-			metrics:      monitoringAdmin{api: monitoringServerOf(d.monitoring)}}, alloyDBBackupsProvider{svc: d.alloyDB})
+			metrics:      monitoringAdmin{api: monitoringServerOf(d.monitoring)},
+			migrate:      enabled[config.ServiceDataMigration] && d.dataMigration != nil}, alloyDBBackupsProvider{svc: d.alloyDB})
+	}
+	// Database Migration Service (#2252), in process: Migration jobs,
+	// Conversion workspaces, Connection profiles and Private connectivity
+	// configurations.
+	if enabled[config.ServiceDataMigration] && d.dataMigration != nil {
+		providers = append(providers, dmsJobsProvider{svc: d.dataMigration}, dmsConversionProvider{},
+			dmsProfilesProvider{svc: d.dataMigration}, dmsPrivateProvider{svc: d.dataMigration})
 	}
 	if enabled[config.ServiceAppHub] && d.appHub != nil {
 		providers = append(providers, appHubProvider{svc: d.appHub}, appHubDiscoveredProvider{svc: d.appHub}, appHubSettingsProvider{svc: d.appHub})
@@ -693,7 +704,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			endpoint: net.JoinHostPort(host, strconv.Itoa(d.cfg.Endpoints.SQLAdmin)), versions: versions, srv: d.sqlAdmin,
 			metrics:      monitoringAdmin{api: monitoringServerOf(d.monitoring)},
 			savedQueries: filepath.Join(d.cfg.InstanceDir(), cloudSQLSavedQueriesFile),
-			iamPrincipal: metadata.ServiceAccountEmail(d.cfg.DefaultProject())}
+			iamPrincipal: metadata.ServiceAccountEmail(d.cfg.DefaultProject()),
+			migrate:      enabled[config.ServiceDataMigration] && d.dataMigration != nil}
 		if enabled[config.ServiceCompute] && d.compute != nil {
 			instances.compute = d.compute.API
 		}
@@ -961,6 +973,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceDataform:         "Dataform",
 	config.ServiceDataproc:         "Serverless for Apache Spark",
 	config.ServiceAppHub:           "App Hub",
+	config.ServiceDataMigration:    "Database Migration Service",
 	config.ServiceAlloyDB:          "AlloyDB",
 	config.ServiceFilestore:        "Filestore",
 	config.ServiceDataflow:         "Dataflow",

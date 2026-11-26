@@ -115,6 +115,7 @@ func TestGenerateServiceIdentityEveryEntry(t *testing.T) {
 		"dataproc.googleapis.com":               "dataproc-accounts.iam.gserviceaccount.com",
 		"dataflow.googleapis.com":               "dataflow-service-producer-prod.iam.gserviceaccount.com",
 		"apphub.googleapis.com":                 "gcp-sa-apphub.iam.gserviceaccount.com",
+		"datamigration.googleapis.com":          "gcp-sa-datamigration.iam.gserviceaccount.com",
 		"vpcaccess.googleapis.com":              "gcp-sa-vpcaccess.iam.gserviceaccount.com",
 		"certificatemanager.googleapis.com":     "gcp-sa-certificatemanager.iam.gserviceaccount.com",
 		"networksecurity.googleapis.com":        "gcp-sa-networksecurity.iam.gserviceaccount.com",

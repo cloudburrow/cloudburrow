@@ -75,3 +75,13 @@ func dataflowNetwork(project, network, subnetwork, region string, api func() *co
 	}
 	return rel
 }
+
+// computeAPIOf is s's Compute Engine API, or nil when Compute Engine is
+// not served. runUp's compute is the compute host (#2209), which hides the
+// compute package there.
+func computeAPIOf(s *computeService) func() *compute.Server {
+	if s == nil {
+		return nil
+	}
+	return s.API
+}
