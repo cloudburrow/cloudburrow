@@ -394,6 +394,7 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # served shard's instance again (COMPAT_BROWSER_VPCVMS_TEST_NAMES).
 COMPAT_BROWSER_SHARDS="storage served vpcvms run crossservice emulators memorystore sql localai"
 COMPAT_BROWSER_VPCVMS_TEST_NAMES="ComputeA1Screens ComputeA1ScreensMeetWCAG
+  ComputeGroupWorkloadPolicyThroughTheBrowser
   ShieldedVMConsole2181 ShieldedVMConsole2181MeetsWCAG
   IPv6OnlyFormsMeetWCAG2140 IPv6OnlySubnetAndInstanceThroughTheBrowser2140
   IPv6LoadBalancerFrontendMeetsWCAG2140 IPv6LoadBalancerFrontendThroughTheBrowser2140
@@ -418,8 +419,8 @@ COMPAT_BROWSER_VPCVMS_SHARD_TESTS="^Test($(echo "$COMPAT_BROWSER_VPCVMS_TEST_NAM
 # Compute Engine's regional disks, disk performance, keys and snapshot
 # schedules, instance schedules and group workload policies (#2206) need
 # Compute Engine, which served serves.
-COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore|ComputeDiskPerformance|ComputeGroupWorkloadPolicy|ComputeInstanceSchedules|ComputeRegionalDisks)'
-COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore|ComputeDiskPerformance|ComputeGroupWorkloadPolicy|ComputeInstanceSchedules|ComputeRegionalDisks)'
+COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore|ComputeDiskPerformance|ComputeInstanceSchedules|ComputeRegionalDisks)'
+COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore|ComputeDiskPerformance|ComputeInstanceSchedules|ComputeRegionalDisks)'
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipeline|VertexAIMetadata|VertexAITraining|VertexAIDatasets|Workbench|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS='^Test(KMS|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipeline|VertexAIMetadata|VertexAITraining|VertexAIDatasets|Workbench|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
