@@ -273,6 +273,7 @@ func TestDataflowProvidedFlexTemplatesV2(t *testing.T) {
 	})
 
 	t.Run("BigQuery_to_Bigtable", func(t *testing.T) {
+		h := h.For(t)
 		ds := "provided_flex_bt_" + suffix
 		if err := bq.Dataset(ds).Create(ctx, nil); err != nil {
 			t.Fatal(err)

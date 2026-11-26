@@ -123,6 +123,7 @@ func TestDataflowProvidedFlexModules(t *testing.T) {
 	}
 
 	t.Run("PostgreSQL_to_BigQuery", func(t *testing.T) {
+		h := h.For(t)
 		src := newJDBCSource(t, h, ctx, project, suffix)
 		out := table(t, "postgres")
 		done(t, ctx, c, project, "PostgreSQL_to_BigQuery", launch(t, "PostgreSQL_to_BigQuery", "provided-pg-bq", map[string]string{
@@ -134,6 +135,7 @@ func TestDataflowProvidedFlexModules(t *testing.T) {
 	})
 
 	t.Run("MySQL_to_BigQuery", func(t *testing.T) {
+		h := h.For(t)
 		src := newMySQLSource(t, h, ctx, project, suffix)
 		out := table(t, "mysql")
 		done(t, ctx, c, project, "MySQL_to_BigQuery", launch(t, "MySQL_to_BigQuery", "provided-mysql-bq", map[string]string{
@@ -145,6 +147,7 @@ func TestDataflowProvidedFlexModules(t *testing.T) {
 	})
 
 	t.Run("Streaming_Data_Generator", func(t *testing.T) {
+		h := h.For(t)
 		ps := pubsubClient(t, h)
 		topic := fmt.Sprintf("projects/%s/topics/provgen-%s", project, suffix)
 		sub := fmt.Sprintf("projects/%s/subscriptions/provgen-%s", project, suffix)

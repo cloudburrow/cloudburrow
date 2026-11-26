@@ -12,7 +12,8 @@
 //
 // Google publishes no host key field, so the SSH host's key is not
 // checked, as Database Migration Service's cannot be (UNVERIFIED: the
-// reference names none).
+// reference names none; docs re-read 2026-11-25, still unanswered: the
+// forwardSshTunnelConnectivity reference above).
 package dmstunnel
 
 import (
