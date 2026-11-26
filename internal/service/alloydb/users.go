@@ -311,7 +311,7 @@ func (s *Server) UpdateUser(ctx context.Context, req *alloydbpb.UpdateUserReques
 				// the user no password to sign in with (#2251). An empty
 				// mask (every field) keeps it. UNVERIFIED: Google's server
 				// answer to an empty password in the mask.
-				// (read 2026-11-25: docs.cloud.google.com/alloydb/docs/database-users/manage-roles.)
+				// (re-read 2026-11-25: docs.cloud.google.com/alloydb/docs/database-users/manage-roles.)
 				stmts = append(stmts, "ALTER ROLE "+quoteIdent(role)+" WITH PASSWORD NULL")
 			}
 		case "database_roles":

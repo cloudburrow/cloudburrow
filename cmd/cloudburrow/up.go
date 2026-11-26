@@ -1424,6 +1424,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 				return ""
 			}
 		}
+		// AlloyDB's metrics in Cloud Monitoring (#2251).
+		if monitoringSvc != nil {
+			svc := alloyDBSvc
+			monitoringSvc.alloyDB = svc.API
+		}
 		alloyDBSvc.register(coord)
 	}
 	// The Backup and DR Service (#1433), over the Admin API's backups.

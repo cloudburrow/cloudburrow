@@ -25,6 +25,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/mailsink"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/service/alloydb"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/monitoring"
@@ -70,6 +71,11 @@ type monitoringService struct {
 	// servers are read for cloudsql.googleapis.com metrics (#2141).
 	sql     func() *sqladmin.Server
 	sqlStop chan struct{}
+	// alloyDB is the instance's AlloyDB Admin API, or nil, whose
+	// instances' servers are read for alloydb.googleapis.com metrics
+	// (#2251); alloyDBStop ends their sampling.
+	alloyDB     func() *alloydb.Server
+	alloyDBStop chan struct{}
 	// computeCPU is the Compute Engine API, for its VMs' CPU utilization
 	// (#2139); nil when Compute Engine is not served. computeStop ends
 	// its sampling.
@@ -239,6 +245,27 @@ func (s *monitoringService) Start(ctx context.Context) error {
 			}
 		}(s.sqlStop)
 	}
+	if s.alloyDB != nil {
+		// AlloyDB's servers, sampled every 60 seconds on their own (#2251).
+		// Every project's clusters: each series carries its project as
+		// resource_container, which Series filters on.
+		am := monitoring.NewAlloyDBBuiltin(monitoringAlloyDB{srv: s.alloyDB, kubeconfig: s.cfg.KubeconfigPath(),
+			namespace: s.cfg.Cluster.Namespace}, time.Now)
+		api.AddBuiltin(am)
+		s.alloyDBStop = make(chan struct{})
+		go func(stop chan struct{}) {
+			t := time.NewTicker(requestSampleInterval)
+			defer t.Stop()
+			for {
+				select {
+				case <-t.C:
+					am.Sample()
+				case <-stop:
+					return
+				}
+			}
+		}(s.alloyDBStop)
+	}
 	if s.tasks != nil {
 		s.tasksMets = monitoring.NewTasksBuiltin(monitoringTasks{svc: s.tasks}, time.Now)
 		api.AddBuiltin(s.tasksMets)
@@ -302,6 +329,10 @@ func (s *monitoringService) Stop(ctx context.Context) error {
 	if s.sqlStop != nil {
 		close(s.sqlStop)
 		s.sqlStop = nil
+	}
+	if s.alloyDBStop != nil {
+		close(s.alloyDBStop)
+		s.alloyDBStop = nil
 	}
 	if s.computeStop != nil {
 		close(s.computeStop)

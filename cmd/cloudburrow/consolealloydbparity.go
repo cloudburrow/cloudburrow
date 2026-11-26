@@ -52,7 +52,7 @@ const (
 
 // alloyDBClusterColumns are Google's Clusters list's columns.
 var alloyDBClusterColumns = []string{"Resource name", "Resource type", "Location", "Status", "Private IP address", "High availability",
-	"Read pool nodes", "Automated backups", "Most recent backup", "Labels", "Created", "Encryption"}
+	"Read pool nodes", "Automated backups", "Most recent backup", "Maintenance", "Labels", "Created", "Encryption"}
 
 func alloyDBLabels(m map[string]string) string {
 	if len(m) == 0 {
@@ -122,7 +122,7 @@ func alloyDBClusterListing(ctx context.Context, s *alloydb.Server, project strin
 		for _, in := range instances {
 			row := map[string]string{"Resource name": lastSegment(in.GetName()), "Resource type": alloyDBInstanceResourceType(in.GetInstanceType()),
 				"Location": kmsOrDash(in.GetGceZone()), "Status": alloyDBState(in.GetState()), "Private IP address": kmsOrDash(in.GetIpAddress()),
-				"High availability": "-", "Read pool nodes": "-", "Automated backups": "-", "Most recent backup": "-",
+				"High availability": "-", "Read pool nodes": "-", "Automated backups": "-", "Most recent backup": "-", "Maintenance": "-",
 				"Labels": alloyDBLabels(in.GetLabels()), "Created": kmsTime(in.GetCreateTime()), "Encryption": "-"}
 			if row["Location"] == "-" {
 				row["Location"] = kmsLocation(c.GetName())
@@ -149,7 +149,8 @@ func alloyDBClusterListing(ctx context.Context, s *alloydb.Server, project strin
 			Fields: map[string]string{"Resource name": lastSegment(c.GetName()), "Resource type": clusterType,
 				"Location": kmsLocation(c.GetName()), "Status": alloyDBState(c.GetState()), "Private IP address": privateIP,
 				"High availability": ha, "Read pool nodes": poolNodes, "Automated backups": auto, "Most recent backup": recent,
-				"Labels": alloyDBLabels(c.GetLabels()), "Created": kmsTime(c.GetCreateTime()), "Encryption": alloyDBEncryption(c.GetEncryptionConfig())}})
+				"Maintenance": alloyDBUpcomingMaintenance(c),
+				"Labels":      alloyDBLabels(c.GetLabels()), "Created": kmsTime(c.GetCreateTime()), "Encryption": alloyDBEncryption(c.GetEncryptionConfig())}})
 	}
 	listing.Total = len(listing.Items)
 	listing.RowsOpenable = true
