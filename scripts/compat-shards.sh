@@ -421,7 +421,7 @@ COMPAT_BROWSER_VPCVMS_SHARD_TESTS="^Test($(echo "$COMPAT_BROWSER_VPCVMS_TEST_NAM
 # Compute Engine, which served serves.
 COMPAT_BROWSER_SERVED_SHARD_TESTS='^Test(GKEServed|KubernetesEnginePages|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore|ComputeDiskPerformance|ComputeInstanceSchedules|ComputeRegionalDisks)'
 COMPAT_BROWSER_SERVED_ONLY_TESTS='^Test(GKEServed|VPCNetwork|ComputeEngine|ComputePermissions|TraceExplorer|LoadBalancing|Filestore|ComputeDiskPerformance|ComputeInstanceSchedules|ComputeRegionalDisks)'
-COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipeline|VertexAIMetadata|VertexAITraining|VertexAIDatasets|Workbench|AppHub|DeveloperConnect)'
+COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(AgentPlatformMonitoring|KMS|CloudRun|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipeline|VertexAIMetadata|VertexAITraining|VertexAIDatasets|Workbench|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_CROSSSERVICE_SHARD_TESTS='^Test(KMS|CloudBuild|LoggingAdmin|LoggingConsole|LoggingAppHub|SecretManager|Eventarc|DocumentAI|Speech|StoragePicker|Workflows|ModelRegistry|Dataform|Colab|VertexAIPipeline|VertexAIMetadata|VertexAITraining|VertexAIDatasets|Workbench|AppHub|DeveloperConnect)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
 # Create an image from a Cloud Storage file (#2139) browses a bucket of
@@ -478,7 +478,10 @@ COMPAT_BROWSER_SPARK_SHARD_TESTS='^Test(BigQueryStudioNotebookRuntimeThroughTheP
 # builds a function from source with Google's builder, as the compat
 # suite's Functions tests do, so it runs only when asked for
 # (CLOUDBURROW_TEST_FUNCTIONS) on amd64 nodes.
-COMPAT_BROWSER_NEVER_TESTS='^TestCloudRunFunctionsEditDownloadAndPermissionsThroughThePage$'
+# TestByocFirstRunWalkThrough and TestRemoteComputeConsole need stand-in
+# remote hosts and the BYOC fakes, which no v0.8.0 shard starts: the
+# remotehosts shard that runs them is #2259 (fix/after-169-followups).
+COMPAT_BROWSER_NEVER_TESTS='^(TestCloudRunFunctionsEditDownloadAndPermissionsThroughThePage|TestByocFirstRunWalkThrough|TestRemoteComputeConsole)$'
 
 # compat_browser_select <shard>: sets, for that shard's browser step,
 #   BROWSER_RUN   its go test -run pattern (every test when empty)
