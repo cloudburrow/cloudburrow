@@ -35,3 +35,17 @@ func TestTunnelLogSummarizesTheBoot(t *testing.T) {
 		t.Errorf("failed: %q", got)
 	}
 }
+
+// TestBootFailureHintNamesInotify: a guest whose systemd exited for want
+// of inotify instances (CI's run shard, main run 45753347963) gets a line
+// naming the host limit; any other serial console none.
+func TestBootFailureHintNamesInotify(t *testing.T) {
+	serial := "Welcome to Debian GNU/Linux 12 (bookworm)!\nFailed to create control group inotify object: Too many open files\n" +
+		"Failed to allocate manager object: Too many open files\n[!!!!!!] Failed to allocate manager object.\nExiting PID 1..."
+	if h := bootFailureHint(serial); !strings.Contains(h, "fs.inotify.max_user_instances") {
+		t.Errorf("hint %q", h)
+	}
+	if h := bootFailureHint("Welcome to Debian GNU/Linux 12 (bookworm)!\nReached target multi-user.target"); h != "" {
+		t.Errorf("hint for a normal boot: %q", h)
+	}
+}
