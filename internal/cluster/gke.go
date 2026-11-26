@@ -288,7 +288,7 @@ func (g *GKE) join(ctx context.Context, kind, image, pool, name string) error {
 		out, err := r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "get", "node", name, "-o",
 			`jsonpath={.status.conditions[?(@.type=="Ready")].status}`)
 		if err == nil && strings.TrimSpace(out) == "True" {
-			return nil
+			return g.routePodRanges(ctx, kind, name, deadline)
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("node %s did not become Ready (%q, %v)", name, strings.TrimSpace(out), err)
@@ -299,6 +299,79 @@ func (g *GKE) join(ctx context.Context, kind, image, pool, name string) error {
 		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+// routePodRanges makes a node that has just joined kind's cluster reachable
+// before it is used: every other node routes the new node's pod range
+// through its address, and the new node every other node's. A GKE node's
+// pod range is routed in the VPC once the node is up, so the control plane
+// (the API server's service proxy, webhooks) and the other nodes reach the
+// pods scheduled onto it at once. kindnet adds these routes only on its
+// next pass over the nodes, every ten seconds or more: a surge upgrade
+// drained its old node onto the new one inside that window, the workload's
+// new pods were Ready, and the API server's connections to them hung until
+// the control plane had the route (main run 45753347963,
+// TestGKEUpgradeMasterThenNodePool). The routes are kindnet's own (`ip
+// route replace` of the same destination and gateway), so its pass finds
+// them there.
+func (g *GKE) routePodRanges(ctx context.Context, kind, name string, deadline time.Time) error {
+	r := g.runner()
+	type node struct{ name, cidr, ip string }
+	var nodes []node
+	var self *node
+	for {
+		out, err := r.Run(ctx, "kubectl", "--kubeconfig", g.kubeconfig(kind), "get", "nodes", "-o",
+			`jsonpath={range .items[*]}{.metadata.name} {.spec.podCIDR} {.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}`)
+		nodes, self = nil, nil
+		if err == nil {
+			for _, l := range strings.Split(out, "\n") {
+				f := strings.Fields(l)
+				if len(f) == 3 && strings.HasPrefix(f[0], kind+"-") {
+					nodes = append(nodes, node{f[0], f[1], f[2]})
+				}
+			}
+			for i := range nodes {
+				if nodes[i].name == name {
+					self = &nodes[i]
+				}
+			}
+		}
+		// The node controller gives a node its pod range as it registers;
+		// it is Ready only with it, so it is there or about to be.
+		if self != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("node %s has no pod range (%v)", name, err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+	route := func(on, cidr, via string) error {
+		_, err := r.Run(ctx, "docker", "exec", on, "ip", "route", "replace", cidr, "via", via)
+		if err != nil && on != name && noSuchContainer(err) {
+			return nil // a node being removed meanwhile
+		}
+		if err != nil {
+			return fmt.Errorf("route %s via %s on node %s: %w", cidr, via, on, err)
+		}
+		return nil
+	}
+	for _, n := range nodes {
+		if n.name == name {
+			continue
+		}
+		if err := route(n.name, self.cidr, self.ip); err != nil {
+			return err
+		}
+		if err := route(name, n.cidr, n.ip); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // joinConfig is kind's JoinConfiguration and KubeletConfiguration for a

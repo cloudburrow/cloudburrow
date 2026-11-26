@@ -16,6 +16,7 @@ type registeringRunner struct {
 	reads    int
 	register int // the read from which the Node exists, Ready
 	removed  bool
+	routes   []string // the `ip route replace` commands, "node cidr via"
 }
 
 func (f *registeringRunner) Run(_ context.Context, name string, args ...string) (string, error) {
@@ -36,6 +37,12 @@ func (f *registeringRunner) Run(_ context.Context, name string, args ...string) 
 		return "", nil
 	case strings.HasPrefix(cmd, "kubectl") && strings.Contains(cmd, " wait "):
 		return "", errors.New(`Error from server (NotFound): nodes "x" not found`)
+	case strings.HasPrefix(cmd, "kubectl") && strings.Contains(cmd, " get nodes "):
+		k := OwnerPrefix + "-gke-x"
+		return k + "-control-plane 10.244.0.0/24 172.18.0.2\n" + poolNodeName(k, "tfpool", 1) + " 10.244.1.0/24 172.18.0.3\n", nil
+	case strings.HasPrefix(cmd, "docker exec") && strings.Contains(cmd, " ip route replace "):
+		f.routes = append(f.routes, args[1]+" "+args[5]+" "+args[7])
+		return "", nil
 	case strings.HasPrefix(cmd, "kubectl") && strings.Contains(cmd, " get node "):
 		f.reads++
 		if f.reads < f.register {
@@ -58,5 +65,23 @@ func TestJoinWaitsForTheNodeToRegister(t *testing.T) {
 	}
 	if r.reads != 2 || r.removed {
 		t.Errorf("read the Node %d times and removed it %v, want 2 reads and kept", r.reads, r.removed)
+	}
+}
+
+// TestJoinRoutesTheNewNodesPodRange: once a new node is Ready, the
+// cluster's other nodes route its pod range through it, and it theirs,
+// before the node is used: a surge upgrade drained onto a node whose pods
+// the control plane could not reach yet, kindnet's routes coming only on
+// its next pass (main run 45753347963).
+func TestJoinRoutesTheNewNodesPodRange(t *testing.T) {
+	r := &registeringRunner{register: 1}
+	g := &GKE{Dir: t.TempDir(), Runner: r}
+	k := OwnerPrefix + "-gke-x"
+	if err := g.Resize(context.Background(), k, "kindest/node:v0", "tfpool", 1); err != nil {
+		t.Fatalf("Resize to one node: %v", err)
+	}
+	want := []string{k + "-control-plane 10.244.1.0/24 172.18.0.3", poolNodeName(k, "tfpool", 1) + " 10.244.0.0/24 172.18.0.2"}
+	if strings.Join(r.routes, ",") != strings.Join(want, ",") {
+		t.Errorf("routes = %q, want %q", r.routes, want)
 	}
 }
