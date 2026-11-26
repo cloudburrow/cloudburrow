@@ -79,6 +79,8 @@ section and add its link at the bottom.
   as a locally built image and never started.
 - A Compute Engine VM answers SSH as soon as it boots, even while its guest agent waits for the
   metadata server, so a managed instance group no longer gives up on a VM that booted slowly (#2250).
+- A managed instance group recreating a VM whose creation fails keeps the VM's name and lists it
+  RECREATING with its last attempt, instead of sometimes dropping it or making one of a new name.
 
 ## [0.7.0] - 2026-11-25
 
