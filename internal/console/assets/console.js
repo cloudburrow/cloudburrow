@@ -30447,6 +30447,14 @@ function renderDBStudio(panel, route, segments, project, product) {
   let saved = [];
   let catalog = null;
   const lastOf = new Map();
+  // Whether the Studio is still what this panel shows: the options load
+  // before the sign-in dialog opens, and a reader who moved on to another
+  // tab meanwhile (or another Studio render took the panel) must not get
+  // the dialog over that tab's page.
+  const render = {};
+  panel.dbStudio = render;
+  const showing = () => panel.isConnected && panel.dbStudio === render &&
+    panel.querySelector("#dbs-signed-out, #dbs-studio") !== null;
 
   // --- the sign-in dialog -------------------------------------------------
   const signIn = async () => {
@@ -30454,10 +30462,12 @@ function renderDBStudio(panel, route, segments, project, product) {
     try {
       options = await call("options");
     } catch (err) {
+      if (!showing()) return;
       setChildren(panel, el("div", { class: "dbs-signed-out", id: "dbs-signed-out" },
         el("h2", { text: title }), el("p", { class: "form-error", role: "alert", id: "dbs-options-error", text: err.message })));
       return;
     }
+    if (!showing()) return;
     const { dialog, close } = openModal({ labelledBy: "dbs-signin-title" });
     const database = el("select", { id: "dbs-database", required: true },
       el("option", { value: "", text: "Select a database" }),
