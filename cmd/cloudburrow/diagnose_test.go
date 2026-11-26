@@ -96,3 +96,17 @@ func TestDiagnoseGetArgsPutTheVerbFirst(t *testing.T) {
 		t.Errorf("all namespaces: %s", got)
 	}
 }
+
+// TestDiagnoseSerialArgs (#2250): a VM's serial console is its pod's vm
+// container's log, the previous boot's when the guest restarted, each in
+// a file of its own.
+func TestDiagnoseSerialArgs(t *testing.T) {
+	args, file := diagnoseSerialArgs("cloudburrow", "vm-1", false)
+	if got := strings.Join(args, " "); got != "logs vm-1 -n cloudburrow -c vm --tail 2000" || file != "kubernetes/serial/vm-1.txt" {
+		t.Errorf("current: %s %s", got, file)
+	}
+	args, file = diagnoseSerialArgs("cloudburrow", "vm-1", true)
+	if got := strings.Join(args, " "); got != "logs vm-1 -n cloudburrow -c vm --tail 2000 --previous" || file != "kubernetes/serial/vm-1.previous.txt" {
+		t.Errorf("previous: %s %s", got, file)
+	}
+}

@@ -481,6 +481,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if computeSvc != nil {
 		// A VM's metadata server mints its service account's tokens (#2177).
 		computeSvc.tokens = creds
+		computeSvc.logw = stderr
 		computeSvc.gke = gkeSvc
 		computeSvc.kms = kmsSvc
 		// Secure Web Proxy's TLS inspection issues its leaves from a CA

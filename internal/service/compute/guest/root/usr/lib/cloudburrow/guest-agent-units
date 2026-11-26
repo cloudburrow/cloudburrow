@@ -5,12 +5,36 @@
 # certificate timer and Google's shutdown-script unit are masked, since
 # CloudBurrow's own units run the guest's scripts and keys.
 set -e
+# sshd does not wait for the agent (#2250). Google's units start before
+# sshd "in order to regenerate SSH host keys", which the agent does not do
+# here (set_host_keys is off; ssh.service's drop-in makes them): ordered
+# before it, a Type=notify agent that cannot reach the metadata server
+# yet (a guest booting beside another on a loaded machine) held sshd for
+# its whole 90-second start timeout, after the firmware unit's own wait,
+# and a VM that is RUNNING did not answer SSH. The unit is the package's,
+# copied to /etc/systemd/system with sshd.service and ssh.service taken
+# out of its Before= lines; its WantedBy= still pulls it in with sshd.
+# (UNIT_DIRS and ETC_UNITS are the directories; only tests set them.)
+unorder_sshd() {
+  for d in ${UNIT_DIRS:-/lib/systemd/system /usr/lib/systemd/system}; do
+    [ -e "$d/$1" ] || continue
+    out=${ETC_UNITS:-/etc/systemd/system}/$1
+    sed -E '/^# Start before sshd/d; /^Before=/{s/[[:space:]]+sshd?\.service//g; s/=sshd?\.service[[:space:]]*/=/; /^Before=[[:space:]]*$/d;}' "$d/$1" > "$out"
+    if grep -Eq '^Before=.*sshd?\.service' "$out"; then
+      echo "guest-agent-units: $1 is still ordered before sshd" >&2
+      exit 1
+    fi
+    return 0
+  done
+}
 if [ -e /lib/systemd/system/google-guest-agent-manager.service ] || [ -e /usr/lib/systemd/system/google-guest-agent-manager.service ]; then
+  unorder_sshd google-guest-agent-manager.service
   systemctl enable google-guest-agent-manager.service
   systemctl mask google-guest-agent.service google-guest-compat-manager.service
 else
   mkdir -p /etc/systemd/system/google-guest-agent.service.d
   cp /etc/systemd/system/google-guest-agent-manager.service.d/zz-cloudburrow.conf /etc/systemd/system/google-guest-agent.service.d/
+  unorder_sshd google-guest-agent.service
   systemctl enable google-guest-agent.service
 fi
 for u in gce-workload-cert-refresh.timer google-shutdown-scripts.service google-oslogin-cache.timer; do

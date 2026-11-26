@@ -1379,6 +1379,10 @@ jobs:
           # The same bundle a user attaches to a bug report (#293): redacted,
           # and it records what it could not collect rather than failing.
           ./bin/cloudburrow diagnose -o diagnostics/bundle.tar.gz --name ci --state-dir "$RUNNER_TEMP/cb" || true
+          # The instance's whole log (#2250): the VMs' SSH tunnel lines, and
+          # the serial console of a guest whose sshd never answered, which
+          # goes with its pod when the insert is undone, are only there.
+          cp "$RUNNER_TEMP/cb/ci/up.log" diagnostics/up.log 2>/dev/null || true
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()

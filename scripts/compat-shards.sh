@@ -243,7 +243,8 @@ COMPAT_COMPUTE_VM_TEST_NAMES="ComputeRegionalDisksThroughTheGoClient ComputeVMsT
   ComputeOpsAgentWritesLogsAndMetrics ComputeAutoscalerScalesOnRealCPU
   ShieldedVMHTTPSMetadataServer2179 VMMetadataServerFromInsideTheVM2177
   ComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient ComputeHyperdiskBalancedHAThroughTheGoClient
-  ComputeDiskVolumeIsCiphertextWhileTheVMWrites ComputeRegionalDisksHAThroughTheGoClient"
+  ComputeDiskVolumeIsCiphertextWhileTheVMWrites ComputeRegionalDisksHAThroughTheGoClient
+  ComputeConcurrentVMBootsAnswerSSH2250"
 COMPAT_COMPUTE_VM_TESTS="^Test($(echo "$COMPAT_COMPUTE_VM_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 COMPAT_VPC_VM_TEST_NAMES="CloudRouterBGPWithARouterApplianceVM2140 ComputeVMNetworkingThroughTheGoClient
   RelayedConnectionsFollowTheEgressFirewall ComputeIPv6ThroughTheGoClient
