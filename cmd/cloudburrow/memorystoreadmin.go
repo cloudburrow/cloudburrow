@@ -449,15 +449,43 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 }
 
 // Restart implements redisadmin.Restarter, a Basic tier instance's
-// maintenance update (#1524): its pod is deleted, so the server is
-// unavailable until the Deployment's next pod serves, through a new
-// tunnel.
+// maintenance update (#1524): its server is stopped, so it is unavailable
+// until the Deployment's next pod serves, through a new tunnel.
+//
+// The Deployment is scaled to none first, and Restart waits until its pod
+// is gone, before Provision applies it again with its one replica.
+// Deleting the pod instead has its ReplicaSet start the next one at once,
+// beside the old one still stopping (a Recreate strategy orders rollouts,
+// not a pod's deletion). With RDB persistence the old server writes its
+// last snapshot to the volume as it stops, and the next one, sharing that
+// volume, could load the file from before it: main run 45823073864 lost a
+// key written just before the maintenance (#1911), where Memorystore keeps
+// a Basic tier instance's RDB data across planned maintenance. A pod is
+// gone from the API only once its containers have exited, so its server
+// has saved by then.
 func (p *memorystoreProvisioner) Restart(ctx context.Context, spec redisadmin.Spec) (string, error) {
-	if _, err := p.installer.Kubectl(ctx, "-n", p.cfg.Cluster.Namespace, "delete", "pods", "-l", "app="+spec.Server, "--wait=true"); err != nil {
+	ns := p.cfg.Cluster.Namespace
+	if _, err := p.installer.Kubectl(ctx, "-n", ns, "scale", "deployment/"+spec.Server, "--replicas=0"); err != nil {
 		return "", fmt.Errorf("stop %s: %w", spec.Server, err)
+	}
+	t := time.NewTicker(memorystoreStopPoll)
+	defer t.Stop()
+	for {
+		out, err := p.installer.Kubectl(ctx, "-n", ns, "get", "pods", "-l", "app="+spec.Server, "-o", "name")
+		if err == nil && strings.TrimSpace(out) == "" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("stop %s: its pod did not end: %w (last: %v)", spec.Server, ctx.Err(), err)
+		case <-t.C:
+		}
 	}
 	return p.Provision(ctx, spec)
 }
+
+// memorystoreStopPoll is how often Restart looks for its stopped pod.
+var memorystoreStopPoll = 250 * time.Millisecond
 
 // StartClusterNode runs a Redis Cluster node (#1519): the server of spec
 // in cluster mode, serving on one port that is the same in the cluster and
