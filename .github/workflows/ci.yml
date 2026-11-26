@@ -573,8 +573,10 @@ jobs:
     # timeout is now 30m (below). The crossservice shard's 105 too: Landing
     # 169's Vertex AI pages took its browser suite to its 30m, and the job
     # past 90 minutes in run 45680873104's re-run (a 60-minute suite); its
-    # browser suite has 40m.
-    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || (matrix.shard == 'storage' || matrix.shard == 'crossservice') && 105 || 90 }}
+    # browser suite has 40m. The run, served and sql shards' 105 too: main
+    # run 45770556272 cancelled all three at 90 minutes in their browser
+    # step (sql: a 73-minute compat suite, then the Cloud SQL pages).
+    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || (matrix.shard == 'storage' || matrix.shard == 'crossservice' || matrix.shard == 'run' || matrix.shard == 'served' || matrix.shard == 'sql') && 105 || 90 }}
     # Same rule as integration: the suite that caught #268 only after it merged.
     needs: [changes, bigquery-emulator]
     if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
