@@ -119,6 +119,9 @@ type alloyDBProvider struct {
 	// metrics reads the clusters' alloydb.googleapis.com metrics from
 	// the instance's Cloud Monitoring (#2251).
 	metrics monitoringAdmin
+	// logs is the instance's Cloud Logging, which System insights' Log
+	// errors counts (#2253); nil without it.
+	logs *loggingService
 	// migrate is whether Database Migration Service is served (#2252):
 	// the Clusters page then has Google's Migrate button.
 	migrate bool
@@ -265,6 +268,19 @@ func alloyDBInstances(ctx context.Context, s *alloydb.Server, cluster string) ([
 }
 
 func (p alloyDBProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
+	if len(path) == 4 || len(path) == 6 {
+		// A query's details, a plan sample's, and a tag's (#2253).
+		if path[1] == "query" || path[1] == "tag" && len(path) == 4 {
+			s, c, err := p.cluster(ctx, project, path[0])
+			if err != nil {
+				return console.Detail{Unavailable: "cannot read the cluster: " + consoleErr(err)}, nil
+			}
+			if path[1] == "tag" {
+				return p.alloyDBTagDetail(ctx, s, c, path), nil
+			}
+			return p.alloyDBQueryDetail(ctx, s, c, path), nil
+		}
+	}
 	if len(path) != 1 {
 		return console.DeeperThan(1, path), nil
 	}
@@ -359,7 +375,7 @@ func (p alloyDBProvider) Detail(ctx context.Context, project string, path []stri
 				Series: alloyDBOverviewSeries(ctx, p.metrics, c, lastSegment(primary.GetName())), Note: alloyDBMetricsNote},
 			// System insights and Query insights (#2251), as Google's
 			// cluster menu has them.
-			alloyDBSystemInsights(ctx, s, p.metrics, c, ins),
+			alloyDBSystemInsights(ctx, s, p.metrics, p.logs, c, ins),
 			alloyDBQueryInsights(ctx, s, p.metrics, c, ins),
 			// AlloyDB Studio (#2208), as Google's cluster menu has it.
 			{ID: "studio", Label: "AlloyDB Studio", Kind: console.KindStudio},

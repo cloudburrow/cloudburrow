@@ -231,6 +231,7 @@ func (s *Server) CreateUser(ctx context.Context, req *alloydbpb.CreateUserReques
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.users[name] = u
+	s.userEvent("USER_CREATE", name)
 	if err := s.save(); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -358,6 +359,7 @@ func (s *Server) UpdateUser(ctx context.Context, req *alloydbpb.UpdateUserReques
 		s.passwords[m[1]] = in.GetPassword()
 	}
 	s.users[next.GetName()] = next
+	s.userEvent("USER_UPDATE", next.GetName())
 	if err := s.save(); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -393,6 +395,7 @@ func (s *Server) DeleteUser(ctx context.Context, req *alloydbpb.DeleteUserReques
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.users, req.GetName())
+	s.userEvent("USER_DELETE", req.GetName())
 	if err := s.save(); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -590,4 +593,38 @@ func typeName(oid uint32) string {
 		return "oid"
 	}
 	return fmt.Sprint(oid)
+}
+
+// UserEvent is one user created, updated or deleted through the API, as
+// System insights' events timeline lists them (USER_CREATE, USER_UPDATE,
+// USER_DELETE; docs.cloud.google.com/alloydb/docs/monitor-instance, read
+// 2026-11-25), which have no operation. Kept for a day, in memory.
+type UserEvent struct {
+	Type, User string
+	At         time.Time
+}
+
+// userEvent records one; the caller holds mu.
+func (s *Server) userEvent(typ, user string) {
+	now := s.now()
+	s.userEvents = append(s.userEvents, UserEvent{Type: typ, User: user, At: now})
+	for len(s.userEvents) > 0 && now.Sub(s.userEvents[0].At) > 24*time.Hour {
+		s.userEvents = s.userEvents[1:]
+	}
+	if len(s.userEvents) > 1000 {
+		s.userEvents = s.userEvents[len(s.userEvents)-1000:]
+	}
+}
+
+// UserEvents are cluster's user events of the last day, oldest first.
+func (s *Server) UserEvents(cluster string) []UserEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []UserEvent
+	for _, e := range s.userEvents {
+		if strings.HasPrefix(e.User, cluster+"/users/") && s.now().Sub(e.At) <= 24*time.Hour {
+			out = append(out, e)
+		}
+	}
+	return out
 }

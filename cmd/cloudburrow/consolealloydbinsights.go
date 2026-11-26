@@ -33,10 +33,10 @@ package main
 //   - Create backup's Description and labels, and a backup's Edit labels
 //     (docs.cloud.google.com/alloydb/docs/backup/create-on-demand).
 //
-// Left out, as no reading backs them here (docs/gaps.md): the latency
-// charts, wait events, Log errors, the query plans and tags of Query
-// insights, Gemini, and Database Migration Service's entry points (that
-// API is not served).
+// Left out, as no reading backs them here (docs/gaps.md): Gemini, and
+// Database Migration Service's entry points (that API is not served). The
+// latency charts, wait events, Log errors, and the query plans and tags of
+// Query insights are round 3's (#2253, consolealloydbinsights2253.go).
 
 import (
 	"context"
@@ -240,7 +240,7 @@ type alloyDBView struct {
 
 // alloyDBSummary is a view's summary cards, as the monitor-instance
 // page's table puts them on each dashboard.
-func alloyDBSummary(ctx context.Context, a monitoringAdmin, v alloyDBView, primary string) []console.Property {
+func alloyDBSummary(ctx context.Context, a monitoringAdmin, logs *loggingService, v alloyDBView, primary string) []console.Property {
 	card := func(label string, f func() (string, error)) console.Property {
 		val, err := f()
 		switch {
@@ -297,11 +297,13 @@ func alloyDBSummary(ctx context.Context, a monitoringAdmin, v alloyDBView, prima
 		}
 		return fmt.Sprintf("%.4f%%", n), nil
 	})
+	// Log errors (#2253): the servers' error logs in Cloud Logging.
+	logErr := alloyDBLogErrors(logs, v.scope, v.scope.instance)
 	switch v.kind {
 	case "cluster":
-		return []console.Property{storage, nodes, peak}
+		return []console.Property{storage, nodes, peak, logErr}
 	case "primary":
-		return []console.Property{cpu, peak, xid}
+		return []console.Property{cpu, peak, logErr, xid}
 	}
 	lag := card("Replication lag", func() (string, error) {
 		sc := v.scope
@@ -317,7 +319,7 @@ func alloyDBSummary(ctx context.Context, a monitoringAdmin, v alloyDBView, prima
 		}
 		return fmt.Sprintf("%.0f ms", sum/float64(len(vs))), nil
 	})
-	return []console.Property{nodes, cpu, peak, xid, lag}
+	return []console.Property{nodes, cpu, peak, logErr, xid, lag}
 }
 
 // alloyDBEvents is the events timeline: the cluster's operations in the
@@ -332,11 +334,12 @@ func alloyDBEvents(ctx context.Context, s *alloydb.Server, c *alloydbpb.Cluster,
 		return g
 	}
 	since := time.Now().Add(-24 * time.Hour)
-	type ev struct {
-		at   time.Time
-		prop console.Property
-	}
+	type ev = alloyDBEvent
 	var evs []ev
+	if instance == "" {
+		// Users are the cluster's: their events are on its view (#2253).
+		evs = append(evs, alloyDBUserEvents(s, c)...)
+	}
 	for _, op := range resp.GetOperations() {
 		md := &alloydbpb.OperationMetadata{}
 		if op.GetMetadata().UnmarshalTo(md) != nil || md.GetCreateTime().AsTime().Before(since) {
@@ -409,7 +412,7 @@ func alloyDBEventName(verb, target string) (string, string) {
 
 // alloyDBSystemInsights is the System insights tab: a view for the
 // cluster and one for each instance.
-func alloyDBSystemInsights(ctx context.Context, s *alloydb.Server, a monitoringAdmin, c *alloydbpb.Cluster, ins []*alloydbpb.Instance) console.Section {
+func alloyDBSystemInsights(ctx context.Context, s *alloydb.Server, a monitoringAdmin, logs *loggingService, c *alloydbpb.Cluster, ins []*alloydbpb.Instance) console.Section {
 	sc := alloyDBScopeOf(c)
 	views := []alloyDBView{{id: "si-cluster", label: "Cluster (all instances)", scope: sc, kind: "cluster"}}
 	primary := ""
@@ -436,6 +439,7 @@ func alloyDBSystemInsights(ctx context.Context, s *alloydb.Server, a monitoringA
 			charts = alloyDBClusterCharts
 		}
 		series := alloyDBCharts(ctx, a, v.scope, charts)
+		series = append(series, alloyDBRound3Series(ctx, a, v)...)
 		if v.kind == "read pool" {
 			lag := alloyDBChart{label: "Read pool replication lag", metric: monitoring.AlloyDBReplicationLag, unit: "milliseconds",
 				resource: monitoring.AlloyDBInstanceResource, labels: map[string]string{"replica_instance_id": v.scope.instance}, gauge: true, scale: 1}
@@ -446,7 +450,7 @@ func alloyDBSystemInsights(ctx context.Context, s *alloydb.Server, a monitoringA
 		// The summary cards, the charts (one at a time, chosen from the
 		// Chart list) and the events timeline.
 		tab := console.Section{ID: v.id, Label: v.label, Kind: console.KindProperties,
-			Groups: []console.PropertyGroup{{Heading: "Summary", Properties: alloyDBSummary(ctx, a, v, primary)},
+			Groups: []console.PropertyGroup{{Heading: "Summary", Properties: alloyDBSummary(ctx, a, logs, v, primary)},
 				alloyDBEvents(ctx, s, c, v.scope.instance)},
 			Series: series}
 		sec.Tabs = append(sec.Tabs, tab)
@@ -475,7 +479,8 @@ func alloyDBQueryInsights(ctx context.Context, s *alloydb.Server, a monitoringAd
 		return sec
 	}
 	for _, in := range ins {
-		sec.Tabs = append(sec.Tabs, alloyDBQueryInsightsTab(ctx, s, a, c, in))
+		// Google's Queries and Tags tables, an instance's each (#2253).
+		sec.Tabs = append(sec.Tabs, alloyDBQueryInsightsTab(ctx, s, a, c, in), alloyDBTagsTab(s, c, in))
 	}
 	return sec
 }
@@ -484,7 +489,7 @@ func alloyDBQueryInsightsTab(ctx context.Context, s *alloydb.Server, a monitorin
 	id := lastSegment(in.GetName())
 	tab := console.Section{ID: "qi-" + id, Label: alloyDBInstanceType(in.GetInstanceType()) + ": " + id,
 		Actions: []console.Action{alloyDBEditInsightsAction(in)}}
-	l := console.Listing{TableTitle: "Queries", NameColumn: "Query string", Noun: "queries",
+	l := console.Listing{TableTitle: "Queries", NameColumn: "Query string", Noun: "queries", RowsOpenable: true,
 		Columns:         []string{"Database", "User", "Load by total time", "Avg execution time (ms)", "Times called", "Avg rows fetched"},
 		OptionalColumns: []string{"Load by CPU", "Load by IO wait"}}
 	if in.GetState() != alloydbpb.Instance_READY {
@@ -515,7 +520,12 @@ func alloyDBQueryInsightsTab(ctx context.Context, s *alloydb.Server, a monitorin
 			rows = strconv.FormatFloat(float64(q.Rows)/float64(q.Calls), 'f', 2, 64)
 		}
 		dbs[q.Database], users[q.User] = true, true
-		l.Items = append(l.Items, console.Resource{Name: q.Query, Fields: map[string]string{
+		var opens []string
+		if q.QueryID != 0 {
+			// The query's details (#2253).
+			opens = []string{c.GetName(), "query", id, alloydb.QueryHash(q.QueryID)}
+		}
+		l.Items = append(l.Items, console.Resource{Name: truncateQuery(q.Query, alloyDBQueryLength(in)), Opens: opens, Fields: map[string]string{
 			"Database": q.Database, "User": q.User, "Load by total time": share(q.TotalMs, total), "Load by CPU": share(q.CPUMs, cpu),
 			"Load by IO wait": share(q.IOMs, io), "Avg execution time (ms)": fmt.Sprintf("%.3f", q.MeanMs),
 			"Times called": strconv.FormatInt(q.Calls, 10), "Avg rows fetched": rows}})

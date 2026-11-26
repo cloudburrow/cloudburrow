@@ -36,14 +36,14 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 6 | 1 | 4 | 1 | 0 |
 | Functions, credentials, tooling | 1 | 0 | 1 | 0 | 0 |
 | App Hub | 5 | 1 | 1 | 3 | 0 |
-| AlloyDB for PostgreSQL | 10 | 3 | 5 | 2 | 0 |
+| AlloyDB for PostgreSQL | 10 | 2 | 5 | 3 | 0 |
 | Filestore | 6 | 1 | 4 | 1 | 0 |
 | Dataflow | 4 | 2 | 1 | 1 | 0 |
 | Dataform | 8 | 0 | 3 | 5 | 0 |
 | Console | 11 | 5 | 5 | 1 | 0 |
 | Remote compute | 0 | 0 | 0 | 0 | 0 |
 | Bring your own cloud | 2 | 1 | 0 | 0 | 1 |
-| **Total** | **117** | **21** | **39** | **50** | **7** |
+| **Total** | **117** | **20** | **39** | **51** | **7** |
 
 ## Cloud Storage
 
@@ -372,7 +372,11 @@ Clusters and Backups pages. Since #2251: the cluster's alloydb.googleapis.com me
 Monitoring, read from each running server every 60 seconds (the `Cluster`, `Instance` and
 `Database` monitored resources); the console's System insights, Query insights (pg_stat_statements)
 and Overview charts over them; maintenance windows and deny periods with Google's limits; the
-database flags picker; backup descriptions and labels. See [alloydb.md](alloydb.md).
+database flags picker; backup descriptions and labels. Since #2253: each server's own telemetry
+(its csvlog, auto_explain's sampled plans and `pg_stat_activity` every second) backs System
+insights' Log errors (the servers' lines in Cloud Logging), the latency distributions, wait
+events, `node/*`, Query insights' Tags, a query's latency and plan samples, and `client_addr`. See
+[alloydb.md](alloydb.md).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -383,9 +387,9 @@ database flags picker; backup descriptions and labels. See [alloydb.md](alloydb.
 | The AlloyDB connector's refusal of an IAM sign-in whose token is not valid reads `IAM authentication failed for user "…"` (FATAL 28P01), and so does AlloyDB Studio's of an IAM sign-in as a principal that is no IAM user of the cluster; Google documents no text (UNVERIFIED) | not built yet | S |
 | Google's error messages, the cluster etag (none), a bare network name written with the project's ID rather than its number, the flag bounds given in other units, the instance exports and imports run on (the primary), `pooler_count`'s sizing, and the deletes refused under replication are CloudBurrow's choices, dated UNVERIFIED in compatibility.md's AlloyDB section | not documented by Google | S |
 | The AlloyDB console's list of a cluster's own migration jobs is left out: the Clusters page's **Migrate** opens Database Migration Service's Migration jobs (#2252), which lists every job with its destination | not built yet | S |
-| AlloyDB System insights' Log errors card is left out: the clusters' PostgreSQL server logs are not written to Cloud Logging (#2253) | not built yet | M |
-| AlloyDB metrics no local reading backs are not published, and the console's charts of them are left out: the insights `latencies` distributions and query details' latency, `wait_time` and `wait_count`, query plans and application tags (the settings are kept and checked; nothing samples plans), the `client_addr` label (recorded as ""), `node/*`, ultra-fast cache, `mlintegration`, audit, autoscaler and quota metrics (#2253) | not built yet | M |
-| AlloyDB metrics read from one server where Google has a fleet: a read pool's nodes are one server, so `postgres/instances` reports its nodes up or down together; `cluster/storage/usage` is the primary's databases' size, not AlloyDB's storage layer; `insights/aggregate/lock_time` is estimated per user and database from the sessions waiting on a lock at each sample; the events timeline lists the Admin API's operations, with no user or maintenance events (#2253) | no emulator support | S |
+| AlloyDB metrics no local reading backs are not published: per-tag `io_time`, `row_count` and `shared_blk_access_count` and the Tags table's Avg rows fetched (the server's log has no per-statement row or block counts), `client_addr` on the per-query metrics read from `pg_stat_statements` (recorded ""), and the ultra-fast cache, `mlintegration`, audit, autoscaler and quota metrics (#2261) | not built yet | M |
+| AlloyDB metrics read from one server where Google has a fleet: a read pool of several nodes is one server, so `postgres/instances` reports its nodes up or down together and it has no `node/*` series (a primary's and a one-node read pool's are published); `cluster/storage/usage` is the databases' size and the primary's WAL, not AlloyDB's storage layer; lock time and wait events are sampled from `pg_stat_activity` every second, so shorter waits are missed; a client's address is the one the server sees, a loopback or Docker bridge address for a client on the host; the events timeline has the Admin API's operations and the user events, no maintenance events (#2261) | no emulator support | S |
+| AlloyDB's insights latency distributions' buckets (64 exponential, growth 1.4, scale 1 µs), the text of the servers' log lines in Cloud Logging (`alloydb.googleapis.com/postgres.log`), FATAL and PANIC lines as severity ALERT, and Log errors counting the last day are CloudBurrow's choices; Google documents none of them (UNVERIFIED) (#2253) | not documented by Google | S |
 | AlloyDB's console has Labels on Create backup and a backup's Edit labels; Google's backup/create-on-demand page documents no labels field in its console (the API's `Backup.labels` is served; UNVERIFIED) (#2253) | not documented by Google | S |
 
 ## Filestore

@@ -3,12 +3,17 @@ package main
 // AlloyDB's metrics in Cloud Monitoring (#2251) are read from each
 // instance's server: its pod's CPU time and memory from the kubelet's
 // /stats/summary (as Cloud SQL's are, monitoringsql.go) and the server's
-// own figures through alloydb.Server.InstanceStats. A cluster's storage is
-// its primary's databases' size; its last backups are its READY backups'.
+// own figures through alloydb.Server.InstanceStats, and the collector's
+// per-execution readings through alloydb.Server.TelemetryOf (#2253). A
+// cluster's storage is what its primary stores: its databases and its WAL
+// files; its last backups are its READY backups'. An instance whose node
+// is its server (a primary, a read pool of one node) has node/* too, its
+// node_id its pod's name.
 
 import (
 	"context"
 	"strings"
+	"unicode/utf8"
 
 	alloydbpb "cloud.google.com/go/alloydb/apiv1/alloydbpb"
 
@@ -48,6 +53,7 @@ func (m monitoringAlloyDB) AlloyDBSample() ([]monitoring.AlloyDBCluster, []monit
 			MemoryMachine: int64(mi.CPUs) * alloyDBMachineBytes}
 		// The server's Deployment is its name: its pods are
 		// SERVER-<replica set hash>-<id>.
+		var podNames []string
 		for name, st := range pods {
 			rest, ok := strings.CutPrefix(name, mi.Server+"-")
 			if !ok || strings.Count(rest, "-") != 1 {
@@ -56,6 +62,13 @@ func (m monitoringAlloyDB) AlloyDBSample() ([]monitoring.AlloyDBCluster, []monit
 			r.HasPod = true
 			r.CPUSeconds += st.cpuSeconds
 			r.MemoryUsed += st.working
+			r.RxBytes += int64(st.rx)
+			r.TxBytes += int64(st.tx)
+			podNames = append(podNames, name)
+		}
+		if len(podNames) == 1 && mi.Nodes == 1 {
+			// One pod, the instance's one node.
+			r.NodeID, r.HasNet = podNames[0], true
 		}
 		if mi.Serving {
 			if st, err := srv.InstanceStats(ctx, mi.Name); err == nil {
@@ -70,8 +83,13 @@ func (m monitoringAlloyDB) AlloyDBSample() ([]monitoring.AlloyDBCluster, []monit
 						Inserted: d.Inserted, Updated: d.Updated, Deleted: d.Deleted, TempFiles: d.TempFiles, TempBytes: d.TempBytes,
 						Deadlocks: d.Deadlocks, Sessions: d.Sessions, Live: d.Live, Dead: d.Dead, HasTuples: d.HasTuples})
 				}
-				if !r.ReadPool {
-					storage[mi.Project+"/"+mi.Location+"/"+mi.Cluster] = size
+				if !r.ReadPool && st.HasWAL {
+					storage[mi.Project+"/"+mi.Location+"/"+mi.Cluster] = size + st.WALBytes
+				}
+				for _, q := range st.Queries {
+					r.Queries = append(r.Queries, monitoring.AlloyDBQuery{QueryHash: alloydb.QueryHash(q.QueryID),
+						QueryString: truncateQuery(q.Query, queryLength(mi)), User: q.User, Database: q.Database, ExecUs: q.ExecUs,
+						IOReadUs: q.IOReadUs, IOWriteUs: q.IOWriteUs, Rows: q.Rows, SharedHit: q.SharedHit, SharedRead: q.SharedRead})
 				}
 				r.HasLoad = st.HasLoad
 				for _, l := range st.Load {
@@ -86,6 +104,9 @@ func (m monitoringAlloyDB) AlloyDBSample() ([]monitoring.AlloyDBCluster, []monit
 				}
 			}
 		}
+		if mi.Serving {
+			alloyDBTelemetryInto(&r, srv.TelemetryOf(mi.Name))
+		}
 		out = append(out, r)
 	}
 	var cs []monitoring.AlloyDBCluster
@@ -96,3 +117,63 @@ func (m monitoringAlloyDB) AlloyDBSample() ([]monitoring.AlloyDBCluster, []monit
 	}
 	return cs, out
 }
+
+// queryLength is the instance's query_string_length (1024 by default).
+func queryLength(mi alloydb.MetricInstance) int {
+	if n := int(mi.Insights.GetQueryStringLength()); n > 0 {
+		return n
+	}
+	return 1024
+}
+
+// truncateQuery is q's first n bytes, as Query insights keeps them,
+// without splitting a character.
+func truncateQuery(q string, n int) string {
+	if len(q) <= n {
+		return q
+	}
+	for n > 0 && !utf8.RuneStart(q[n]) {
+		n--
+	}
+	return q[:n]
+}
+
+// alloyDBTelemetryInto copies the collector's readings into r.
+func alloyDBTelemetryInto(r *monitoring.AlloyDBInstance, t alloydb.Telemetry) {
+	if !t.Reading {
+		return
+	}
+	r.HasTelemetry = true
+	tags := func(h string) monitoring.AlloyDBTags {
+		v := t.TagValues[h]
+		return monitoring.AlloyDBTags{Action: v.Action, Application: v.Application, Controller: v.Controller, DBDriver: v.DBDriver,
+			Framework: v.Framework, Route: v.Route}
+	}
+	hist := func(h alloydb.Histogram) monitoring.AlloyDBHistogram {
+		return monitoring.AlloyDBHistogram{Count: h.Count, Sum: h.Sum, SumSq: h.SumSq, Buckets: h.Buckets}
+	}
+	query := func(id int64) (string, string) {
+		if id == 0 {
+			return "", ""
+		}
+		return alloydb.QueryHash(id), truncateQuery(t.Queries[id], t.QueryStringLength)
+	}
+	for _, group := range [][]alloydb.LatencyStat{t.Aggregate, t.PerQuery, t.PerTag} {
+		for _, l := range group {
+			qh, qs := query(l.QueryID)
+			r.Latencies = append(r.Latencies, monitoring.AlloyDBLatency{Database: l.Database, User: l.User, Client: l.Client,
+				QueryHash: qh, QueryString: qs, TagHash: l.TagHash, Tags: tags(l.TagHash), Hist: hist(l.Hist)})
+		}
+	}
+	for _, l := range t.Locks {
+		qh, qs := query(l.QueryID)
+		r.Locks = append(r.Locks, monitoring.AlloyDBLockWait{Database: l.Database, User: l.User, Client: l.Client, LockType: l.LockType,
+			QueryHash: qh, QueryString: qs, TagHash: l.TagHash, Tags: tags(l.TagHash), Us: l.Us})
+	}
+	for _, w := range t.Waits {
+		r.WaitEvents = append(r.WaitEvents, monitoring.AlloyDBWaitEvent{Type: w.Type, Name: w.Name, Count: w.Count, Us: w.Us})
+	}
+}
+
+// The latency distributions' buckets are the collector's.
+func init() { monitoring.AlloyDBLatencyBuckets = alloydb.LatencyBuckets }

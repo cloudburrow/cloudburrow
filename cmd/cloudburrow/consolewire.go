@@ -438,6 +438,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			savedQueries: filepath.Join(d.cfg.InstanceDir(), alloyDBSavedQueriesFile),
 			iamPrincipal: metadata.ServiceAccountEmail(d.cfg.DefaultProject()),
 			metrics:      monitoringAdmin{api: monitoringServerOf(d.monitoring)},
+			logs:         d.logging,
 			migrate:      enabled[config.ServiceDataMigration] && d.dataMigration != nil}, alloyDBBackupsProvider{svc: d.alloyDB})
 	}
 	// Database Migration Service (#2252), in process: Migration jobs,

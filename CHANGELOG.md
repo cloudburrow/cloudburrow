@@ -53,6 +53,9 @@ section and add its link at the bottom.
   Data protection tab's backup and recovery policies, database version upgrades, changing a user's
   password, System insights and Query insights from AlloyDB's metrics in Cloud Monitoring, the
   maintenance window, the database flags picker and backup labels (#2251).
+- AlloyDB insights from the servers' own telemetry: query latency distributions, wait events,
+  lock time, sampled query plans and tags in Query insights, the servers' logs in Cloud Logging
+  with System insights' Log errors card, and node metrics (#2253).
 - Database Migration Service: connection profiles, one-time and continuous migration jobs from
   MySQL and PostgreSQL to Cloud SQL and AlloyDB, private connectivity, and its console pages with
   Migrate on the Cloud SQL and AlloyDB pages (#2252); existing destination instances and

@@ -12,9 +12,10 @@ package monitoring
 // pg_stat_statements and the rest; internal/service/alloydb/insights.go).
 // A GAUGE is the sample's reading; a DELTA the change since the last
 // sample (none across a restart or a statistics reset, whose counters
-// start again from zero). The metrics no reading backs (the latency
-// distributions, wait events, the ultra-fast cache, node/*, ML
-// integration, audit logging) are not served: docs/gaps.md lists them.
+// start again from zero). The per-execution metrics (latencies, lock
+// time, wait events) and node/* are alloydbinsights.go's (#2253); those no
+// reading backs (the ultra-fast cache, ML integration, audit logging,
+// autoscaler and quota metrics) are not served: docs/gaps.md lists them.
 
 import (
 	"sort"
@@ -142,6 +143,20 @@ type AlloyDBInstance struct {
 	Load       []AlloyDBLoad
 	Statements []AlloyDBStatementCount
 	Waits      []AlloyDBWait
+	// Queries are the top queries' pg_stat_statements totals (#2253).
+	Queries []AlloyDBQuery
+	// NodeID is the instance's node when it is its server (a primary, or
+	// a read pool of one node): its pod's name; "" publishes no node/*.
+	NodeID string
+	// HasNet is whether the pod's network counters were read.
+	HasNet           bool
+	RxBytes, TxBytes int64
+	// HasTelemetry is whether the collector reads the server (#2253):
+	// its latency distributions, lock waits and wait events, cumulative.
+	HasTelemetry bool
+	Latencies    []AlloyDBLatency
+	Locks        []AlloyDBLockWait
+	WaitEvents   []AlloyDBWaitEvent
 }
 
 // AlloyDBCluster is one cluster's readings at one sample: its primary's
@@ -166,7 +181,10 @@ type AlloyDBBuiltin struct {
 	now    func() time.Time
 	minGap time.Duration
 
-	mu     sync.Mutex
+	mu sync.Mutex
+	// mirror, while one instance is recorded, is its node: its Instance
+	// and Database metrics are recorded on it too (#2253).
+	mirror *alloyDBMirror
 	lastAt time.Time
 	prev   map[string]AlloyDBInstance
 	series map[string]*monitoringpb.TimeSeries
@@ -198,7 +216,13 @@ func alloyDBDatabaseRes(in AlloyDBInstance, db string) *monitoredres.MonitoredRe
 	return r
 }
 
-// add appends a point to its series; the caller holds mu.
+// alloyDBMirror is the instance whose node mirrors its metrics.
+type alloyDBMirror struct {
+	project, location, cluster, instance, node string
+}
+
+// add appends a point to its series, and to its node's when the
+// instance's node mirrors it; the caller holds mu.
 func (b *AlloyDBBuiltin) add(metric string, labels map[string]string, res *monitoredres.MonitoredResource,
 	iv *monitoringpb.TimeInterval, v *monitoringpb.TypedValue) {
 	d := alloyDBDescriptorOf(metric)
@@ -207,6 +231,20 @@ func (b *AlloyDBBuiltin) add(metric string, labels map[string]string, res *monit
 	}
 	if labels == nil {
 		labels = map[string]string{}
+	}
+	if m := b.mirror; m != nil && res.GetLabels()["instance_id"] == m.instance && res.GetLabels()["cluster_id"] == m.cluster &&
+		res.GetLabels()["resource_container"] == m.project {
+		if nm := alloyDBNodeMetric(metric); nm != "" {
+			if nr := alloyDBNodeRes(res, m.node); nr != nil {
+				nl := map[string]string{}
+				for k, v := range labels {
+					nl[k] = v
+				}
+				b.mirror = nil
+				b.add(nm, nl, nr, iv, clone(v))
+				b.mirror = m
+			}
+		}
 	}
 	ts := &monitoringpb.TimeSeries{Metric: &metricpb.Metric{Type: metric, Labels: labels}, Resource: res,
 		MetricKind: d.kind, ValueType: d.vt, Unit: d.unit}
@@ -285,6 +323,23 @@ func (b *AlloyDBBuiltin) sampleAt(now time.Time) {
 		b.add(AlloyDBNodes, map[string]string{"status": "down"}, clone(res), at, int64Value(down))
 		b.add(AlloyDBVCPUs, nil, clone(res), at, int64Value(in.VCPUs))
 		withPrev := had && !start.IsZero() && elapsed > 0
+		b.mirror = nil
+		if in.NodeID != "" {
+			b.mirror = &alloyDBMirror{project: in.Project, location: in.Location, cluster: in.Cluster, instance: in.Instance, node: in.NodeID}
+			nr := alloyDBNodeRes(res, in.NodeID)
+			uptime := 0.0
+			if in.Up {
+				uptime = 1
+			}
+			b.add(AlloyDBNodeUptime, nil, nr, at, doubleValue(uptime))
+			if withPrev && in.HasNet && prev.HasNet && in.RxBytes >= prev.RxBytes && in.TxBytes >= prev.TxBytes && prev.NodeID == in.NodeID {
+				b.add(AlloyDBNodeReceived, nil, clone(nr), span, int64Value(in.RxBytes-prev.RxBytes))
+				b.add(AlloyDBNodeSent, nil, clone(nr), span, int64Value(in.TxBytes-prev.TxBytes))
+			}
+			if in.HasServer && in.Replica && in.ReadPool {
+				b.add(AlloyDBNodeReplayLag, nil, clone(nr), at, int64Value(in.ReplayLagMs))
+			}
+		}
 		if in.HasPod {
 			if in.MemoryMachine > 0 {
 				avail := in.MemoryMachine - in.MemoryUsed
@@ -330,8 +385,13 @@ func (b *AlloyDBBuiltin) sampleAt(now time.Time) {
 			}
 			if withPrev && prev.HasServer {
 				b.deltasLocked(in, prev, res, span)
+				b.queriesLocked(in, prev, span)
 			}
 		}
+		if withPrev {
+			b.telemetryLocked(in, prev, res, span)
+		}
+		b.mirror = nil
 		b.prev[key] = in
 	}
 	for k := range b.prev {
@@ -425,10 +485,13 @@ func (b *AlloyDBBuiltin) deltasLocked(in, prev AlloyDBInstance, res *monitoredre
 		b.add(AlloyDBSharedBlks, lab("access_type", "hit"), clone(dr), span, int64Value(l.SharedHit-o.SharedHit))
 		b.add(AlloyDBSharedBlks, lab("access_type", "miss"), clone(dr), span, int64Value(l.SharedRead-o.SharedRead))
 	}
-	// Lock time: the backends seen waiting at this sample, times the
-	// span: an estimate, where AlloyDB measures it.
+	// Lock time, without the collector's 1 s samples (telemetryLocked):
+	// the backends seen waiting at this sample, times the span.
 	us := span.GetEndTime().AsTime().Sub(span.GetStartTime().AsTime()).Microseconds()
 	for _, w := range in.Waits {
+		if in.HasTelemetry {
+			break
+		}
 		b.add(AlloyDBLockTime, map[string]string{"user": w.User, "client_addr": "", "lock_type": w.LockType},
 			alloyDBDatabaseRes(in, w.Database), span, int64Value(w.Sessions*us))
 	}
