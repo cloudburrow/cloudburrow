@@ -494,7 +494,25 @@ func (b *computeVMs) logBootFailure(vm compute.VMSpec, err error) {
 		for _, l := range strings.Split(strings.TrimRight(ansiRE.ReplaceAllString(out, ""), "\n"), "\n") {
 			b.logf("instance %s %s: %s", vm.Name, what, l)
 		}
+		if hint := bootFailureHint(out); hint != "" {
+			b.logf("instance %s: %s", vm.Name, hint)
+		}
 	}
+}
+
+// bootFailureHint names a host limit a guest's serial console shows it
+// hit. Every VM's systemd, like every kind node's, takes inotify
+// instances from the host's one per-user allowance (fs.inotify.max_user_instances,
+// 128 on Ubuntu): once it is spent the guest's systemd exits at once with
+// "Failed to allocate manager object: Too many open files" and the pod
+// restarts in a loop (CI's run shard, main runs 45731759763 and
+// 45753347963: a managed instance group's second VM never booted).
+func bootFailureHint(serial string) string {
+	if strings.Contains(serial, "Too many open files") {
+		return "its systemd ran out of the host's inotify instances; raise them on the Docker host (kind's known issues: " +
+			"sysctl -w fs.inotify.max_user_instances=512 fs.inotify.max_user_watches=524288)"
+	}
+	return ""
 }
 
 func (b *computeVMs) Stop(ctx context.Context, vm compute.VMSpec) error {
