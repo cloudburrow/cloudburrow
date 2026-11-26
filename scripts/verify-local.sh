@@ -149,7 +149,7 @@ cleanup() {
       kind delete cluster --name "$cluster" >/dev/null 2>&1 || log "could not delete kind cluster $cluster"
     fi
   done
-  # The remotecompute shard's stand-in hosts and fakes, by ID and PID.
+  # The remotehosts shard's stand-in hosts and fakes, by ID and PID.
   [ ! -d "$WORK/remotecompute" ] || scripts/remote-compute-shard.sh cleanup "$WORK/remotecompute" >/dev/null 2>&1
   if [ -z "$keep_images" ]; then
     docker images -q --no-trunc | sort -u | comm -13 "$IMAGES_BEFORE" - | while read -r id; do
@@ -233,7 +233,7 @@ run_shard() {
   SUITES="$WORK/$shard.suites" CHECKS="$WORK/$shard.checks"
   : > "$SUITES"; : > "$CHECKS"
   compat_shard "$shard"
-  if [ "$shard" = remotecompute ]; then
+  if [ "$shard" = remotehosts ]; then
     # As in CI: the stand-in tests, then the stand-in host this shard's
     # instance runs on, whose target compat_shard reads (#2259).
     log "$shard: the stand-in remote hosts and their tests"
@@ -311,7 +311,7 @@ run_shard() {
   local COMPAT_ENV
   COMPAT_ENV=$(scripts/compat-env.sh --only "$TEST_VARS" --env-json "$WORK/env.json" --cli "$CLI" -- "${CB[@]}" 2> "$dir/compat-env.err" || true)
   eval "$COMPAT_ENV"
-  # As in CI: the remotecompute shard's DOCKER_HOST and ingress.
+  # As in CI: the remotehosts shard's DOCKER_HOST and ingress.
   compat_remote_exports "$shard" "$WORK/env.json" 2>> "$dir/compat-env.err" || check "the remote instance's DOCKER_HOST and ingress" fail
   local unset_vars
   unset_vars=$(sed -n 's/^compat-env: not set, so the tests that need them skip: //p' "$dir/compat-env.err")
@@ -358,6 +358,9 @@ run_shard() {
     fi
     go_suite compat "$dir/compat.log"
   fi
+  # The remotehosts shard's DOCKER_HOST is the running up's socket, gone
+  # after the stop below: the rest of the shard uses this machine's Docker.
+  unset DOCKER_HOST
 
   if [ -n "$sdk" ] && { [ "$shard" = storage ] || [ "$shard" = emulators ]; }; then
     node_suite "$shard" "$dir" "${CB[*]}"
@@ -453,7 +456,7 @@ run_shard() {
   cp "$UPLOG" "$dir/up.log" 2>/dev/null || true
   shard_done "$shard" "$name" "$t0"
   unset DOCKER_HOST
-  [ "$shard" != remotecompute ] || scripts/remote-compute-shard.sh cleanup "$WORK/remotecompute" >/dev/null 2>&1 || true
+  [ "$shard" != remotehosts ] || scripts/remote-compute-shard.sh cleanup "$WORK/remotecompute" >/dev/null 2>&1 || true
 }
 
 node_suite() {  # <shard> <dir> <flags>
@@ -538,9 +541,9 @@ browser_suite() {  # <shard> <dir> <flags...>
     compat_browser_prepare "$shard" 2>> "$dir/browser-prepare.err" || true
     export CLOUDBURROW_TEST_CHROME="$chrome" CLOUDBURROW_TEST_SCREENSHOTS="$dir/browser-screenshots"
     go test -tags=browser -count=1 -timeout "$timeout" -v "${select[@]}" ./test/browser/ > "$dir/browser.log" 2>&1 || true
-    # As in CI: the remotecompute shard's walk-through, on its own
+    # As in CI: the remotehosts shard's walk-through, on its own
     # instance and stand-ins (#2259), its results with the suite's.
-    if [ "$shard" = remotecompute ] && [ -n "$BROWSER_OWN_INSTANCE" ]; then
+    if [ "$shard" = remotehosts ] && [ -n "$BROWSER_OWN_INSTANCE" ]; then
       scripts/remote-compute-shard.sh walkthrough "$WORK/remotecompute" "$CLI" "$dir/walk.log" 2>> "$dir/browser-prepare.err" || true
       cat "$dir/walk.log" >> "$dir/browser.log" 2>/dev/null || true
     fi
@@ -597,7 +600,7 @@ done
 # from ci.yml so the two cannot drift.
 compat_coverage() {
   local s never none
-  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech remotecompute; do
+  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech remotehosts; do
     case " ${SHARD_LIST[*]} " in *" $s "*) ;; *) return 0 ;; esac
   done
   SUITES="$WORK/coverage.suites" CHECKS="$WORK/coverage.checks"
@@ -606,7 +609,7 @@ compat_coverage() {
   go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > "$WORK/all.txt"
   # A shard without restart probes has no probe-*.log, and cat's exit 1
   # for the unmatched glob would end the script under set -e.
-  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech remotecompute; do
+  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech remotehosts; do
     cat "$LOGS/$s"/compat.log "$LOGS/$s"/probe-*.log 2>/dev/null || true
   done | grep -oE -- '^--- (PASS|FAIL): Test[A-Za-z0-9_]+' | awk '{print $3}' | sort -u > "$WORK/ran.txt"
   none=$(comm -23 "$WORK/all.txt" "$WORK/ran.txt" | grep -vE "${never:-^$}" || true)

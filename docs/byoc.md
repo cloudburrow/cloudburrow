@@ -375,8 +375,8 @@ never reach a real endpoint:
   deleted (the API's 409, the page's typed *Delete VM and this instance's data*, cancelled).
   `CLOUDBURROW_BYOC_FAKES` is refused unless every endpoint is a loopback address, and
   keeps the fakes' credentials in a directory, never the keychain.
-- CI runs the stand-in tests and the walk-through in the compat job's `remotecompute` shard
-  (`scripts/remote-compute-shard.sh`, [ci.md](ci.md#the-remotecompute-shard), #2259).
+- CI runs the stand-in tests and the walk-through in the compat job's `remotehosts` shard
+  (`scripts/remote-compute-shard.sh`, [ci.md](ci.md#the-remotehosts-shard), #2259).
 - Moves are tested for real against the stand-ins: `TestStandInInterruptedMoveResumes` cuts a
   carry off half way, resumes it with the data whole, and rolls a second one back from its
   journal alone; `TestStandInMoveBetweenTwoHosts` carries from this machine to one host, to a

@@ -351,6 +351,6 @@ the network.
   with `TestWelcomePage`, `TestSelectAProjectAndTheNewProjectPage`,
   `TestTerminalRunsACommandAndKeepsTheSession` and, with `bigquery` and `dataform` served,
   `TestBigQueryStudioNotebookRuntimeThroughThePage`, whose runtime container runs on the host.
-- CI runs every test above that needs a stand-in in the compat job's `remotecompute` shard
-  (`scripts/remote-compute-shard.sh`, [ci.md](ci.md#the-remotecompute-shard), #2259), on GitHub's
-  Ubuntu runners; locally, `scripts/verify-local.sh --shards remotecompute` runs the same.
+- CI runs every test above that needs a stand-in in the compat job's `remotehosts` shard
+  (`scripts/remote-compute-shard.sh`, [ci.md](ci.md#the-remotehosts-shard), #2259), on GitHub's
+  Ubuntu runners; locally, `scripts/verify-local.sh --shards remotehosts` runs the same.

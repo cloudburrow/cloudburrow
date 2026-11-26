@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# remote-compute-shard.sh: the remotecompute shard's stand-in hosts and the
+# remote-compute-shard.sh: the remotehosts shard's stand-in hosts and the
 # tests that need them (#2209, #2259), for ci.yml's compat job and
 # scripts/verify-local.sh alike. Every host is the Docker-in-Docker sshd
 # stand-in scripts/remote-compute-standin.sh starts, on 127.0.0.1 only;
@@ -30,6 +30,9 @@
 # Ports 23022 to 23026 (the stand-ins' sshd) and 23200 (the walk-through
 # instance's --port-base) on 127.0.0.1.
 set -euo pipefail
+# The stand-ins, fakes and the walk-through's instance are this machine's
+# Docker's, whatever instance the caller's DOCKER_HOST names.
+unset DOCKER_HOST DOCKER_CONTEXT
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cmd=${1:?usage: remote-compute-shard.sh hosts|walkthrough|cleanup <dir> ...}

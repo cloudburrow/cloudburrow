@@ -409,7 +409,7 @@ jobs:
           shellcheck -s bash .github/scripts/*.sh scripts/compat-env.sh
           # The BigQuery engine soak that reproduces #989, the localai shard's model fetch (#1985) and
           # the iam shard's registry clients (#2111) and the stand-in remote
-          # compute host (#2209) and the remotecompute shard's hosts and tests
+          # compute host (#2209) and the remotehosts shard's hosts and tests
           # (#2259), as bash.
           shellcheck -s bash scripts/bigquery-engine-soak.sh scripts/localai-models.sh scripts/oci-tools.sh scripts/remote-compute-standin.sh scripts/remote-compute-shard.sh
           # The endpoint inventory of the pinned tools (#1975), as bash.
@@ -575,18 +575,18 @@ jobs:
     # 169's Vertex AI pages took its browser suite to its 30m, and the job
     # past 90 minutes in run 45680873104's re-run (a 60-minute suite); its
     # browser suite has 40m.
-    # The remotecompute shard's 120 (#2259): the stand-in tests (about 6
+    # The remotehosts shard's 120 (#2259): the stand-in tests (about 6
     # minutes on a laptop), its instance on a stand-in host, and the BYOC
     # walk-through, which moves an instance's kind node onto one stand-in,
     # on to another and back (10.5 minutes on a laptop).
-    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || matrix.shard == 'remotecompute' && 120 || (matrix.shard == 'storage' || matrix.shard == 'crossservice') && 105 || 90 }}
+    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || matrix.shard == 'remotehosts' && 120 || (matrix.shard == 'storage' || matrix.shard == 'crossservice') && 105 || 90 }}
     # Same rule as integration: the suite that caught #268 only after it merged.
     needs: [changes, bigquery-emulator]
     if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
     strategy:
       fail-fast: false
       matrix:
-        shard: [storage, served, gke, gkeupgrade, computevms, vpcvms, run, crossservice, scale, emulators, memorystore, sql, sqlreplicas, acceptance, iam, localai, localaispeech, remotecompute]
+        shard: [storage, served, gke, gkeupgrade, computevms, vpcvms, run, crossservice, scale, emulators, memorystore, sql, sqlreplicas, acceptance, iam, localai, localaispeech, remotehosts]
     env:
       SHARD: ${{ matrix.shard }}
       # Every make build here uses the emulator binaries the
@@ -610,11 +610,11 @@ jobs:
       # The localai shard (#1985) needs the room too: the LiteRT-LM image
       # and its build, the 2.6 GB generation model and the instance's 1.3 GB
       # of embedding, speech, OCR and vision models, each held twice while
-      # its cache is packed or unpacked. The remotecompute shard (#2259)
+      # its cache is packed or unpacked. The remotehosts shard (#2259)
       # holds its instance's node image in a stand-in host's Docker, and the
       # walk-through's twice more, in the AWS and the Azure VM's stand-ins.
       - name: Free disk for the Kubernetes Engine API's clusters
-        if: matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'gkeupgrade' || matrix.shard == 'computevms' || matrix.shard == 'vpcvms' || matrix.shard == 'localai' || matrix.shard == 'localaispeech' || matrix.shard == 'remotecompute'
+        if: matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'gkeupgrade' || matrix.shard == 'computevms' || matrix.shard == 'vpcvms' || matrix.shard == 'localai' || matrix.shard == 'localaispeech' || matrix.shard == 'remotehosts'
         run: |
           df -h /
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift
@@ -877,7 +877,7 @@ jobs:
           path: ${{ runner.temp }}/cb/models
           key: localai-instance-models-${{ hashFiles('internal/localai/*.go', '!internal/localai/*_test.go') }}
 
-      # The remotecompute shard's stand-in remote hosts (#2209, #2259):
+      # The remotehosts shard's stand-in remote hosts (#2209, #2259):
       # scripts/remote-compute-shard.sh runs the stand-in tests of
       # internal/remotecompute and cmd/cloudburrow (Connect, the mirror,
       # carries and their resume between two hosts, host mounts, a
@@ -887,7 +887,7 @@ jobs:
       # whose target compat_shard reads from CLOUDBURROW_TEST_REMOTE_HOST.
       # Every host is on 127.0.0.1; nothing signs in to a cloud.
       - name: Start the stand-in remote hosts and run their tests
-        if: matrix.shard == 'remotecompute'
+        if: matrix.shard == 'remotehosts'
         run: |
           scripts/remote-compute-shard.sh hosts "$RUNNER_TEMP/remotecompute" "$RUNNER_TEMP/cb" ci standin.log > "$RUNNER_TEMP/remote-hosts.env" ||
             { grep -E -- '^(--- FAIL|    .*_test.go)' standin.log | head -40; exit 1; }
@@ -966,7 +966,7 @@ jobs:
           COMPAT_ENV=$(scripts/compat-env.sh --strict --only "$TEST_VARS" --env-json env.json \
             --cli "$PWD/bin/cloudburrow" --gcloud "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" -- "${CB[@]}")
           eval "$COMPAT_ENV"
-          # The remotecompute shard's DOCKER_HOST, so docker and kind reach
+          # The remotehosts shard's DOCKER_HOST, so docker and kind reach
           # the instance's host, and its ingress (#2259).
           compat_remote_exports "$SHARD" env.json
           if ! { [ -s "$CLOUDBURROW_TEST_KUBECONFIG" ] && kind get clusters | grep -qx "$CLOUDBURROW_TEST_CLUSTER"; }; then
@@ -1086,7 +1086,7 @@ jobs:
           # serve (#700, #854, #1472, #1568), and in served and vpcvms for
           # Compute Engine's and Kubernetes Engine's.
           case "$SHARD" in
-            storage|served|vpcvms|run|crossservice|emulators|memorystore|sql|localai|remotecompute) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
+            storage|served|vpcvms|run|crossservice|emulators|memorystore|sql|localai|remotehosts) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
           esac
           if [ "$SHARD" = storage ]; then
             # The official Python clients against the same instance (#287),
@@ -1234,7 +1234,7 @@ jobs:
       # Every test selected for the shard must pass: go test
       # exits 0 on a skip, and each skips without its variables or its screen.
       - name: Console in a headless browser
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai' || matrix.shard == 'remotecompute'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai' || matrix.shard == 'remotehosts'
         run: |
           set -o pipefail
           # ubuntu-latest ships Google Chrome: it is in the runner image's
@@ -1366,7 +1366,7 @@ jobs:
           BROWSER_TIMEOUT=10m; case "$SHARD" in served|run|storage|sql|vpcvms) BROWSER_TIMEOUT=30m ;; crossservice) BROWSER_TIMEOUT=40m ;; esac
           go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
           ./bin/cloudburrow stop "${CB[@]}"
-          # The remotecompute shard's TestByocFirstRunWalkThrough (#2259),
+          # The remotehosts shard's TestByocFirstRunWalkThrough (#2259),
           # on an instance of its own on this machine's Docker started with
           # the local fakes of AWS and Azure (test/tools/byocfakes), whose
           # VMs boot as two more stand-ins; its log joins the suite's, so
@@ -1384,7 +1384,7 @@ jobs:
           echo "== browser ($SHARD): $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai' || matrix.shard == 'remotecompute')
+        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai' || matrix.shard == 'remotehosts')
         with:
           name: browser-screenshots-${{ matrix.shard }}
           path: |
@@ -1433,7 +1433,7 @@ jobs:
           PID=$(jq -r .pid "$RUNNER_TEMP/cb/ci/up.json" 2>/dev/null || true)
           [ -n "$PID" ] && kill "$PID" 2>/dev/null || true
           for c in $(kind get clusters 2>/dev/null); do kind delete cluster --name "$c" || true; done
-          # The remotecompute shard's stand-ins and fakes, by ID and PID.
+          # The remotehosts shard's stand-ins and fakes, by ID and PID.
           [ ! -d "$RUNNER_TEMP/remotecompute" ] || scripts/remote-compute-shard.sh cleanup "$RUNNER_TEMP/remotecompute" || true
 
   # Every compat test ran in some shard. A test whose service is in no shard
@@ -1459,7 +1459,7 @@ jobs:
         run: |
           go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > all.txt
           missing=
-          for shard in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech remotecompute; do
+          for shard in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech remotehosts; do
             d=logs/compat-log-$shard
             [ -d "$d" ] || { echo "no logs from the $shard shard"; missing=1; continue; }
             # Top-level results only; a subtest's line is indented.
@@ -1512,7 +1512,7 @@ jobs:
           # Dataproc tests (#2162, #2234), which that job runs too, and the
           # Dataflow ones, whose Beam pipelines run on the pinned Flink job
           # server (#2215), which its dataflow job runs. The remote compute
-          # tests (#2209) run in the remotecompute shard, on an instance
+          # tests (#2209) run in the remotehosts shard, on an instance
           # whose compute is a stand-in remote host (#2259), so none is
           # here. #2245:
           # twelve tests from Landing 168 have no shard yet whose instance

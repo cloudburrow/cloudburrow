@@ -250,9 +250,9 @@ which ci.yml and `scripts/verify-local.sh` both call, and `cmd/cloudburrow`'s
 ones is selected by exactly one browser shard whose `--services` draw each screen it names with
 `needService`.
 
-### The remotecompute shard
+### The remotehosts shard
 
-The compat job's `remotecompute` shard (#2259) runs the remote compute and bring-your-own-cloud
+The compat job's `remotehosts` shard (#2259) runs the remote compute and bring-your-own-cloud
 tests (#2209), which need hosts no other shard has: Docker-in-Docker sshd stand-ins
 (`testdata/remotehost`, started by `scripts/remote-compute-standin.sh`, every one on 127.0.0.1)
 and the local fakes of AWS and Azure (`test/tools/byocfakes`). `scripts/remote-compute-shard.sh`

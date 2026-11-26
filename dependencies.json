@@ -4452,9 +4452,9 @@
         ],
         "license": "GPL-2.0-only (BusyBox); pulled at test time only, never vendored into the repository or shipped",
         "redistribution": "not-redistributed",
-        "redistributionPlan": "Pulled from Docker Hub by digest by scripts/remote-compute-shard.sh, in CI's remotecompute shard or by a developer; never by cloudburrow.",
+        "redistributionPlan": "Pulled from Docker Hub by digest by scripts/remote-compute-shard.sh, in CI's remotehosts shard or by a developer; never by cloudburrow.",
         "scope": "test-only",
-        "usedBy": ".github/workflows/ci.yml, compat job, remotecompute shard: CLOUDBURROW_TEST_REMOTE_IMAGE for internal/remotecompute's stand-in tests (#2209, #2259): the container their carries, mirrors and host mounts run on the stand-in hosts (sh, nc and httpd, and no VOLUME)",
+        "usedBy": ".github/workflows/ci.yml, compat job, remotehosts shard: CLOUDBURROW_TEST_REMOTE_IMAGE for internal/remotecompute's stand-in tests (#2209, #2259): the container their carries, mirrors and host mounts run on the stand-in hosts (sh, nc and httpd, and no VOLUME)",
         "verification": "image-digest",
         "updateFeed": "docker-hub-tags",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest (the multi-platform index's) with `docker buildx imagetools inspect busybox:<version>`."
