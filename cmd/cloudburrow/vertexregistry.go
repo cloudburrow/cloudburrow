@@ -19,6 +19,7 @@ import (
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/images"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
@@ -73,7 +74,10 @@ func (v vertexRunner) Run(ctx context.Context, project string, spec vertexai.Con
 	defer func() { _ = c.Close() }()
 	ctx, cancel := context.WithTimeout(ctx, deployTimeout)
 	defer cancel()
-	container := &runpb.Container{Image: spec.Image, Command: spec.Command, Args: spec.Args,
+	// The model's image is pulled from its registry, as Vertex AI pulls
+	// it: a short name is Docker Hub's, not a dev.local image nothing
+	// loaded into the cluster (Cloud Run's reading of a short name).
+	container := &runpb.Container{Image: images.Qualify(spec.Image), Command: spec.Command, Args: spec.Args,
 		Ports: []*runpb.ContainerPort{{ContainerPort: int32(spec.Port)}},
 		StartupProbe: &runpb.Probe{PeriodSeconds: 10, TimeoutSeconds: 10, FailureThreshold: 60,
 			ProbeType: &runpb.Probe_HttpGet{HttpGet: &runpb.HTTPGetAction{Path: spec.HealthRoute}}}}
