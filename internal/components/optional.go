@@ -1201,6 +1201,16 @@ type SQLReplicaSource struct {
 	// replica created as one, which takes a base backup only when its data
 	// directory is empty.
 	Epoch int
+	// CACert, ClientCert and ClientKey are an external primary's TLS
+	// certificates (#2257), PEM; the replica's setup writes them beside its
+	// data and verifies the primary's certificate against CACert.
+	CACert, ClientCert, ClientKey string
+	// DumpFlags are extra mysqldump options of an external MySQL
+	// primary's dump (#2257).
+	DumpFlags []string
+	// Databases are the databases a MySQL replica of an external primary
+	// replicates (#2257, selectedObjects): each one a --replicate-do-db.
+	Databases []string
 }
 
 // SQLReplicaUser is the replication user a replica connects to its
@@ -1224,12 +1234,21 @@ func CloudSQLReplicaBackend(b Backend, mysql bool, src SQLReplicaSource) Backend
 	if src.Port != 0 {
 		b.Env["CLOUDSQL_PRIMARY_PORT"] = fmt.Sprint(src.Port)
 	}
+	for k, v := range map[string]string{"CLOUDSQL_PRIMARY_SSL_CA": src.CACert, "CLOUDSQL_PRIMARY_SSL_CERT": src.ClientCert,
+		"CLOUDSQL_PRIMARY_SSL_KEY": src.ClientKey, "CLOUDSQL_DUMP_FLAGS": strings.Join(src.DumpFlags, " ")} {
+		if v != "" {
+			b.Env[k] = v
+		}
+	}
 	if src.Logical {
 		return b
 	}
 	if mysql {
 		b.Args = append(append([]string{}, b.Args...), fmt.Sprintf("--server-id=%d", src.ServerID),
 			"--gtid-mode=ON", "--enforce-gtid-consistency=ON", "--read-only=ON")
+		for _, db := range src.Databases {
+			b.Args = append(b.Args, "--replicate-do-db="+db)
+		}
 		return b
 	}
 	args := b.Args

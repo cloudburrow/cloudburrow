@@ -8,6 +8,7 @@ import (
 	dmspb "cloud.google.com/go/clouddms/apiv1/clouddmspb"
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -55,9 +56,38 @@ func cloudSQLVersion(s *dmspb.CloudSqlSettings) string {
 	return ""
 }
 
-// isSource is a profile a migration job reads from.
+// isSource is a profile a migration job reads from: a MySQL or
+// PostgreSQL server, not a destination profile of an existing instance.
 func isSource(p *dmspb.ConnectionProfile) bool {
-	return p.GetMysql() != nil || p.GetPostgresql() != nil
+	return (p.GetMysql() != nil || p.GetPostgresql() != nil) && !existingDestination(p)
+}
+
+// existingDestination is a mysql or postgresql profile of an existing
+// Cloud SQL instance (cloudSqlId) or AlloyDB cluster (alloydbClusterId)
+// that a job migrates into (#2257): role DESTINATION, or no host, as
+// gcloud's `connection-profiles create mysql --role=DESTINATION
+// --cloudsql-instance=ID` makes it ("For PostgreSQL or MySQL destination
+// profiles with Cloud SQL or AlloyDB, this flag [--host] is optional if
+// the instance or cluster is provided", gcloud 594's flags.py; the
+// existing-instance guide's `connection-profiles create mysql ... --cloudsql-instance=DESTINATION_INSTANCE_ID`,
+// https://docs.cloud.google.com/database-migration/docs/mysql/create-migration-job-existing-instance,
+// read 2026-11-25). An alloydb profile without settings is one too.
+func existingDestination(p *dmspb.ConnectionProfile) bool {
+	host, id := "", ""
+	switch {
+	case p.GetMysql() != nil:
+		host, id = p.GetMysql().GetHost(), p.GetMysql().GetCloudSqlId()
+	case p.GetPostgresql() != nil:
+		host, id = p.GetPostgresql().GetHost(), p.GetPostgresql().GetCloudSqlId()
+		if a := str(p.GetPostgresql(), "alloydb_cluster_id"); a != "" {
+			id = a
+		}
+	case p.GetAlloydb() != nil:
+		return p.GetAlloydb().GetSettings() == nil
+	default:
+		return false
+	}
+	return id != "" && (str(p, "role") == "DESTINATION" || host == "")
 }
 
 // redact is p as it is answered: input-only fields cleared, their *Set
@@ -74,10 +104,12 @@ func redact(p *dmspb.ConnectionProfile) *dmspb.ConnectionProfile {
 		m := out.GetMysql()
 		m.PasswordSet, m.Password = m.Password != "", ""
 		clearSSL(m.Ssl)
+		redactSSH(m)
 	case out.GetPostgresql() != nil:
 		m := out.GetPostgresql()
 		m.PasswordSet, m.Password = m.Password != "", ""
 		clearSSL(m.Ssl)
+		redactSSH(m)
 	case out.GetCloudsql() != nil:
 		if st := out.GetCloudsql().GetSettings(); st != nil {
 			st.RootPasswordSet, st.RootPassword = st.RootPassword != "", ""
@@ -109,17 +141,27 @@ func checkEndpoint(kind, host string, port int32, user, password string, ssl *dm
 	if password == "" && !update {
 		return apierror.InvalidArgument("connection_profile.%s.password is required", kind)
 	}
-	switch t := int32(ssl.GetType()); {
+	switch t := sslType(ssl); {
 	case ssl == nil, t == 0, t == SSLRequired, t == SSLNone:
+		if ssl.GetCaCertificate() != "" || ssl.GetClientCertificate() != "" {
+			return apierror.InvalidArgument("connection_profile.%s.ssl: certificates are for SSL types SERVER_ONLY and SERVER_CLIENT", kind)
+		}
 	case t == int32(dmspb.SslConfig_SERVER_ONLY), t == int32(dmspb.SslConfig_SERVER_CLIENT):
 		if ssl.GetCaCertificate() == "" {
-			return apierror.InvalidArgument("connection_profile.%s.ssl.ca_certificate is required for SSL type %s", kind, ssl.GetType())
+			if update {
+				// The certificates are input only: an update that names
+				// the type without them keeps the stored ones.
+				return nil
+			}
+			return apierror.InvalidArgument("connection_profile.%s.ssl.ca_certificate is required for SSL type %s", kind, dmspb.SslConfig_SslType(t))
 		}
 		if t == int32(dmspb.SslConfig_SERVER_CLIENT) && (ssl.GetClientKey() == "" || ssl.GetClientCertificate() == "") {
 			return apierror.InvalidArgument("connection_profile.%s.ssl.client_key and client_certificate are required for SSL type SERVER_CLIENT", kind)
 		}
-		return unimplemented("connection_profile."+kind+".ssl.type "+ssl.GetType().String(),
-			"the destinations' servers connect to a source unverified (REQUIRED) or in the clear (NONE); a source certificate check is not run (docs/gaps.md)")
+		if t == int32(dmspb.SslConfig_SERVER_ONLY) && (ssl.GetClientKey() != "" || ssl.GetClientCertificate() != "") {
+			return apierror.InvalidArgument("connection_profile.%s.ssl: SSL type SERVER_ONLY takes only ca_certificate", kind)
+		}
+		return checkCertificates(kind, ssl)
 	default:
 		return apierror.InvalidArgument("connection_profile.%s.ssl.type %d is not an SslType", kind, t)
 	}
@@ -138,14 +180,19 @@ func (s *Server) checkProfile(project, location string, p *dmspb.ConnectionProfi
 		return apierror.InvalidArgument("connection_profile.role %q must be SOURCE or DESTINATION", r)
 	}
 	switch {
+	case existingDestination(p):
+		return s.checkExistingDestination(p)
 	case p.GetMysql() != nil:
 		m := p.GetMysql()
 		if err := checkEndpoint("mysql", m.GetHost(), m.GetPort(), m.GetUsername(), m.GetPassword(), m.GetSsl(), false); err != nil {
 			return err
 		}
-		if has(m, "forward_ssh_connectivity") || has(m, "private_service_connect_connectivity") {
-			return unimplemented("connection_profile.mysql's forward SSH and Private Service Connect connectivity",
-				"the destinations' servers reach a source directly, on the instance's network (docs/gaps.md)")
+		if has(m, "private_service_connect_connectivity") {
+			return unimplemented("connection_profile.mysql.private_service_connect_connectivity",
+				"Private Service Connect service attachments are not served; reach the source directly or through forward SSH (docs/gaps.md)")
+		}
+		if err := checkForwardSSH("mysql", m, false); err != nil {
+			return err
 		}
 		return s.checkPrivateConnectivity(project, location, m)
 	case p.GetPostgresql() != nil:
@@ -153,9 +200,12 @@ func (s *Server) checkProfile(project, location string, p *dmspb.ConnectionProfi
 		if err := checkEndpoint("postgresql", m.GetHost(), m.GetPort(), m.GetUsername(), m.GetPassword(), m.GetSsl(), false); err != nil {
 			return err
 		}
-		if m.GetPrivateServiceConnectConnectivity() != nil || has(m, "forward_ssh_connectivity") {
-			return unimplemented("connection_profile.postgresql's forward SSH and Private Service Connect connectivity",
-				"the destinations' servers reach a source directly, on the instance's network (docs/gaps.md)")
+		if m.GetPrivateServiceConnectConnectivity() != nil {
+			return unimplemented("connection_profile.postgresql.private_service_connect_connectivity",
+				"Private Service Connect service attachments are not served; reach the source directly or through forward SSH (docs/gaps.md)")
+		}
+		if err := checkForwardSSH("postgresql", m, false); err != nil {
+			return err
 		}
 		if boolField(m, "enable_iam_authentication") {
 			return unimplemented("connection_profile.postgresql.enable_iam_authentication",
@@ -270,8 +320,8 @@ func (s *Server) checkAlloyDB(a *dmspb.AlloyDbConnectionProfile) error {
 	}
 	st := a.GetSettings()
 	if st == nil {
-		// A profile of an existing cluster: a migration to it needs the
-		// cluster demoted, which is not served (CreateMigrationJob says so).
+		// A profile of an existing cluster (#2257), checked by
+		// checkExistingDestination.
 		return nil
 	}
 	if st.GetInitialUser().GetUser() == "" || st.GetInitialUser().GetPassword() == "" {
@@ -315,11 +365,40 @@ func (s *Server) profileLocked(name string) (*dmspb.ConnectionProfile, error) {
 	return p, nil
 }
 
-// targetOf is the destination server a cloudsql or alloydb profile names.
+// targetOf is the destination server a cloudsql or alloydb profile, or a
+// destination profile of an existing instance or cluster, names; an
+// existing one's version is the server's versions record.
+func (s *Server) targetOf(p *dmspb.ConnectionProfile) (Target, bool) {
+	t, ok := targetOf(p)
+	if ok && t.Existing {
+		t.Version = s.versions[p.GetName()]
+	}
+	return t, ok
+}
+
+// existingID is an existing destination profile's instance or cluster:
+// cloudSql reports a Cloud SQL instance.
+func existingID(p *dmspb.ConnectionProfile) (cloudSQL bool, id string) {
+	switch {
+	case p.GetAlloydb() != nil:
+		return false, p.GetAlloydb().GetClusterId()
+	case p.GetPostgresql() != nil && str(p.GetPostgresql(), "alloydb_cluster_id") != "":
+		return false, str(p.GetPostgresql(), "alloydb_cluster_id")
+	case p.GetMysql() != nil:
+		return true, p.GetMysql().GetCloudSqlId()
+	}
+	return true, p.GetPostgresql().GetCloudSqlId()
+}
+
 func targetOf(p *dmspb.ConnectionProfile) (Target, bool) {
 	m := profileRE.FindStringSubmatch(p.GetName())
 	if m == nil {
 		return Target{}, false
+	}
+	if existingDestination(p) {
+		t := Target{Project: m[1], Location: m[2], Existing: true}
+		t.CloudSQL, t.ID = existingID(p)
+		return t, true
 	}
 	switch {
 	case p.GetCloudsql() != nil:
@@ -337,12 +416,26 @@ func targetOf(p *dmspb.ConnectionProfile) (Target, bool) {
 
 // sourceOf is a source profile's connection.
 func sourceOf(p *dmspb.ConnectionProfile) Source {
-	req := func(c *dmspb.SslConfig) bool { return int32(c.GetType()) == SSLRequired }
-	if m := p.GetMysql(); m != nil {
-		return Source{Engine: dmspb.DatabaseEngine_MYSQL, Host: m.GetHost(), Port: int(m.GetPort()), User: m.GetUsername(), Password: m.GetPassword(), RequireSSL: req(m.GetSsl())}
+	tlsOf := func(src *Source, c *dmspb.SslConfig) {
+		switch sslType(c) {
+		case SSLRequired:
+			src.RequireSSL = true
+		case int32(dmspb.SslConfig_SERVER_ONLY), int32(dmspb.SslConfig_SERVER_CLIENT):
+			src.RequireSSL = true
+			src.CACert, src.ClientCert, src.ClientKey = c.GetCaCertificate(), c.GetClientCertificate(), c.GetClientKey()
+		}
 	}
-	m := p.GetPostgresql()
-	return Source{Engine: dmspb.DatabaseEngine_POSTGRESQL, Host: m.GetHost(), Port: int(m.GetPort()), User: m.GetUsername(), Password: m.GetPassword(), RequireSSL: req(m.GetSsl())}
+	var out Source
+	if m := p.GetMysql(); m != nil {
+		out = Source{Engine: dmspb.DatabaseEngine_MYSQL, Host: m.GetHost(), Port: int(m.GetPort()), User: m.GetUsername(), Password: m.GetPassword(), SSH: sshOf(m)}
+		tlsOf(&out, m.GetSsl())
+	} else {
+		m := p.GetPostgresql()
+		out = Source{Engine: dmspb.DatabaseEngine_POSTGRESQL, Host: m.GetHost(), Port: int(m.GetPort()), User: m.GetUsername(), Password: m.GetPassword(), SSH: sshOf(m)}
+		tlsOf(&out, m.GetSsl())
+	}
+	out.Name = p.GetName()
+	return out
 }
 
 func (s *Server) CreateConnectionProfile(_ context.Context, req *dmspb.CreateConnectionProfileRequest) (*longrunningpb.Operation, error) {
@@ -373,12 +466,45 @@ func (s *Server) CreateConnectionProfile(_ context.Context, req *dmspb.CreateCon
 	if _, ok := s.profiles[name]; ok {
 		return nil, apierror.AlreadyExists("Resource '%s' already exists", name)
 	}
-	if t, ok := targetOf(&dmspb.ConnectionProfile{Name: name, ConnectionProfile: p.ConnectionProfile}); ok && t.CloudSQL {
+	probe := &dmspb.ConnectionProfile{Name: name, ConnectionProfile: p.ConnectionProfile}
+	if t, ok := targetOf(probe); ok && t.CloudSQL && !t.Existing {
 		for _, o := range s.profiles {
 			if ot, ok := targetOf(o); ok && ot.CloudSQL && ot.Project == t.Project && ot.ID == t.ID {
 				return nil, apierror.AlreadyExists("the Cloud SQL instance %s is already the destination of %s", t.ID, o.GetName())
 			}
 		}
+	}
+	if existingDestination(probe) {
+		// An existing instance or cluster (#2257): checked to be there,
+		// standalone and running, and its version kept.
+		t, _ := targetOf(probe)
+		if s.opts.Backend == nil {
+			return nil, failedPrecondition("this server runs no destinations")
+		}
+		if t.CloudSQL && !s.opts.CloudSQL {
+			return nil, failedPrecondition("a Cloud SQL destination needs Cloud SQL: start the instance with --services including cloudsql or cloudsql-mysql")
+		}
+		if !t.CloudSQL && !s.opts.AlloyDB {
+			return nil, failedPrecondition("an AlloyDB destination needs AlloyDB: start the instance with --services including alloydb")
+		}
+		v, err := s.opts.Backend.Existing(context.Background(), t)
+		if err != nil {
+			return nil, err
+		}
+		if p.GetMysql() != nil && !strings.HasPrefix(v, "MYSQL_") || p.GetPostgresql() != nil && !strings.HasPrefix(v, "POSTGRES_") {
+			return nil, apierror.InvalidArgument("the destination %s runs %s, not the profile's engine", t.ID, v)
+		}
+		now := ts(s.now())
+		p.Name, p.CreateTime, p.UpdateTime, p.Error, p.State = name, now, now, nil, dmspb.ConnectionProfile_READY
+		if p.Provider == dmspb.DatabaseProvider_DATABASE_PROVIDER_UNSPECIFIED {
+			p.Provider = dmspb.DatabaseProvider_CLOUDSQL
+			if !t.CloudSQL {
+				p.Provider = dmspb.DatabaseProvider_ALLOYDB
+			}
+		}
+		s.profiles[name] = p
+		s.versions[name] = v
+		return s.done(req.GetParent(), "create", name, req.GetRequestId(), redact(p))
 	}
 	if s.opts.Backend == nil && (p.GetCloudsql() != nil || p.GetAlloydb().GetSettings() != nil) {
 		return nil, failedPrecondition("this server runs no destinations")
@@ -529,10 +655,20 @@ func (s *Server) UpdateConnectionProfile(_ context.Context, req *dmspb.UpdateCon
 	}
 	if isSource(next) {
 		if m := next.GetMysql(); m != nil {
+			keepSSL(cur.GetMysql().GetSsl(), m.GetSsl())
+			keepSSHSecret(cur.GetMysql(), m)
 			err = checkEndpoint("mysql", m.GetHost(), m.GetPort(), m.GetUsername(), m.GetPassword(), m.GetSsl(), true)
+			if err == nil {
+				err = checkForwardSSH("mysql", m, true)
+			}
 		} else {
 			m := next.GetPostgresql()
+			keepSSL(cur.GetPostgresql().GetSsl(), m.GetSsl())
+			keepSSHSecret(cur.GetPostgresql(), m)
 			err = checkEndpoint("postgresql", m.GetHost(), m.GetPort(), m.GetUsername(), m.GetPassword(), m.GetSsl(), true)
+			if err == nil {
+				err = checkForwardSSH("postgresql", m, true)
+			}
 		}
 		if err != nil {
 			return nil, err
@@ -545,6 +681,15 @@ func (s *Server) UpdateConnectionProfile(_ context.Context, req *dmspb.UpdateCon
 	s.profiles[next.GetName()] = next
 	location := parentOf(next.GetName())
 	return s.done(location, "update", next.GetName(), req.GetRequestId(), redact(next))
+}
+
+// keepSSL carries cur's input-only certificates into next when an update
+// names the same verified type without them.
+func keepSSL(cur, next *dmspb.SslConfig) {
+	if next == nil || cur == nil || next.GetCaCertificate() != "" || sslType(next) != sslType(cur) {
+		return
+	}
+	next.CaCertificate, next.ClientCertificate, next.ClientKey = cur.GetCaCertificate(), cur.GetClientCertificate(), cur.GetClientKey()
 }
 
 // updateEndpoint applies one update_mask path of a source's connection;
@@ -563,8 +708,10 @@ func updateEndpoint(next, in *dmspb.ConnectionProfile, path string) error {
 			m.Username = src.GetUsername()
 		case "password":
 			m.Password = src.GetPassword()
-		case "ssl":
-			m.Ssl = src.GetSsl()
+		case "ssl", "ssl.type", "ssl.caCertificate", "ssl.ca_certificate", "ssl.clientCertificate", "ssl.client_certificate", "ssl.clientKey", "ssl.client_key":
+			m.Ssl = updateSSL(m.Ssl, src.GetSsl(), field)
+		case "forwardSshConnectivity", "forward_ssh_connectivity":
+			copyOverlay(m, src, "forward_ssh_connectivity")
 		case "":
 			pw := m.Password
 			*m = *clone(src)
@@ -586,8 +733,10 @@ func updateEndpoint(next, in *dmspb.ConnectionProfile, path string) error {
 			m.Username = src.GetUsername()
 		case "password":
 			m.Password = src.GetPassword()
-		case "ssl":
-			m.Ssl = src.GetSsl()
+		case "ssl", "ssl.type", "ssl.caCertificate", "ssl.ca_certificate", "ssl.clientCertificate", "ssl.client_certificate", "ssl.clientKey", "ssl.client_key":
+			m.Ssl = updateSSL(m.Ssl, src.GetSsl(), field)
+		case "forwardSshConnectivity", "forward_ssh_connectivity":
+			copyOverlay(m, src, "forward_ssh_connectivity")
 		case "":
 			pw := m.Password
 			*m = *clone(src)
@@ -602,6 +751,40 @@ func updateEndpoint(next, in *dmspb.ConnectionProfile, path string) error {
 		return apierror.InvalidArgument("update_mask path %q cannot be updated: a destination's settings are immutable", path)
 	}
 	return apierror.InvalidArgument("update_mask path %q cannot be updated on %s", path, next.GetName())
+}
+
+// updateSSL applies an ssl update_mask path: the whole config, or one of
+// its fields (gcloud's `connection-profiles update --ssl-type` sends
+// mysql.ssl.type, .caCertificate, .clientCertificate and .clientKey).
+func updateSSL(cur, in *dmspb.SslConfig, field string) *dmspb.SslConfig {
+	if field == "ssl" {
+		return clone(in)
+	}
+	out := clone(cur)
+	if out == nil {
+		out = &dmspb.SslConfig{}
+	}
+	switch strings.TrimPrefix(field, "ssl.") {
+	case "type":
+		out.Type = in.GetType()
+	case "caCertificate", "ca_certificate":
+		out.CaCertificate = in.GetCaCertificate()
+	case "clientCertificate", "client_certificate":
+		out.ClientCertificate = in.GetClientCertificate()
+	case "clientKey", "client_key":
+		out.ClientKey = in.GetClientKey()
+	}
+	return out
+}
+
+// copyOverlay copies an added message field from src to dst.
+func copyOverlay(dst, src proto.Message, field string) {
+	v, ok := overlay.Get(src, protoreflect.Name(field))
+	if !ok {
+		_ = overlay.Set(dst, protoreflect.Name(field), protoreflect.Value{})
+		return
+	}
+	_ = overlay.Set(dst, protoreflect.Name(field), v)
 }
 
 func parentOf(name string) string {
@@ -640,7 +823,16 @@ func (s *Server) DeleteConnectionProfile(_ context.Context, req *dmspb.DeleteCon
 		}
 	}
 	location := parentOf(p.GetName())
-	if t, ok := targetOf(p); ok && t.CloudSQL && req.GetForce() && s.opts.Backend != nil {
+	if isSource(p) && sourceOf(p).SSH != nil && s.opts.Backend != nil {
+		src := sourceOf(p)
+		s.background(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), stepTimeout)
+			defer cancel()
+			_ = s.opts.Backend.Release(ctx, src)
+		})
+	}
+	delete(s.versions, p.GetName())
+	if t, ok := targetOf(p); ok && t.CloudSQL && !t.Existing && req.GetForce() && s.opts.Backend != nil {
 		// "In case of force delete, the CloudSQL replica database is also
 		// deleted (only for CloudSQL connection profile)."
 		p.State = dmspb.ConnectionProfile_DELETING

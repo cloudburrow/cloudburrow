@@ -83,6 +83,8 @@ import (
 
 // Source is a source database as a destination's server reaches it.
 type Source struct {
+	// Name is the source connection profile's resource name.
+	Name string
 	// Engine is MYSQL or POSTGRESQL.
 	Engine dmspb.DatabaseEngine
 	Host   string
@@ -93,7 +95,26 @@ type Source struct {
 	// RequireSSL is a profile whose SSL type is REQUIRED: the connection
 	// is encrypted, its certificate not verified.
 	RequireSSL bool
+	// CACert is a SERVER_ONLY or SERVER_CLIENT profile's caCertificate
+	// (#2257): the source's certificate is verified against it; ClientCert
+	// and ClientKey are SERVER_CLIENT's, presented to the source.
+	CACert, ClientCert, ClientKey string
+	// SSH is the profile's forward SSH tunnel (#2257): the destinations'
+	// servers reach Host:Port through it, as its SSH host does.
+	SSH *SSHTunnel
 }
+
+// SSHTunnel is a source's forwardSshConnectivity.
+type SSHTunnel struct {
+	Host string
+	Port int
+	User string
+	// Password or PrivateKey signs in.
+	Password, PrivateKey string
+}
+
+// Verified reports whether src's certificate is checked against a CA.
+func (s Source) Verified() bool { return s.CACert != "" }
 
 // Target is a destination database server of this instance.
 type Target struct {
@@ -104,6 +125,10 @@ type Target struct {
 	Project, Location, ID string
 	// Version is its database version: MYSQL_8_0, POSTGRES_16, ...
 	Version string
+	// Existing is an instance or cluster the destination profile names
+	// rather than creates (#2257): it is demoted before its migration and
+	// never deleted by it.
+	Existing bool
 }
 
 // MySQL reports whether the target is a MySQL server.
@@ -123,6 +148,24 @@ type ConnError struct {
 
 func (e *ConnError) Error() string { return e.Msg }
 
+// Migration is what a job's full dump copies and how (#2257).
+type Migration struct {
+	// Databases are the databases migrated: every one a PostgreSQL
+	// source's sourceDatabases answers, or the job's selected ones; nil
+	// for a MySQL source is every database but its system schemas.
+	Databases []string
+	// Continuous replicates after the dump.
+	Continuous bool
+	// DumpPath is a MySQL job's dump in Cloud Storage
+	// (gs://BUCKET/OBJECT), loaded instead of dumping the source; with
+	// Physical, the folder of an XtraBackup backup.
+	DumpPath string
+	// DumpFlags are extra mysqldump options (--name or --name=value).
+	DumpFlags []string
+	// Physical is dumpType PHYSICAL: a file-based copy.
+	Physical bool
+}
+
 // Backend runs the destinations and moves the data. Every method that
 // touches the source does so from the target's server.
 type Backend interface {
@@ -134,6 +177,13 @@ type Backend interface {
 	// primary instance, and returns once the primary runs, answering the
 	// cluster's database version (POSTGRES_16, ...).
 	CreateAlloyDB(ctx context.Context, t Target, s *dmspb.AlloyDbSettings) (string, error)
+	// Existing checks an existing destination (#2257), a Cloud SQL
+	// instance or AlloyDB cluster that is standalone and running, and
+	// answers its database version.
+	Existing(ctx context.Context, t Target) (string, error)
+	// Demote makes an existing destination a replica of src waiting for
+	// Migrate (#2257): Cloud SQL's instances.demote.
+	Demote(ctx context.Context, t Target, src Source) error
 	// Delete deletes a Cloud SQL destination's instance and its source
 	// representation instance.
 	Delete(ctx context.Context, t Target) error
@@ -143,20 +193,23 @@ type Backend interface {
 	// QueryTarget runs a statement in t's database as its administrator
 	// and answers its rows.
 	QueryTarget(ctx context.Context, t Target, database, query string) ([][]string, error)
-	// Migrate copies src's databases (a PostgreSQL source's, or every one
-	// of a MySQL source's) into t and, when continuous, goes on
+	// Migrate copies src's databases into t and, when continuous, goes on
 	// replicating them. A MySQL target returns once its dump is loaded
-	// (and, continuous, replication from the dump's GTID position runs);
-	// a PostgreSQL target once its subscriptions are created, their
-	// initial copy then followed in pg_subscription_rel.
-	Migrate(ctx context.Context, t Target, src Source, databases []string, continuous bool) error
+	// (and, continuous, replication from the dump's position runs); a
+	// PostgreSQL target once its subscriptions are created, their initial
+	// copy then followed in pg_subscription_rel.
+	Migrate(ctx context.Context, t Target, src Source, m Migration) error
 	// Pause stops (or, with pause false, restarts) t's replication.
 	Pause(ctx context.Context, t Target, pause bool) error
 	// Promote ends t's replication: it is then a standalone database.
 	Promote(ctx context.Context, t Target) error
-	// Reset undoes an AlloyDB target's migration (its subscriptions and the
-	// migrated databases), so Migrate can run again.
-	Reset(ctx context.Context, t Target, databases []string) error
+	// Reset undoes t's migration of databases (an AlloyDB target's
+	// subscriptions and databases; an existing Cloud SQL instance's
+	// replication and databases, demoted again), so Migrate can run again.
+	Reset(ctx context.Context, t Target, src Source, databases []string) error
+	// Release stops what reaching a source took (its SSH tunnel), once its
+	// profile is deleted.
+	Release(ctx context.Context, src Source) error
 }
 
 // Options are the server's collaborators.
@@ -198,6 +251,15 @@ type Server struct {
 	requests map[string]string
 	// started is when each job last entered RUNNING, for its duration.
 	started map[string]time.Time
+	// demoted are the jobs whose existing destination demoteDestination
+	// demoted (#2257).
+	demoted map[string]bool
+	// demoting are the jobs whose demotion runs.
+	demoting map[string]bool
+	// versions are existing destinations' database versions, by profile.
+	versions map[string]string
+	// objects are each job's migration job objects (#2257), by job.
+	objects map[string][]*JobObject
 	// cancel stops each job's runner.
 	cancel map[string]context.CancelFunc
 	work   sync.WaitGroup
@@ -223,6 +285,10 @@ func (s *Server) clear() {
 	s.policies = map[string]*iampolicy.Stored{}
 	s.requests = map[string]string{}
 	s.started = map[string]time.Time{}
+	s.demoted = map[string]bool{}
+	s.demoting = map[string]bool{}
+	s.versions = map[string]string{}
+	s.objects = map[string][]*JobObject{}
 	if s.cancel == nil {
 		s.cancel = map[string]context.CancelFunc{}
 	}
@@ -463,6 +529,13 @@ func (s *Server) ResetProject(project string) error {
 			delete(s.jobs, k)
 			delete(s.policies, k)
 			delete(s.started, k)
+			delete(s.demoted, k)
+			delete(s.objects, k)
+		}
+	}
+	for k := range s.versions {
+		if strings.HasPrefix(k, prefix) {
+			delete(s.versions, k)
 		}
 	}
 	for k := range s.privates {
@@ -491,6 +564,9 @@ type diskState struct {
 	Policies map[string]iampolicy.Stored `json:"policies,omitempty"`
 	Requests map[string]string           `json:"requests,omitempty"`
 	Started  map[string]time.Time        `json:"started,omitempty"`
+	Demoted  map[string]bool             `json:"demoted,omitempty"`
+	Versions map[string]string           `json:"versions,omitempty"`
+	Objects  map[string][]*JobObject     `json:"objects,omitempty"`
 }
 
 func marshalAll[T proto.Message](m map[string]T) ([]json.RawMessage, error) {
@@ -542,7 +618,7 @@ func (s *Server) save() error {
 			st.Policies[k] = *p
 		}
 	}
-	st.Requests, st.Started = s.requests, s.started
+	st.Requests, st.Started, st.Demoted, st.Versions, st.Objects = s.requests, s.started, s.demoted, s.versions, s.objects
 	b, err := json.Marshal(st)
 	if err != nil {
 		return err
@@ -594,6 +670,15 @@ func (s *Server) load() error {
 	}
 	if st.Started != nil {
 		s.started = st.Started
+	}
+	if st.Demoted != nil {
+		s.demoted = st.Demoted
+	}
+	if st.Versions != nil {
+		s.versions = st.Versions
+	}
+	if st.Objects != nil {
+		s.objects = st.Objects
 	}
 	return nil
 }

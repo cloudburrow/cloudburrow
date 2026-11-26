@@ -105,11 +105,12 @@ func (s *Server) verifyPostgres(ctx context.Context, jc jobContext, fresh bool) 
 		out = append(out, verificationError(errRDBMS, "The migration user "+src.User+" has no REPLICATION attribute.",
 			"ALTER USER "+src.User+" WITH REPLICATION;"))
 	}
-	dbs, err := s.sourceDatabases(ctx, jc)
+	all, err := s.allSourceDatabases(ctx, jc)
 	if err != nil {
 		return append(out, connFailure("list the source's databases", err))
 	}
-	if !hasDatabase(dbs, "postgres") {
+	dbs := selected(jc.job, all)
+	if !hasDatabase(all, "postgres") {
 		out = append(out, verificationError(errRDBMS, "The source has no postgres database.", "Database Migration Service needs the default postgres database."))
 	}
 	n := len(dbs)
@@ -163,7 +164,9 @@ func (s *Server) verifyPostgres(ctx context.Context, jc jobContext, fresh bool) 
 				"Add a primary key, or set REPLICA IDENTITY FULL or USING INDEX, so their updates and deletes replicate (and the source keeps taking them)."))
 		}
 	}
-	if fresh {
+	if fresh && !t.Existing {
+		// An existing destination's databases of the migrated names are
+		// dropped by its demotion.
 		out = append(out, s.conflicting(ctx, t, dbs)...)
 	}
 	return out
@@ -239,9 +242,18 @@ func (s *Server) verifyMySQL(ctx context.Context, jc jobContext, fresh bool) []*
 	case gtid != "ON" && gtid != "OFF":
 		// "GTID_MODE: Must be ON or OFF ... no other value is supported."
 		out = append(out, verificationError(errGTID, "The source's gtid_mode is "+r[1]+"; it must be ON or OFF.", "Set gtid_mode to ON or OFF."))
-	case continuous && gtid != "ON":
-		out = append(out, verificationError(errGTID, "The source's gtid_mode is OFF; CloudBurrow's continuous MySQL migration replicates by GTID.",
-			"Set gtid_mode=ON and enforce_gtid_consistency=ON on the source, or run a ONE_TIME job (docs/gaps.md)."))
+	case gtid == "OFF" && jc.job.GetDumpPath() != "":
+		// "If you're using a manual dump file ... GTID_MODE must be ON"
+		// (configure-source-database, read 2026-11-25).
+		out = append(out, verificationError(errGTID, "The source's gtid_mode is OFF; a migration from a manual dump file needs gtid_mode ON.",
+			"Set gtid_mode=ON and enforce_gtid_consistency=ON on the source, or let Database Migration Service dump the source."))
+	case gtid == "OFF" && continuous && (strings.HasPrefix(t.Version, "MYSQL_5_")):
+		// A source without GTIDs is replicated by binary log position
+		// (#2257), its anonymous transactions given the destination's
+		// GTIDs (ASSIGN_GTIDS_TO_ANONYMOUS_TRANSACTIONS), which MySQL 8.0.23
+		// introduced: a 5.7 or 5.6 destination cannot.
+		out = append(out, verificationError(errGTID, "The source's gtid_mode is OFF; CloudBurrow replicates it by binary log position only into MySQL 8.0 or later, not "+t.Version+".",
+			"Set gtid_mode=ON on the source, or migrate into a MySQL 8.0 or later destination (docs/gaps.md)."))
 	}
 	if continuous {
 		if r[3] != "1" {
@@ -261,7 +273,10 @@ func (s *Server) verifyMySQL(ctx context.Context, jc jobContext, fresh bool) []*
 		}
 		every := strings.Contains(all.String(), "GRANT ALL PRIVILEGES ON *.*")
 		need := []string{"SELECT", "SHOW VIEW", "TRIGGER"}
-		if gtid == "ON" {
+		if gtid == "ON" || continuous {
+			// RELOAD: "only if GTID mode is ON"; CloudBurrow's dump of a
+			// source without GTIDs records its binary log position under
+			// FLUSH TABLES WITH READ LOCK, which takes it too (docs/gaps.md).
 			need = append(need, "RELOAD")
 		}
 		if continuous {
@@ -288,7 +303,7 @@ func (s *Server) verifyMySQL(ctx context.Context, jc jobContext, fresh bool) []*
 		schemas, err := b.QuerySource(ctx, t, src, "", `SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN `+mysqlSystem)
 		if err == nil {
 			for _, sc := range schemas {
-				if len(sc) == 0 {
+				if len(sc) == 0 || !isSelected(jc.job, sc[0]) {
 					continue
 				}
 				got, err := b.QueryTarget(ctx, t, "", fmt.Sprintf("SELECT count(*) FROM information_schema.tables WHERE table_schema = %s", quoteLiteral(sc[0])))

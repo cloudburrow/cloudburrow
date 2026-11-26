@@ -32,6 +32,25 @@ func overlayField(name, json string, num int32, typ descriptorpb.FieldDescriptor
 	return f
 }
 
+func repeated(f *descriptorpb.FieldDescriptorProto) *descriptorpb.FieldDescriptorProto {
+	f.Label = descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum()
+	return f
+}
+
+func enumField(name, json string, num int32, typ string) *descriptorpb.FieldDescriptorProto {
+	f := overlayField(name, json, num, descriptorpb.FieldDescriptorProto_TYPE_ENUM, "")
+	f.TypeName = proto.String(typ)
+	return f
+}
+
+func enumOf(name string, values ...string) *descriptorpb.EnumDescriptorProto {
+	e := &descriptorpb.EnumDescriptorProto{Name: proto.String(name)}
+	for i, v := range values {
+		e.Value = append(e.Value, &descriptorpb.EnumValueDescriptorProto{Name: proto.String(v), Number: proto.Int32(int32(i))})
+	}
+	return e
+}
+
 func addFields(f *descriptorpb.FileDescriptorProto) {
 	const (
 		tMsg  = descriptorpb.FieldDescriptorProto_TYPE_MESSAGE
@@ -67,6 +86,28 @@ func addFields(f *descriptorpb.FileDescriptorProto) {
 			}},
 			&descriptorpb.DescriptorProto{Name: proto.String("MySqlHomogeneousConfig"), Field: []*descriptorpb.FieldDescriptorProto{
 				overlayField("is_primary_destination", "isPrimaryDestination", 1, tBool, ""),
+			}},
+			// The objects a job migrates (#2257): objectsConfig's
+			// sourceObjectsConfig, as gcloud's datamigration_v1 messages
+			// and the REST reference have them.
+			&descriptorpb.DescriptorProto{Name: proto.String("SourceObjectIdentifier"), Field: []*descriptorpb.FieldDescriptorProto{
+				overlayField("database", "database", 1, tStr, ""),
+				overlayField("schema", "schema", 2, tStr, ""),
+				overlayField("table", "table", 3, tStr, ""),
+				enumField("type", "type", 4, pkg+"SourceObjectIdentifier.MigrationJobObjectType"),
+			}, EnumType: []*descriptorpb.EnumDescriptorProto{enumOf("MigrationJobObjectType",
+				"MIGRATION_JOB_OBJECT_TYPE_UNSPECIFIED", "DATABASE", "SCHEMA", "TABLE")}},
+			&descriptorpb.DescriptorProto{Name: proto.String("SourceObjectConfig"), Field: []*descriptorpb.FieldDescriptorProto{
+				overlayField("object_identifier", "objectIdentifier", 1, tMsg, pkg+"SourceObjectIdentifier"),
+			}},
+			&descriptorpb.DescriptorProto{Name: proto.String("SourceObjectsConfig"), Field: []*descriptorpb.FieldDescriptorProto{
+				repeated(overlayField("excluded_object_configs", "excludedObjectConfigs", 1, tMsg, pkg+"SourceObjectConfig")),
+				repeated(overlayField("object_configs", "objectConfigs", 2, tMsg, pkg+"SourceObjectConfig")),
+				enumField("objects_selection_type", "objectsSelectionType", 3, pkg+"SourceObjectsConfig.ObjectsSelectionType"),
+			}, EnumType: []*descriptorpb.EnumDescriptorProto{enumOf("ObjectsSelectionType",
+				"OBJECTS_SELECTION_TYPE_UNSPECIFIED", "ALL_OBJECTS", "SPECIFIED_OBJECTS")}},
+			&descriptorpb.DescriptorProto{Name: proto.String("MigrationJobObjectsConfig"), Field: []*descriptorpb.FieldDescriptorProto{
+				overlayField("source_objects_config", "sourceObjectsConfig", 1, tMsg, pkg+"SourceObjectsConfig"),
 			}})
 	}
 	add("ConnectionProfile", overlayField("role", "role", 1001, tStr, ""))
@@ -74,8 +115,10 @@ func addFields(f *descriptorpb.FileDescriptorProto) {
 	// gcloud sends (its generated datamigration_v1 messages): resume's
 	// skipValidation, promote's failback, restart's restartFailedObjects.
 	add("ResumeMigrationJobRequest", overlayField("skip_validation", "skipValidation", 1001, tBool, ""))
-	add("PromoteMigrationJobRequest", overlayField("failback", "failback", 1001, tBool, ""))
-	add("RestartMigrationJobRequest", overlayField("restart_failed_objects", "restartFailedObjects", 1001, tBool, ""))
+	add("PromoteMigrationJobRequest", overlayField("failback", "failback", 1001, tBool, ""),
+		overlayField("objects_filter", "objectsFilter", 1002, tMsg, pkg+"MigrationJobObjectsConfig"))
+	add("RestartMigrationJobRequest", overlayField("restart_failed_objects", "restartFailedObjects", 1001, tBool, ""),
+		overlayField("objects_filter", "objectsFilter", 1002, tMsg, pkg+"MigrationJobObjectsConfig"))
 	add("PostgreSqlConnectionProfile",
 		overlayField("database", "database", 1001, tStr, ""),
 		overlayField("alloydb_cluster_id", "alloydbClusterId", 1002, tStr, ""),
@@ -93,7 +136,8 @@ func addFields(f *descriptorpb.FileDescriptorProto) {
 		overlayField("postgres_homogeneous_config", "postgresHomogeneousConfig", 1001, tMsg, pkg+"PostgresHomogeneousConfig"),
 		overlayField("mysql_homogeneous_config", "mysqlHomogeneousConfig", 1002, tMsg, pkg+"MySqlHomogeneousConfig"),
 		overlayField("dump_type", "dumpType", 1003, tStr, ""),
-		overlayField("purpose", "purpose", 1004, tStr, ""))
+		overlayField("purpose", "purpose", 1004, tStr, ""),
+		overlayField("objects_config", "objectsConfig", 1005, tMsg, pkg+"MigrationJobObjectsConfig"))
 	if ssl := byName["SslConfig"]; ssl != nil {
 		for _, e := range ssl.GetEnumType() {
 			if e.GetName() != "SslType" {

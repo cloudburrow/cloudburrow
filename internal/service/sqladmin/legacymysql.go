@@ -145,7 +145,7 @@ var legacyReplacer = strings.NewReplacer(
 
 // legacySourceOption is a CHANGE REPLICATION SOURCE TO or START REPLICA
 // UNTIL option, whose 5.7 and 5.6 name starts MASTER_.
-var legacySourceOption = regexp.MustCompile(`\bSOURCE_(HOST|PORT|USER|PASSWORD|AUTO_POSITION|SSL|CONNECT_RETRY|LOG_FILE|LOG_POS|DELAY|RETRY_COUNT|HEARTBEAT_PERIOD)\b`)
+var legacySourceOption = regexp.MustCompile(`\bSOURCE_(HOST|PORT|USER|PASSWORD|AUTO_POSITION|SSL_CA|SSL_CERT|SSL_KEY|SSL|CONNECT_RETRY|LOG_FILE|LOG_POS|DELAY|RETRY_COUNT|HEARTBEAT_PERIOD)\b`)
 
 // mysql56Replacer is what MySQL 5.6 has not even under its old names: no
 // super_read_only (5.7.8), whose closest is read_only; the server's

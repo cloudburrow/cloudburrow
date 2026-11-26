@@ -14,6 +14,9 @@
 // (internal/callfront, #1288), all from the same image, so the cluster
 // needs no second locally built image.
 //
+// `cloudburrow-storage dms-tunnel` is a Database Migration Service source
+// profile's forward SSH tunnel (internal/dmstunnel, #2257).
+//
 // `cloudburrow-storage supervise [flags] -- command...` runs a backend's
 // process inside its container and restarts it at once when it ends or the
 // front fails it (internal/supervisor, #1091), and `cloudburrow-storage
@@ -33,6 +36,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/bigtablefront"
 	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/debugpprof"
+	"github.com/cloudburrow/cloudburrow/internal/dmstunnel"
 	"github.com/cloudburrow/cloudburrow/internal/filestorecsi"
 	"github.com/cloudburrow/cloudburrow/internal/mysqlpool"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
@@ -58,6 +62,16 @@ func main() {
 		if err := bigqueryfront.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
 			if !errors.Is(err, bigqueryfront.ErrUsage) {
 				fmt.Fprintln(os.Stderr, "cloudburrow-storage bigquery-front:", err)
+			}
+			os.Exit(2)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "dms-tunnel" {
+		// A Database Migration Service source's forward SSH tunnel (#2257).
+		if err := dmstunnel.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			if !errors.Is(err, dmstunnel.ErrUsage) {
+				fmt.Fprintln(os.Stderr, "cloudburrow-storage dms-tunnel:", err)
 			}
 			os.Exit(2)
 		}

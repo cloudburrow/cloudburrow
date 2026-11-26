@@ -49,6 +49,13 @@ var DataMigration = &Service{
 			"ListPrivateConnections":  {"datamigration.privateconnections.list", "parent"},
 			"DeletePrivateConnection": {"datamigration.privateconnections.delete", "name"},
 			"FetchStaticIps":          {"datamigration.locations.fetchStaticIps", "name"},
+			// The JSON API's methods clouddmspb has none for (#2257),
+			// from their reference pages (read 2026-11-25).
+			"DemoteDestination":        {"datamigration.migrationjobs.demoteDestination", "name"},
+			"FetchSourceObjects":       {"datamigration.migrationjobs.fetchSourceObjects", "name"},
+			"GetMigrationJobObject":    {"datamigration.objects.get", "name"},
+			"ListMigrationJobObjects":  {"datamigration.objects.list", "parent"},
+			"LookupMigrationJobObject": {"datamigration.objects.list", "parent"},
 		}, p)
 		for prefix, rows := range map[string]map[string][2]string{
 			"/google.cloud.location.Locations/": {
