@@ -44,6 +44,18 @@
 # hashes, as Ranger's build does; the Maven repository is a BuildKit cache
 # mount, so a rebuild reuses it.
 FROM maven:3.9.11-eclipse-temurin-8@sha256:e3c149f44c95b0e9dd131862b3df67b3f061f7f6f3898a87b170564b3a943611 AS build
+# The Ubuntu archive at one fixed time through snapshot.ubuntu.com (#2258;
+# archive.ubuntu.com carries arm64 as well as amd64), so a rebuild installs
+# the same package versions and no build depends on a live mirror's health.
+# Retried.
+RUN printf '%s\n' 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80cloudburrow-snapshot \
+ && printf '%s\n' \
+      'Types: deb' 'URIs: https://snapshot.ubuntu.com/ubuntu/20261120T000000Z' \
+      'Suites: noble noble-updates noble-backports noble-security' \
+      'Components: main universe restricted multiverse' \
+      'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' 'Check-Valid-Until: no' \
+      > /etc/apt/sources.list.d/ubuntu.sources \
+ && rm -f /etc/apt/sources.list
 ADD --checksum=sha256:069ed1550160ac0da87980411c346d1e607466cb823720c73458a7b3b95b34aa \
     https://archive.apache.org/dist/ranger/2.8.0/apache-ranger-2.8.0.tar.gz /src/apache-ranger-2.8.0.tar.gz
 RUN apt-get update && apt-get install -y --no-install-recommends python3 git && rm -rf /var/lib/apt/lists/* && \
@@ -67,6 +79,18 @@ RUN --mount=type=cache,id=cloudburrow-ranger-2.8.0-m2,target=/root/.m2 \
       cp target/ranger-2.8.0-$p.tar.gz /out/ || exit 1; done && rm -rf /src
 
 FROM maven:3.9.11-eclipse-temurin-8@sha256:e3c149f44c95b0e9dd131862b3df67b3f061f7f6f3898a87b170564b3a943611
+# The Ubuntu archive at one fixed time through snapshot.ubuntu.com (#2258;
+# archive.ubuntu.com carries arm64 as well as amd64), so a rebuild installs
+# the same package versions and no build depends on a live mirror's health.
+# Retried.
+RUN printf '%s\n' 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80cloudburrow-snapshot \
+ && printf '%s\n' \
+      'Types: deb' 'URIs: https://snapshot.ubuntu.com/ubuntu/20261120T000000Z' \
+      'Suites: noble noble-updates noble-backports noble-security' \
+      'Components: main universe restricted multiverse' \
+      'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' 'Check-Valid-Until: no' \
+      > /etc/apt/sources.list.d/ubuntu.sources \
+ && rm -f /etc/apt/sources.list
 RUN apt-get update && apt-get install -y --no-install-recommends python3 procps bc && rm -rf /var/lib/apt/lists/* && \
     mkdir -p /opt/ranger /usr/share/java /var/log/ranger /var/run/ranger
 ADD --checksum=sha256:a00ccdf537ff50e50067b989108c2235197ffb65e197149bbb669db843cd1c3e \

@@ -9,6 +9,20 @@
 # (#694), by digest. It is published for linux/amd64 only, so the image is
 # built and run as linux/amd64 everywhere (emulated on an arm64 host).
 FROM google/cloud-sdk:593.0.0-slim@sha256:e8394c66f4f66336af311343ff9a84c84521f8c1113ebc8abfe98bab9a155099
+# The Debian archive at one fixed time through snapshot.debian.org (#2258), so
+# a rebuild installs the same package versions and no build depends on a live
+# mirror's health; the snapshot's Release files are past their Valid-Until,
+# their signatures still checked against the base's keyring. Retried.
+RUN printf '%s\n' 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80cloudburrow-snapshot \
+ && printf '%s\n' \
+      'Types: deb' 'URIs: http://snapshot.debian.org/archive/debian/20261120T000000Z' \
+      'Suites: trixie trixie-updates' 'Components: main' \
+      'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' 'Check-Valid-Until: no' '' \
+      'Types: deb' 'URIs: http://snapshot.debian.org/archive/debian-security/20261120T000000Z' \
+      'Suites: trixie-security' 'Components: main' \
+      'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' 'Check-Valid-Until: no' \
+      > /etc/apt/sources.list.d/debian.sources \
+ && rm -f /etc/apt/sources.list
 RUN apt-get update && apt-get install -y --no-install-recommends iptables iproute2 unzip ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 RUN set -eu; cd /tmp; \
