@@ -69,6 +69,36 @@ func TestLocalise(t *testing.T) {
 	}
 }
 
+// Qualify reads a reference as Docker does, so a digest-pinned short name
+// (the CI pipeline image, python@sha256:...) is pulled from Docker Hub
+// rather than localised to a dev.local name nothing loaded.
+func TestQualify(t *testing.T) {
+	t.Parallel()
+	const d = "sha256:0f9552bb28711333da16915ec146f5e6bb44a7fdac9ced15dc17c2e0206346dd"
+	tests := []struct{ in, want string }{
+		{"python@" + d, "docker.io/library/python@" + d},
+		{"python:3-alpine", "docker.io/library/python:3-alpine"},
+		{"python:3-alpine@" + d, "docker.io/library/python:3-alpine@" + d},
+		{"bitnami/redis:7", "docker.io/bitnami/redis:7"},
+		{"docker.io/library/python@" + d, "docker.io/library/python@" + d},
+		{"dev.local/m:1", "dev.local/m:1"},
+		{"kind.local/m:1", "kind.local/m:1"},
+		{"us-docker.pkg.dev/p/r/serve:1", "us-docker.pkg.dev/p/r/serve:1"},
+		{"localhost:5000/app@" + d, "localhost:5000/app@" + d},
+		{"localhost/app:1", "localhost/app:1"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := Qualify(tt.in); got != tt.want {
+			t.Errorf("Qualify(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+		// The run adapter leaves a qualified reference to be pulled.
+		if q := Qualify(tt.in); q != "" && !IsLocal(tt.in) && (IsLocal(Localise(q)) || PullPolicy(Localise(q)) != "IfNotPresent") {
+			t.Errorf("Localise(Qualify(%q)) = %q, a dev.local image", tt.in, Localise(q))
+		}
+	}
+}
+
 // A locally loaded image must never be pulled: no registry can serve it.
 func TestPullPolicy(t *testing.T) {
 	t.Parallel()
