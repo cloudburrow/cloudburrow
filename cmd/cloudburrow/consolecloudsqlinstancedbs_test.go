@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	sqladminapi "google.golang.org/api/sqladmin/v1"
 )
 
 // TestCloudSQLConsoleInstanceDatabasesAndUsers: a RUNNABLE instance's page
@@ -76,6 +78,8 @@ func TestCloudSQLConsoleInstanceDatabasesAndUsers(t *testing.T) {
 		{"drop-database", map[string]string{"dbName": "shop"}, "DELETE /v1/projects/proj/instances/my/databases/shop?"},
 		{"add-user", map[string]string{"userName": "ro", "password": "Pw-1", "host": "%"}, `POST /v1/projects/proj/instances/my/users?alt=json&prettyPrint=false {"host":"%","name":"ro","password":"Pw-1"}`},
 		{"add-user", map[string]string{"authentication": "CLOUD_IAM", "principal": "sa@proj.iam.gserviceaccount.com", "type": "CLOUD_IAM_SERVICE_ACCOUNT"}, `POST /v1/projects/proj/instances/my/users?alt=json&prettyPrint=false {"name":"sa@proj.iam.gserviceaccount.com","type":"CLOUD_IAM_SERVICE_ACCOUNT"}`},
+		// An IAM group (#1524), as Google's Add user account takes one.
+		{"add-user", map[string]string{"authentication": "CLOUD_IAM", "principal": "eng@example.com", "type": "CLOUD_IAM_GROUP"}, `POST /v1/projects/proj/instances/my/users?alt=json&prettyPrint=false {"name":"eng@example.com","type":"CLOUD_IAM_GROUP"}`},
 		{"change-password", map[string]string{"user": "app@10.0.0.%", "password": "Pw-2"}, `PUT /v1/projects/proj/instances/my/users?alt=json&host=10.0.0.%25&name=app&prettyPrint=false {"host":"10.0.0.%","name":"app","password":"Pw-2"}`},
 		{"remove-user", map[string]string{"user": "root"}, "DELETE /v1/projects/proj/instances/my/users?alt=json&name=root&prettyPrint=false"},
 	} {
@@ -94,5 +98,19 @@ func TestCloudSQLConsoleInstanceDatabasesAndUsers(t *testing.T) {
 	}
 	if err := p.ActAt(ctx, "proj", []string{"my"}, "change-password", map[string]string{"user": "root"}); err == nil {
 		t.Error("Change password took no password")
+	}
+}
+
+// TestSQLUserAuthenticationOfGroups (#1524): the Users page names IAM
+// groups and their members' accounts, and an inactive group's status.
+func TestSQLUserAuthenticationOfGroups(t *testing.T) {
+	for typ, want := range map[string]string{"CLOUD_IAM_GROUP": "Cloud IAM (group)", "CLOUD_IAM_GROUP_USER": "Cloud IAM (group user)",
+		"CLOUD_IAM_GROUP_SERVICE_ACCOUNT": "Cloud IAM (group service account)"} {
+		if got := sqlUserAuthentication(typ); got != want {
+			t.Errorf("sqlUserAuthentication(%s) = %q, want %q", typ, got, want)
+		}
+	}
+	if got := sqlUserStatus(&sqladminapi.User{Type: "CLOUD_IAM_GROUP", IamStatus: "INACTIVE"}); got != "IAM status: inactive" {
+		t.Errorf("an inactive group's status = %q", got)
 	}
 }

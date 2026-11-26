@@ -417,7 +417,7 @@ func (s *Server) executeSQLLogin(ctx context.Context, r *http.Request, project s
 	if err != nil {
 		return iamLogin{}, errIAMRefused{msg: err.Error()}
 	}
-	u, ok := iamUserNamed(ctx, e, name)
+	u, ok := iamLoginUser(ctx, e, name)
 	if !ok {
 		return iamLogin{}, errIAMRefused{msg: fmt.Sprintf("%s is not an IAM user of instance %s: the API caller must be an IAM user in the database", email, e.Instance())}
 	}

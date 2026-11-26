@@ -315,7 +315,9 @@ automatic failover, and a cross-instance secondary follows its primary instance'
 cluster clients on the host and in the Kubernetes cluster, each given addresses it reaches (#1614); Cloud SQL blue-green deployments
 for MySQL (#1614). IAM database authentication for IAM users and service accounts, PostgreSQL and MySQL
 (#1944): through the connectors' `WithIAMAuthN`, the Auth Proxy's `--auto-iam-authn`, a token as the
-password, and `executeSql` with `autoIamAuthn`; IAM groups are excluded (below).
+password, and `executeSql` with `autoIamAuthn`; IAM group authentication (`CLOUD_IAM_GROUP` and its
+members' `CLOUD_IAM_GROUP_USER` and `CLOUD_IAM_GROUP_SERVICE_ACCOUNT` accounts, PostgreSQL and MySQL 8.0+,
+Cloud Identity groups of this instance, nested groups through a parent; #1524, `TestCloudSQLIAMGroupAuthentication`).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -531,9 +533,5 @@ Not gaps to close; each stays until its decision is amended.
   email): UNIMPLEMENTED, naming the reason, as that account is not an IAM service account and
   has no key of its own. On an account the IAM API created it is served and checked (#1747);
   the signature is local, so a signed URL made with it is accepted by no Google service.
-- **Cloud SQL IAM groups** (`CLOUD_IAM_GROUP` users and their members' automatic accounts): 501. IAM
-  users and service accounts are served since #1944 (below, and ADR-0004's amendment of 2026-11-19),
-  checking a token this instance minted; a token sent as a password to the server's own port, rather
-  than through the connector listener, is refused, as the role's password is the connector's alone.
 - **Local AI and embeddings in per-PR CI**, and the default build's embeddings answering 501:
   maintainer decisions recorded in compatibility.md (§What CI does not run, §Local AI, #41).

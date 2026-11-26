@@ -40,9 +40,10 @@ package sqladmin
 // that reaches the server's own port and names an IAM role is therefore
 // refused, whatever it sends.
 //
-// Not served: CLOUD_IAM_GROUP and its members' automatic accounts, and a
-// token sent as a password on the server's own port rather than through
-// the connector listener.
+// IAM groups and their members' accounts are iamgroups.go's (#1524).
+//
+// Not served: a token sent as a password on the server's own port rather
+// than through the connector listener.
 
 import (
 	"context"
@@ -80,6 +81,12 @@ type IAMSource struct {
 	Token func(hash string, now time.Time) (email string, expires time.Time, ok bool)
 	// Allowed reports whether email holds permission on the instance.
 	Allowed func(project, instance, email, permission string) bool
+	// Groups are the emails of the Cloud Identity groups email belongs
+	// to, directly or through nested groups (IAM group authentication,
+	// #1524).
+	Groups func(email string) []string
+	// GroupExists is whether Cloud Identity has the group email.
+	GroupExists func(email string) bool
 }
 
 // iamAuth is the server's IAM database authentication state.
@@ -238,21 +245,6 @@ type errIAMRefused struct{ msg string }
 
 func (e errIAMRefused) Error() string { return e.msg }
 
-// iamUserNamed is the IAM user of e named name, or ok false when name is
-// not one.
-func iamUserNamed(ctx context.Context, e Engine, name string) (User, bool) {
-	us, err := e.ListUsers(ctx)
-	if err != nil {
-		return User{}, false
-	}
-	for _, u := range us {
-		if u.Name == name && (u.Type == TypeIAMUser || u.Type == TypeIAMServiceAccount) {
-			return u, true
-		}
-	}
-	return User{}, false
-}
-
 // checkIAMLogin checks a sign-in to project's instance e as the IAM user
 // u with the access token whose SHA-256 is hash.
 func (s *Server) checkIAMLogin(project string, e Engine, u User, hash string) (iamLogin, error) {
@@ -282,6 +274,9 @@ func (s *Server) checkIAMLogin(project string, e Engine, u User, hash string) (i
 // the connector's token, or the console's own principal in Cloud SQL
 // Studio (#2208).
 func (s *Server) checkIAMLoginOf(project string, e Engine, u User, email string) (iamLogin, error) {
+	if isGroupMemberType(u.Type) {
+		return s.checkGroupLogin(project, e, u, email)
+	}
 	refused := func(why string) (iamLogin, error) {
 		kind := "user"
 		if u.Type == TypeIAMServiceAccount {
@@ -334,6 +329,9 @@ func (s *Server) insertIAMUser(ctx context.Context, base, project string, e Engi
 	}
 	name, err := iamDBName(typ, email, isMySQLEngine(e))
 	if err != nil {
+		return nil, err
+	}
+	if err := groupMemberConflict(ctx, e, name); err != nil {
 		return nil, err
 	}
 	u := User{Name: name, Type: typ, IAMEmail: strings.ToLower(strings.TrimSpace(email))}
