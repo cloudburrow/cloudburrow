@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"hash/crc32"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/dmstunnel"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
@@ -89,6 +91,25 @@ func (b *dmsBackend) reach(ctx context.Context, src datamigration.Source) (datam
 	if _, err := kube.Do(ctx, "", "rollout", "status", "deployment/"+name, "--timeout=180s"); err != nil {
 		return src, fmt.Errorf("the SSH tunnel to %s did not become ready: %w", src.SSH.Host, kubectlCause(err))
 	}
+	// A ready pod is not yet a Service that answers: its EndpointSlice and
+	// the nodes' forwarding rules follow it (a first connection right after
+	// the rollout was refused), so wait for a ready endpoint; the callers
+	// retry a refused connection for the rest (tunnelRetry).
+	for deadline := time.Now().Add(time.Minute); ; {
+		out, err := kube.Do(ctx, "", "get", "endpointslices", "-l", "kubernetes.io/service-name="+name,
+			"-o", `jsonpath={.items[*].endpoints[?(@.conditions.ready==true)].addresses[0]}`)
+		if err == nil && strings.TrimSpace(out) != "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			return src, fmt.Errorf("the SSH tunnel to %s has no ready endpoint", src.SSH.Host)
+		}
+		select {
+		case <-ctx.Done():
+			return src, ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 	out := src
 	out.Host, out.Port, out.SSH = name+"."+b.cfg.Cluster.Namespace+".svc.cluster.local", dmsTunnelPort, nil
 	return out, nil
@@ -124,3 +145,24 @@ IFS= read -r l; if [ -n "$l" ]; then printf '%s' "$l" | base64 -d > "$tlsdir/ca.
 IFS= read -r l; if [ -n "$l" ]; then printf '%s' "$l" | base64 -d > "$tlsdir/cert.pem"; cert="$tlsdir/cert.pem"; fi
 IFS= read -r l; if [ -n "$l" ]; then (umask 077; printf '%s' "$l" | base64 -d > "$tlsdir/key.pem"); key="$tlsdir/key.pem"; fi
 `
+
+// tunnelRefusedRE is a client's refused or failed connection, which, to a
+// tunnel just made, is the Service's forwarding not yet in place.
+var tunnelRefusedRE = regexp.MustCompile(`Connection refused|Can't connect to MySQL server|Lost connection to MySQL server at 'reading initial`)
+
+// tunnelRetry runs f, again while a tunnelled source's connection is
+// refused, for up to 30 seconds; a source with no tunnel runs once.
+func tunnelRetry(ctx context.Context, tunnelled bool, f func() error) error {
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		err := f()
+		if err == nil || !tunnelled || !tunnelRefusedRE.MatchString(err.Error()) || time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(time.Second):
+		}
+	}
+}

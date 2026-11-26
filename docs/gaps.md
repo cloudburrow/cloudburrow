@@ -425,17 +425,20 @@ the destination (Cloud SQL's external-primary replicas; AlloyDB subscriptions), 
 Google's error codes, start, stop, resume, promote, restart and delete; VPC peering private
 connections and fetchStaticIps; operations, locations and IAM; gcloud `database-migration` and
 the console's Migration jobs, Connection profiles and Private connectivity pages, with Migrate on
-AlloyDB's and Cloud SQL's pages.
+AlloyDB's and Cloud SQL's pages. Since #2257: migrations into an existing Cloud SQL instance or
+AlloyDB cluster (demoteDestination), continuous MySQL from a `gtid_mode=OFF` source by binary log
+file and position, `SERVER_ONLY`/`SERVER_CLIENT` certificate-verified sources, forward-SSH tunnels
+and reverse-SSH connectivity, fetchSourceObjects and `objects.*` with database selection, and
+`dumpPath`/`dumpFlags`.
 
 | Gap | Why open | Size |
 |---|---|---|
-| Conversion workspaces and mapping rules (every `conversionWorkspaces.*` method, `DescribeDatabaseEntities`, `SearchBackgroundJobs`), and Oracle and SQL Server sources, answer UNIMPLEMENTED: they need Google's schema conversion engine, which is not published | no emulator support | L |
-| `generateSshScript` and `generateTcpProxyScript`, reverse-SSH and forward-SSH connectivity, and Private Service Connect connectivity answer UNIMPLEMENTED | not built yet | M |
-| `demoteDestination`, `fetchSourceObjects` and `objects.*`, a migration into an existing AlloyDB cluster or Cloud SQL instance (a profile without settings), `dumpPath`/`dumpFlags` and `PHYSICAL` dumps, and selected-objects filters answer UNIMPLEMENTED | not built yet | M |
+| Conversion workspaces and mapping rules (every `conversionWorkspaces.*` method, `DescribeDatabaseEntities`, `SearchBackgroundJobs`), and Oracle and SQL Server sources, answer UNIMPLEMENTED: they need Google's schema conversion engine, which is not published, and an Oracle or SQL Server source needs that server, which runs only under a licence or EULA someone must accept (Oracle Database Free's terms, Microsoft's SQL Server EULA): there is no open-source engine to back them (#2257, re-checked 2026-11-25) | no emulator support | L |
+| `generateSshScript` and `generateTcpProxyScript` answer UNIMPLEMENTED: Google publishes neither script's contents nor the TCP proxy's image (#2257 serves the forward-SSH and reverse-SSH connectivity those scripts set up). Private Service Connect connectivity answers UNIMPLEMENTED | not documented by Google | S |
+| `PHYSICAL` dumps (Percona XtraBackup files in Cloud Storage), schema and table object selection (conversion workspaces only), and `objectsFilter` on promote and restart answer UNIMPLEMENTED (#2257 serves `demoteDestination`, `fetchSourceObjects`, `objects.*`, existing destinations, `dumpPath`/`dumpFlags` and database selection) | not built yet | M |
 | pglogical is not run (CloudBurrow's PostgreSQL images do not have it): a standard PostgreSQL migration is checked for it, as Google checks, and replicates with PostgreSQL's built-in logical replication; DDL is not replicated, as with Google's native migrations | no emulator support | M |
-| Continuous MySQL migrations need `gtid_mode=ON` on the source; Google also replicates by binary log position | not built yet | S |
 | Promote with `failback` (a reverse migration back to the source) answers UNIMPLEMENTED; resume's `skipValidation` and restart's `restartFailedObjects` are accepted, and resume runs no verification either way | not built yet | S |
-| SSL `SERVER_ONLY` and `SERVER_CLIENT` (certificate-verified) sources, IAM database authentication to a source, `REGIONAL` and customer-managed-key destinations and a job's CMEK key are refused or answer UNIMPLEMENTED | not built yet | M |
+| IAM database authentication to a source, `REGIONAL` and customer-managed-key destinations and a job's CMEK key are refused or answer UNIMPLEMENTED (#2257 serves `SERVER_ONLY` and `SERVER_CLIENT` certificate-verified sources) | not built yet | M |
 | Cancelling a running operation answers UNIMPLEMENTED; VPC peering private connections are recorded and route nothing (the instance's network already reaches the source) | no emulator support | S |
 | The source representation instance's name (`<id>-master`), a one-time job promoting itself to COMPLETED, an AlloyDB destination promoted when its job is deleted mid-migration, the error texts and the IAM refusal wording are CloudBurrow's choices (UNVERIFIED in compatibility.md's section) | not documented by Google | S |
 

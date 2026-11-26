@@ -229,7 +229,7 @@ func dmsGcloud(t *testing.T, h *Harness) (func(a ...string) string, func(a ...st
 // the source; the selected database's rows and a row written after reach
 // it, the other database does not; promote leaves it standalone and
 // writable, and deleting the job leaves the instance.
-// covers: google.cloud.clouddms.v1.DataMigrationService/CreateConnectionProfile, google.cloud.clouddms.v1.DataMigrationService/CreateMigrationJob, google.cloud.clouddms.v1.DataMigrationService/DemoteDestination, google.cloud.clouddms.v1.DataMigrationService/VerifyMigrationJob, google.cloud.clouddms.v1.DataMigrationService/StartMigrationJob, google.cloud.clouddms.v1.DataMigrationService/PromoteMigrationJob, google.cloud.clouddms.v1.DataMigrationService/DeleteMigrationJob
+// covers: google.cloud.clouddms.v1.DataMigrationService/CreateConnectionProfile, google.cloud.clouddms.v1.DataMigrationService/CreateMigrationJob, google.cloud.clouddms.v1.DataMigrationService/VerifyMigrationJob, google.cloud.clouddms.v1.DataMigrationService/StartMigrationJob, google.cloud.clouddms.v1.DataMigrationService/PromoteMigrationJob, google.cloud.clouddms.v1.DataMigrationService/DeleteMigrationJob
 func TestDataMigrationMySQLExistingInstanceNoGTID(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvMySQL) == "" {
@@ -357,7 +357,7 @@ func TestDataMigrationMySQLExistingInstanceNoGTID(t *testing.T) {
 // `demote-destination`, then the rows and a row written after reach the
 // cluster, read through AlloyDB's ExecuteSql; the object is then RUNNING;
 // promote ends replication.
-// covers: google.cloud.clouddms.v1.DataMigrationService/CreateConnectionProfile, google.cloud.clouddms.v1.DataMigrationService/CreateMigrationJob, google.cloud.clouddms.v1.DataMigrationService/FetchSourceObjects, google.cloud.clouddms.v1.DataMigrationService/ListMigrationJobObjects, google.cloud.clouddms.v1.DataMigrationService/LookupMigrationJobObject, google.cloud.clouddms.v1.DataMigrationService/DemoteDestination, google.cloud.clouddms.v1.DataMigrationService/StartMigrationJob, google.cloud.clouddms.v1.DataMigrationService/PromoteMigrationJob
+// covers: google.cloud.clouddms.v1.DataMigrationService/CreateConnectionProfile, google.cloud.clouddms.v1.DataMigrationService/CreateMigrationJob, google.cloud.clouddms.v1.DataMigrationService/StartMigrationJob, google.cloud.clouddms.v1.DataMigrationService/PromoteMigrationJob
 func TestDataMigrationPostgresExistingAlloyDBObjects(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvAlloyDB) == "" {
@@ -493,7 +493,7 @@ func TestDataMigrationPostgresExistingAlloyDBObjects(t *testing.T) {
 // Cloud SQL for PostgreSQL destination; a profile with another CA fails
 // verification with CONNECTION_FAILURE, and one without the tunnel cannot
 // reach the source.
-// covers: google.cloud.clouddms.v1.DataMigrationService/CreateConnectionProfile, google.cloud.clouddms.v1.DataMigrationService/CreateMigrationJob, google.cloud.clouddms.v1.DataMigrationService/VerifyMigrationJob, google.cloud.clouddms.v1.DataMigrationService/StartMigrationJob, google.cloud.clouddms.v1.DataMigrationService/UpdateMigrationJob, google.cloud.clouddms.v1.DataMigrationService/DeleteMigrationJob, google.cloud.clouddms.v1.DataMigrationService/DeleteConnectionProfile
+// covers: google.cloud.clouddms.v1.DataMigrationService/CreateConnectionProfile, google.cloud.clouddms.v1.DataMigrationService/CreateMigrationJob, google.cloud.clouddms.v1.DataMigrationService/VerifyMigrationJob, google.cloud.clouddms.v1.DataMigrationService/StartMigrationJob, google.cloud.clouddms.v1.DataMigrationService/DeleteMigrationJob, google.cloud.clouddms.v1.DataMigrationService/DeleteConnectionProfile
 func TestDataMigrationPostgresVerifiedSSLForwardSSH(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" {

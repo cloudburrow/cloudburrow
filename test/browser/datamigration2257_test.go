@@ -130,12 +130,15 @@ func TestDataMigrationExistingDestinationThroughThePage(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the job's objects after Fetch source objects: %s", body)
+			var alert string
+			p.eval(`[...document.querySelectorAll("[role=alert], .toast, .error")].map((e) => e.textContent.trim()).join(" | ")`, &alert)
+			t.Fatalf("the job's objects after Fetch source objects (the page says %q): %s", alert, body)
 		}
 		time.Sleep(3 * time.Second)
 	}
 
 	p.navigate(jobPath)
+	p.waitFor(`document.querySelector("#view h1") !== null && [...document.querySelectorAll("#view button")].some((b) => b.textContent.trim() === "Demote destination")`)
 	t.Run("keyboard", func(t *testing.T) {
 		// Tab from the title reaches Demote destination; Enter opens its
 		// dialog, whose typed confirmation is the instance's ID.

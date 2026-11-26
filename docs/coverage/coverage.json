@@ -25476,7 +25476,12 @@
         "method": "google.cloud.clouddms.v1.DataMigrationService/CreateConnectionProfile",
         "status": "Verified",
         "tests": [
-          "test/compat/datamigration_cli_test.go:25 TestGcloudDatabaseMigration",
+          "test/compat/datamigration2257_test.go:233 TestDataMigrationMySQLExistingInstanceNoGTID",
+          "test/compat/datamigration2257_test.go:361 TestDataMigrationPostgresExistingAlloyDBObjects",
+          "test/compat/datamigration2257_test.go:497 TestDataMigrationPostgresVerifiedSSLForwardSSH",
+          "test/compat/datamigration2257_test.go:600 TestDataMigrationMySQLClientCertReverseSSH",
+          "test/compat/datamigration2257_test.go:714 TestDataMigrationMySQLDumpPath",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
           "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL",
           "test/compat/datamigration_test.go:410 TestDataMigrationPostgresToAlloyDB",
           "test/compat/datamigration_test.go:509 TestDataMigrationMySQLToCloudSQL"
@@ -25496,7 +25501,12 @@
         "method": "google.cloud.clouddms.v1.DataMigrationService/CreateMigrationJob",
         "status": "Verified",
         "tests": [
-          "test/compat/datamigration_cli_test.go:25 TestGcloudDatabaseMigration",
+          "test/compat/datamigration2257_test.go:233 TestDataMigrationMySQLExistingInstanceNoGTID",
+          "test/compat/datamigration2257_test.go:361 TestDataMigrationPostgresExistingAlloyDBObjects",
+          "test/compat/datamigration2257_test.go:497 TestDataMigrationPostgresVerifiedSSLForwardSSH",
+          "test/compat/datamigration2257_test.go:600 TestDataMigrationMySQLClientCertReverseSSH",
+          "test/compat/datamigration2257_test.go:714 TestDataMigrationMySQLDumpPath",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
           "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL",
           "test/compat/datamigration_test.go:410 TestDataMigrationPostgresToAlloyDB",
           "test/compat/datamigration_test.go:509 TestDataMigrationMySQLToCloudSQL"
@@ -25513,7 +25523,8 @@
         "method": "google.cloud.clouddms.v1.DataMigrationService/DeleteConnectionProfile",
         "status": "Verified",
         "tests": [
-          "test/compat/datamigration_cli_test.go:25 TestGcloudDatabaseMigration",
+          "test/compat/datamigration2257_test.go:497 TestDataMigrationPostgresVerifiedSSLForwardSSH",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
           "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
         ]
       },
@@ -25531,7 +25542,11 @@
         "method": "google.cloud.clouddms.v1.DataMigrationService/DeleteMigrationJob",
         "status": "Verified",
         "tests": [
-          "test/compat/datamigration_cli_test.go:25 TestGcloudDatabaseMigration",
+          "test/compat/datamigration2257_test.go:233 TestDataMigrationMySQLExistingInstanceNoGTID",
+          "test/compat/datamigration2257_test.go:497 TestDataMigrationPostgresVerifiedSSLForwardSSH",
+          "test/compat/datamigration2257_test.go:600 TestDataMigrationMySQLClientCertReverseSSH",
+          "test/compat/datamigration2257_test.go:714 TestDataMigrationMySQLDumpPath",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
           "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL",
           "test/compat/datamigration_test.go:410 TestDataMigrationPostgresToAlloyDB",
           "test/compat/datamigration_test.go:509 TestDataMigrationMySQLToCloudSQL"
@@ -25575,7 +25590,7 @@
         "method": "google.cloud.clouddms.v1.DataMigrationService/GetConnectionProfile",
         "status": "Verified",
         "tests": [
-          "test/compat/datamigration_cli_test.go:25 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
           "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
         ]
       },
@@ -25593,7 +25608,7 @@
         "method": "google.cloud.clouddms.v1.DataMigrationService/GetMigrationJob",
         "status": "Verified",
         "tests": [
-          "test/compat/datamigration_cli_test.go:25 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
           "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
         ]
       },
@@ -25613,7 +25628,7 @@
         "method": "google.cloud.clouddms.v1.DataMigrationService/ListConnectionProfiles",
         "status": "Verified",
         "tests": [
-          "test/compat/datamigration_cli_test.go:25 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
           "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
         ]
       },
@@ -25631,7 +25646,7 @@
         "method": "google.cloud.clouddms.v1.DataMigrationService/ListMigrationJobs",
         "status": "Verified",
         "tests": [
-          "test/compat/datamigration_cli_test.go:25 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
           "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
         ]
       },
@@ -25646,7 +25661,10 @@
         "method": "google.cloud.clouddms.v1.DataMigrationService/PromoteMigrationJob",
         "status": "Verified",
         "tests": [
-          "test/compat/datamigration_cli_test.go:25 TestGcloudDatabaseMigration",
+          "test/compat/datamigration2257_test.go:233 TestDataMigrationMySQLExistingInstanceNoGTID",
+          "test/compat/datamigration2257_test.go:361 TestDataMigrationPostgresExistingAlloyDBObjects",
+          "test/compat/datamigration2257_test.go:600 TestDataMigrationMySQLClientCertReverseSSH",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
           "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL",
           "test/compat/datamigration_test.go:410 TestDataMigrationPostgresToAlloyDB",
           "test/compat/datamigration_test.go:509 TestDataMigrationMySQLToCloudSQL"
@@ -25661,7 +25679,7 @@
         "method": "google.cloud.clouddms.v1.DataMigrationService/ResumeMigrationJob",
         "status": "Verified",
         "tests": [
-          "test/compat/datamigration_cli_test.go:25 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
           "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
         ]
       },
@@ -25684,7 +25702,12 @@
         "method": "google.cloud.clouddms.v1.DataMigrationService/StartMigrationJob",
         "status": "Verified",
         "tests": [
-          "test/compat/datamigration_cli_test.go:25 TestGcloudDatabaseMigration",
+          "test/compat/datamigration2257_test.go:233 TestDataMigrationMySQLExistingInstanceNoGTID",
+          "test/compat/datamigration2257_test.go:361 TestDataMigrationPostgresExistingAlloyDBObjects",
+          "test/compat/datamigration2257_test.go:497 TestDataMigrationPostgresVerifiedSSLForwardSSH",
+          "test/compat/datamigration2257_test.go:600 TestDataMigrationMySQLClientCertReverseSSH",
+          "test/compat/datamigration2257_test.go:714 TestDataMigrationMySQLDumpPath",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
           "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL",
           "test/compat/datamigration_test.go:410 TestDataMigrationPostgresToAlloyDB",
           "test/compat/datamigration_test.go:509 TestDataMigrationMySQLToCloudSQL"
@@ -25694,7 +25717,7 @@
         "method": "google.cloud.clouddms.v1.DataMigrationService/StopMigrationJob",
         "status": "Verified",
         "tests": [
-          "test/compat/datamigration_cli_test.go:25 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
           "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
         ]
       },
@@ -25719,6 +25742,10 @@
         "method": "google.cloud.clouddms.v1.DataMigrationService/VerifyMigrationJob",
         "status": "Verified",
         "tests": [
+          "test/compat/datamigration2257_test.go:233 TestDataMigrationMySQLExistingInstanceNoGTID",
+          "test/compat/datamigration2257_test.go:497 TestDataMigrationPostgresVerifiedSSLForwardSSH",
+          "test/compat/datamigration2257_test.go:600 TestDataMigrationMySQLClientCertReverseSSH",
+          "test/compat/datamigration2257_test.go:714 TestDataMigrationMySQLDumpPath",
           "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL",
           "test/compat/datamigration_test.go:509 TestDataMigrationMySQLToCloudSQL"
         ]

@@ -520,12 +520,22 @@ func (b *dmsBackend) QuerySource(ctx context.Context, t datamigration.Target, sr
 	if err != nil {
 		return nil, err
 	}
+	tunnelled := src.SSH != nil
 	if src, err = b.reach(ctx, src); err != nil {
 		return nil, err
 	}
 	var out bytes.Buffer
-	// The password, then the certificates (#2257), on the script's input.
-	stdin := strings.NewReader(src.Password + "\n" + tlsStdin(src))
+	// The password, then the certificates (#2257), on the script's input,
+	// read again by each try.
+	input := src.Password + "\n" + tlsStdin(src)
+	run0 := run
+	run = func(ctx context.Context, _ io.Reader, w io.Writer, args ...string) error {
+		return tunnelRetry(ctx, tunnelled, func() error {
+			out.Reset()
+			return run0(ctx, strings.NewReader(input), w, args...)
+		})
+	}
+	var stdin io.Reader
 	if src.Engine == dmspb.DatabaseEngine_MYSQL {
 		ssl := "PREFERRED"
 		if src.RequireSSL {
