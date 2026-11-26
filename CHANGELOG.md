@@ -81,6 +81,8 @@ section and add its link at the bottom.
   metadata server, so a managed instance group no longer gives up on a VM that booted slowly (#2250).
 - A managed instance group recreating a VM whose creation fails keeps the VM's name and lists it
   RECREATING with its last attempt, instead of sometimes dropping it or making one of a new name.
+- A Kubernetes Engine node's pods are reachable as soon as the node joins its pool, so a workload
+  keeps serving while a surge upgrade drains the old node.
 
 ## [0.7.0] - 2026-11-25
 
