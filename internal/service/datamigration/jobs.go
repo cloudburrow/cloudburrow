@@ -85,12 +85,8 @@ func (s *Server) checkJob(project, location string, j *dmspb.MigrationJob) error
 	if !isSource(src) {
 		return apierror.InvalidArgument("migration_job.source %s is not a MySQL or PostgreSQL connection profile", j.GetSource())
 	}
-	if dst.GetCloudsql() == nil && dst.GetAlloydb() == nil {
+	if dst.GetCloudsql() == nil && dst.GetAlloydb() == nil && !existingDestination(dst) {
 		return apierror.InvalidArgument("migration_job.destination %s is not a Cloud SQL or AlloyDB connection profile", j.GetDestination())
-	}
-	if dst.GetAlloydb() != nil && dst.GetAlloydb().GetSettings() == nil {
-		return unimplemented("a migration to an existing AlloyDB cluster",
-			"an existing destination is demoted first (migrationJobs.demoteDestination), which CloudBurrow does not serve; create the destination profile with settings (docs/gaps.md)")
 	}
 	if c := dst.GetCloudsql(); c != nil && c.GetSettings().GetSourceId() != j.GetSource() {
 		return apierror.InvalidArgument("the destination %s was created as a replica of %s, not of the job's source %s",
@@ -99,12 +95,17 @@ func (s *Server) checkJob(project, location string, j *dmspb.MigrationJob) error
 	if j.GetConversionWorkspace().GetName() != "" || j.GetFilter() != "" {
 		return unimplemented("migration_job.conversion_workspace and filter", "conversion workspaces are not served (docs/gaps.md)")
 	}
-	if j.GetDumpPath() != "" || len(j.GetDumpFlags().GetDumpFlags()) > 0 {
-		return unimplemented("migration_job.dump_path and dump_flags",
-			"Database Migration Service's managed dump is the copy CloudBurrow runs; a manual dump and mysqldump flags are not (docs/gaps.md)")
+	if err := checkDump(j, src.GetMysql() != nil); err != nil {
+		return err
+	}
+	if j.GetDumpPath() != "" && !s.opts.CloudSQL {
+		return failedPrecondition("a migration from a dump file needs Cloud SQL")
 	}
 	if dt := str(j, "dump_type"); dt == "PHYSICAL" {
-		return unimplemented("migration_job.dump_type PHYSICAL", "the copy is logical (docs/gaps.md)")
+		return unimplemented("migration_job.dump_type PHYSICAL", "the copy is logical: a Percona XtraBackup dump is restored by Cloud SQL's own startExternalSync, not through Database Migration Service (docs/gaps.md)")
+	}
+	if err := checkObjects(j); err != nil {
+		return err
 	}
 	if j.GetCmekKeyName() != "" {
 		// "Not supported for MySQL-to-MySQL, PostgreSQL-to-PostgreSQL, or
@@ -114,8 +115,11 @@ func (s *Server) checkJob(project, location string, j *dmspb.MigrationJob) error
 	}
 	switch c := j.GetConnectivity().(type) {
 	case *dmspb.MigrationJob_ReverseSshConnectivity:
-		return unimplemented("migration_job.reverse_ssh_connectivity",
-			"the destinations' servers reach a source directly, on the instance's network; no bastion VM tunnel is run (docs/gaps.md)")
+		// The destination connects to the bastion's vmIp:vmPort, which
+		// the source's side forwards to the source (#2257).
+		if err := checkReverseSSH(c.ReverseSshConnectivity); err != nil {
+			return err
+		}
 	case *dmspb.MigrationJob_VpcPeeringConnectivity:
 		vpc := c.VpcPeeringConnectivity.GetVpc()
 		if vpc == "" {
@@ -244,7 +248,7 @@ func (s *Server) UpdateMigrationJob(_ context.Context, req *dmspb.UpdateMigratio
 			next.PerformanceConfig = in.GetPerformanceConfig()
 		case "type", "source", "destination", "static_ip_connectivity", "staticIpConnectivity",
 			"vpc_peering_connectivity", "vpcPeeringConnectivity", "reverse_ssh_connectivity", "reverseSshConnectivity",
-			"dump_path", "dumpPath", "dump_flags", "dumpFlags":
+			"dump_path", "dumpPath", "dump_flags", "dumpFlags", "objects_config", "objectsConfig":
 			if !editable {
 				return nil, failedPrecondition("migration job %s is %s: %s can be changed before it starts", cur.GetName(), cur.State, p)
 			}
@@ -259,6 +263,8 @@ func (s *Server) UpdateMigrationJob(_ context.Context, req *dmspb.UpdateMigratio
 				next.DumpPath = in.GetDumpPath()
 			case "dump_flags", "dumpFlags":
 				next.DumpFlags = in.GetDumpFlags()
+			case "objects_config", "objectsConfig":
+				copyOverlay(next, in, "objects_config")
 			default:
 				next.Connectivity = in.GetConnectivity()
 			}
@@ -283,6 +289,8 @@ type jobContext struct {
 	srcProfile *dmspb.ConnectionProfile
 	dst        *dmspb.ConnectionProfile
 	target     Target
+	// demoted is an existing destination demoteDestination demoted.
+	demoted bool
 }
 
 func (s *Server) contextLocked(j *dmspb.MigrationJob) (jobContext, error) {
@@ -297,8 +305,18 @@ func (s *Server) contextLocked(j *dmspb.MigrationJob) (jobContext, error) {
 	if s.opts.Backend == nil {
 		return jobContext{}, failedPrecondition("this server runs no destinations")
 	}
-	t, _ := targetOf(dst)
-	return jobContext{name: j.GetName(), job: clone(j), src: sourceOf(src), srcProfile: clone(src), dst: clone(dst), target: t}, nil
+	t, _ := s.targetOf(dst)
+	if t.Existing && t.Version == "" {
+		return jobContext{}, failedPrecondition("the destination connection profile %s's database version is not known; create it again", dst.GetName())
+	}
+	from := sourceOf(src)
+	if r := reverseSSH(j); r != nil {
+		// Reverse SSH (#2257): the destination reaches the source at the
+		// bastion's forwarding port.
+		from.Host, from.Port, from.SSH = r.GetVmIp(), int(r.GetVmPort()), nil
+	}
+	return jobContext{name: j.GetName(), job: clone(j), src: from, srcProfile: clone(src), dst: clone(dst), target: t,
+		demoted: s.demoted[j.GetName()]}, nil
 }
 
 // transition moves a job from one of states to via, starts an operation,
@@ -468,6 +486,14 @@ func (s *Server) StartMigrationJob(_ context.Context, req *dmspb.StartMigrationJ
 // begin verifies a job (unless skip) and starts its runner: the job is
 // then RUNNING in its FULL_DUMP phase.
 func (s *Server) begin(ctx context.Context, jc jobContext, skip bool) (dmspb.MigrationJob_State, dmspb.MigrationJob_Phase, error) {
+	if jc.target.Existing && !jc.demoted {
+		// The console demotes before it starts; a job started without it
+		// has a destination that replicates from nothing (UNVERIFIED: the
+		// wording of Google's refusal).
+		// Docs re-read 2026-11-25, still unanswered: https://docs.cloud.google.com/database-migration/docs/mysql/create-migration-job-existing-instance
+		return dmspb.MigrationJob_STATE_UNSPECIFIED, 0, failedPrecondition("migration job %s's destination %s is an existing instance that is not demoted: demote it first (migrationJobs.demoteDestination)",
+			jc.name, jc.target.ID)
+	}
 	if !skip {
 		if errs := s.verify(ctx, jc, true); len(errs) > 0 {
 			return dmspb.MigrationJob_STATE_UNSPECIFIED, 0, verificationFailed(errs)
@@ -528,7 +554,12 @@ func (s *Server) copyJob(ctx context.Context, jc jobContext) error {
 		return err
 	}
 	continuous := jc.job.GetType() == dmspb.MigrationJob_CONTINUOUS
-	if err := s.opts.Backend.Migrate(ctx, jc.target, jc.src, dbs, continuous); err != nil {
+	flags, err := dumpFlagsOf(jc.job)
+	if err != nil {
+		return err
+	}
+	m := Migration{Databases: dbs, Continuous: continuous, DumpPath: jc.job.GetDumpPath(), DumpFlags: flags}
+	if err := s.opts.Backend.Migrate(ctx, jc.target, jc.src, m); err != nil {
 		return fmt.Errorf("the full dump: %w", err)
 	}
 	if continuous && !jc.target.MySQL() {
@@ -591,6 +622,17 @@ const sourceDatabasesQuery = `SELECT datname FROM pg_database WHERE datallowconn
 // (a MySQL source's are every one but its system schemas, which the
 // Backend finds itself).
 func (s *Server) sourceDatabases(ctx context.Context, jc jobContext) ([]string, error) {
+	all, err := s.allSourceDatabases(ctx, jc)
+	if err != nil {
+		return nil, err
+	}
+	// The job's objectsConfig selects some (#2257).
+	return selected(jc.job, all), nil
+}
+
+// allSourceDatabases are every database a PostgreSQL source has (nil for
+// a MySQL source).
+func (s *Server) allSourceDatabases(ctx context.Context, jc jobContext) ([]string, error) {
 	if jc.src.Engine == dmspb.DatabaseEngine_MYSQL {
 		return nil, nil
 	}
@@ -742,6 +784,28 @@ func (s *Server) RestartMigrationJob(_ context.Context, req *dmspb.RestartMigrat
 // created again (its sync runs once), an AlloyDB cluster's migration is
 // undone.
 func (s *Server) resetTarget(ctx context.Context, jc jobContext) error {
+	if jc.target.Existing {
+		// An existing destination is never deleted: its migration is
+		// undone (its replication ended, the migrated databases dropped)
+		// and it is demoted again.
+		dbs, err := s.sourceDatabases(ctx, jc)
+		if err != nil {
+			return err
+		}
+		if dbs == nil && jc.target.MySQL() {
+			rows, err := s.opts.Backend.QuerySource(ctx, jc.target, jc.src, "",
+				`SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN `+mysqlSystem)
+			if err != nil {
+				return err
+			}
+			for _, r := range rows {
+				if len(r) > 0 {
+					dbs = append(dbs, r[0])
+				}
+			}
+		}
+		return s.opts.Backend.Reset(ctx, jc.target, jc.src, dbs)
+	}
 	if jc.target.CloudSQL {
 		if err := s.opts.Backend.Delete(ctx, jc.target); err != nil {
 			return fmt.Errorf("delete the destination replica: %w", err)
@@ -761,7 +825,7 @@ func (s *Server) resetTarget(ctx context.Context, jc jobContext) error {
 	if err != nil {
 		return err
 	}
-	return s.opts.Backend.Reset(ctx, jc.target, dbs)
+	return s.opts.Backend.Reset(ctx, jc.target, jc.src, dbs)
 }
 
 func (s *Server) DeleteMigrationJob(_ context.Context, req *dmspb.DeleteMigrationJobRequest) (*longrunningpb.Operation, error) {
@@ -789,8 +853,11 @@ func (s *Server) DeleteMigrationJob(_ context.Context, req *dmspb.DeleteMigratio
 	var t Target
 	var replicating bool
 	if dst != nil {
-		t, _ = targetOf(dst)
+		t, _ = s.targetOf(dst)
 		replicating = j.State != dmspb.MigrationJob_COMPLETED && j.State != dmspb.MigrationJob_NOT_STARTED && j.State != dmspb.MigrationJob_DRAFT
+		// An existing destination that was demoted and not promoted is a
+		// replica still (#2257).
+		replicating = replicating || s.demoted[name] && j.State != dmspb.MigrationJob_COMPLETED
 	}
 	j.State = dmspb.MigrationJob_DELETING
 	op, err := s.startOp(parentOf(name), "delete", name, req.GetRequestId())
@@ -805,6 +872,14 @@ func (s *Server) DeleteMigrationJob(_ context.Context, req *dmspb.DeleteMigratio
 		var err error
 		switch {
 		case dst == nil || s.opts.Backend == nil:
+		case t.Existing:
+			// UNVERIFIED: an existing destination is the user's, never
+			// deleted, force or not; left mid-migration it is promoted,
+			// standalone again.
+			// Docs re-read 2026-11-25, still unanswered: https://docs.cloud.google.com/database-migration/docs/reference/rest/v1/projects.locations.migrationJobs/delete
+			if replicating {
+				err = s.opts.Backend.Promote(ctx, t)
+			}
 		case t.CloudSQL && force:
 			// "In case of force delete, the destination CloudSQL replica
 			// database is also deleted."
@@ -829,11 +904,14 @@ func (s *Server) DeleteMigrationJob(_ context.Context, req *dmspb.DeleteMigratio
 		delete(s.jobs, name)
 		delete(s.policies, name)
 		delete(s.started, name)
+		delete(s.demoted, name)
+		delete(s.objects, name)
 		if dst != nil && t.CloudSQL {
 			// "The destination CloudSQL connection profile is always deleted
 			// with the migration job."
 			delete(s.profiles, dst.GetName())
 			delete(s.policies, dst.GetName())
+			delete(s.versions, dst.GetName())
 		}
 		s.finishOp(opName, &emptyResp, nil)
 		_ = s.save()
@@ -843,12 +921,12 @@ func (s *Server) DeleteMigrationJob(_ context.Context, req *dmspb.DeleteMigratio
 
 func (s *Server) GenerateSshScript(context.Context, *dmspb.GenerateSshScriptRequest) (*dmspb.SshScript, error) {
 	return nil, unimplemented("migrationJobs.generateSshScript",
-		"reverse SSH connectivity through a bastion VM is not run: the destinations' servers reach a source directly, on the instance's network (docs/gaps.md)")
+		"Google does not publish the script it writes; a job's reverseSshConnectivity to a bastion set up by hand is served (docs/gaps.md)")
 }
 
 func (s *Server) GenerateTcpProxyScript(context.Context, *dmspb.GenerateTcpProxyScriptRequest) (*dmspb.TcpProxyScript, error) {
 	return nil, unimplemented("migrationJobs.generateTcpProxyScript",
-		"a TCP proxy VM in front of a Private Service Connect source is not run (docs/gaps.md)")
+		"the script creates a Compute Engine container VM (a Google-published proxy image) in front of a Private Service Connect source; neither the image nor the script's contents are published (docs/gaps.md)")
 }
 
 // Resume picks up the jobs a previous run left: one in its full dump

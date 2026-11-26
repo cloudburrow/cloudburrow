@@ -35,11 +35,23 @@ type fakeBackend struct {
 	setvals   []string
 	created   []string
 	reach     bool
+	// existing are the existing destinations' versions, by ID.
+	existing map[string]string
+	// demotedIDs, resets, releases and migrations record the calls.
+	demotedIDs []string
+	resets     map[string][]string
+	releases   []string
+	migrations map[string]Migration
+	sources    map[string]Source
+	// targetDBs are the existing MySQL destinations' user databases.
+	targetDBs map[string][]string
 }
 
 func newFake() *fakeBackend {
 	return &fakeBackend{walLevel: "logical", pglogical: true, gtid: "ON", reach: true,
-		migrated: map[string]bool{}, paused: map[string]bool{}, promoted: map[string]bool{}, deleted: map[string]bool{}}
+		migrated: map[string]bool{}, paused: map[string]bool{}, promoted: map[string]bool{}, deleted: map[string]bool{},
+		existing: map[string]string{}, resets: map[string][]string{}, migrations: map[string]Migration{}, sources: map[string]Source{},
+		targetDBs: map[string][]string{}}
 }
 
 func (f *fakeBackend) CreateCloudSQL(_ context.Context, t Target, _ *dmspb.CloudSqlSettings, _ Source) (CloudSQLAddresses, error) {
@@ -118,14 +130,46 @@ func (f *fakeBackend) QueryTarget(_ context.Context, t Target, db, q string) ([]
 		return [][]string{{"42"}}, nil
 	case strings.Contains(q, "FROM pg_database"):
 		return [][]string{{"postgres"}}, nil
+	case strings.Contains(q, "information_schema.schemata"):
+		var out [][]string
+		for _, d := range f.targetDBs[t.ID] {
+			out = append(out, []string{d})
+		}
+		return out, nil
 	}
 	return [][]string{{"0"}}, nil
 }
 
-func (f *fakeBackend) Migrate(_ context.Context, t Target, _ Source, _ []string, _ bool) error {
+func (f *fakeBackend) Migrate(_ context.Context, t Target, src Source, m Migration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.migrated[t.ID] = true
+	f.migrations[t.ID] = m
+	f.sources[t.ID] = src
+	return nil
+}
+
+func (f *fakeBackend) Existing(_ context.Context, t Target) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	v, ok := f.existing[t.ID]
+	if !ok {
+		return "", &ConnError{Msg: "no such instance " + t.ID}
+	}
+	return v, nil
+}
+
+func (f *fakeBackend) Demote(_ context.Context, t Target, _ Source) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.demotedIDs = append(f.demotedIDs, t.ID)
+	return nil
+}
+
+func (f *fakeBackend) Release(_ context.Context, src Source) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.releases = append(f.releases, src.Name)
 	return nil
 }
 
@@ -143,10 +187,11 @@ func (f *fakeBackend) Promote(_ context.Context, t Target) error {
 	return nil
 }
 
-func (f *fakeBackend) Reset(_ context.Context, t Target, _ []string) error {
+func (f *fakeBackend) Reset(_ context.Context, t Target, _ Source, dbs []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.migrated, t.ID)
+	f.resets[t.ID] = dbs
 	return nil
 }
 
@@ -505,10 +550,12 @@ func TestREST(t *testing.T) {
 	if c, m := post("/v1/"+parent+"/migrationJobs/j:promote", `{"failback":true}`); c != 501 {
 		t.Errorf("promote with failback: %d %v", c, m)
 	}
-	for _, p := range []string{"/v1/" + parent + "/migrationJobs/j:demoteDestination", "/v1/" + parent + "/conversionWorkspaces?conversionWorkspaceId=c"} {
-		if c, m := post(p, `{}`); c != 501 {
-			t.Errorf("POST %s: %d %v", p, c, m)
-		}
+	// demoteDestination is served (#2257), for an existing destination.
+	if c, m := post("/v1/"+parent+"/migrationJobs/j:demoteDestination", `{}`); c != 400 || !strings.Contains(fmt.Sprint(m), "only an existing destination") {
+		t.Errorf("demote a created destination: %d %v", c, m)
+	}
+	if c, m := post("/v1/"+parent+"/conversionWorkspaces?conversionWorkspaceId=c", `{}`); c != 501 {
+		t.Errorf("POST a conversion workspace: %d %v", c, m)
 	}
 	for _, p := range []string{"/v1/projects/p1/locations", "/v1/" + parent + "/operations", "/v1/" + parent + "/privateConnections"} {
 		resp, err := http.Get(srv.URL + p)

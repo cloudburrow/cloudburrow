@@ -49,12 +49,19 @@ func (*unreachableDMSBackend) QueryTarget(context.Context, datamigration.Target,
 	return nil, nil
 }
 
-func (*unreachableDMSBackend) Migrate(context.Context, datamigration.Target, datamigration.Source, []string, bool) error {
+func (*unreachableDMSBackend) Migrate(context.Context, datamigration.Target, datamigration.Source, datamigration.Migration) error {
 	return nil
 }
+func (*unreachableDMSBackend) Existing(context.Context, datamigration.Target) (string, error) {
+	return "POSTGRES_16", nil
+}
+func (*unreachableDMSBackend) Demote(context.Context, datamigration.Target, datamigration.Source) error {
+	return nil
+}
+func (*unreachableDMSBackend) Release(context.Context, datamigration.Source) error     { return nil }
 func (*unreachableDMSBackend) Pause(context.Context, datamigration.Target, bool) error { return nil }
 func (*unreachableDMSBackend) Promote(context.Context, datamigration.Target) error     { return nil }
-func (*unreachableDMSBackend) Reset(context.Context, datamigration.Target, []string) error {
+func (*unreachableDMSBackend) Reset(context.Context, datamigration.Target, datamigration.Source, []string) error {
 	return nil
 }
 

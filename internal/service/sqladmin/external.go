@@ -92,6 +92,47 @@ type ExternalSource struct {
 	// once it has been, so a restart replicates instead of restoring again.
 	Physical         bool `json:"physical,omitempty"`
 	PhysicalRestored bool `json:"physicalRestored,omitempty"`
+	// CACert, ClientCert and ClientKey are the source representation
+	// instance's caCertificate, clientCertificate and clientKey (#2257):
+	// with a CA certificate the replica's connections to the source verify
+	// the source's certificate against it (a client certificate and key
+	// are then presented too), as the onPremisesConfiguration reference
+	// describes them; without one they are encrypted, unverified.
+	CACert     string `json:"caCert,omitempty"`
+	ClientCert string `json:"clientCert,omitempty"`
+	ClientKey  string `json:"clientKey,omitempty"`
+	// DumpFlags are extra mysqldump options of a MySQL sync's dump
+	// (#2257, Database Migration Service's dumpFlags), each --name or
+	// --name=value.
+	DumpFlags []string `json:"dumpFlags,omitempty"`
+	// LoadDumpAtSync is a DumpFile startExternalSync loads (#2257, a
+	// Database Migration Service job's dumpPath), rather than the
+	// replica's creation; it is cleared once loaded.
+	LoadDumpAtSync bool `json:"loadDumpAtSync,omitempty"`
+}
+
+// ConfigureExternal changes the replica name's external source before its
+// startExternalSync (#2257): Database Migration Service, in process, sets
+// the databases (selectedObjects, for MySQL too), the dump file and the
+// mysqldump flags of a migration job on its destination replica, which
+// the Admin API has no request field for once the replica exists.
+func (s *Server) ConfigureExternal(project, name string, f func(*ExternalSource)) error {
+	c, err := s.createdFor(project, name, "configure the external source")
+	if err != nil {
+		return err
+	}
+	s.emu.Lock()
+	defer s.emu.Unlock()
+	if c.spec.External == nil {
+		return Errorf(http.StatusBadRequest, "Invalid request: %s is not a replica of a source representation instance.", name)
+	}
+	if c.spec.ExternalSyncStarted {
+		return Errorf(http.StatusBadRequest, "Invalid request: replication to %s has already been started.", name)
+	}
+	ext := *c.spec.External
+	f(&ext)
+	c.spec.External = &ext
+	return s.saveLocked()
 }
 
 // instanceServicePrefix and upMySQLService are the Services a created
@@ -371,7 +412,8 @@ func (s *Server) prepareExternalReplica(b instanceBody, rep *SourceRep, spec *Sp
 	if dump != "" && s.transfers == nil {
 		return s.noTransfers("a replica seeded from dumpFilePath")
 	}
-	ext := &ExternalSource{Host: host, Port: port, User: user, Password: pass, DumpFile: dump}
+	ext := &ExternalSource{Host: host, Port: port, User: user, Password: pass, DumpFile: dump,
+		CACert: rep.OnPremises.CaCertificate, ClientCert: rep.OnPremises.ClientCertificate, ClientKey: rep.OnPremises.ClientKey}
 	for _, o := range rep.OnPremises.SelectedObjects {
 		if o.Database != "" {
 			ext.Databases = append(ext.Databases, o.Database)
@@ -679,6 +721,52 @@ func (s *Server) seedExternal(ctx context.Context, name string, spec Spec) error
 		// startExternalSync with migrationType PHYSICAL to restore it.
 		return nil
 	}
+	if err := s.loadDump(ctx, c, spec); err != nil {
+		return err
+	}
+	s.emu.Lock()
+	c.spec.ExternalSyncStarted = true
+	next := c.spec
+	err := s.saveLocked()
+	s.emu.Unlock()
+	if err != nil {
+		return err
+	}
+	return s.writes.prov.Start(ctx, next)
+}
+
+// loadSyncDump loads a startExternalSync's dump file (LoadDumpAtSync,
+// #2257) into the replica's running server before its replication is set
+// up, answering the spec with the flag cleared.
+func (s *Server) loadSyncDump(ctx context.Context, name string, spec Spec) (Spec, error) {
+	ext := spec.External
+	if ext == nil || !ext.LoadDumpAtSync || !spec.ExternalSyncStarted || ext.Physical || !spec.MySQL() {
+		return spec, nil
+	}
+	s.emu.RLock()
+	c := s.writes.byName[name]
+	s.emu.RUnlock()
+	if c == nil || s.transfers == nil {
+		return spec, s.noTransfers("a sync from dumpFilePath")
+	}
+	if err := s.loadDump(ctx, c, spec); err != nil {
+		return spec, err
+	}
+	s.emu.Lock()
+	next := *c.spec.External
+	next.LoadDumpAtSync = false
+	c.spec.External = &next
+	out := c.spec
+	err := s.saveLocked()
+	s.emu.Unlock()
+	return out, err
+}
+
+// loadDump loads spec's dumpFilePath into c's server: its GTIDs reset,
+// the dump, written by mysqldump --set-gtid-purged=ON, then sets them as
+// the source's at the dump.
+func (s *Server) loadDump(ctx context.Context, c *created, spec Spec) error {
+	ext := spec.External
 	bucket, object, err := parseGCSURI(ext.DumpFile)
 	if err != nil {
 		return err
@@ -702,13 +790,5 @@ func (s *Server) seedExternal(ctx context.Context, name string, spec Spec) error
 	if err := s.transfers.t.ImportSQL(ctx, s.target(c.engine), "", "", io.MultiReader(strings.NewReader(reset), rd)); err != nil {
 		return fmt.Errorf("load the dump file %s: %w", ext.DumpFile, err)
 	}
-	s.emu.Lock()
-	c.spec.ExternalSyncStarted = true
-	next := c.spec
-	err = s.saveLocked()
-	s.emu.Unlock()
-	if err != nil {
-		return err
-	}
-	return s.writes.prov.Start(ctx, next)
+	return nil
 }

@@ -345,6 +345,10 @@ func (s *Server) bringUp(name, opID string) {
 		spec, err = s.restorePhysical(ctx, name, spec)
 	}
 	if err == nil {
+		// A sync's dumpFilePath (#2257) is loaded before replication.
+		spec, err = s.loadSyncDump(ctx, name, spec)
+	}
+	if err == nil {
 		err = s.writes.prov.Start(ctx, spec)
 	}
 	if err == nil {

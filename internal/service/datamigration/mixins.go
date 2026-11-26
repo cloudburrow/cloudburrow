@@ -241,7 +241,9 @@ func (i *iamServer) TestIamPermissions(_ context.Context, req *iampb.TestIamPerm
 // connections, conversion workspaces and migration job objects), and the
 // REST reference's methods clouddmspb v1.16.1 does not have
 // (migrationJobs.demoteDestination, .fetchSourceObjects and .objects),
-// whose selectors resolve to nothing and so answer 501.
+// whose selectors name the permission checks (iameval.DataMigration) and
+// which ServeJobJSON answers (#2257); the objects' IAM policy methods
+// resolve to nothing and so answer 501.
 func mixins() []*annotations.HttpRule {
 	out := []*annotations.HttpRule{
 		{Selector: "google.cloud.location.Locations.GetLocation",
@@ -291,11 +293,18 @@ func Transcoder() *rest.Transcoder {
 	return &rest.Transcoder{Packages: []string{"google.cloud.clouddms.v1"}, Mixins: mixins(), SnakeCaseMasks: true, Overlay: overlay}
 }
 
-// NewRESTHandler is the JSON API over s, on the gRPC port.
+// NewRESTHandler is the JSON API over s, on the gRPC port: the
+// transcoder, and ServeJobJSON's methods clouddmspb has no gRPC method for
+// (#2257).
 func NewRESTHandler(s *Server) http.Handler {
 	t := Transcoder()
 	s.Register(t)
-	return t
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.ServeJobJSON(w, r) {
+			return
+		}
+		t.ServeHTTP(w, r)
+	})
 }
 
 // Operation is the operation named name, for the console.

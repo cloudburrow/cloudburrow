@@ -281,17 +281,39 @@ func (b *dmsBackend) sqlOp(ctx context.Context, t datamigration.Target, method, 
 	return b.sqlWait(ctx, t.Project, op)
 }
 
-func (b *dmsBackend) CreateCloudSQL(ctx context.Context, t datamigration.Target, st *dmspb.CloudSqlSettings, src datamigration.Source) (datamigration.CloudSQLAddresses, error) {
-	var none datamigration.CloudSQLAddresses
+// createSourceRep creates t's source representation instance of src,
+// replacing one a restart left.
+func (b *dmsBackend) createSourceRep(ctx context.Context, t datamigration.Target, src datamigration.Source) error {
+	src, err := b.reach(ctx, src)
+	if err != nil {
+		return err
+	}
 	hp := net.JoinHostPort(src.Host, strconv.Itoa(src.Port))
+	onPrem := map[string]any{"hostPort": hp, "username": src.User, "password": src.Password}
+	if src.CACert != "" {
+		// A SERVER_ONLY or SERVER_CLIENT profile (#2257): the replica
+		// verifies the source's certificate.
+		onPrem["caCertificate"] = src.CACert
+		if src.ClientCert != "" {
+			onPrem["clientCertificate"], onPrem["clientKey"] = src.ClientCert, src.ClientKey
+		}
+	}
 	rep := map[string]any{"name": sourceRep(t), "databaseVersion": t.Version, "instanceType": "ON_PREMISES_INSTANCE", "region": t.Location,
-		"onPremisesConfiguration": map[string]any{"hostPort": hp, "username": src.User, "password": src.Password}}
+		"onPremisesConfiguration": onPrem}
 	if _, err := b.sqlCall(ctx, http.MethodGet, "projects/"+t.Project+"/instances/"+sourceRep(t), nil); err == nil {
 		// A restart's replica is created again from the same source.
 		_ = b.sqlOp(ctx, t, http.MethodDelete, sourceRep(t), nil)
 	}
 	if err := b.sqlOp(ctx, t, http.MethodPost, "", rep); err != nil {
-		return none, fmt.Errorf("create the source representation instance %s: %w", sourceRep(t), err)
+		return fmt.Errorf("create the source representation instance %s: %w", sourceRep(t), err)
+	}
+	return nil
+}
+
+func (b *dmsBackend) CreateCloudSQL(ctx context.Context, t datamigration.Target, st *dmspb.CloudSqlSettings, src datamigration.Source) (datamigration.CloudSQLAddresses, error) {
+	var none datamigration.CloudSQLAddresses
+	if err := b.createSourceRep(ctx, t, src); err != nil {
+		return none, err
 	}
 	settings := map[string]any{"tier": st.GetTier()}
 	if l := st.GetUserLabels(); len(l) > 0 {
@@ -472,9 +494,9 @@ func parseRows(out string, fieldSep string) [][]string {
 
 var (
 	pgAuthRE    = regexp.MustCompile(`password authentication failed|no pg_hba\.conf entry|role "[^"]*" does not exist|authentication failed`)
-	pgConnRE    = regexp.MustCompile(`could not connect|could not translate host name|Connection refused|timeout expired|No route to host|Network is unreachable|server closed the connection`)
+	pgConnRE    = regexp.MustCompile(`could not connect|could not translate host name|Connection refused|timeout expired|No route to host|Network is unreachable|server closed the connection|SSL error|certificate verify failed|server does not support SSL`)
 	mysqlAuthRE = regexp.MustCompile(`Access denied`)
-	mysqlConnRE = regexp.MustCompile(`Can't connect|Unknown MySQL server host|Lost connection|timed out`)
+	mysqlConnRE = regexp.MustCompile(`Can't connect|Unknown MySQL server host|Lost connection|timed out|SSL connection error|certificate verify failed`)
 )
 
 // classify is a source query's failure as the verification reports it.
@@ -498,15 +520,35 @@ func (b *dmsBackend) QuerySource(ctx context.Context, t datamigration.Target, sr
 	if err != nil {
 		return nil, err
 	}
+	tunnelled := src.SSH != nil
+	if src, err = b.reach(ctx, src); err != nil {
+		return nil, err
+	}
 	var out bytes.Buffer
-	stdin := strings.NewReader(src.Password + "\n")
+	// The password, then the certificates (#2257), on the script's input,
+	// read again by each try.
+	input := src.Password + "\n" + tlsStdin(src)
+	run0 := run
+	run = func(ctx context.Context, _ io.Reader, w io.Writer, args ...string) error {
+		return tunnelRetry(ctx, tunnelled, func() error {
+			out.Reset()
+			return run0(ctx, strings.NewReader(input), w, args...)
+		})
+	}
+	var stdin io.Reader
 	if src.Engine == dmspb.DatabaseEngine_MYSQL {
 		ssl := "PREFERRED"
 		if src.RequireSSL {
 			ssl = "REQUIRED"
 		}
-		args := []string{"sh", "-c", `IFS= read -r MYSQL_PWD; export MYSQL_PWD; db=""; if [ -n "$5" ]; then db="-D$5"; fi
-exec mysql -h "$1" -P "$2" -u "$3" -N -B --raw --connect-timeout=10 --ssl-mode="$6" $db -e "$4"`,
+		// A verified profile's certificate is checked against its CA
+		// (VERIFY_CA), its client certificate presented.
+		args := []string{"sh", "-c", `IFS= read -r MYSQL_PWD; export MYSQL_PWD
+` + tlsFiles + `db=""; if [ -n "$5" ]; then db="-D$5"; fi
+tls="--ssl-mode=$6"
+if [ -n "$ca" ]; then tls="--ssl-mode=VERIFY_CA --ssl-ca=$ca"; fi
+if [ -n "$cert" ]; then tls="$tls --ssl-cert=$cert --ssl-key=$key"; fi
+mysql -h "$1" -P "$2" -u "$3" -N -B --raw --connect-timeout=10 $tls $db -e "$4"`,
 			"sh", src.Host, strconv.Itoa(src.Port), src.User, query, database, ssl}
 		if err := run(ctx, stdin, &out, args...); err != nil {
 			return nil, classify(err, true)
@@ -521,7 +563,11 @@ exec mysql -h "$1" -P "$2" -u "$3" -N -B --raw --connect-timeout=10 --ssl-mode="
 		ssl = "require"
 	}
 	conn := fmt.Sprintf("host=%s port=%d user=%s dbname=%s sslmode=%s connect_timeout=10", pgConnValue(src.Host), src.Port, pgConnValue(src.User), pgConnValue(database), ssl)
-	args := []string{"sh", "-c", `IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql "$1" -X -v ON_ERROR_STOP=1 -qAt -F "$(printf '\037')" -c "$2"`,
+	args := []string{"sh", "-c", `IFS= read -r PGPASSWORD; export PGPASSWORD
+` + tlsFiles + `conn="$1"
+if [ -n "$ca" ]; then conn="$conn sslmode=verify-ca sslrootcert=$ca"; fi
+if [ -n "$cert" ]; then conn="$conn sslcert=$cert sslkey=$key"; fi
+psql "$conn" -X -v ON_ERROR_STOP=1 -qAt -F "$(printf '\037')" -c "$2"`,
 		"sh", conn, query}
 	if err := run(ctx, stdin, &out, args...); err != nil {
 		return nil, classify(err, false)
@@ -559,12 +605,36 @@ exec mysql $MYSQL_LOCAL -N -B --raw $db -e "$1"`, "sh", query, database}
 	return parseRows(out.String(), sep), nil
 }
 
-func (b *dmsBackend) Migrate(ctx context.Context, t datamigration.Target, src datamigration.Source, databases []string, continuous bool) error {
+func (b *dmsBackend) Migrate(ctx context.Context, t datamigration.Target, src datamigration.Source, m datamigration.Migration) error {
 	mode := "ONLINE"
-	if !continuous {
+	if !m.Continuous {
 		mode = "OFFLINE"
 	}
+	src, err := b.reach(ctx, src)
+	if err != nil {
+		return err
+	}
 	if t.CloudSQL {
+		// The job's source as the destination reaches it (a tunnel, a
+		// bastion), its certificates, databases, dump file and dump flags
+		// (#2257), on the destination replica before its sync.
+		if b.sql == nil {
+			return apierror.FailedPrecondition("Cloud SQL is not served by this instance")
+		}
+		if err := b.sql.ConfigureExternal(t.Project, t.ID, func(e *sqladmin.ExternalSource) {
+			e.Host, e.Port, e.Instance, e.InstanceUp = src.Host, src.Port, "", false
+			e.User, e.Password = src.User, src.Password
+			e.CACert, e.ClientCert, e.ClientKey = src.CACert, src.ClientCert, src.ClientKey
+			if m.Databases != nil {
+				e.Databases = m.Databases
+			}
+			e.DumpFlags = m.DumpFlags
+			if m.DumpPath != "" {
+				e.DumpFile, e.LoadDumpAtSync = m.DumpPath, true
+			}
+		}); err != nil {
+			return err
+		}
 		// Database Migration Service verified the source itself.
 		return b.sqlOp(ctx, t, http.MethodPost, t.ID+"/startExternalSync", map[string]any{"syncMode": mode, "skipVerification": true})
 	}
@@ -574,13 +644,22 @@ func (b *dmsBackend) Migrate(ctx context.Context, t datamigration.Target, src da
 	}
 	// The PostgreSQL external replica's setup (sqlinstances.go), run in
 	// the AlloyDB primary: each database's schema by pg_dump, then a
-	// subscription to a publication of its tables.
+	// subscription to a publication of its tables. An existing cluster's
+	// databases of the migrated names are dropped first (#2257).
+	demoted := ""
+	if t.Existing {
+		demoted = " CLOUDSQL_DEMOTED=1"
+	}
 	env := "export CLOUDSQL_PRIMARY_HOST=" + shellQuote(src.Host) + " CLOUDSQL_PRIMARY_PORT=" + strconv.Itoa(src.Port) +
 		" CLOUDSQL_PRIMARY_USER=" + shellQuote(src.User) + " CLOUDSQL_SYNC_MODE=" + mode +
-		" CLOUDSQL_DATABASES=" + shellQuote(strings.Join(databases, " ")) +
+		" CLOUDSQL_DATABASES=" + shellQuote(strings.Join(m.Databases, " ")) + demoted +
 		" CLOUDSQL_SYNC_ID=" + fmt.Sprintf("%08x", crc32.ChecksumIEEE([]byte(t.Project+":"+t.ID))) + "\n" +
-		"IFS= read -r CLOUDSQL_REPLICATION_PASSWORD; export CLOUDSQL_REPLICATION_PASSWORD\n"
-	script := src.Password + "\n"
+		"IFS= read -r CLOUDSQL_REPLICATION_PASSWORD; export CLOUDSQL_REPLICATION_PASSWORD\n" +
+		"IFS= read -r l; CLOUDSQL_PRIMARY_SSL_CA=$(printf '%s' \"$l\" | base64 -d)\n" +
+		"IFS= read -r l; CLOUDSQL_PRIMARY_SSL_CERT=$(printf '%s' \"$l\" | base64 -d)\n" +
+		"IFS= read -r l; CLOUDSQL_PRIMARY_SSL_KEY=$(printf '%s' \"$l\" | base64 -d)\n" +
+		"export CLOUDSQL_PRIMARY_SSL_CA CLOUDSQL_PRIMARY_SSL_CERT CLOUDSQL_PRIMARY_SSL_KEY\n"
+	script := src.Password + "\n" + tlsStdin(src)
 	var out bytes.Buffer
 	if err := run(ctx, strings.NewReader(script), &out, "sh", "-c", env+pgExternalSetup); err != nil {
 		return classify(err, false)
@@ -624,9 +703,77 @@ func (b *dmsBackend) eachSubscription(ctx context.Context, t datamigration.Targe
 
 func (b *dmsBackend) Promote(ctx context.Context, t datamigration.Target) error {
 	if t.CloudSQL {
-		return b.sqlOp(ctx, t, http.MethodPost, t.ID+"/promoteReplica", nil)
+		if err := b.sqlOp(ctx, t, http.MethodPost, t.ID+"/promoteReplica", nil); err != nil {
+			return err
+		}
+		if t.Existing {
+			// The existing instance is standalone again; the source
+			// representation instance its demotion made goes.
+			if err := b.sqlOp(ctx, t, http.MethodDelete, sourceRep(t), nil); err != nil && apierror.From(err).Code != codes.NotFound {
+				return err
+			}
+		}
+		return nil
 	}
 	return b.dropSubscriptions(ctx, t)
+}
+
+// Existing checks an existing destination (#2257): a Cloud SQL instance
+// that is a standalone primary, RUNNABLE, with no replicas, or an AlloyDB
+// cluster that is a READY primary cluster with a primary instance.
+func (b *dmsBackend) Existing(ctx context.Context, t datamigration.Target) (string, error) {
+	if t.CloudSQL {
+		in, err := b.sqlCall(ctx, http.MethodGet, "projects/"+t.Project+"/instances/"+t.ID, nil)
+		if err != nil {
+			return "", err
+		}
+		v, _ := in["databaseVersion"].(string)
+		switch {
+		case in["instanceType"] != "CLOUD_SQL_INSTANCE" || in["masterInstanceName"] != nil:
+			return "", apierror.InvalidArgument("the Cloud SQL instance %s is not a standalone primary instance", t.ID)
+		case in["region"] != t.Location:
+			// "The destination instance must be in the same region as the
+			// migration job."
+			return "", apierror.InvalidArgument("the Cloud SQL instance %s is in %v, not %s", t.ID, in["region"], t.Location)
+		case in["state"] != "RUNNABLE":
+			return "", apierror.FailedPrecondition("the Cloud SQL instance %s is %v, not RUNNABLE", t.ID, in["state"])
+		}
+		if r, _ := in["replicaNames"].([]any); len(r) > 0 {
+			return "", apierror.FailedPrecondition("the Cloud SQL instance %s has read replicas: an existing destination is standalone", t.ID)
+		}
+		return v, nil
+	}
+	api := b.alloy.API()
+	if api == nil {
+		return "", apierror.FailedPrecondition("AlloyDB is not served by this instance")
+	}
+	c, err := api.GetCluster(ctx, &alloydbpb.GetClusterRequest{Name: "projects/" + t.Project + "/locations/" + t.Location + "/clusters/" + t.ID})
+	if err != nil {
+		return "", err
+	}
+	if c.GetClusterType() == alloydbpb.Cluster_SECONDARY || c.GetState() != alloydbpb.Cluster_READY {
+		return "", apierror.FailedPrecondition("the AlloyDB cluster %s is not a READY primary cluster", t.ID)
+	}
+	if _, err := b.exec(ctx, t); err != nil {
+		return "", err
+	}
+	return c.GetDatabaseVersion().String(), nil
+}
+
+// Demote makes an existing destination a replica of src (#2257): a Cloud
+// SQL instance is demoted (instances.demote) to a replica of a source
+// representation instance, waiting for startExternalSync. An AlloyDB
+// cluster has no demotion of its own: its migration subscribes it to the
+// source, its databases of the migrated names dropped first.
+func (b *dmsBackend) Demote(ctx context.Context, t datamigration.Target, src datamigration.Source) error {
+	if !t.CloudSQL {
+		return nil
+	}
+	if err := b.createSourceRep(ctx, t, src); err != nil {
+		return err
+	}
+	return b.sqlOp(ctx, t, http.MethodPost, t.ID+"/demote", map[string]any{
+		"demoteContext": map[string]any{"sourceRepresentativeInstanceName": sourceRep(t)}})
 }
 
 // dropSubscriptions drops an AlloyDB target's subscriptions, and with them
@@ -646,9 +793,29 @@ func (b *dmsBackend) dropSubscriptions(ctx context.Context, t datamigration.Targ
 	})
 }
 
-func (b *dmsBackend) Reset(ctx context.Context, t datamigration.Target, databases []string) error {
+func (b *dmsBackend) Reset(ctx context.Context, t datamigration.Target, src datamigration.Source, databases []string) error {
 	if t.CloudSQL {
-		return nil
+		if !t.Existing {
+			return nil
+		}
+		// An existing instance (#2257): promoted, its migrated databases
+		// dropped, and demoted again.
+		if err := b.Promote(ctx, t); err != nil && !strings.Contains(err.Error(), "not a read replica") {
+			return err
+		}
+		for _, db := range databases {
+			q := "DROP DATABASE IF EXISTS " + quotePGIdent(db) + " WITH (FORCE)"
+			dbIn := "template1"
+			if t.MySQL() {
+				q, dbIn = "DROP DATABASE IF EXISTS `"+strings.ReplaceAll(db, "`", "``")+"`", ""
+			} else if db == "postgres" {
+				continue
+			}
+			if _, err := b.QueryTarget(ctx, t, dbIn, q); err != nil {
+				return err
+			}
+		}
+		return b.Demote(ctx, t, src)
 	}
 	if err := b.dropSubscriptions(ctx, t); err != nil {
 		return err
