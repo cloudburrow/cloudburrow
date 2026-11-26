@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -133,6 +134,9 @@ type computeService struct {
 	// request log: the console's calls to the APIs served beside
 	// /compute/v1/ (Certificate Manager and IAP, #2160) go through it.
 	handler http.Handler
+	// logw is up.log, for what the VM backend's tunnels and failed boots
+	// did (#2250); nil discards it.
+	logw io.Writer
 }
 
 // v1Handler is the Compute port's handler as the console calls it: the
@@ -209,6 +213,7 @@ func (s *computeService) Start(ctx context.Context) error {
 	bg, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	s.vms = newComputeVMs(s.cfg, bg)
+	s.vms.logw = s.logw
 	s.vms.guestBase = func() string {
 		if s.guestBase == nil {
 			return ""

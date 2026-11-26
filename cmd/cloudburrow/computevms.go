@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,6 +47,10 @@ type computeVMs struct {
 	// opsAgentHosts are the Ops Agent's Logging and Monitoring addresses
 	// (#2139, computeopsagent.go); nil or "" when not served.
 	opsAgentHosts func() (logging, monitoring string)
+	// logw is up.log (#2250): each VM's SSH tunnel's lines, and the serial
+	// console of a guest whose sshd never answered, which is gone with
+	// its pod once the insert is undone. nil discards them.
+	logw io.Writer
 
 	mu     sync.Mutex
 	built  map[string]bool
@@ -65,6 +70,12 @@ func newComputeVMs(cfg config.Config, bg context.Context) *computeVMs {
 }
 
 func (b *computeVMs) ns() string { return b.cfg.Cluster.Namespace }
+
+func (b *computeVMs) logf(format string, args ...any) {
+	if b.logw != nil {
+		fmt.Fprintf(b.logw, "cloudburrow: Compute Engine: "+format+"\n", args...)
+	}
+}
 
 func (b *computeVMs) kubectl(ctx context.Context, args ...string) (string, error) {
 	return b.installer.Kubectl(ctx, append([]string{"-n", b.ns()}, args...)...)
@@ -381,21 +392,107 @@ var vmSSHWait = 5 * time.Minute
 // again while the guest's sshd does not listen yet, for up to vmSSHWait.
 func (b *computeVMs) forwardSSH(ctx context.Context, vm compute.VMSpec) (*netfwd.Forwarder, error) {
 	deadline := time.Now().Add(vmSSHWait)
+	tl := &tunnelLog{logf: b.logf}
 	for {
 		f := netfwd.New(netfwd.Target{Name: vm.Key, Namespace: b.ns(), ServicePort: 22, Label: "ssh-" + vm.Key},
 			b.cfg.KubeconfigPath(), b.cfg.BindAddress)
+		f.Logf = tl.Logf
 		err := f.Start(b.bg)
 		if err == nil {
+			tl.up(vm.Name)
 			return f, nil
 		}
 		_ = f.Stop(context.Background())
 		if !errors.Is(err, netfwd.ErrForwardFailed) || time.Now().After(deadline) {
+			tl.failed(vm.Name)
+			b.logBootFailure(vm, err)
 			return nil, fmt.Errorf("forward %s's SSH port: %w", vm.Name, err)
 		}
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("forward %s's SSH port: %w", vm.Name, ctx.Err())
 		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// tunnelLog is an SSH tunnel's lines in up.log (#2250). While the guest
+// boots, every launch fails until its sshd listens, about once a second,
+// so those lines are counted and only the first and last are written,
+// when the tunnel comes up or the start gives up; once it is up, each
+// exit and re-establishment is written as it happens.
+type tunnelLog struct {
+	logf func(format string, args ...any)
+
+	mu          sync.Mutex
+	armed       bool
+	n           int
+	first, last string
+}
+
+func (l *tunnelLog) Logf(format string, args ...any) {
+	line := fmt.Sprintf(format, args...)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.armed {
+		l.logf("%s", line)
+		return
+	}
+	if l.n == 0 {
+		l.first = line
+	}
+	l.n++
+	l.last = line
+}
+
+// up writes the boot's summary and arms the log.
+func (l *tunnelLog) up(name string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.armed = true
+	if l.n > 0 {
+		l.logf("instance %s's SSH tunnel is up after %d lines while the guest booted; the last: %s", name, l.n, l.last)
+	}
+}
+
+// failed writes every boot line kept, the first and the last.
+func (l *tunnelLog) failed(name string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.n == 0 {
+		return
+	}
+	l.logf("instance %s's SSH tunnel, %d lines; the first: %s", name, l.n, l.first)
+	l.logf("instance %s's SSH tunnel, the last: %s", name, l.last)
+}
+
+// logBootFailure writes to up.log what a guest whose sshd never answered
+// did: its containers' states and the tail of its serial console (the
+// previous one's too, when the guest restarted), which go with its pod
+// when the insert is undone (#2250).
+func (b *computeVMs) logBootFailure(vm compute.VMSpec, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	b.logf("instance %s (pod %s) did not answer SSH: %v", vm.Name, vm.Key, err)
+	if out, err := b.kubectl(ctx, "get", "pod", vm.Key, "-o",
+		`jsonpath={range .status.initContainerStatuses[*]}{.name} {.restartCount} {.state}{"\n"}{end}{range .status.containerStatuses[*]}{.name} {.restartCount} {.state} last {.lastState}{"\n"}{end}`); err == nil {
+		for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+			b.logf("instance %s: container %s", vm.Name, l)
+		}
+	}
+	for _, prev := range []bool{true, false} {
+		args := []string{"logs", vm.Key, "-c", "vm", "--tail", "200"}
+		what := "serial console"
+		if prev {
+			args = append(args, "--previous")
+			what = "serial console before its restart"
+		}
+		out, err := b.kubectl(ctx, args...)
+		if err != nil {
+			continue
+		}
+		for _, l := range strings.Split(strings.TrimRight(ansiRE.ReplaceAllString(out, ""), "\n"), "\n") {
+			b.logf("instance %s %s: %s", vm.Name, what, l)
 		}
 	}
 }
