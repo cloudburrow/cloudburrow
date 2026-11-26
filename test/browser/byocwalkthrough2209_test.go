@@ -533,8 +533,7 @@ func TestByocFirstRunWalkThrough(t *testing.T) {
 
 	// The service the walk-through deployed goes too, as the VMs do below:
 	// an instance the walk-through runs on again (-count) would otherwise
-	// carry, and restart after each move, every earlier run's service, and
-	// a fifth run's Create outlasted the console's 70 s on them (#2259).
+	// carry, and restart after each move, every earlier run's service.
 	if code, body := consoleDo(t, http.MethodDelete, "/api/resources/run?project="+project+"&name="+service, ""); code != http.StatusOK {
 		t.Errorf("delete the Cloud Run service %s: %d %s", service, code, body)
 	}
