@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/compute"
@@ -34,7 +37,7 @@ func instanceScheduleOf(pol map[string]any, k string) string {
 func (p computeInstanceSchedulesProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	listing := console.Listing{Columns: []string{"Region", "Start schedule", "Stop schedule", "Time zone", "In use by", "Next run"},
 		Noun: "instance schedules", InfoOnSelect: true,
-		Note: "An instance schedule starts and stops its VMs (unix-cron, at most one start and one stop an hour); a VM follows one schedule of its region."}
+		Note: "An instance schedule starts and stops its VMs (at most one start and one stop an hour); a VM follows one schedule of its region."}
 	if p.api() == nil {
 		return listing, errors.New(computeNotStarted)
 	}
@@ -79,20 +82,170 @@ func (computeInstanceSchedulesProvider) CreateLayout() string { return console.C
 
 const cronPattern = `^$|^[0-9*,\-]+ [0-9*,\-]+ [0-9*,\-]+ [0-9*,\-]+ [0-9A-Za-z*,\-]+$`
 
+// Create a schedule's Frequency (#2260). Google's console (Create a
+// schedule, https://docs.cloud.google.com/compute/docs/instances/schedule-instance-start-stop,
+// read 2026-11-25) has a Start time and a Stop time, and "the Frequency
+// drop-down menu at the bottom of the pane" for "how often the Start time
+// and Stop time repeat"; or, with the "Use CRON expression" toggle at the
+// top of the pane, a Start CRON expression and a Stop CRON expression.
+// The page does not list the menu's choices: these are the repeats one
+// cron expression of the API's form says with a time of day, and the
+// console turns them into the API's vmStartSchedule.schedule and
+// vmStopSchedule.schedule, the only form the API has.
+const (
+	scheduleDaily   = "Daily"
+	scheduleWeekly  = "Weekly"
+	scheduleMonthly = "Monthly"
+)
+
+// scheduleWeekdays are cron's days of the week, 0 (Sunday) to 6.
+var scheduleWeekdays = []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
+
+func scheduleDaysOfMonth() []string {
+	out := make([]string, 31)
+	for i := range out {
+		out[i] = strconv.Itoa(i + 1)
+	}
+	return out
+}
+
 func (computeInstanceSchedulesProvider) CreateForm() (string, []console.Field) {
 	return "Create schedule", []console.Field{
 		{Name: "name", Label: "Name", Type: "text", Required: true, Pattern: computeNamePattern, Help: computeNameHelp},
 		{Name: "description", Label: "Description", Type: "textarea"},
 		{Name: "region", Label: "Region", Type: "select", Required: true, Default: "us-central1", Options: compute.Regions(),
 			Help: "A schedule applies to the VM instances of its region."},
-		{Name: "startSchedule", Label: "Start time (unix-cron)", Type: "text", Section: "Schedule", Default: "0 9 * * 1-5", Pattern: cronPattern,
-			Help: "When to start the VMs: minute hour day-of-month month day-of-week, with *, - and ,. Empty starts none."},
-		{Name: "stopSchedule", Label: "Stop time (unix-cron)", Type: "text", Section: "Schedule", Default: "0 18 * * 1-5", Pattern: cronPattern,
-			Help: "When to stop the VMs. Keep at least 15 minutes between start and stop."},
-		{Name: "timeZone", Label: "Time zone", Type: "select", Section: "Schedule", Default: "UTC", Options: scheduleTimeZones},
-		{Name: "startTime", Label: "Initiation date (RFC 3339)", Type: "text", Section: "Schedule", Help: "Optional: the schedule runs from this time."},
-		{Name: "expirationTime", Label: "End date (RFC 3339)", Type: "text", Section: "Schedule", Help: "Optional: the schedule stops running after this time."},
+		{Name: "useCron", Label: "Use CRON expression", Type: "checkbox", Section: "Schedule",
+			Help: "For a schedule the start and stop times and Frequency cannot say: unix-cron, with *, - and ,."},
+		{Name: "startClock", Label: "Start time", Type: "time", Section: "Schedule", ShowWhen: "!useCron",
+			Help: "When the VM instances start. Leave it empty to start none. Scheduled operations can run up to 15 minutes late."},
+		{Name: "stopClock", Label: "Stop time", Type: "time", Section: "Schedule", ShowWhen: "!useCron",
+			Help: "When the VM instances stop. Keep at least 15 minutes between the start and the stop."},
+		{Name: "startSchedule", Label: "Start CRON expression", Type: "text", Section: "Schedule", ShowWhen: "useCron", Pattern: cronPattern,
+			Help: "minute hour day-of-month month day-of-week, such as 0 9 * * 1-5. Empty starts none."},
+		{Name: "stopSchedule", Label: "Stop CRON expression", Type: "text", Section: "Schedule", ShowWhen: "useCron", Pattern: cronPattern,
+			Help: "When to stop the VM instances, such as 0 18 * * 1-5."},
+		{Name: "timeZone", Label: "Time zone", Type: "select", Section: "Schedule", Default: "UTC", Options: scheduleTimeZones,
+			Help: "The time zone of the start and stop times."},
+		{Name: "startTime", Label: "Initiate date", Type: "date", Section: "Schedule",
+			Help: "Optional: the schedule takes effect on this date. Without it, it takes effect at once."},
+		{Name: "expirationTime", Label: "End date", Type: "date", Section: "Schedule",
+			Help: "Optional: the schedule ends on this date. Without it, it runs until it is deleted."},
+		{Name: "frequency", Label: "Frequency", Type: "select", Section: "Schedule", ShowWhen: "!useCron", Default: scheduleDaily,
+			Options: []string{scheduleDaily, scheduleWeekly, scheduleMonthly}, Help: "How often the start time and stop time repeat."},
+		{Name: "weekdays", Label: "Days of the week", Type: "multiselect", Section: "Schedule", ShowWhen: "!useCron&frequency=" + scheduleWeekly,
+			Options: []string{"1", "2", "3", "4", "5", "6", "0"}, OptionLabels: weekdayLabels(), Default: "1\n2\n3\n4\n5"},
+		{Name: "dayOfMonth", Label: "Day of the month", Type: "select", Section: "Schedule", ShowWhen: "!useCron&frequency=" + scheduleMonthly,
+			Default: "1", Options: scheduleDaysOfMonth(), Help: "Days 29 to 31 run only in the months that have them."},
 	}
+}
+
+func weekdayLabels() map[string]string {
+	m := map[string]string{}
+	for i, d := range scheduleWeekdays {
+		m[strconv.Itoa(i)] = d
+	}
+	return m
+}
+
+// scheduleCron is a time of day ("HH:MM") repeated at frequency as the
+// API's unix-cron expression; "" for no time.
+func scheduleCron(clock, frequency, weekdays, dayOfMonth string) (string, error) {
+	clock = strings.TrimSpace(clock)
+	if clock == "" {
+		return "", nil
+	}
+	t, err := time.Parse("15:04", clock)
+	if err != nil {
+		return "", fmt.Errorf("%q is not a time of day (HH:MM)", clock)
+	}
+	at := fmt.Sprintf("%d %d", t.Minute(), t.Hour())
+	switch vpcOr(strings.TrimSpace(frequency), scheduleDaily) {
+	case scheduleDaily:
+		return at + " * * *", nil
+	case scheduleWeekly:
+		var days []string
+		for _, d := range strings.FieldsFunc(weekdays, func(r rune) bool { return r == '\n' || r == ',' || r == ' ' }) {
+			n, err := strconv.Atoi(d)
+			if err != nil || n < 0 || n > 6 {
+				return "", fmt.Errorf("days of the week: %q is not a day", d)
+			}
+			days = append(days, strconv.Itoa(n))
+		}
+		if len(days) == 0 {
+			return "", errors.New("days of the week: choose at least one day")
+		}
+		slices.SortFunc(days, func(a, b string) int { return cmpWeekday(a) - cmpWeekday(b) })
+		return at + " * * " + strings.Join(slices.Compact(days), ","), nil
+	case scheduleMonthly:
+		n, err := strconv.Atoi(strings.TrimSpace(dayOfMonth))
+		if err != nil || n < 1 || n > 31 {
+			return "", fmt.Errorf("day of the month: %q is not a day from 1 to 31", dayOfMonth)
+		}
+		return fmt.Sprintf("%s %d * *", at, n), nil
+	}
+	return "", fmt.Errorf("frequency: %q is not one of %s, %s and %s", frequency, scheduleDaily, scheduleWeekly, scheduleMonthly)
+}
+
+// cmpWeekday orders Monday first and Sunday last, as the menu lists them.
+func cmpWeekday(d string) int {
+	n, _ := strconv.Atoi(d)
+	return (n + 6) % 7
+}
+
+// scheduleDate is a date field's YYYY-MM-DD as the API's RFC 3339 time:
+// its midnight in the schedule's time zone.
+func scheduleDate(v, zone, field string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", nil
+	}
+	if _, err := time.Parse(time.RFC3339, v); err == nil {
+		return v, nil
+	}
+	loc, err := time.LoadLocation(vpcOr(zone, "UTC"))
+	if err != nil {
+		loc = time.UTC
+	}
+	d, err := time.ParseInLocation("2006-01-02", v, loc)
+	if err != nil {
+		return "", fmt.Errorf("%s: %q is not a date", field, v)
+	}
+	return d.Format(time.RFC3339), nil
+}
+
+// scheduleInWords is an operation's cron in the form's terms, "09:00,
+// weekly on Monday, Tuesday", when the form could have made it; "" else.
+func scheduleInWords(cron string) string {
+	f := strings.Fields(cron)
+	if len(f) != 5 || f[3] != "*" {
+		return ""
+	}
+	m, err1 := strconv.Atoi(f[0])
+	h, err2 := strconv.Atoi(f[1])
+	if err1 != nil || err2 != nil || m < 0 || m > 59 || h < 0 || h > 23 {
+		return ""
+	}
+	at := fmt.Sprintf("%02d:%02d", h, m)
+	switch {
+	case f[2] == "*" && f[4] == "*":
+		return at + ", daily"
+	case f[2] == "*":
+		var days []string
+		for _, d := range strings.Split(f[4], ",") {
+			n, err := strconv.Atoi(d)
+			if err != nil || n < 0 || n > 6 {
+				return ""
+			}
+			days = append(days, scheduleWeekdays[n])
+		}
+		return at + ", weekly on " + strings.Join(days, ", ")
+	case f[4] == "*":
+		if n, err := strconv.Atoi(f[2]); err == nil && n >= 1 && n <= 31 {
+			return fmt.Sprintf("%s, monthly on day %d", at, n)
+		}
+	}
+	return ""
 }
 
 func (p computeInstanceSchedulesProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
@@ -101,14 +254,45 @@ func (p computeInstanceSchedulesProvider) Create(ctx context.Context, project st
 	if !compute.IsRegion(region) {
 		return "", fmt.Errorf("region: %q is not a region", region)
 	}
-	isp := map[string]any{"timeZone": vpcOr(values["timeZone"], "UTC")}
-	for k, f := range map[string]string{"vmStartSchedule": "startSchedule", "vmStopSchedule": "stopSchedule"} {
-		if v := strings.TrimSpace(values[f]); v != "" {
+	zone := vpcOr(values["timeZone"], "UTC")
+	isp := map[string]any{"timeZone": zone}
+	start, stop := strings.TrimSpace(values["startSchedule"]), strings.TrimSpace(values["stopSchedule"])
+	// The form's times and Frequency unless Use CRON expression is on (an
+	// API caller that names only the cron fields gets them as they are).
+	if values["useCron"] != "true" && (strings.TrimSpace(values["startClock"]) != "" || strings.TrimSpace(values["stopClock"]) != "") {
+		var err error
+		if start, err = scheduleCron(values["startClock"], values["frequency"], values["weekdays"], values["dayOfMonth"]); err != nil {
+			return "", fmt.Errorf("start time: %w", err)
+		}
+		if stop, err = scheduleCron(values["stopClock"], values["frequency"], values["weekdays"], values["dayOfMonth"]); err != nil {
+			return "", fmt.Errorf("stop time: %w", err)
+		}
+		if start != "" && stop != "" {
+			a, _ := time.Parse("15:04", strings.TrimSpace(values["startClock"]))
+			b, _ := time.Parse("15:04", strings.TrimSpace(values["stopClock"]))
+			gap := int(b.Sub(a).Abs().Minutes())
+			if gap > 12*60 {
+				gap = 24*60 - gap
+			}
+			if gap < 15 {
+				return "", errors.New("stop time: keep at least 15 minutes between the start and stop operations")
+			}
+		}
+	}
+	if start == "" && stop == "" {
+		return "", errors.New("start time: give a start time, a stop time or both")
+	}
+	for k, v := range map[string]string{"vmStartSchedule": start, "vmStopSchedule": stop} {
+		if v != "" {
 			isp[k] = map[string]any{"schedule": v}
 		}
 	}
-	for _, k := range []string{"startTime", "expirationTime"} {
-		if v := strings.TrimSpace(values[k]); v != "" {
+	for k, label := range map[string]string{"startTime": "initiate date", "expirationTime": "end date"} {
+		v, err := scheduleDate(values[k], zone, label)
+		if err != nil {
+			return "", err
+		}
+		if v != "" {
 			isp[k] = v
 		}
 	}
@@ -212,6 +396,8 @@ func (p computeInstanceSchedulesProvider) Detail(ctx context.Context, project st
 	return console.Detail{Title: path[1], Sections: []console.Section{
 		{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Properties: []console.Property{
 			{Label: "Region", Value: path[0]},
+			{Label: "Start time", Value: vpcDash(scheduleInWords(instanceScheduleOf(pol, "vmStartSchedule")))},
+			{Label: "Stop time", Value: vpcDash(scheduleInWords(instanceScheduleOf(pol, "vmStopSchedule")))},
 			{Label: "Start schedule", Value: vpcDash(instanceScheduleOf(pol, "vmStartSchedule"))},
 			{Label: "Stop schedule", Value: vpcDash(instanceScheduleOf(pol, "vmStopSchedule"))},
 			{Label: "Time zone", Value: vpcStr(isp, "timeZone")},

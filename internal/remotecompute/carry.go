@@ -1086,9 +1086,12 @@ func (c *Carry) bindVolume(ctx context.Context, src string) (string, error) {
 	if err := cmd.Start(); err != nil {
 		return "", err
 	}
-	werr := tarPath(&countingWriter{w: pw, n: &c.bytes}, src)
+	werr := tarPath(&countingWriter{w: pw, n: &c.bytes}, localBindPath(src))
 	_ = pw.CloseWithError(werr)
 	if err := cmd.Wait(); err != nil {
+		if werr != nil {
+			return "", fmt.Errorf("copy %s: %w", src, werr)
+		}
 		return "", fmt.Errorf("copy %s: %v: %s", src, err, strings.TrimSpace(errOut.String()))
 	}
 	if werr != nil {
@@ -1096,6 +1099,21 @@ func (c *Carry) bindVolume(ctx context.Context, src string) (string, error) {
 	}
 	c.copied[v] = true
 	return v, c.save()
+}
+
+// localBindPath is a bind mount's source as this machine's path. Docker
+// Desktop on macOS reports a shared path of the Mac under /host_mnt (its
+// VM's view: /host_mnt/private/var/... for /private/var/...), which does
+// not exist here; Linux's Docker reports the path itself.
+func localBindPath(src string) string {
+	if _, err := os.Lstat(src); err != nil && strings.HasPrefix(src, "/host_mnt/") {
+		if p := strings.TrimPrefix(src, "/host_mnt"); p != "" {
+			if _, err := os.Lstat(p); err == nil {
+				return p
+			}
+		}
+	}
+	return src
 }
 
 // tarPath writes a directory's tree, or a file, as a tar.

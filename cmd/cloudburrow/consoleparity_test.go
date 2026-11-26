@@ -220,7 +220,7 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleComputeDiskKeysAndSchedules", "TestComputeDiskPerformanceKeysAndSchedulesThroughTheBrowser", "TestConsoleComputeParity2139", "TestSnapshotSchedulesRun"}},
 	{Resource: "Compute Engine instance schedules", Service: "compute",
 		Methods:  []string{"compute.instances.addResourcePolicies", "compute.instances.removeResourcePolicies"},
-		Provider: "compute-instance-schedules", Offers: "Instance schedules (/compute/instanceSchedules): each schedule with its region, start and stop schedules, time zone, VM instances and next run; Create a schedule (name, description, region, unix-cron start and stop, time zone, initiation and end dates); a schedule's page with its VM instances, last and next run, Add instances to schedule, Remove instances from schedule and Delete (#2206)",
+		Provider: "compute-instance-schedules", Offers: "Instance schedules (/compute/instanceSchedules): each schedule with its region, start and stop schedules, time zone, VM instances and next run; Create a schedule (name, description, region, Start time, Stop time and Frequency (daily, weekly on chosen days, monthly on a day) or Use CRON expression with Start and Stop CRON expressions, time zone, Initiate date and End date; #2260); a schedule's page with its VM instances, last and next run, Add instances to schedule, Remove instances from schedule and Delete (#2206)",
 		Tests: []string{"TestConsoleComputeInstanceSchedules", "TestComputeInstanceSchedulesThroughTheBrowser", "TestConsoleComputeParity2139", "TestInstanceSchedulesStartAndStop"}},
 	{Resource: "Compute Engine customer-supplied encryption keys", Service: "compute",
 		Methods:  []string{"compute.instances.startWithEncryptionKey"},
