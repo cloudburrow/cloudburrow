@@ -103,7 +103,7 @@ func (s *Server) setCommonInstanceMetadata(c call) (obj, error) {
 	}
 	o := s.res[projectRel(c.project)]
 	cur, _ := o["commonInstanceMetadata"].(map[string]any)
-	if fp := str(c.body, "fingerprint"); fp != "" && fp != str(cur, "fingerprint") {
+	if fp := str(c.body, "fingerprint"); fp != "" && !sameFingerprint(fp, str(cur, "fingerprint")) {
 		return nil, errf(http.StatusPreconditionFailed, "conditionNotMet",
 			"Supplied fingerprint does not match current metadata fingerprint.")
 	}

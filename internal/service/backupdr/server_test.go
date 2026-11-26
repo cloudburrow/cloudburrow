@@ -59,7 +59,7 @@ const loc = "/v1/projects/p/locations/us-central1"
 
 const planBody = `{"backupVault":"projects/p/locations/us-central1/backupVaults/v","resourceType":"sqladmin.googleapis.com/Instance",
   "backupRules":[{"ruleId":"daily","backupRetentionDays":7,"standardSchedule":{"recurrenceType":"DAILY","timeZone":"UTC",
-  "backupWindow":{"startHourOfDay":1,"endHourOfDay":5}}}],"logRetentionDays":"7"}`
+  "backupWindow":{"startHourOfDay":1,"endHourOfDay":7}}}],"logRetentionDays":"7"}`
 
 func TestCloudSQLBackupLifecycle(t *testing.T) {
 	sql := &fakeSQL{runs: map[string]Run{}}
@@ -71,9 +71,9 @@ func TestCloudSQLBackupLifecycle(t *testing.T) {
 	if code, _ := call(t, s, "POST", loc+"/backupVaults?backupVaultId=v", `{"backupMinimumEnforcedRetentionDuration":"86400s"}`); code != http.StatusConflict {
 		t.Errorf("a second vault create: %d", code)
 	}
-	if code, out := call(t, s, "POST", loc+"/backupPlans?backupPlanId=gce", strings.Replace(planBody, "sqladmin.googleapis.com/Instance", "alloydb.googleapis.com/Cluster", 1)); code != 501 ||
-		!strings.Contains(out["error"].(map[string]any)["message"].(string), "AlloyDB") {
-		t.Errorf("an AlloyDB plan: %d %v", code, out)
+	if code, out := call(t, s, "POST", loc+"/backupPlans?backupPlanId=gce", strings.Replace(planBody, "sqladmin.googleapis.com/Instance", "storage.googleapis.com/Bucket", 1)); code != 501 ||
+		!strings.Contains(out["error"].(map[string]any)["message"].(string), "another workload type") {
+		t.Errorf("a bucket plan: %d %v", code, out)
 	}
 	if code, out := call(t, s, "POST", loc+"/backupPlans?backupPlanId=plan", planBody); code != 200 {
 		t.Fatalf("plan create: %d %v", code, out)
@@ -159,7 +159,7 @@ func TestCloudSQLBackupLifecycle(t *testing.T) {
 
 func TestScheduleIsDue(t *testing.T) {
 	daily := map[string]any{"recurrenceType": "DAILY", "timeZone": "UTC",
-		"backupWindow": map[string]any{"startHourOfDay": 1.0, "endHourOfDay": 5.0}}
+		"backupWindow": map[string]any{"startHourOfDay": 1.0, "endHourOfDay": 7.0}}
 	at := func(s string) time.Time { v, _ := time.Parse(time.RFC3339, s); return v }
 	for _, c := range []struct {
 		sch       map[string]any
@@ -168,7 +168,7 @@ func TestScheduleIsDue(t *testing.T) {
 		what      string
 	}{
 		{daily, "", "2026-10-16T02:00:00Z", true, "first in the window"},
-		{daily, "", "2026-10-16T06:00:00Z", false, "outside the window"},
+		{daily, "", "2026-10-16T08:00:00Z", false, "outside the window"},
 		{daily, "2026-10-16T01:00:00Z", "2026-10-16T02:00:00Z", false, "already taken today"},
 		{daily, "2026-10-15T01:00:00Z", "2026-10-16T02:00:00Z", true, "taken yesterday"},
 		{map[string]any{"recurrenceType": "HOURLY", "hourlyFrequency": 6.0, "timeZone": "UTC"}, "2026-10-16T00:00:00Z", "2026-10-16T05:00:00Z", false, "hourly too soon"},

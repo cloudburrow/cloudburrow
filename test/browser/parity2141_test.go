@@ -86,7 +86,7 @@ func TestCloudSQLConsoleParity2141(t *testing.T) {
 	// instances `up` runs are not deleted.
 	svc := sqlAdminSDK(t)
 	name := fmt.Sprintf("browser-2141-%d", time.Now().UnixNano()%1e6)
-	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17",
+	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1",
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}}).Do()
 	if err != nil {
 		t.Fatal(err)

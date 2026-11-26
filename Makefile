@@ -362,6 +362,7 @@ tidy:
 	cd testdata/worker && go mod tidy && go mod verify
 	cd testdata/function && go mod tidy && go mod verify
 	cd testdata/sourcebuild && go mod tidy && go mod verify
+	cd testdata/dataflowgo && go mod tidy && go mod verify
 
 ## docs-check: Fail if a generated doc is stale, a relative Markdown link is broken, or the module map or Console table drifts
 .PHONY: docs-check

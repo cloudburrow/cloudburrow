@@ -25,6 +25,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // Where continuous queries export to (#2193): EXPORT DATA's CLOUD_PUBSUB,
@@ -171,7 +173,7 @@ func (s continuousSinks) openSink(ctx context.Context, p *cqPlan) (cqSink, error
 			}
 			return nil, err
 		}
-		dc, err := bigtable.NewClient(ctx, m[1], m[2], grpcOpts(s.bigtable)...)
+		dc, err := localclient.Bigtable(ctx, m[1], m[2], grpcOpts(s.bigtable)...)
 		if err != nil {
 			_ = ac.Close()
 			return nil, err
@@ -206,7 +208,8 @@ func (s continuousSinks) openSink(ctx context.Context, p *cqPlan) (cqSink, error
 			return nil, &cqRefusal{400, fmt.Sprintf("Invalid spanner_options: priority %q is LOW, MEDIUM or HIGH", so.Priority)}
 		}
 		db := "projects/" + m[1] + "/instances/" + m[2] + "/databases/" + m[3]
-		c, err := spanner.NewClient(ctx, db, grpcOpts(s.spanner)...)
+		localclient.SpannerLocalOnly(s.spanner)
+		c, err := localclient.Spanner(ctx, db, grpcOpts(s.spanner)...)
 		if err != nil {
 			return nil, err
 		}

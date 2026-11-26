@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostmount"
 )
 
 // Engine converts the SavedModel in dir to a bundle (bundle.go).
@@ -26,7 +28,7 @@ type Engine interface {
 // Server serves POST /v1/convert: a tar of a SavedModel's files in, the
 // bundle out (200, application/x-tar), or a Refusal as JSON (422; 503
 // when the converter cannot run at all); and the TensorFlow runtime of
-// converted models, POST /v1/models and /v1/run (predict.go).
+// converted models, POST /v1/models and /v1/run (predict.go); and POST /v1/export (export.go).
 type Server struct {
 	engine Engine
 	mu     sync.Mutex // one conversion at a time: TensorFlow is large
@@ -40,6 +42,10 @@ type Server struct {
 func NewServer(engine Engine, tmp string) *Server { return &Server{engine: engine, tmp: tmp} }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/v1/export" && r.Method == http.MethodPost {
+		s.serveExport(w, r)
+		return
+	}
 	switch r.URL.Path {
 	case "/v1/models":
 		s.serveLoad(w, r)
@@ -297,12 +303,28 @@ func (d *Docker) Convert(ctx context.Context, dir string) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, d.bin(), "run", "--rm", "--network", Network, "--read-only", "--tmpfs", "/tmp",
-		"-e", "HOME=/tmp", "-e", "TF_CPP_MIN_LOG_LEVEL=2",
-		"-v", dir+":/model:ro", "-v", out+":/out", d.Image, "convert")
+	// On a remote compute host the model and the output directory are
+	// volumes there (internal/hostmount), the output copied back after.
+	model, err := hostmount.Scratch(ctx, dir, "/model", hostmount.ReadOnly)
+	if err != nil {
+		return nil, &Refusal{Kind: "unavailable", Message: err.Error()}
+	}
+	defer model.Release()
+	output, err := hostmount.Scratch(ctx, out, "/out", hostmount.ReadWrite)
+	if err != nil {
+		return nil, &Refusal{Kind: "unavailable", Message: err.Error()}
+	}
+	defer output.Release()
+	args := []string{"run", "--rm", "--network", Network, "--read-only", "--tmpfs", "/tmp", "-e", "HOME=/tmp", "-e", "TF_CPP_MIN_LOG_LEVEL=2"}
+	args = append(append(args, model.Args()...), output.Args()...)
+	cmd := exec.CommandContext(ctx, d.bin(), append(args, d.Image, "convert")...)
 	var log bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &log, &log
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+	if err := output.Collect(ctx); err != nil && runErr == nil {
+		return nil, &Refusal{Kind: "unavailable", Message: err.Error()}
+	}
+	if err := runErr; err != nil {
 		tail := log.String()
 		if len(tail) > 2000 {
 			tail = tail[len(tail)-2000:]

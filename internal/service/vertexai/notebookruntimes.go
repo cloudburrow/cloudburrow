@@ -44,8 +44,8 @@ package vertexai
 // (the runtime's network is --internal, as every CloudBurrow container
 // that runs user code is); a post-startup script from a Cloud Storage URL
 // is not fetched (FAILED_PRECONDITION at start), an inline one runs with
-// bash in the runtime; proxy_uri is empty (the console's notebooks reach
-// the kernel through the instance).
+// bash in the runtime. A runtime runs the real Jupyter Server (#2198), and
+// a RUNNING one's proxy_uri is its JupyterLab on the console (colabproxy.go).
 //
 // UNVERIFIED (re-read 2026-11-22: https://docs.cloud.google.com/colab/docs/manage-runtimes):
 // starting a running runtime and stopping a stopped one succeed without a
@@ -71,6 +71,7 @@ import (
 	"unicode/utf8"
 
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
+	betapb "cloud.google.com/go/aiplatform/apiv1beta1/aiplatformpb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	nbpb "cloud.google.com/go/notebooks/apiv2/notebookspb"
@@ -113,6 +114,8 @@ type NotebookRuntimeOptions struct {
 	// Token is the bearer token the runtime's clients use: the identity
 	// a run executes as (runas.go), "" for the instance's own.
 	Token string
+	// Jupyter runs a Workbench instance's JupyterLab (#2198).
+	Jupyter *WorkbenchJupyter
 }
 
 const (
@@ -202,6 +205,28 @@ type notebookStore struct {
 	// pipelineRunner.
 	pipelines      map[string]*pipelineEntry
 	pipelineRunner PipelineRunner
+	// mon is Model Monitoring's resources (modelmonitor.go,
+	// mdmjobs.go, #2214), saved beside file.
+	mon *monitorState
+	// md is Vertex ML Metadata (metadata.go, #2205).
+	md *mdStore
+	// pipelineCache are pipeline tasks' cache entries by parent and cache
+	// key (pipelinerun.go, #2205); pipelineSlots the per-project quotas of
+	// concurrent runs and parallel tasks.
+	pipelineCache map[string]json.RawMessage
+	pipelineSlots map[string]chan struct{}
+	// customJobs, batchJobs and trainingPipelines are Vertex AI's custom
+	// training and batch prediction (customjobs.go, batchprediction.go,
+	// trainingpipelines.go, #2210), run on pipelineRunner too.
+	customJobs        map[string]*customJobEntry
+	batchJobs         map[string]*batchJobEntry
+	trainingPipelines map[string]*trainingEntry
+	// hpJobs are hyperparameter tuning jobs (hptuning.go, #2210).
+	hpJobs map[string]*hpJobEntry
+	// nasJobs are Neural Architecture Search jobs (nasjobs.go, #2214).
+	nasJobs map[string]*nasJobEntry
+	// ds are Vertex AI managed datasets (datasets.go, #2210).
+	ds *dsStore
 }
 
 // runtimeEntry is a runtime and what its lifecycle needs.
@@ -220,7 +245,7 @@ func (s *Server) notebooks() *notebookStore {
 	defer s.mu.Unlock()
 	if s.nb == nil {
 		s.nb = &notebookStore{templates: map[string]*aiplatformpb.NotebookRuntimeTemplate{}, runtimes: map[string]*runtimeEntry{},
-			defaults: map[string]string{}, now: time.Now, jobs: map[string]*jobEntry{}, schedules: map[string]*aiplatformpb.Schedule{},
+			defaults: map[string]string{}, now: s.clockNow, jobs: map[string]*jobEntry{}, schedules: map[string]*aiplatformpb.Schedule{},
 			policies: map[string]*iampolicy.Stored{}, owners: map[string]string{}, pipelines: map[string]*pipelineEntry{}}
 	}
 	if s.ops == nil {
@@ -237,6 +262,7 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	st.host, st.file = host, file
+	st.loadMonitoringState()
 	b, err := os.ReadFile(file)
 	if err != nil {
 		return
@@ -253,6 +279,11 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 		Policies  map[string]*iampolicy.Stored `json:"policies"`
 		Owners    map[string]string            `json:"scheduleOwners"`
 		Pipelines []json.RawMessage            `json:"pipelineJobs"`
+		Metadata  json.RawMessage              `json:"metadata"`
+		Cache     map[string]json.RawMessage   `json:"pipelineCache"`
+		Training  map[string][]json.RawMessage `json:"trainingJobs"`
+		Datasets  json.RawMessage              `json:"datasets"`
+		NAS       []savedNASJob                `json:"nasJobs"`
 	}
 	if json.Unmarshal(b, &saved) != nil {
 		return
@@ -278,6 +309,19 @@ func (s *Server) SetNotebookRuntimes(host NotebookHost, file string) {
 		st.owners[k] = v
 	}
 	st.loadPipelines(saved.Pipelines)
+	st.loadMetadata(saved.Metadata)
+	st.pipelineCache = saved.Cache
+	st.loadTrainingJobs(saved.Training)
+	st.loadNASJobs(saved.NAS)
+	st.loadDatasets(saved.Datasets)
+}
+
+// loadMonitoringState reads Model Monitoring's state, which
+// SetNotebookRuntimes's file has beside it; the caller holds st.mu.
+func (st *notebookStore) loadMonitoringState() {
+	if st.file != "" {
+		st.loadMonitoring()
+	}
 }
 
 // save writes the store; the caller holds st.mu.
@@ -298,7 +342,12 @@ func (st *notebookStore) save() {
 		Policies  map[string]*iampolicy.Stored `json:"policies"`
 		Owners    map[string]string            `json:"scheduleOwners,omitempty"`
 		Pipelines []json.RawMessage            `json:"pipelineJobs,omitempty"`
-	}{Owners: st.owners, Pipelines: st.savedPipelines(), Templates: []json.RawMessage{}, Runtimes: []savedRuntime{}, Defaults: st.defaults, Jobs: []json.RawMessage{}, Schedules: []json.RawMessage{},
+		Metadata  json.RawMessage              `json:"metadata,omitempty"`
+		Cache     map[string]json.RawMessage   `json:"pipelineCache,omitempty"`
+		Training  map[string][]json.RawMessage `json:"trainingJobs,omitempty"`
+		Datasets  json.RawMessage              `json:"datasets,omitempty"`
+		NAS       []savedNASJob                `json:"nasJobs,omitempty"`
+	}{NAS: st.savedNASJobs(), Datasets: st.savedDatasets(), Training: st.savedJobs(), Cache: st.pipelineCache, Owners: st.owners, Pipelines: st.savedPipelines(), Metadata: st.savedMetadata(), Templates: []json.RawMessage{}, Runtimes: []savedRuntime{}, Defaults: st.defaults, Jobs: []json.RawMessage{}, Schedules: []json.RawMessage{},
 		Policies: st.policies}
 	for _, n := range sortedNames(st.jobs) {
 		if b, err := protojson.Marshal(st.jobs[n].Job); err == nil {
@@ -898,7 +947,7 @@ func (n *notebookService) AssignNotebookRuntime(_ context.Context, req *aiplatfo
 			}
 			return nil, grpcError(apierror.AlreadyExists("NotebookRuntime %s already exists, assigned from another template or to another user", k))
 		}
-		v := st.view(e)
+		v := n.s.runtimeView(st, e)
 		st.mu.Unlock()
 		return n.s.finished(k, &aiplatformpb.AssignNotebookRuntimeOperationMetadata{GenericMetadata: generic()}, v, nil)
 	}
@@ -1047,7 +1096,7 @@ func (s *Server) awaitRunning(op string, e *runtimeEntry, resp func(*aiplatformp
 	st.mu.Lock()
 	e.Ready, e.Ran = true, e.Ran || run
 	e.RT.UpdateTime = timestamppb.New(st.now())
-	v := st.view(e)
+	v := s.runtimeView(st, e)
 	st.save()
 	st.mu.Unlock()
 	_ = s.ops.Succeed(op, resp(v))
@@ -1062,7 +1111,7 @@ func (n *notebookService) GetNotebookRuntime(_ context.Context, req *aiplatformp
 	if err != nil {
 		return nil, grpcError(err)
 	}
-	return st.view(e), nil
+	return n.s.runtimeView(st, e), nil
 }
 
 func (n *notebookService) ListNotebookRuntimes(_ context.Context, req *aiplatformpb.ListNotebookRuntimesRequest) (*aiplatformpb.ListNotebookRuntimesResponse, error) {
@@ -1075,7 +1124,7 @@ func (n *notebookService) ListNotebookRuntimes(_ context.Context, req *aiplatfor
 	var all []*aiplatformpb.NotebookRuntime
 	for _, k := range sortedNames(st.runtimes) {
 		if strings.HasPrefix(k, req.GetParent()+"/") {
-			all = append(all, st.view(st.runtimes[k]))
+			all = append(all, n.s.runtimeView(st, st.runtimes[k]))
 		}
 	}
 	st.mu.Unlock()
@@ -1183,20 +1232,51 @@ func (s *Server) registerNotebooks(srv grpc.ServiceRegistrar) {
 	aiplatformpb.RegisterNotebookServiceServer(srv, &notebookService{s: s})
 	aiplatformpb.RegisterScheduleServiceServer(srv, &scheduleService{s: s})
 	aiplatformpb.RegisterPipelineServiceServer(srv, &pipelineService{s: s})
+	aiplatformpb.RegisterJobServiceServer(srv, &jobService{s: s})
+	aiplatformpb.RegisterMetadataServiceServer(srv, &metadataService{s: s})
+	aiplatformpb.RegisterDatasetServiceServer(srv, &datasetService{s: s})
 	nbpb.RegisterNotebookServiceServer(srv, &workbenchService{s: s})
+	// Model Monitoring and data labeling jobs (#2214): v1's JobService
+	// (above), v1beta1's ModelMonitoringService and ScheduleService.
+	betapb.RegisterModelMonitoringServiceServer(srv, &modelMonitoringService{s: s})
+	betapb.RegisterScheduleServiceServer(srv, &betaScheduleService{s: s})
 }
 
 // notebookREST is the transcoder for the notebookRuntimeTemplates and
 // notebookRuntimes paths and their operations.
 func (s *Server) notebookREST() *rest.Transcoder {
 	s.nbRESTOnce.Do(func() {
-		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1", "google.cloud.notebooks.v2"}, SnakeCaseMasks: true, Mixins: []*annotations.HttpRule{
+		t := &rest.Transcoder{Packages: []string{"google.cloud.aiplatform.v1", "google.cloud.aiplatform.v1beta1", "google.cloud.notebooks.v2"}, SnakeCaseMasks: true, Mixins: []*annotations.HttpRule{
 			opRule("/v1/{name=projects/*/locations/*/notebookRuntimeTemplates/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/notebookRuntimes/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/notebookExecutionJobs/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/schedules/*/operations/*}"),
 			opRule("/v1/{name=projects/*/locations/*/pipelineJobs/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/modelDeploymentMonitoringJobs/*/operations/*}"),
+			opRule("/v1beta1/{name=projects/*/locations/*/modelMonitors/*/operations/*}"),
+			opRule("/v1beta1/{name=projects/*/locations/*/modelMonitors/*/modelMonitoringJobs/*/operations/*}"),
+			opRule("/v1beta1/{name=projects/*/locations/*/schedules/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/customJobs/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/batchPredictionJobs/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/trainingPipelines/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/hyperparameterTuningJobs/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/nasJobs/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/datasets/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/datasets/*/savedQueries/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/datasets/*/datasetVersions/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/artifacts/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/contexts/*/operations/*}"),
+			opRule("/v1/{name=projects/*/locations/*/metadataStores/*/executions/*/operations/*}"),
 		}}
+		// The Python SDK (google-cloud-aiplatform) polls under /ui, the
+		// first binding aiplatform_v1.yaml gives GetOperation (#1940): a
+		// dataset's import is polled as /ui/{name=.../datasets/*/operations/*}.
+		for _, m := range append([]*annotations.HttpRule(nil), t.Mixins...) {
+			if g := m.GetGet(); strings.HasPrefix(g, "/v1/{name=projects/*/locations/*/") {
+				t.Mixins = append(t.Mixins, opRule("/ui/"+strings.TrimPrefix(g, "/v1/")))
+			}
+		}
 		t.Mixins = append(t.Mixins, NotebookIAMMixins()...)
 		s.registerNotebooks(t)
 		iampb.RegisterIAMPolicyServer(t, &notebookIAM{s: s})

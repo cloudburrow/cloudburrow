@@ -6,7 +6,18 @@ pandas==2.3.3
 pyarrow==22.0.0
 matplotlib==3.10.7
 google-cloud-dataproc==5.32.0
+google-cloud-storage
 pyspark-client==4.0.1
 websockets==17.4
 tqdm==4.70.1
 packaging==26.3
+# 4.6.5 and later bundle a URI parser that refuses the settings schema id
+# of Google's dataproc-jupyter-plugin (dataproc_jupyter_plugin:plugin, an
+# underscore in its scheme), so the plugin fails to activate there.
+jupyterlab==4.6.4
+jupyter-server
+ipykernel
+terminado
+dataproc-jupyter-plugin==0.1.99
+bigquery-jupyter-plugin==0.1.4
+gcs-jupyter-plugin==0.1.3

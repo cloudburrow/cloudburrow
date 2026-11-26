@@ -13,15 +13,18 @@ import (
 // consoleFakeVMs is a VMBackend that does nothing, with room to spare.
 type consoleFakeVMs struct{}
 
-func (consoleFakeVMs) CreateDisk(context.Context, compute.DiskSpec) error       { return nil }
-func (consoleFakeVMs) DeleteDisk(context.Context, compute.DiskSpec) error       { return nil }
-func (consoleFakeVMs) ResizeDisk(context.Context, compute.DiskSpec) error       { return nil }
-func (consoleFakeVMs) Snapshot(context.Context, compute.DiskSpec, string) error { return nil }
-func (consoleFakeVMs) DeleteSnapshot(context.Context, string) error             { return nil }
-func (consoleFakeVMs) Start(context.Context, compute.VMSpec) error              { return nil }
-func (consoleFakeVMs) Stop(context.Context, compute.VMSpec) error               { return nil }
-func (consoleFakeVMs) Suspend(context.Context, compute.VMSpec) error            { return nil }
-func (consoleFakeVMs) Resume(context.Context, compute.VMSpec) error             { return nil }
+func (consoleFakeVMs) CreateDisk(context.Context, compute.DiskSpec) error                 { return nil }
+func (consoleFakeVMs) CopyDisk(context.Context, compute.DiskSpec, compute.DiskSpec) error { return nil }
+func (consoleFakeVMs) DeleteDisk(context.Context, compute.DiskSpec) error                 { return nil }
+func (consoleFakeVMs) ResizeDisk(context.Context, compute.DiskSpec) error                 { return nil }
+func (consoleFakeVMs) Snapshot(context.Context, compute.DiskSpec, string) error           { return nil }
+func (consoleFakeVMs) DeleteSnapshot(context.Context, string) error                       { return nil }
+func (consoleFakeVMs) SealDisk(context.Context, compute.DiskSpec) error                   { return nil }
+func (consoleFakeVMs) UnsealDisk(context.Context, compute.DiskSpec) error                 { return nil }
+func (consoleFakeVMs) Start(context.Context, compute.VMSpec) error                        { return nil }
+func (consoleFakeVMs) Stop(context.Context, compute.VMSpec) error                         { return nil }
+func (consoleFakeVMs) Suspend(context.Context, compute.VMSpec) error                      { return nil }
+func (consoleFakeVMs) Resume(context.Context, compute.VMSpec) error                       { return nil }
 func (consoleFakeVMs) SerialOutput(context.Context, compute.VMSpec) (string, error) {
 	return "boot ok\n", nil
 }

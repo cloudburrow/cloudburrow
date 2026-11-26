@@ -20,6 +20,113 @@
     "latestCandidate": "Discovered by #31, tested in isolation, never used for release artifacts until promoted here."
   },
   "components": {
+    "dataflow": {
+      "beamFlinkJobServer": {
+        "$comment": "Dataflow (#2215): internal/beamrun runs each job's Beam pipeline on this Apache Beam 2.78.0 portable runner for Flink 1.20 (--flink-master=[local]), on a per-job docker network create --internal network whose one other peer is a relay to the instance's Cloud Storage, Pub/Sub, BigQuery and Dataflow ports.",
+        "image": "apache/beam_flink1.20_job_server:2.78.0",
+        "digest": "sha256:b1f7e43440a148151e9db001dfc0498eb4f87bdd4d6808904daf52ab0b532053",
+        "license": "Apache-2.0 (Apache Beam, Apache Flink) and the Debian and Eclipse Temurin packages it is built on",
+        "redistribution": "not published: pulled by digest by the local CLI on a Dataflow job's first run",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-24. The Apache Software Foundation's image. Flink is chosen over Spark's portable runner as it runs Python streaming pipelines (Spark's runs batch only); a batch wordcount ran in 15 s. Google publishes no Dataflow runner image.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/beam_flink1.20_job_server:2.78.0`."
+      },
+      "beamPythonSDK312": {
+        "$comment": "Dataflow (#2215): the Apache Beam 2.78.0 Python 3.12 SDK harness, which internal/beamrun runs as the job's worker pool (--worker_pool) in the job server's network namespace, and the job's launcher and relay (python3) run in; the Python SDK's DataflowRunner tests (test/compat/dataflow2215_test.go) submit from it.",
+        "image": "apache/beam_python3.12_sdk:2.78.0",
+        "digest": "sha256:bf536d721f825259329a396a20947b81ce8d0bbe08472b26f3f149c9957c1e56",
+        "license": "Apache-2.0 (Apache Beam) and the Debian and PyPI packages it is built on",
+        "redistribution": "not published: pulled by digest by the local CLI on a Dataflow job's first run",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-24. The SDK container the Apache Beam project publishes for its portable runners; Dataflow's own worker images are not published for local use.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/beam_python3.12_sdk:2.78.0`."
+      },
+      "beamJavaSDK11": {
+        "$comment": "Dataflow (#2215): the Apache Beam 2.78.0 Java 11 SDK harness. internal/beamrun runs a Java job's workers in it as Beam's ExternalWorkerService (org.apache.beam.fn.harness.ExternalWorkerService) on the job's staged jars, in the job server's network namespace, when the job's pipeline names beam_java11_sdk.",
+        "image": "apache/beam_java11_sdk:2.78.0",
+        "digest": "sha256:20c289f6288972c9bbbe63effdda9d8b1f207b5597c96bb42c83012cb5e7f532",
+        "license": "Apache-2.0 (Apache Beam) and the Debian and Eclipse Temurin packages it is built on",
+        "redistribution": "not published: pulled by digest by the local CLI on a Java Dataflow job's first run",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-24. The SDK container the Apache Beam project publishes for its portable runners. Pinned for Java 11 pipelines; not yet exercised by a test.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/beam_java11_sdk:2.78.0`."
+      },
+      "beamJavaSDK17": {
+        "$comment": "Dataflow (#2215): the Apache Beam 2.78.0 Java 17 SDK harness. internal/beamrun runs a Java job's workers in it as Beam's ExternalWorkerService (org.apache.beam.fn.harness.ExternalWorkerService) on the job's staged jars, in the job server's network namespace, when the job's pipeline names beam_java17_sdk.",
+        "image": "apache/beam_java17_sdk:2.78.0",
+        "digest": "sha256:8acfe1acfd173b80474c12833397ca1d19b432a3aa5d0d160c5f8fd4abf95126",
+        "license": "Apache-2.0 (Apache Beam) and the Debian and Eclipse Temurin packages it is built on",
+        "redistribution": "not published: pulled by digest by the local CLI on a Java Dataflow job's first run",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-24. The SDK container the Apache Beam project publishes for its portable runners. Verified by TestJavaDataflowWordCount.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/beam_java17_sdk:2.78.0`."
+      },
+      "mavenTemurin17": {
+        "$comment": "Dataflow (#2215): Maven 3.9.9 on Eclipse Temurin 17. test/compat/dataflowjava2215_test.go builds testdata/dataflowjava (Apache Beam 2.78.0's Java SDK and Dataflow runner, from Maven Central) and submits it with this image's JDK; and (round 3) internal/beamrun builds Google's DataflowTemplates v1 module (the Google-provided classic templates, release 2026-11-18-00_RC00 from github.com/GoogleCloudPlatform/DataflowTemplates, Apache-2.0, archive SHA-256 checked) in it, once per state directory, on a provided template's first use.",
+        "image": "maven:3.9.9-eclipse-temurin-17",
+        "digest": "sha256:f58d59b6273e785ac0a4477f6e9b5ba1d7731c75b906c0f7b34076f1851318cc",
+        "license": "Apache-2.0 (Apache Maven) and GPL-2.0-with-Classpath-Exception (Eclipse Temurin OpenJDK) with the Ubuntu packages it is built on, run as a tool only, never copied into the repository or linked",
+        "redistribution": "not published: pulled by digest by the local CLI on a Google-provided template's first use",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-24 (the digest the Java test pipelines pin). Verified by TestDataflowProvidedTemplates.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect maven:3.9.9-eclipse-temurin-17`."
+      },
+      "beamJavaSDK21": {
+        "$comment": "Dataflow (#2215): the Apache Beam 2.78.0 Java 21 SDK harness. internal/beamrun runs a Java job's workers in it as Beam's ExternalWorkerService (org.apache.beam.fn.harness.ExternalWorkerService) on the job's staged jars, in the job server's network namespace, when the job's pipeline names beam_java21_sdk.",
+        "image": "apache/beam_java21_sdk:2.78.0",
+        "digest": "sha256:96816b03bebe628d9ffd2bd47f37167e055fae2ab99890ad6e941aa908440740",
+        "license": "Apache-2.0 (Apache Beam) and the Debian and Eclipse Temurin packages it is built on",
+        "redistribution": "not published: pulled by digest by the local CLI on a Java Dataflow job's first run",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-24. The SDK container the Apache Beam project publishes for its portable runners. Pinned for Java 21 pipelines; not yet exercised by a test.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/beam_java21_sdk:2.78.0`."
+      },
+      "beamGoSDK": {
+        "$comment": "Dataflow (#2215): the Apache Beam 2.78.0 Go SDK harness. internal/beamrun copies its boot (/opt/apache/beam/boot) into a Go job's directory and runs it as the container executable of Beam's worker pool, which fetches the job's staged worker binary and runs it.",
+        "image": "apache/beam_go_sdk:2.78.0",
+        "digest": "sha256:6290be71b91b975153ed86ffe7e05f3d36376c3e46ece68ea08de366fba17fab",
+        "license": "Apache-2.0 (Apache Beam) and the distroless base it is built on",
+        "redistribution": "not published: pulled by digest by the local CLI on a Go Dataflow job's first run",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "Resolved 2026-11-24. The SDK container the Apache Beam project publishes for its portable runners; testdata/dataflowgo (test-only) builds its pipelines with the Go SDK module github.com/apache/beam/sdks/v2 v2.78.0 (Apache-2.0) from the Go module proxy.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve with `docker buildx imagetools inspect apache/beam_go_sdk:2.78.0`."
+      }
+    },
     "computeGuest": {
       "opsAgent": {
         "$comment": "Google's Ops Agent (#2139), installed into the locally built VM images (internal/service/compute/guest/Dockerfile.debian and Dockerfile.rocky) from Google's own package repository, as add-google-cloud-ops-agent-repo.sh adds it: apt google-cloud-ops-agent-<codename>-all (Debian 12 bookworm, Ubuntu 24.04 noble), yum google-cloud-ops-agent-el9-<arch>-all (Rocky Linux 9). It runs in the guest only behind CloudBurrow's egress fence (usr/lib/cloudburrow/ops-agent), which lets its processes reach this instance's Cloud Logging and Cloud Monitoring and nothing else.",
@@ -132,6 +239,36 @@
         "version": "1.16.2-2",
         "source": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/d/dbus/",
         "license": "AFL-2.1 or GPL-2.0-or-later",
+        "redistribution": "not published: installed into the locally built Filestore NFS server image and run there as a separate program; none of its code is in the repository or linked into the CLI",
+        "updateFeed": "debian-snapshot",
+        "verification": "built-and-run",
+        "skipDiscovery": "Debian package; depcheck only discovers GitHub-sourced components."
+      },
+      "cryptsetup": {
+        "$comment": "apt-get install cryptsetup-bin=2:2.7.5-2 from snapshot.debian.org 20261120T000000Z in internal/filestoreserver/image/Dockerfile (#2194): dm-crypt mappings that encrypt a share at rest with the data key its customer-managed key wraps.",
+        "version": "2:2.7.5-2",
+        "source": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/c/cryptsetup/",
+        "license": "GPL-2.0-or-later (cryptsetup), LGPL-2.1-or-later (libcryptsetup)",
+        "redistribution": "not published: installed into the locally built Filestore NFS server image and run there as a separate program; none of its code is in the repository or linked into the CLI",
+        "updateFeed": "debian-snapshot",
+        "verification": "built-and-run",
+        "skipDiscovery": "Debian package; depcheck only discovers GitHub-sourced components."
+      },
+      "e2fsprogs": {
+        "$comment": "apt-get install e2fsprogs=1.47.2-3+b12 from snapshot.debian.org 20261120T000000Z in internal/filestoreserver/image/Dockerfile (#2194): mkfs.ext4 and resize2fs for the share's filesystem, sized to the instance's capacity.",
+        "version": "1.47.2-3+b12",
+        "source": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/e/e2fsprogs/",
+        "license": "GPL-2.0 (e2fsprogs), LGPL-2.0 (libext2fs)",
+        "redistribution": "not published: installed into the locally built Filestore NFS server image and run there as a separate program; none of its code is in the repository or linked into the CLI",
+        "updateFeed": "debian-snapshot",
+        "verification": "built-and-run",
+        "skipDiscovery": "Debian package; depcheck only discovers GitHub-sourced components."
+      },
+      "iproute2": {
+        "$comment": "apt-get install iproute2=6.15.0-1 from snapshot.debian.org 20261120T000000Z in internal/filestoreserver/image/Dockerfile (#2194): tc, the read throughput shaper, and ip, the server's routes back to its VPC clients.",
+        "version": "6.15.0-1",
+        "source": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/i/iproute2/",
+        "license": "GPL-2.0-or-later",
         "redistribution": "not published: installed into the locally built Filestore NFS server image and run there as a separate program; none of its code is in the repository or linked into the CLI",
         "updateFeed": "debian-snapshot",
         "verification": "built-and-run",
@@ -2472,6 +2609,41 @@
           "internal/nbruntime/image/build-requirements.txt"
         ]
       },
+      "notebookRuntimeJupyterLab": {
+        "$comment": "pip install --require-hashes in internal/nbruntime/image/Dockerfile (#2198), a Vertex AI Workbench instance's JupyterLab: jupyterlab 4.6.4 (4.6.5 and later bundle a URI parser that refuses dataproc-jupyter-plugin's settings schema id) and jupyter-server 2.21.1 (BSD-3-Clause), ipykernel 7.4.0 (BSD-3-Clause), terminado 0.18.1 (BSD-2-Clause), Google's google-cloud-storage 2.18.2 (Apache-2.0; Google's JupyterLab plugins require ~=2.18.2), and their dependencies. Every package of the image is pinned with its hashes in requirements.txt and spark.txt, uv pip compile --universal --generate-hashes of requirements.in and spark.in with --exclude-newer 2026-11-01; no installed distribution declares a GPL, LGPL or AGPL licence (checked 2026-11-24).",
+        "version": "jupyterlab 4.6.4, jupyter-server 2.21.1, ipykernel 7.4.0",
+        "source": "https://pypi.org/project/jupyterlab/4.6.4/",
+        "license": "BSD-3-Clause (JupyterLab, Jupyter Server, ipykernel), BSD-2-Clause (terminado), Apache-2.0 (Google's packages); BSD, MIT, Apache-2.0 and MPL-2.0 (their dependencies)",
+        "redistribution": "not published: installed into the locally built notebook runtime image; nothing of it is in the CLI",
+        "updateFeed": "pypi",
+        "verification": "built-and-run",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components."
+      },
+      "notebookRuntimeJupyterLabPlugins": {
+        "$comment": "pip install --require-hashes in internal/nbruntime/image/Dockerfile (#2198), a Vertex AI Workbench instance's Google JupyterLab plugins, as Google installs them on a Workbench VM: dataproc-jupyter-plugin 0.1.99, bigquery-jupyter-plugin 0.1.4, gcs-jupyter-plugin 0.1.3, scheduler-jupyter-plugin 0.1.9, google-cloud-jupyter-config 0.0.16 and kernels-mixer 0.0.17 (Google's; LICENSE Apache-2.0), with Google's google-cloud-compute, -iam, -kms, -logging, -audit-log and -appengine-logging (Apache-2.0) and the third-party aiohttp (Apache-2.0 AND MIT), aiofiles, aiosignal, frozenlist, multidict, propcache, yarl (Apache-2.0), anywidget, cachetools, cron-descriptor, pendulum, pydantic 1.10.27 (MIT) and psygnal (BSD-3-Clause), each pinned with its hashes in requirements.txt; no GPL, LGPL or AGPL licence (checked against PyPI 2026-11-24). A Colab or BigQuery Studio runtime's Jupyter Server loads none of them (JUPYTER_CONFIG_PATH=/etc/cloudburrow/colab).",
+        "version": "dataproc-jupyter-plugin 0.1.99, bigquery-jupyter-plugin 0.1.4, gcs-jupyter-plugin 0.1.3",
+        "source": "https://pypi.org/project/dataproc-jupyter-plugin/0.1.99/",
+        "license": "Apache-2.0 (Google's packages); Apache-2.0, MIT and BSD-3-Clause (their dependencies)",
+        "redistribution": "not published: installed into the locally built notebook runtime image; nothing of it is in the CLI",
+        "updateFeed": "pypi",
+        "verification": "lock-file-hashes",
+        "skipDiscovery": "PyPI; depcheck only discovers GitHub-sourced components.",
+        "lockFiles": [
+          "internal/nbruntime/image/requirements.txt"
+        ]
+      },
+      "notebookRuntimeGoogleCloudCli": {
+        "$comment": "internal/nbruntime/image/fetch_gcloud.py (#2198): the Google Cloud CLI of a Vertex AI Workbench instance, which Google's JupyterLab plugins read their project, region, credentials (gcloud config config-helper) and api_endpoint_overrides from. Google's versioned Linux archive for the build's architecture, fetched from dl.google.com while the image builds, checked against these SHA-256s (x86_64 first, arm second; the arm digest matches the one Google's install page lists) and unpacked into /opt/google-cloud-sdk.",
+        "version": "594.0.1",
+        "source": "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-594.0.1-linux-x86_64.tar.gz",
+        "sha256": "8fc798fd0638428551f80277a568112d08afcf9cafd967d1cf39ae0918df2a1d",
+        "sha256Arm": "ab9d36381e5e1de6efb4969ffa71d5c9b4765b7d4a534542dcb0360c062fbbe6",
+        "license": "Apache-2.0 (google-cloud-sdk/LICENSE)",
+        "redistribution": "not published: unpacked into the locally built notebook runtime image; nothing of it is in the CLI or the repository",
+        "updateFeed": "gcloud-release-notes",
+        "verification": "sha256",
+        "skipDiscovery": "dl.google.com; depcheck only discovers GitHub-sourced components."
+      },
       "tensorflow": {
         "$comment": "TensorFlow 2.20.0 as the tensorflow/tensorflow:2.20.0 image deploy/tfconvert/Dockerfile builds FROM (#1775): Google's tf.lite.TFLiteConverter.from_saved_model converts imported SavedModels to TensorFlow Lite.",
         "version": "2.20.0",
@@ -2990,6 +3162,60 @@
         "updateFeed": "mcr-tags",
         "skipDiscovery": "Microsoft Container Registry tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://mcr.microsoft.com/v2/mssql/server/manifests/2025-latest."
       },
+      "alloyDBOmni15": {
+        "$comment": "AlloyDB Omni 15.18.0 (PostgreSQL 15), Google's AlloyDB engine, the server of an AlloyDB for PostgreSQL cluster of POSTGRES_15 whose user accepted Google's AlloyDB Omni licence terms (#2207); pulled by a node only for such a cluster, and never by CloudBurrow's tests or CI. The digest is the 15 and 15.18.0 tags' multi-arch OCI index, read from the registry's manifest API without pulling (2026-11-24).",
+        "image": "google/alloydbomni:15.18.0",
+        "version": "15.18.0",
+        "digest": "sha256:8d626c5540b7c8eda0635fb62005833cd44d9c9aff588a509cbe9223a5cf9120",
+        "source": "https://hub.docker.com/r/google/alloydbomni",
+        "license": "Proprietary: Google's AlloyDB Omni License Terms (https://cloud.google.com/terms/alloydb-omni-marketplace-terms), free for development, evaluation and non-commercial use; the user who provisions a cluster accepts them, and CloudBurrow never does",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time, and started only with the user's own acceptance of the terms.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "Google's AlloyDB Omni engine (columnar engine, google_ml_integration, alloydb_scann, query plan cache, index advisor) for an opted-in AlloyDB cluster. NOT the AlloyDB Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://registry-1.docker.io/v2/google/alloydbomni/manifests/15 (the index), never by pulling."
+      },
+      "alloyDBOmni16": {
+        "$comment": "AlloyDB Omni 16.14.0 (PostgreSQL 16), Google's AlloyDB engine, the server of an AlloyDB for PostgreSQL cluster of POSTGRES_16 whose user accepted Google's AlloyDB Omni licence terms (#2207); pulled by a node only for such a cluster, and never by CloudBurrow's tests or CI. The digest is the 16 and 16.14.0 tags' multi-arch OCI index, read from the registry's manifest API without pulling (2026-11-24).",
+        "image": "google/alloydbomni:16.14.0",
+        "version": "16.14.0",
+        "digest": "sha256:6f9f2a87354dac2eed5e3a84fb1e6ccfce0429d4176623a3396a6012e6fc5e47",
+        "source": "https://hub.docker.com/r/google/alloydbomni",
+        "license": "Proprietary: Google's AlloyDB Omni License Terms (https://cloud.google.com/terms/alloydb-omni-marketplace-terms), free for development, evaluation and non-commercial use; the user who provisions a cluster accepts them, and CloudBurrow never does",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time, and started only with the user's own acceptance of the terms.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "Google's AlloyDB Omni engine (columnar engine, google_ml_integration, alloydb_scann, query plan cache, index advisor) for an opted-in AlloyDB cluster. NOT the AlloyDB Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://registry-1.docker.io/v2/google/alloydbomni/manifests/16 (the index), never by pulling."
+      },
+      "alloyDBOmni17": {
+        "$comment": "AlloyDB Omni 17.10.0 (PostgreSQL 17), Google's AlloyDB engine, the server of an AlloyDB for PostgreSQL cluster of POSTGRES_17 whose user accepted Google's AlloyDB Omni licence terms (#2207); pulled by a node only for such a cluster, and never by CloudBurrow's tests or CI. The digest is the 17 and 17.10.0 tags' multi-arch OCI index, read from the registry's manifest API without pulling (2026-11-24).",
+        "image": "google/alloydbomni:17.10.0",
+        "version": "17.10.0",
+        "digest": "sha256:ee3a5ed22fe0d239db05c990b2e0bdee6af9a40e6b7f3566fc2be4c1d4947a3e",
+        "source": "https://hub.docker.com/r/google/alloydbomni",
+        "license": "Proprietary: Google's AlloyDB Omni License Terms (https://cloud.google.com/terms/alloydb-omni-marketplace-terms), free for development, evaluation and non-commercial use; the user who provisions a cluster accepts them, and CloudBurrow never does",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time, and started only with the user's own acceptance of the terms.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "Google's AlloyDB Omni engine (columnar engine, google_ml_integration, alloydb_scann, query plan cache, index advisor) for an opted-in AlloyDB cluster. NOT the AlloyDB Admin API.",
+        "verification": "image-digest",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest from https://registry-1.docker.io/v2/google/alloydbomni/manifests/17 (the index), never by pulling."
+      },
       "cloudSQLMySQL80": {
         "$comment": "MySQL 8.0.46, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1381); pulled by a node only when one is created. NOT a Google-published component.",
         "image": "mysql:8.0",
@@ -3252,7 +3478,7 @@
         "version": "1.5.4-0.20250319132907-e064f32e3674",
         "license": "BSD-2-Clause",
         "verification": "go.sum",
-        "notes": "IAP TCP forwarding (#2160): internal/service/iap/tunnel.go serves the relay.tunnel.cloudproxy.app WebSocket subprotocol gcloud start-iap-tunnel speaks, closing a refused tunnel with IAP's close codes and reasons, which golang.org/x/net/websocket cannot send. Promoted from indirect (google.golang.org/genai already links it) to direct; same version, no new dependency."
+        "notes": "IAP TCP forwarding (#2160): internal/service/iap/tunnel.go serves the relay.tunnel.cloudproxy.app WebSocket subprotocol gcloud start-iap-tunnel speaks, closing a refused tunnel with IAP's close codes and reasons, which golang.org/x/net/websocket cannot send. Promoted from indirect (google.golang.org/genai already links it) to direct; same version, no new dependency. Bring your own cloud (#2209) uses it too, for the Session Manager data channel's WebSocket (internal/byoc/awsprov/ssmtunnel), the library AWS's session-manager-plugin uses."
       },
       "goMSSQL": {
         "module": "github.com/microsoft/go-mssqldb",
@@ -3524,6 +3750,38 @@
         "license": "Apache-2.0",
         "verification": "go.sum",
         "notes": "Firestore with MongoDB compatibility (#1703): the official MongoDB Go driver for the compat test, and its bson package for the wire-protocol server (internal/firestoreadmin), approved by the maintainer 2026-11-17."
+      },
+      "goAWSSDK": {
+        "module": "github.com/aws/aws-sdk-go-v2",
+        "version": "v1.48.0",
+        "source": "https://github.com/aws/aws-sdk-go-v2",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "Bring your own cloud (#2209): internal/byoc/awsprov drives EC2, IAM (SimulatePrincipalPolicy, GetRole, and the VM's Session Manager role and instance profile), STS, the Price List API, Systems Manager (StartSession, TerminateSession and DescribeInstanceInformation, for Session Manager port forwarding) and IAM Identity Center's SSO OIDC device flow and portal (service/ec2, iam, sts, pricing, ssm, ssooidc, sso, with aws/smithy-go; aws/signer/v4 signs the Session Manager stream URL). The aws.Config is built by hand: the config package, which reads ~/.aws and the environment, is not imported. AWS's own SDK; Google publishes none for AWS."
+      },
+      "goAzureSDK": {
+        "module": "github.com/Azure/azure-sdk-for-go/sdk/azcore",
+        "version": "v1.24.0",
+        "source": "https://github.com/Azure/azure-sdk-for-go",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "Bring your own cloud (#2209): internal/byoc/azureprov drives Azure Resource Manager through azcore and the resourcemanager modules compute/armcompute/v7, network/armnetwork/v7, resources/armresources, resources/armsubscriptions and authorization/armauthorization/v2; sign-in is Microsoft's MSAL for Go (github.com/AzureAD/microsoft-authentication-library-for-go, MIT), the library azidentity's InteractiveBrowserCredential is built on, used directly so its token cache can live in the OS keychain. DefaultAzureCredential and the Azure CLI credential, which read ~/.azure, are not used. Microsoft's own SDK; Google publishes none for Azure."
+      },
+      "goSmux": {
+        "module": "github.com/xtaci/smux",
+        "version": "v1.5.34",
+        "source": "https://github.com/xtaci/smux",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "Bring your own cloud (#2209): internal/byoc/awsprov/ssmtunnel multiplexes a Session Manager port session's TCP connections with smux, as AWS's session-manager-plugin (Apache-2.0, whose protocol ssmtunnel implements in Go; no plugin code is copied) and the SSM agent do for agents after 3.0.196.0. v1.5.34 is the newest release without dependencies. Google publishes nothing for AWS Session Manager."
+      },
+      "goKeyring": {
+        "module": "github.com/zalando/go-keyring",
+        "version": "v0.2.8",
+        "source": "https://github.com/zalando/go-keyring",
+        "license": "MIT",
+        "verification": "go.sum",
+        "notes": "Bring your own cloud (#2209): internal/byoc/keychain keeps cloud credentials and SSH keys in the OS keychain: /usr/bin/security on macOS with the secret on its standard input, and the Secret Service over D-Bus on Linux through github.com/godbus/dbus/v5 (BSD-2-Clause), both pure Go, so the Linux CLI stays static. Depends on github.com/alessio/shellescape (MIT) and, on Windows only, github.com/danieljoos/wincred (MIT). Google publishes no keychain library."
       }
     },
     "apiContracts": {
@@ -3975,6 +4233,31 @@
         "notes": "Multi-arch OCI index, resolved 2026-11-20 with docker buildx imagetools inspect.",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect node:24.11.1-bookworm-slim`."
       },
+      "compatToolsBase": {
+        "$comment": "test/compat/testdata/tools/Dockerfile builds FROM this digest: the tools container (#2174), where every gcloud, gsutil, bq, Terraform and OpenTofu command of the compat tests runs, on an --internal Docker network. The build adds Terraform 1.16.6 (releases.hashicorp.com, sha256 38034b38d03096399a7a1264a14561a8029b2b496fd1f169452656e53968f1b7, from its SHA256SUMS), OpenTofu 1.12.6 (sha256 50a6106fa4de523d09c87af85f3db1dd47535fc005727fdca6852146476b88ec) and, into a filesystem mirror, hashicorp/google 8.12.0 for Terraform (eddf30f5..., a zh: hash of testdata/terraform/.terraform.lock.hcl) and OpenTofu (3d9eee56..., likewise) and hashicorp/google-beta 8.12.0 (e40ea7bc09cee810da2fe997dbb126916f23c86413234624dd46da1aa9c2cbcf, from its SHA256SUMS), each checked against its pinned SHA-256.",
+        "image": "google/cloud-sdk:593.0.0-slim",
+        "digest": "sha256:e8394c66f4f66336af311343ff9a84c84521f8c1113ebc8abfe98bab9a155099",
+        "includes": {
+          "gcloud": "593.0.0",
+          "alpha": "2026.11.06",
+          "beta": "2026.11.06",
+          "gsutil": "5.38",
+          "bq": "2.1.42",
+          "terraform": "1.16.6",
+          "tofu": "1.12.6"
+        },
+        "platforms": [
+          "linux/amd64"
+        ],
+        "license": "google-cloud-cli-terms (the Cloud SDK); BUSL-1.1 (Terraform, run unmodified as a test tool, never distributed); MPL-2.0 (OpenTofu and the providers)",
+        "redistribution": "not published: built locally by the compat test only",
+        "scope": "test-only",
+        "usedBy": "test/compat/toolscontainer_test.go (#2174), through test/compat/testdata/tools/shim on PATH",
+        "updateFeed": "docker-hub-tag-list",
+        "verification": "image-digest",
+        "notes": "Google publishes the 593.0.0 tags for linux/amd64 only (a single manifest, not an index; checked 2026-11-24 with docker buildx imagetools inspect), so the image is built and run as linux/amd64 everywhere. It carries alpha and beta, so no `gcloud components install` reaches dl.google.com.",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect google/cloud-sdk:<version>-slim` when the gcloud pin moves."
+      },
       "alloydbAuthProxy": {
         "$comment": "Google's AlloyDB Auth Proxy, downloaded by test/compat/testdata/alloydbconnectors/Dockerfile and checked against the SHA-256 its release lists, for the daemon's architecture.",
         "version": "v1.18.0",
@@ -4038,6 +4321,44 @@
           {"zip": "referencesWav.zip", "member": "../mpeg4audio-conformance2ndEd_20230125/referencesWav/add-opt/al_sbr_ps_06_ur.wav", "bytes": 2605244, "sha256": "e2ef76b498971db8871190e2102eadc747870ca00c83d0e9add7fb9be7d4e817", "md5": "a170700536bd15130a58d2cbe22ee99d"}
         ],
         "notes": "HE-AAC v2 streams with parametric stereo beyond baseline (fine IID and mixing B; IPD/OPD; 34 bands) and their unrestricted-PS reference decodes. md5 is ISO's own (mpeg4audio-conformance2ndEd_20230125.md5); sha256 was measured on the members downloaded 2026-11-19. internal/isoconformance holds the same pins (TestDependenciesRecordThePins)."
+      },
+      "cloudSqlAuthProxyInContainer": {
+        "$comment": "Google's Cloud SQL Auth Proxy v2.19.0, the release the Makefile's cloud-sql-proxy target pins, downloaded by test/compat/testdata/sqlconnect/Dockerfile and checked against the same SHA-256s (the Makefile's CLOUD_SQL_PROXY_SHA256_linux.*), for the daemon's architecture.",
+        "version": "v2.19.0",
+        "source": "https://github.com/GoogleCloudPlatform/cloud-sql-proxy",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "Apache-2.0",
+        "redistribution": "not published: downloaded into the locally built test image; nothing of it is in the CLI or the repository",
+        "scope": "test-only",
+        "usedBy": "test/compat/testdata/sqlconnect/Dockerfile (#2208): TestGcloudSQLConnectInContainer's `gcloud sql connect` containers",
+        "updateFeed": "github-releases",
+        "verification": "release-checksum",
+        "checksums": {
+          "cloud-sql-proxy.linux.amd64": "sha256:218ae2a18ef8295c48809b73962f326caca1270aad4623f16c4ff5fa1e9f7d3e",
+          "cloud-sql-proxy.linux.arm64": "sha256:a58e9e0d4f10f368dbe2e24079597eb005dd9352b43fb18726f7983f913e6c1f"
+        },
+        "checksumsNote": "The Makefile's pins for the same release (#1421), recorded for the Dockerfile in Landing 169."
+      },
+      "trainerBusybox": {
+        "$comment": "Docker Hub's official busybox image, the base of testdata/trainer/Dockerfile, the Vertex AI custom-job trainer fixture (#2210), whose sh a replica runs.",
+        "image": "busybox",
+        "version": "1.38.0",
+        "digest": "sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4",
+        "source": "https://hub.docker.com/_/busybox",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "GPL-2.0 (BusyBox), run as a test fixture only, never copied into the repository or linked",
+        "redistribution": "not published: pulled by digest by the compat tests only",
+        "scope": "test-only",
+        "usedBy": "testdata/trainer/Dockerfile (#2210): test/compat/jobs2210_test.go's custom-job trainer",
+        "verification": "image-digest",
+        "updateFeed": "docker-hub-tag-list",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. busybox:1.38.0 resolved to this index on 2026-11-25; re-resolve with `docker buildx imagetools inspect busybox:<version>`."
       }
     },
     "realTools": {
@@ -4320,6 +4641,38 @@
         "updateFeed": "npm",
         "verification": "npm-integrity",
         "skipDiscovery": "npm registry; depcheck only discovers GitHub-sourced components."
+      }
+    },
+    "byoc": {
+      "$comment": "What cloud-init installs, pinned, on the VM bring your own cloud creates in the user's AWS or Azure account (#2209; internal/byoc/cloudinit.go). Nothing here is downloaded by CloudBurrow itself: the VM fetches it from the source named.",
+      "dockerCE": {
+        "version": "5:29.9.3-1~ubuntu.24.04~noble",
+        "source": "https://download.docker.com/linux/ubuntu (noble stable)",
+        "license": "Apache-2.0",
+        "verification": "apt signature; key fingerprint 9DC858229FC7DD38854AE2D88D81803C0EBFCD88 checked",
+        "notes": "docker-ce and docker-ce-cli at this version, containerd.io 2.4.2-4~ubuntu.24.04~noble, held. Resolved 2026-11-24 from the repository's Packages index."
+      },
+      "kind": {
+        "version": "v0.33.0",
+        "source": "https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64",
+        "license": "Apache-2.0",
+        "verification": "release-checksum",
+        "digest": "sha256:aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d",
+        "notes": "The kind release CloudBurrow runs locally (components.cluster.kind), checked against the release's kind-linux-amd64.sha256sum."
+      },
+      "nvidiaDriver": {
+        "version": "580-server",
+        "source": "Ubuntu 24.04 archive (restricted), through ubuntu-drivers install --gpgpu nvidia:580-server",
+        "license": "NVIDIA proprietary (installed on the user's VM; not redistributed by CloudBurrow)",
+        "verification": "apt signature (Ubuntu archive)",
+        "notes": "GPU presets only. The branch is pinned; ubuntu-drivers picks the kernel's matching signed modules."
+      },
+      "nvidiaContainerToolkit": {
+        "version": "1.20.2-1",
+        "source": "https://nvidia.github.io/libnvidia-container/stable/deb",
+        "license": "Apache-2.0",
+        "verification": "apt signature; key fingerprint C95B321B61E88C1809C4F759DDCAE044F796ECB0 checked",
+        "notes": "GPU presets only: nvidia-container-toolkit, -base, libnvidia-container-tools and libnvidia-container1 at this version, held; set as Docker's default runtime."
       }
     }
   },

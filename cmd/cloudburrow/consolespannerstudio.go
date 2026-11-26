@@ -13,7 +13,9 @@ package main
 // instance.
 //
 // Query plans (#2029): Run runs a query in PROFILE mode, as Google's
-// Spanner Studio does, and Explain in PLAN mode (AnalyzeQuery). The Spanner
+// Spanner Studio does, and Explain in PLAN mode (AnalyzeQuery). Run's
+// drop-down, as Google's has it, changes that to Results only (NORMAL mode)
+// or Explanation only (PLAN mode). The Spanner
 // front serves both with the plan it builds from the query and the schema
 // (internal/spannerfront/plan.go), PROFILE with every operator's execution
 // statistics and the query's; the Explanation tab draws the plan as
@@ -238,6 +240,11 @@ type spannerStudioRequest struct {
 	// Write is set once the user confirmed a statement that changes data or
 	// schema.
 	Write bool `json:"write"`
+	// Mode is Run's drop-down choice: "results" (Results only) runs a query
+	// in NORMAL mode, with no plan; anything else runs it in PROFILE mode
+	// (the results and the explanation). Explanation only is the explain
+	// call.
+	Mode string `json:"mode,omitempty"`
 }
 
 type spannerStudioResult struct {
@@ -461,6 +468,14 @@ func (p spannerProvider) spannerStudioRun(ctx context.Context, dbAdmin *database
 	// past the first 1,000 are read and dropped, since the statistics come
 	// at the end of the stream.
 	text := strings.TrimRight(sql, "; \t\r\n")
+	if req.Mode == "results" {
+		res, err := spannerStudioQuery(ctx, c, text, sppb.ExecuteSqlRequest_NORMAL)
+		if err != nil {
+			return nil, err
+		}
+		res.Elapsed = time.Since(start).Round(time.Millisecond).String()
+		return res, nil
+	}
 	res, err := spannerStudioQuery(ctx, c, text, sppb.ExecuteSqlRequest_PROFILE)
 	if spanner.ErrCode(err) == codes.Unimplemented {
 		note := spanner.ErrDesc(err)

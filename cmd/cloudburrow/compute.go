@@ -17,6 +17,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/authplatform"
 	"github.com/cloudburrow/cloudburrow/internal/config"
+	"github.com/cloudburrow/cloudburrow/internal/filestoreserver"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
@@ -54,7 +55,10 @@ type computeService struct {
 	// privateca is Certificate Authority Service, when served: Secure Web
 	// Proxy's TLS inspection leaves (#2160); nil inspects nothing.
 	privateca *privateCAService
-	api       *compute.Server
+	// kms is this instance's Cloud KMS: disks' customer-managed
+	// encryption keys (#2206); nil when kms is not in --services.
+	kms *kmsService
+	api *compute.Server
 	// vpcAccess is Serverless VPC Access (vpcaccess.googleapis.com,
 	// #2140), served on this port beside /compute/v1/, as its connectors
 	// live in the networks served here.
@@ -193,10 +197,14 @@ func (s *computeService) Addr() string {
 	return s.ln.Addr().String()
 }
 
+// computeStateFile is the Compute Engine service's persisted state in the
+// instance directory.
+const computeStateFile = "compute.json"
+
 func (s *computeService) Start(ctx context.Context) error {
 	state := ""
 	if s.cfg.Mode == config.ModePersistent {
-		state = filepath.Join(s.cfg.InstanceDir(), "compute.json")
+		state = filepath.Join(s.cfg.InstanceDir(), computeStateFile)
 	}
 	bg, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
@@ -265,6 +273,11 @@ func (s *computeService) Start(ctx context.Context) error {
 		return err
 	}
 	s.api = api
+	// diskEncryptionKey.kmsKeyName (#2206) wraps a disk's data key with
+	// this instance's Cloud KMS, in process.
+	if s.kms != nil {
+		api.UseKMS(sqlAdminKMS{svc: s.kms})
+	}
 	api.UseRelayAddress(func() string {
 		if s.relayAt == nil {
 			return ""
@@ -484,6 +497,20 @@ func (s *computeService) filestoreNetworks() filestore.Networks {
 		return api
 	}
 	return nil
+}
+
+// filestoreClients are the VMs whose NFS traffic Filestore's servers see
+// from their internal IPs (#2194).
+func (s *computeService) filestoreClients() []filestoreserver.Client {
+	api := s.API()
+	if api == nil {
+		return nil
+	}
+	var out []filestoreserver.Client
+	for _, v := range api.VMAddresses() {
+		out = append(out, filestoreserver.Client{PodIP: v.PodIP, InternalIP: v.InternalIP})
+	}
+	return out
 }
 
 func (s *computeService) gkeNetworks() gke.Networks {

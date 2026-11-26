@@ -231,6 +231,32 @@ func (c *countCtx) sub(from string, where []string) *countCtx {
 	}}
 }
 
+// groups is the context of a subquery run once per group of a SELECT
+// that aggregates: per GROUP BY group (after HAVING), or once for a
+// SELECT with no GROUP BY.
+func (c *countCtx) groups(from string, where, groupBy []string, having string) *countCtx {
+	if from == "" || len(groupBy) == 0 && having == "" {
+		return c
+	}
+	inner := "SELECT 1 AS cb_one FROM " + from + whereSQL(where)
+	if len(groupBy) > 0 {
+		inner += " GROUP BY " + strings.Join(groupBy, ", ")
+	}
+	if having != "" {
+		inner += " HAVING " + having
+	}
+	return &countCtx{sumOver: func(expr string) string {
+		if len(groupBy) == 0 {
+			return c.sumOver("COALESCE((SELECT SUM(" + expr + ") FROM (" + inner + ") AS cb_grp), 0)")
+		}
+		sel := "SELECT " + expr + " AS cb_n FROM " + from + whereSQL(where) + " GROUP BY " + strings.Join(groupBy, ", ")
+		if having != "" {
+			sel += " HAVING " + having
+		}
+		return c.sumOver("COALESCE((SELECT SUM(cb_n) FROM (" + sel + ") AS cb_grp), 0)")
+	}}
+}
+
 func whereSQL(conds []string) string {
 	if len(conds) == 0 {
 		return ""
@@ -779,11 +805,15 @@ func (b *planBuilder) planOutput(sel *sqlSelect, f *frag, scope *planScope, cc *
 		}
 	}
 	if aggregating {
-		for _, it := range sel.list {
-			if hasSubquery(it.e) {
-				return nil, unsupportedSQL{"a subquery in the select list of a SELECT that aggregates"}
+		// a subquery in an aggregate's argument runs once per input row,
+		// one elsewhere in the select list once per group
+		inAgg, perGroup := aggSubqueries(sel.list)
+		for _, x := range inAgg {
+			if err := b.planSubqueries(x, scope, cc, f); err != nil {
+				return nil, err
 			}
 		}
+		groupFrom, groupConds := f.from, append([]string(nil), f.conds...)
 		upTo := sel.hi
 		if sel.having != nil {
 			upTo = sel.having.lo - 1
@@ -837,6 +867,22 @@ func (b *planBuilder) planOutput(sel *sqlSelect, f *frag, scope *planScope, cc *
 			fl.rows = cc.count("SELECT 1 FROM (" + selText + ") AS cb_h")
 			f.op = fl
 		}
+		if len(perGroup) > 0 {
+			var group []string
+			for _, g := range sel.groupBy {
+				group = append(group, b.text(g))
+			}
+			having := ""
+			if sel.having != nil {
+				having = b.text(sel.having)
+			}
+			gcc := cc.groups(groupFrom, groupConds, group, having)
+			for _, x := range perGroup {
+				if err := b.planSubqueriesIn(x, scope, gcc, f); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 	if sel.distinct {
 		var keys []planLink
@@ -887,12 +933,17 @@ func prefixOf(cols, order []string) bool {
 
 // planSubqueries plans the subqueries in e, each run once per row of f.
 func (b *planBuilder) planSubqueries(e *sqlExpr, scope *planScope, cc *countCtx, f *frag) error {
+	return b.planSubqueriesIn(e, scope, cc.sub(f.from, f.conds), f)
+}
+
+// planSubqueriesIn plans the subqueries in e, counting their rows in cc.
+func (b *planBuilder) planSubqueriesIn(e *sqlExpr, scope *planScope, cc *countCtx, f *frag) error {
 	var err error
 	walkExpr(e, func(x *sqlExpr) {
 		if err != nil || x.kind != exSubq || b.subPlans[x] != nil {
 			return
 		}
-		sub, e2 := b.planQuery(x.sub, scope, cc.sub(f.from, f.conds))
+		sub, e2 := b.planQuery(x.sub, scope, cc)
 		if e2 != nil {
 			err = e2
 			return
@@ -900,6 +951,33 @@ func (b *planBuilder) planSubqueries(e *sqlExpr, scope *planScope, cc *countCtx,
 		b.subPlans[x] = b.gather(sub)
 	})
 	return err
+}
+
+// aggSubqueries splits an aggregating select list's subqueries: those in
+// an aggregate's arguments, and the others.
+func aggSubqueries(list []sqlItem) (inAgg, perGroup []*sqlExpr) {
+	var walk func(e *sqlExpr, agg bool)
+	walk = func(e *sqlExpr, agg bool) {
+		if e == nil {
+			return
+		}
+		if e.kind == exSubq {
+			if agg {
+				inAgg = append(inAgg, e)
+			} else {
+				perGroup = append(perGroup, e)
+			}
+			return
+		}
+		inner := agg || e.kind == exFunc && aggregateFuncs[e.op]
+		for _, a := range e.args {
+			walk(a, inner)
+		}
+	}
+	for _, it := range list {
+		walk(it.e, false)
+	}
+	return inAgg, perGroup
 }
 
 func hasSubquery(e *sqlExpr) bool {
@@ -1956,25 +2034,58 @@ func (b *planBuilder) recursiveUnion(f *sqlFrom, it *planItem, q *graphQuant, cc
 	if t := b.schema.table(e.BaseTableName); t != nil {
 		root = b.schema.root(t)
 	}
-	bs := scan()
-	bs.meta["Full scan"] = "true"
-	bs.rows = count(1, 1)
-	base := b.distUnion(bs, &frag{root: root})
+	// the edge pattern's own conditions, on each edge it reads
+	residual := func(o *planOp) *planOp {
+		if len(q.hopConds) == 0 {
+			return o
+		}
+		desc := strings.ReplaceAll(strings.Join(q.hopConds, " AND "), "cb_hop.", "$")
+		if o.name != "Filter Scan" {
+			return op("Filter Scan", nil, rel(o, ""), planLink{sc: &planScalar{name: "Function", desc: desc}, typ: "Residual Condition"})
+		}
+		o.kids = append(o.kids, planLink{sc: &planScalar{name: "Function", desc: desc}, typ: "Residual Condition"})
+		return o
+	}
+	// the base: the first edges, or for a lower bound of 0 the start
+	// nodes (the paths of no edge)
+	first := 1
+	var base *planOp
+	if q.min == 0 && q.node != nil {
+		first = 0
+		ns := op("Scan", map[string]string{"scan_type": "TableScan", "scan_target": q.node.BaseTableName, "scan_method": "Automatic", "Full scan": "true"})
+		ns.scan = true
+		ns.rows = count(0, 0)
+		nroot := q.node.BaseTableName
+		if t := b.schema.table(q.node.BaseTableName); t != nil {
+			nroot = b.schema.root(t)
+		}
+		base = b.distUnion(ns, &frag{root: nroot})
+	} else {
+		bs := scan()
+		bs.meta["Full scan"] = "true"
+		bs.rows = count(1, 1)
+		bo := residual(bs)
+		if bo != bs {
+			// the scan reads every edge; the residual keeps the first ones
+			bo.rows, bs.rows = bs.rows, cc.count("SELECT 1 FROM "+e.BaseTableName)
+		}
+		base = b.distUnion(bo, &frag{root: root})
+	}
 	spool := op("Scan", map[string]string{"scan_type": "RecursiveSpoolScan", "scan_target": "$" + q.alias})
-	spool.rows = count(1, q.max-1)
-	spool.execs = fmt.Sprintf("SELECT %d", q.max-1)
+	spool.rows = count(first, q.max-1)
+	spool.execs = fmt.Sprintf("SELECT %d", q.max-first)
 	ms := scan()
-	ms.rows, ms.execs = count(2, q.max), spool.rows
+	ms.rows, ms.execs = count(first+1, q.max), spool.rows
 	var seek []string
 	for i, c := range e.Source.EdgeCols {
 		seek = append(seek, "($"+c+" = $"+q.alias+"."+e.Dest.EdgeCols[i]+")")
 	}
-	fs := op("Filter Scan", nil, rel(ms, ""), planLink{sc: &planScalar{name: "Function", desc: strings.Join(seek, " AND ")}, typ: "Seek Condition"})
+	fs := residual(op("Filter Scan", nil, rel(ms, ""), planLink{sc: &planScalar{name: "Function", desc: strings.Join(seek, " AND ")}, typ: "Seek Condition"}))
 	fs.rows, fs.execs = ms.rows, spool.rows
 	ca := op("Cross Apply", nil, rel(spool, "Input"), rel(b.distUnion(fs, &frag{root: root}), "Map"))
 	ca.rows, ca.execs = ms.rows, spool.execs
 	ru := op("Recursive Union", map[string]string{"upper_bound": fmt.Sprint(q.max)}, rel(base, "Base"), rel(ca, "Recursive"))
-	ru.rows = count(1, q.max)
+	ru.rows = count(first, q.max)
 	o := ru
 	if q.min > 1 {
 		o = op("Filter", nil, rel(ru, ""), planLink{sc: &planScalar{name: "Function", desc: fmt.Sprintf("($path_length >= %d)", q.min)}, typ: "Condition"})

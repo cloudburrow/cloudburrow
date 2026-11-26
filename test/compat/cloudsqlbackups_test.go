@@ -109,11 +109,11 @@ func TestCloudSQLBackups(t *testing.T) {
 		cases = append(cases,
 			sqlBackupCase{name: "up-postgres", version: "POSTGRES_17", instance: "postgres", table: "bk_rows",
 				dsn: func(_, conn string) string {
-					return fmt.Sprintf("host=%s user=cloudburrow dbname=cloudburrow sslmode=disable", conn)
+					return fmt.Sprintf("host=%s user=cloudburrow password=%s dbname=cloudburrow sslmode=disable", conn, upPGPassword())
 				}, register: pgRegister},
 			sqlBackupCase{name: "created-postgres", version: "POSTGRES_17", instance: "bk-pg-" + suffix, created: true, table: "bk_rows",
 				dsn: func(_, conn string) string {
-					return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+					return fmt.Sprintf("host=%s user=postgres password=%s dbname=postgres sslmode=disable", conn, pgRootPassword)
 				}, register: pgRegister})
 	}
 	if os.Getenv(EnvMySQL) != "" {

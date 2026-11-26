@@ -174,7 +174,7 @@ func TestBackupDRComputeVMAndDiskRoundTrip(t *testing.T) {
 	waitBDR(err)
 	daily := []*backupdrpb.BackupRule{{RuleId: "daily", BackupRetentionDays: 7, BackupScheduleOneof: &backupdrpb.BackupRule_StandardSchedule{
 		StandardSchedule: &backupdrpb.StandardSchedule{RecurrenceType: backupdrpb.StandardSchedule_DAILY, TimeZone: "UTC",
-			BackupWindow: &backupdrpb.BackupWindow{StartHourOfDay: 1, EndHourOfDay: 5}}}}}
+			BackupWindow: &backupdrpb.BackupWindow{StartHourOfDay: 1, EndHourOfDay: 7}}}}}
 	for id, typ := range map[string]string{iplan: "compute.googleapis.com/Instance", dplan: "compute.googleapis.com/Disk"} {
 		op, err := bdr.CreateBackupPlan(ctx, &backupdrpb.CreateBackupPlanRequest{Parent: loc, BackupPlanId: id, BackupPlan: &backupdrpb.BackupPlan{
 			BackupVault: loc + "/backupVaults/" + vault, ResourceType: typ, BackupRules: daily}})
@@ -306,7 +306,11 @@ func TestGcloudBackupDRRestoreDisk(t *testing.T) {
 	h := New(t)
 	_, computeAddr := backupDRComputeFixture(t, h)
 	g := newGcloudSession(t, h)
-	ctx := h.Context()
+	// The whole flow's budget, as its Backup and DR operations each wait
+	// up to 5 minutes (waitBackupDROp): h.Context()'s 60 seconds ran out
+	// across the backup and the restore on a loaded runner.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	t.Cleanup(cancel)
 	disks, err := computeapi.NewDisksRESTClient(ctx, option.WithEndpoint("http://"+computeAddr), option.WithoutAuthentication())
 	if err != nil {
 		t.Fatal(err)
@@ -460,7 +464,7 @@ resource "google_backup_dr_backup_plan" %[2]q {
       time_zone       = "UTC"
       backup_window {
         start_hour_of_day = 1
-        end_hour_of_day   = 5
+        end_hour_of_day   = 7
       }
     }
   }

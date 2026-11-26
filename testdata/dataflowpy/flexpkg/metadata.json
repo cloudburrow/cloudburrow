@@ -1,0 +1,8 @@
+{
+  "name": "Tag words (Flex Template with packages)",
+  "description": "Tags each line of a Cloud Storage text file with three packages' output, into Cloud Storage.",
+  "parameters": [
+    {"name": "input", "label": "Input file", "helpText": "The Cloud Storage file to read, gs://bucket/path."},
+    {"name": "output", "label": "Output prefix", "helpText": "The Cloud Storage prefix the lines are written under."}
+  ]
+}

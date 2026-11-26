@@ -12,6 +12,8 @@ import (
 	"cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestBigtableSQLLanguage (#1511) runs GoogleSQL for Bigtable beyond the
@@ -41,7 +43,7 @@ func TestBigtableSQLLanguage(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ac.Close() })
-	c, err := bigtable.NewClient(ctx, h.Project(), id)
+	c, err := localclient.Bigtable(ctx, h.Project(), id)
 	if err != nil {
 		t.Fatal(err)
 	}

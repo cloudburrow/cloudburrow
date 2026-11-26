@@ -18,9 +18,9 @@ import (
 // opens Create pipeline run; a compiled pipeline pasted as the run source,
 // a run name, a Cloud storage location and its parameters, then Submit,
 // start a run whose two tasks run as containers and end Succeeded; the
-// run's page lists its tasks; the same form with a Recurring run schedule
-// makes a schedule on the Schedules tab, paused and resumed from its row
-// and deleted with the dialog's Delete. Every screen passes the WCAG audit.
+// run's page draws its tasks on its runtime graph; the same form with a
+// Recurring run schedule makes a schedule on the Schedules tab, paused
+// and resumed from its row and deleted with the dialog's Delete. Every screen passes the WCAG audit.
 func TestVertexAIPipelinesThroughThePages(t *testing.T) {
 	for _, s := range []string{"vertex-pipeline-runs", "vertex-pipeline-schedules", "storage"} {
 		needService(t, s)
@@ -100,7 +100,9 @@ func TestVertexAIPipelinesThroughThePages(t *testing.T) {
 	p.navigate(runsPath)
 	p.waitFor(rowReady(runName))
 	p.follow(run.Name)
-	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("consume") && r.textContent.includes("Succeeded"))`)
+	// The run's page is its runtime graph (#2205): consume, after
+	// produce, Succeeded.
+	p.waitFor(`[...document.querySelectorAll("#view button.pl-node")].some((b) => b.getAttribute("aria-label") === "consume, Step, Succeeded")`)
 	var runPath string
 	p.eval(`location.pathname + location.search`, &runPath)
 

@@ -86,7 +86,7 @@ func (p *sqlProvisioner) PhysicalRestore(ctx context.Context, spec sqladmin.Spec
 		return fmt.Errorf("stop the replica's server: %w", err)
 	}
 	job := physicalJobPrefix + spec.Name
-	err := p.runPhysicalJob(ctx, job, physicalJob(p.inst.Namespace, p.inst.Instance, job, spec, take))
+	err := p.runPhysicalJob(ctx, job, physicalJob(p.inst.Namespace, p.inst.Instance, job, spec, take, postgresAdminPassword(p.cfg)))
 	if err == nil {
 		// The server starts on the restored data with its --init-file
 		// (backend), which Start applies again unchanged.
@@ -198,7 +198,7 @@ const physicalVersionCheck = `nsvc=; if xtrabackup --help 2>/dev/null | grep -q 
 // and gives the restored copy CloudBurrow's own account (#1993), unlogged,
 // so the server CloudBurrow reaches answers again. version is the
 // replica's: MySQL 5.7 (#1524) or 8.0, whose statements are the same.
-func physicalInitSQL(version, rootPassword string) string {
+func physicalInitSQL(version, rootPassword, adminPassword string) string {
 	pw := "'" + strings.NewReplacer(`\`, `\\`, `'`, `''`).Replace(rootPassword) + "'"
 	var sb strings.Builder
 	sb.WriteString("SET sql_log_bin = 0;\n")
@@ -207,14 +207,14 @@ func physicalInitSQL(version, rootPassword string) string {
 		fmt.Fprintf(&sb, "CREATE USER IF NOT EXISTS %s IDENTIFIED BY %s;\nALTER USER %s IDENTIFIED BY %s;\nGRANT ALL PRIVILEGES ON *.* TO %s WITH GRANT OPTION;\n",
 			u, pw, u, pw, u)
 	}
-	sb.WriteString(strings.TrimPrefix(sqladmin.MySQLSystemAccountsSQL(version, rootPassword), "SET SESSION sql_log_bin = 0;\n"))
+	sb.WriteString(strings.TrimPrefix(sqladmin.MySQLSystemAccountsSQL(version, adminPassword), "SET SESSION sql_log_bin = 0;\n"))
 	return sb.String()
 }
 
 // physicalJob is the XtraBackup Job's manifest.
-func physicalJob(namespace, instance, job string, spec sqladmin.Spec, take bool) string {
+func physicalJob(namespace, instance, job string, spec sqladmin.Spec, take bool, adminPassword string) string {
 	ext := spec.External
-	env := map[string]string{"CLOUDSQL_INIT_SQL": physicalInitSQL(spec.DatabaseVersion, spec.RootPassword)}
+	env := map[string]string{"CLOUDSQL_INIT_SQL": physicalInitSQL(spec.DatabaseVersion, spec.RootPassword, adminPassword)}
 	volumes := fmt.Sprintf("        - name: replica\n          persistentVolumeClaim:\n            claimName: %s\n",
 		nodeName(spec.ServerName(), spec.PrimaryNode())+"-data")
 	mounts := "            - name: replica\n              mountPath: /replica\n"
@@ -551,7 +551,7 @@ func (p *sqlProvisioner) physicalRestoreEphemeral(ctx context.Context, spec sqla
 		}
 	}
 	out.Reset()
-	env := []string{"env", "CLOUDSQL_INIT_SQL=" + physicalInitSQL(spec.DatabaseVersion, spec.RootPassword)}
+	env := []string{"env", "CLOUDSQL_INIT_SQL=" + physicalInitSQL(spec.DatabaseVersion, spec.RootPassword, postgresAdminPassword(p.cfg))}
 	if take {
 		env = append(env, "CLOUDSQL_TAKEN=1")
 	}

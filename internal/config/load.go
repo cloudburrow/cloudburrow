@@ -106,6 +106,9 @@ func Load(opts Options) (Config, error) {
 		fileKeys = keys
 		cfg.Source.File, _ = filepath.Abs(path)
 		cfg.Source.Discovered = !explicit
+		if cfg.AlloyDB.AcceptOmniTerms {
+			cfg.Source.OmniTerms = "file"
+		}
 	}
 
 	// Environment.
@@ -184,10 +187,12 @@ type rawFlags struct {
 	project          string
 	bindAddress      string
 	cloudsqlConn     string
+	computeTarget    string
 	allowRemote      bool
 	cbHostSteps      bool
 	allowUnconfined  bool
 	acceptMSSQLEULA  bool
+	acceptOmniTerms  bool
 	appEngineURL     string
 	emulatorHeapMiB  int
 	bigQueryHeapMiB  int
@@ -223,6 +228,7 @@ type rawFlags struct {
 	appHub           int
 	alloyDB          int
 	filestore        int
+	dataflow         int
 	onnx             int
 	tfconvert        int
 	spark            int
@@ -291,6 +297,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.name, "name", "", "instance name; scopes the cluster, namespace and every owned resource")
 	fs.StringVar(&r.project, "project", "", "default project ID (default: the instance name when it is a valid project ID, otherwise derived from it)")
 	fs.StringVar(&r.bindAddress, "bind-address", "", "IP address to publish host endpoints on")
+	fs.StringVar(&r.computeTarget, "compute", "", "where the instance's Docker (its kind cluster and every container) runs: empty for this machine, or ssh://[user@]host[:port] for a remote Linux host reached over SSH (docs/remote-compute.md)")
 	fs.StringVar(&r.cloudsqlConn, "cloudsql-connector", "", "host:port the Cloud SQL connectors' TLS listener binds; they dial port 3307, so a second instance takes another loopback address (default: bind address, port 3307)")
 	fs.BoolVar(&r.allowRemote, "allow-remote", false, "permit binding a non-loopback address (unsafe)")
 	fs.IntVar(&r.portBase, "port-base", 0, "move every fixed default port so the layout starts here (control here, ingress +80, console +90); explicit --port-* flags still win (0 = the defaults, from 9000)")
@@ -324,6 +331,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.appHub, "port-apphub", 0, "App Hub API host port (0 = OS-assigned; default 9048)")
 	fs.IntVar(&r.alloyDB, "port-alloydb", 0, "AlloyDB for PostgreSQL API host port (0 = OS-assigned; default 9063)")
 	fs.IntVar(&r.filestore, "port-filestore", 0, "Filestore API host port (0 = OS-assigned; default 9071)")
+	fs.IntVar(&r.dataflow, "port-dataflow", 0, "Dataflow API host port (0 = OS-assigned; default 9074)")
 	fs.IntVar(&r.onnx, "port-onnx", 0, "ONNX runner host port, for BigQuery ML's imported ONNX models in the onnx build (0 = OS-assigned; default 9025)")
 	fs.IntVar(&r.spark, "port-spark", 0, "Spark procedure runner host port, for BigQuery's stored procedures for Apache Spark (0 = OS-assigned; default 9049)")
 	fs.IntVar(&r.tfconvert, "port-tfconvert", 0, "TensorFlow SavedModel converter host port, for BigQuery ML's imported TENSORFLOW models (0 = OS-assigned; default 9027)")
@@ -368,6 +376,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.logLevel, "log-level", "", "log level: trace, debug, info, warn, error")
 	fs.StringVar(&r.iamEnforcement, "iam-enforcement", "", "IAM enforcement: off (policies are stored, never checked) or on (mapped API methods check the caller's permissions, as on Google) (default off)")
 	fs.BoolVar(&r.acceptMSSQLEULA, "accept-mssql-eula", false, "accept Microsoft's End-User Licensing Agreement for SQL Server ("+MSSQLEULAURL+") yourself, for the Cloud SQL for SQL Server instances this instance creates: their servers run Microsoft's SQL Server image, which starts only once it is accepted; who accepted and when is recorded on each instance (also CLOUDBURROW_ACCEPT_MSSQL_EULA=Y)")
+	fs.BoolVar(&r.acceptOmniTerms, "accept-alloydb-omni-terms", false, "accept Google's AlloyDB Omni licence terms ("+OmniTermsURL+") yourself, for the AlloyDB clusters this instance creates: their instances then run Google's AlloyDB Omni image instead of PostgreSQL; who accepted and when is recorded with each cluster (also CLOUDBURROW_ACCEPT_ALLOYDB_OMNI_TERMS=Y)")
 	fs.BoolVar(&r.cbHostSteps, "cloudbuild-host-steps", false, "let Cloud Build run steps other than docker build, docker push and pack, for builds submitted from this machine's loopback only; each runs as a container with the host's Docker socket, which gives it control of the host (unsafe)")
 	fs.BoolVar(&r.allowUnconfined, "allow-unconfined-containers", false, "let the Dataproc DOCKER optional component run each node's Docker daemon with seccomp, AppArmor and the /proc and /sys masks unconfined, which weakens the isolation between those containers and this machine (unsafe; also CLOUDBURROW_ALLOW_UNCONFINED_CONTAINERS=true)")
 	fs.StringVar(&r.appEngineURL, "appengine-url", "", "base URL of a local HTTP server standing in for the App Engine app, such as http://localhost:8080: Cloud Tasks and Cloud Scheduler deliver App Engine targets there (default: none, and every App Engine attempt fails 404)")
@@ -471,6 +480,11 @@ func refuseFileExposure(cfg *Config, path string, explicit bool, keys map[string
 			"a discovered file cannot let other web sites call the emulator (#677): pass --cors-allow-origin "+
 			"(or %sCORS_ALLOW_ORIGIN, or name the file with --config), and remove the key", path, EnvPrefix)
 	}
+	if !explicit && cfg.AlloyDB.AcceptOmniTerms {
+		return fmt.Errorf("config file %s, found in the working directory, sets alloydb.acceptOmniTerms; "+
+			"a discovered file cannot accept Google's AlloyDB Omni licence terms (%s) on your behalf (#2207): pass "+
+			"--accept-alloydb-omni-terms (or %sACCEPT_ALLOYDB_OMNI_TERMS=Y, or name the file with --config), and remove the key", path, OmniTermsURL, EnvPrefix)
+	}
 	if !explicit && cfg.CloudBuildHostSteps {
 		return fmt.Errorf("config file %s, found in the working directory, sets cloudbuildHostSteps; "+
 			"a discovered file cannot let builds run containers with the host's Docker socket (#1382): pass "+
@@ -480,6 +494,11 @@ func refuseFileExposure(cfg *Config, path string, explicit bool, keys map[string
 		return fmt.Errorf("config file %s, found in the working directory, sets allowUnconfinedContainers; "+
 			"a discovered file cannot let containers run with seccomp, AppArmor and the /proc and /sys masks unconfined (#2162): pass "+
 			"--allow-unconfined-containers (or %sALLOW_UNCONFINED_CONTAINERS=true, or name the file with --config), and remove the key", path, EnvPrefix)
+	}
+	if !explicit && cfg.Compute != "" {
+		return fmt.Errorf("config file %s, found in the working directory, sets compute; "+
+			"a discovered file cannot send the instance's Docker, and the reverse forwards to this machine's endpoints, "+
+			"to another host (#2209): pass --compute (or %sCOMPUTE, or name the file with --config), and remove the key", path, EnvPrefix)
 	}
 	if _, ok := keys["bindAddress"]; ok && !explicit {
 		if ip := net.ParseIP(cfg.BindAddress); ip != nil && !ip.IsLoopback() {
@@ -514,6 +533,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	str("PROJECT", &cfg.Project)
 	str("BIND_ADDRESS", &cfg.BindAddress)
 	str("CLOUDSQL_CONNECTOR", &cfg.CloudSQLConnector)
+	str("COMPUTE", &cfg.Compute)
 
 	if v := getenv(EnvPrefix + "ALLOW_REMOTE"); v != "" {
 		b, err := strconv.ParseBool(v)
@@ -557,6 +577,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_APPHUB", &cfg.Endpoints.AppHub},
 		{"PORT_ALLOYDB", &cfg.Endpoints.AlloyDB},
 		{"PORT_FILESTORE", &cfg.Endpoints.Filestore},
+		{"PORT_DATAFLOW", &cfg.Endpoints.Dataflow},
 		{"PORT_ONNX", &cfg.Endpoints.ONNX},
 		{"PORT_TFCONVERT", &cfg.Endpoints.TFConvert},
 		{"PORT_SPARK", &cfg.Endpoints.Spark},
@@ -659,6 +680,13 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		}
 		cfg.AcceptMSSQLEULA, cfg.Source.MSSQLEULA = true, "env"
 	}
+	// Google's AlloyDB Omni terms (#2207): exactly Y, as Microsoft's.
+	if v := getenv(EnvPrefix + "ACCEPT_ALLOYDB_OMNI_TERMS"); v != "" {
+		if v != "Y" {
+			return fmt.Errorf("%sACCEPT_ALLOYDB_OMNI_TERMS: must be Y, which accepts Google's AlloyDB Omni licence terms (%s) (got %q)", EnvPrefix, OmniTermsURL, v)
+		}
+		cfg.AlloyDB.AcceptOmniTerms, cfg.Source.OmniTerms = true, "env"
+	}
 	if v := getenv(EnvPrefix + "CLOUDBUILD_HOST_STEPS"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -695,6 +723,9 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	if set["cloudsql-connector"] {
 		cfg.CloudSQLConnector = raw.cloudsqlConn
 	}
+	if set["compute"] {
+		cfg.Compute = raw.computeTarget
+	}
 	for _, p := range []struct {
 		name string
 		src  int
@@ -730,6 +761,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-apphub", raw.appHub, &cfg.Endpoints.AppHub},
 		{"port-alloydb", raw.alloyDB, &cfg.Endpoints.AlloyDB},
 		{"port-filestore", raw.filestore, &cfg.Endpoints.Filestore},
+		{"port-dataflow", raw.dataflow, &cfg.Endpoints.Dataflow},
 		{"port-onnx", raw.onnx, &cfg.Endpoints.ONNX},
 		{"port-tfconvert", raw.tfconvert, &cfg.Endpoints.TFConvert},
 		{"port-spark", raw.spark, &cfg.Endpoints.Spark},
@@ -827,6 +859,13 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["allow-unconfined-containers"] {
 		cfg.AllowUnconfinedContainers = raw.allowUnconfined
+	}
+	if set["accept-alloydb-omni-terms"] {
+		cfg.AlloyDB.AcceptOmniTerms = raw.acceptOmniTerms
+		cfg.Source.OmniTerms = ""
+		if raw.acceptOmniTerms {
+			cfg.Source.OmniTerms = "flag"
+		}
 	}
 	if set["accept-mssql-eula"] {
 		cfg.AcceptMSSQLEULA = raw.acceptMSSQLEULA

@@ -17,7 +17,7 @@ import (
 
 func (p cloudSQLProvider) engine() *sqladmin.Postgres {
 	return &sqladmin.Postgres{Name: sqlAdminPostgresInstance, Version: "POSTGRES_17",
-		User: components.CloudSQLUser, Database: components.CloudSQLDatabase,
+		User: components.CloudSQLUser, Database: components.CloudSQLDatabase, UserPassword: p.password,
 		HostAddr: func() string { return p.endpoint }}
 }
 

@@ -32,7 +32,7 @@ func TestDataprocHDFSThroughThePage(t *testing.T) {
 	p.submitForm(map[string]string{"clusterName": "hdfs-b", "clusterType": "SINGLE"}, "clusterName")
 	cluster := "projects/" + project + "/regions/us-central1/clusters/hdfs-b"
 	t.Cleanup(func() {
-		consoleDo(t, "POST", "/api/act/dataproc-clusters?project="+project+"&name="+cluster+"&action=delete", "{}")
+		dpDeleteCluster(t, project, cluster)
 	})
 	dpWait(t, "dataproc-clusters", project, cluster, `"Running"`, 25*time.Minute)
 	p.navigate("/dataproc/clusters?project=" + project)

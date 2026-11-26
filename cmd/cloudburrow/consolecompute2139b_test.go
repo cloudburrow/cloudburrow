@@ -147,7 +147,7 @@ func TestConsoleComputeInstanceGroups2139b(t *testing.T) {
 		t.Fatalf("web's VMs = %+v", vms)
 	}
 	acts := groups.DetailActions(ctx, project, path)
-	if got := vpcActionIDs(acts); got != "resize,restart,updatevms,editautoscaling,editports,delete,startvms,stopvms,suspendvms,resumevms,deletevms,applyupdates" {
+	if got := vpcActionIDs(acts); got != "resize,restart,updatevms,editautoscaling,editautohealing,editports,delete,startvms,stopvms,suspendvms,resumevms,deletevms,applyupdates" {
 		t.Fatalf("web's actions = %s", got)
 	}
 	if f := vpcField(c2139bAction(acts, "editautoscaling").Fields, "cpuTarget"); f.Default != "70" {

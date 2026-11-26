@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/cloudburrow/cloudburrow/internal/byoc"
 	"github.com/cloudburrow/cloudburrow/internal/hfmodels"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/modelgarden"
@@ -1219,7 +1220,58 @@ const (
 	// result dialog draws it (page images with their boxes beside the text
 	// and rows), on a page of its own: Document AI's analysis page (#2084).
 	KindResult SectionKind = "result"
+	// KindPipelineGraph is a pipeline run's runtime graph (Section.Pipeline,
+	// #2205): its tasks drawn as Google's run page draws them, nested DAGs
+	// expandable in place, artifacts shown with Expand artifacts, and the
+	// Pipeline run analysis pane beside it, its Node info the chosen node's.
+	KindPipelineGraph SectionKind = "pipelinegraph"
+	// KindGraph is a Dataflow job's graph (#2215): Pipeline's steps drawn
+	// as boxes joined by the collections that pass between them, each
+	// with its state and the elements it has output, as Google's Job graph
+	// tab draws them; choosing a step shows its properties.
+	KindGraph SectionKind = "graph"
 )
+
+// PipelineGraph is a KindPipelineGraph section's run: its nodes and the
+// run's summary for the Pipeline run analysis pane.
+type PipelineGraph struct {
+	Nodes   []PipelineNode  `json:"nodes"`
+	Summary []PropertyGroup `json:"summary,omitempty"`
+}
+
+// PipelineNode is one node of a run's graph: a task, a DAG (a nested
+// pipeline, a condition, an exit handler), a loop, a loop's iteration or
+// an artifact. Parent is the DAG node it is drawn in ("" the root);
+// After are the nodes of the same parent it runs after, Inputs the
+// artifact nodes it takes (drawn as edges when artifacts are shown).
+type PipelineNode struct {
+	ID     string          `json:"id"`
+	Parent string          `json:"parent,omitempty"`
+	Name   string          `json:"name"`
+	Kind   string          `json:"kind"`
+	State  string          `json:"state"`
+	After  []string        `json:"after,omitempty"`
+	Inputs []string        `json:"inputs,omitempty"`
+	Info   []PropertyGroup `json:"info,omitempty"`
+}
+
+// JobGraph is a KindGraph section's content: the job's steps, each
+// naming the steps whose output it reads, in the pipeline's order.
+type JobGraph struct {
+	Steps []JobGraphStep `json:"steps"`
+}
+
+// JobGraphStep is one box of a job graph: its name and kind (Read, ParDo,
+// GroupByKey and so on), its state, the IDs of the steps it reads, and
+// what its step panel shows.
+type JobGraphStep struct {
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	Kind       string     `json:"kind,omitempty"`
+	State      string     `json:"state,omitempty"`
+	Inputs     []string   `json:"inputs,omitempty"`
+	Properties []Property `json:"properties,omitempty"`
+}
 
 // Media is a KindMedia section's player: Src is the console's own media
 // route for the object, Type its audio type, and Label what the player is
@@ -1278,6 +1330,8 @@ type Section struct {
 	// details, its variables with detailed history, and its Parent,
 	// Children, Next and Previous entries, each a link to that entry.
 	StepEntries []StepEntryView `json:"stepEntries,omitempty"`
+	// Pipeline is the content when Kind is KindPipelineGraph.
+	Pipeline *PipelineGraph `json:"pipeline,omitempty"`
 	// Series is the content when Kind is KindChart.
 	Series []ChartSeries `json:"series,omitempty"`
 	// SeriesTitle, on a listing section with Series, draws them as one
@@ -1290,6 +1344,8 @@ type Section struct {
 	Visualization string `json:"visualization,omitempty"`
 	// Media is the content when Kind is KindMedia.
 	Media *Media `json:"media,omitempty"`
+	// JobGraph is the content when Kind is KindGraph (a Dataflow job's).
+	JobGraph *JobGraph `json:"jobGraph,omitempty"`
 	// Unavailable explains why this one section has no content, so a section
 	// that cannot be read shows its own error inside its own panel rather
 	// than an empty table claiming the resource holds nothing.
@@ -1863,6 +1919,11 @@ type Action struct {
 	// another origin opens in a new window: Developer Connect's Connect
 	// your account opens the provider's consent page (#2105).
 	Href string `json:"href,omitempty"`
+	// OpenWindow, when set, makes the action open a page on another origin
+	// the console mints a link to: a POST to this console API path answers
+	// {"url"}, which opens in a new window, as Workbench's Open JupyterLab
+	// opens the instance's JupyterLab (#2198) with a one-time code.
+	OpenWindow string `json:"openWindow,omitempty"`
 	// Terminal, when set, makes the action Google's Run in Cloud Shell: it
 	// opens the console's terminal (#781) and runs this command line in its
 	// active tab, as a Testing tab's test command runs (#2049). The action
@@ -2159,11 +2220,31 @@ type Server struct {
 	terminal     Terminal
 	termSessions *terminalSessions
 
+	// jupyter is the Workbench instances' JupyterLab proxy (#2198,
+	// jupyterproxy.go).
+	jupyter jupyterState
+
 	// instanceSrc performs the Instance page's state save and load, reset
 	// and seed through the admin API, with the page's own token (#801); nil
 	// offers no page. instanceTokenFile is where the token is, not the token.
-	instanceSrc       InstanceSource
+	instanceSrc InstanceSource
+	// mail is the local mail sink (mail.go), or nil; clocks the Instance
+	// page's service clocks.
+	mail              MailSource
+	clocks            []Clock
 	instanceTokenFile string
+	// computeSrc is where the instance's compute runs (#2209); nil is this
+	// machine's Docker.
+	computeSrc ComputeSource
+
+	// cloud is bring your own cloud (#2209): Settings > Compute and
+	// Compute capacity; nil offers no page. cloudAuth checks the admin
+	// token; nil uses instanceSrc's.
+	cloud         *byoc.Manager
+	cloudInstance string
+	cloudAuth     ComputeAuthorizer
+	// mover runs Compute capacity's Move (cloudmove.go); nil offers none.
+	mover ComputeMover
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -2242,10 +2323,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/logs", s.handleDeleteLog)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/instance", s.handleInstance)
+	mux.HandleFunc("GET /api/instance/compute", s.handleCompute)
+	mux.HandleFunc("POST /api/instance/compute/reconnect", s.handleComputeReconnect)
 	mux.HandleFunc("POST /api/instance/save", s.handleStateSave)
 	mux.HandleFunc("POST /api/instance/load", s.handleStateLoad)
 	mux.HandleFunc("POST /api/instance/reset", s.handleInstanceReset)
 	mux.HandleFunc("POST /api/instance/seed", s.handleInstanceSeed)
+	s.cloudRoutes(mux)
+	mux.HandleFunc("GET /api/mail", s.handleMail)
+	mux.HandleFunc("GET /api/mail/{id}", s.handleMailMessage)
+	mux.HandleFunc("DELETE /api/mail", s.handleMailDelete)
+	mux.HandleFunc("GET /api/clocks", s.handleClocks)
+	mux.HandleFunc("POST /api/clocks/{id}", s.handleClockAdvance)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/metrics/series", s.handleSeries)
 	mux.HandleFunc("GET /api/metrics/requests", s.handleRequestMetrics)
@@ -2289,6 +2378,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/objects/{service}", s.handleDeleteObject)
 	mux.HandleFunc("GET /api/terminal", s.handleTerminalStatus)
 	mux.HandleFunc("GET /api/terminal/socket", s.handleTerminalSocket)
+	mux.HandleFunc("POST /api/workbench/open", s.handleWorkbenchOpen)
 	mux.HandleFunc("GET /api/about", s.handleAbout)
 	mux.HandleFunc("GET /api/connect", s.handleConnect)
 	mux.HandleFunc("GET /api/diagnose", s.handleDiagnose)
@@ -2324,7 +2414,8 @@ func (s *Server) Handler() http.Handler {
 
 	// The Host check runs first: sameOriginOnly compares Origin with Host,
 	// which proves nothing when both name a rebound attacker domain (#676).
-	return hostguard.Wrap(sameOriginOnly(noStore(withScope(mux))))
+	// A Workbench instance's proxy host is its JupyterLab (#2198).
+	return hostguard.Wrap(s.withJupyter(sameOriginOnly(noStore(withScope(mux)))))
 }
 
 func isAsset(path string) bool {

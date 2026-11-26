@@ -783,11 +783,10 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 		return nil, Errorf(http.StatusPreconditionFailed, "Invalid request: a %s instance runs the image of --services %s, "+
 			"which this instance was not started with; run `cloudburrow up --services ...,%s`.", b.DatabaseVersion, svc, svc)
 	}
-	if !spec.MySQL() && !IsSQLServer(spec.DatabaseVersion) {
-		// PostgreSQL's postgres user trusts every connection, as the server
-		// `up` runs does (docs/cloudsql.md): no password is kept.
-		spec.RootPassword = ""
-	}
+	// PostgreSQL's postgres user is given rootPassword at the server's
+	// first start, and signs in with it (#2208); with none it cannot sign
+	// in until users.update sets one, as Google documents ("You must set
+	// root passwords before you can connect to PostgreSQL instances").
 	if replica {
 		err = s.replicaKey(r.Context(), &spec, key)
 	} else if key != "" {

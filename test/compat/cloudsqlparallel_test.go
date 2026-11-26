@@ -449,7 +449,7 @@ func TestConsoleCloudSQLParallelExportAndImport(t *testing.T) {
 	time.Sleep(time.Second) // the operation finishes after its last file
 	pg.exec(t, "DROP TABLE xfer_rows")
 	act("import", map[string]string{"uri": uri, "fileType": "SQL", "database": "cloudburrow", "parallel": "true", "threads": "2"})
-	c, err := pgx.Connect(h.Context(), fmt.Sprintf("postgres://cloudburrow@%s/cloudburrow?sslmode=disable", h.Endpoint(EnvCloudSQL)))
+	c, err := pgx.Connect(h.Context(), upPGURL(h.Endpoint(EnvCloudSQL), "cloudburrow"))
 	if err != nil {
 		t.Fatal(err)
 	}

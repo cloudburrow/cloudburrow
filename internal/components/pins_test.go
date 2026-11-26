@@ -59,6 +59,14 @@ func pinned(e entry) string {
 	return e.Image + "@" + *e.Digest
 }
 
+// omniPin is an image:tag@digest pin of e.
+func omniPin(e entry) string {
+	if e.Digest == nil {
+		return e.Image
+	}
+	return e.Image + "@" + *e.Digest
+}
+
 // The binary ships the pins dependencies.json records (#597): a Go constant
 // that disagreed with the inventory would make the release's "tested
 // against" list false without anything failing.
@@ -77,6 +85,10 @@ func TestPinsMatchTheInventory(t *testing.T) {
 		"BuilderImage":            {buildpacks.BuilderImage, pinned(inv["build"]["buildpacksBuilder"])},
 		"PHPFunctionBuilderImage": {buildpacks.PHPFunctionBuilderImage, pinned(inv["build"]["buildpacksPHPFunctionBuilder"])},
 		"TerminalImage":           {terminal.Image, pinned(inv["consoleTerminal"]["cloudSdkImage"])},
+		// AlloyDB Omni (#2207): the tag and the index digest.
+		"AlloyDBOmni15Image": {components.AlloyDBOmni15Image, omniPin(inv["emulatorBackends"]["alloyDBOmni15"])},
+		"AlloyDBOmni16Image": {components.AlloyDBOmni16Image, omniPin(inv["emulatorBackends"]["alloyDBOmni16"])},
+		"AlloyDBOmni17Image": {components.AlloyDBOmni17Image, omniPin(inv["emulatorBackends"]["alloyDBOmni17"])},
 	}
 	for name, c := range checks {
 		if c[0] != c[1] {

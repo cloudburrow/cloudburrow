@@ -39,6 +39,9 @@ type lbEndpoint struct {
 	neg      obj // a serverless or PSC group
 	vmNet    vmNet
 	hasVM    bool
+	// draining: the endpoint is leaving its group, and takes no new
+	// requests or connections (#2226).
+	draining bool
 }
 
 // namedPort is a group's port of that name, 0 when it has none.
@@ -151,7 +154,17 @@ func (s *Server) backendSetLocked(rel string) (lbBackendSet, bool) {
 	}
 	for _, e := range listOf(bs["backends"]) {
 		be := objOf(e)
-		g := lbGroup{backend: be, endpoints: s.groupEndpointsLocked(str(be, "group"), str(bs, "portName"), int(numOr(bs, "port", 80)))}
+		g := lbGroup{backend: be}
+		for _, ep := range s.groupEndpointsLocked(str(be, "group"), str(bs, "portName"), int(numOr(bs, "port", 80))) {
+			// Connection draining (#2226): a VM leaving the group drains
+			// for this backend service's timeout, then is gone from it.
+			draining, gone := s.drainStateLocked(bs, ep)
+			if gone {
+				continue
+			}
+			ep.draining = draining
+			g.endpoints = append(g.endpoints, ep)
+		}
 		for _, ep := range g.endpoints {
 			if s.endpointHealthyLocked(set, ep) {
 				g.healthy = append(g.healthy, ep)
@@ -170,6 +183,7 @@ type lbBalanceState struct {
 	inflight map[string]int
 	rate     map[string]*rateWindow
 	orca     orcaStore
+	flight   lbInflight // requests in flight, for draining's end (#2226)
 }
 
 // rateWindow counts requests in the last second.
@@ -279,8 +293,14 @@ func (b *lbBalanceState) pick(set lbBackendSet, key string, exclude map[string]b
 		// A passthrough load balancer with no healthy backend sends to
 		// every backend (load-balancing/docs/internal#traffic_distribution).
 		for _, g := range set.groups {
-			if len(g.endpoints) > 0 {
-				g.healthy = g.endpoints
+			var eps []lbEndpoint
+			for _, ep := range g.endpoints {
+				if !ep.draining {
+					eps = append(eps, ep)
+				}
+			}
+			if len(eps) > 0 {
+				g.healthy = eps
 				cands = append(cands, cand{g, 1, 0})
 			}
 		}

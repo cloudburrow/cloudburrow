@@ -116,8 +116,10 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_CMEK_KMS` | as `KMS` | the customer-managed keys of Memorystore (memorystore shard) and of Cloud SQL and a Backup and DR vault (sql shard) (#1568), and of Spanner's databases and backups (emulators shard, #1950), so the Cloud KMS tests stay in served |
 | `CLOUDBURROW_TEST_SQL_SERVICEUSAGE` | as `SERVICEUSAGE` | gcloud privateca roots create's `generateServiceIdentity` of the CA service agent (#1834), in the sql shard, so the Service Usage tests stay in storage |
 | `CLOUDBURROW_TEST_SQL_COMPUTE` | as `COMPUTE` | Cloud SQL's private networks checked against Compute Engine's (#1936), in the sql shard, so the Compute Engine suite stays in served |
+| `CLOUDBURROW_TEST_FILESTORE_BACKUPDR` | as `BACKUPDR` | Backup and DR of Filestore instances (#1524), in the served and gke shards, so the Backup and DR suites stay in sql |
 | `CLOUDBURROW_TEST_RUN_COMPUTE` | as `COMPUTE` | `TestComputeExternalHTTPLoadBalancerThroughTheGoClient` (#2153): the run shard's Compute Engine, whose load balancers front its Cloud Run services and VMs and which App Hub discovers, so the Compute Engine suite stays in served |
 | `CLOUDBURROW_TEST_SQL_MONITORING` | as `MONITORING` | Cloud SQL's managed connection pooling metrics (#2163), in the sql shards, so the Monitoring suites stay in theirs |
+| `CLOUDBURROW_TEST_RUN_MONITORING` | as `MONITORING` | `TestAgentPlatformModelMonitoringInputsAndAlerts` (#2214): Vertex AI Model Monitoring's alerts in the run shard's Cloud Monitoring, so the Monitoring suites stay in theirs |
 | `CLOUDBURROW_TEST_MEMORYSTORE_COMPUTE` | as `COMPUTE` | Memorystore's networks and reserved ranges checked against Compute Engine's (#1936), in the memorystore shard |
 | `CLOUDBURROW_TEST_SQL_PRIVATECA` | as `PRIVATECA` | the CA pools of Cloud SQL's `CUSTOMER_MANAGED_CAS_CA` instances (#1834), in the sql shard, so the Certificate Authority Service tests stay in their shard |
 | `CLOUDBURROW_TEST_MEMORYSTORE_PRIVATECA` | as `PRIVATECA` | the CA pools of Redis clusters' `SERVER_CA_MODE_CUSTOMER_MANAGED_CAS_CA` (#1907), in the memorystore shard, so the Certificate Authority Service tests stay in their shard |
@@ -140,7 +142,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_MEMORYSTORE_ADMIN` | `CLOUDBURROW_MEMORYSTORE_ENDPOINT` | Memorystore admin API (#1302) |
 | `CLOUDBURROW_TEST_MEMORYSTORE_PROJECT` | `GOOGLE_CLOUD_PROJECT` | the project the one Memorystore instance is in |
 | `CLOUDBURROW_TEST_MYSQL`, `CLOUDBURROW_TEST_MYSQL_PASSWORD` | `MYSQL_HOST`:`MYSQL_PORT`, `MYSQL_PASSWORD` | Cloud SQL for MySQL |
-| `CLOUDBURROW_TEST_CLOUDSQL` | `PGHOST`:`PGPORT` | Cloud SQL for PostgreSQL |
+| `CLOUDBURROW_TEST_CLOUDSQL`, `CLOUDBURROW_TEST_CLOUDSQL_PASSWORD` | `PGHOST`:`PGPORT`, `PGPASSWORD` | Cloud SQL for PostgreSQL (#2208: the server checks the password) |
 | `CLOUDBURROW_TEST_SQLADMIN` | `CLOUDBURROW_SQLADMIN_ENDPOINT` | the Cloud SQL Admin API (#1301), with either Cloud SQL service |
 | `CLOUDBURROW_TEST_BACKUPDR` | `CLOUDBURROW_BACKUPDR_ENDPOINT` | the Backup and DR Service (#1433), `--services backupdr` with either Cloud SQL service; gcloud backup-dr and Terraform's `google_backup_dr_*` |
 | `CLOUDBURROW_TEST_COMPUTE` | `CLOUDBURROW_COMPUTE_ENDPOINT` | the Compute Engine API's VPC networking (#1936), `--services compute`; JSON under `/compute/v1/`, in process |
@@ -151,6 +153,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_PRIVATECA` | `CLOUDBURROW_PRIVATECA_ENDPOINT` | Certificate Authority Service (#1834), `--services privateca`; gRPC and JSON on one port |
 | `CLOUDBURROW_TEST_WORKFLOWS` | `CLOUDBURROW_WORKFLOWS_ENDPOINT` | Workflows and Workflow Executions (#1986), `--services workflows`; gRPC and JSON on one port; run in the run shard, beside the Cloud Run, Cloud Storage and Pub/Sub its workflows call |
 | `CLOUDBURROW_TEST_DATAPROC` | `CLOUDBURROW_DATAPROC_ENDPOINT` | The Dataproc API's serverless surface, Serverless for Apache Spark (#2156), `--services dataproc` with `bigquery`; gRPC and JSON on one port; its batches and sessions run in the spark shard beside the BigQuery, Cloud Storage and Cloud Logging they use, with `CLOUDBURROW_TEST_SPARK` |
+| `CLOUDBURROW_TEST_DATAFLOW` | `CLOUDBURROW_DATAFLOW_ENDPOINT` | The Dataflow v1b3 API (#2215), `--services dataflow`; gRPC and JSON on one port; its Beam pipelines run on the pinned Flink job server in Docker, in the nightly dataflow shard beside the Cloud Storage, Pub/Sub, BigQuery and Cloud Logging they use, with `CLOUDBURROW_TEST_SPARK` |
 | `CLOUDBURROW_TEST_DATAFORM` | `CLOUDBURROW_DATAFORM_ENDPOINT` | Dataform (#2105), `--services dataform`; gRPC and JSON on one port; run in the run shard, beside the BigQuery its invocations run on, the Secure Source Manager its git remotes are and the Secret Manager their tokens are in; needs Docker and git |
 | `CLOUDBURROW_TEST_TRACE` | `CLOUDBURROW_TRACE_ENDPOINT` | Cloud Trace (#2118), `--services trace`; the Cloud Trace API v1 and v2, gRPC and JSON, and OTLP trace ingestion (OTLP/gRPC and `POST /v1/traces`) on one port; run in the served shard beside Cloud Logging |
 | `CLOUDBURROW_TEST_PARAMETERMANAGER` | `CLOUDBURROW_PARAMETERMANAGER_ENDPOINT` | Parameter Manager (#2054), `--services parametermanager`; gRPC and JSON on one port; run in the storage shard beside the Secret Manager and Cloud KMS its renders and keys use, and its IAM test in the iam shard |
@@ -171,9 +174,10 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_EMBEDDINGS` | the `local AI:` line of `up.log`, set only when that block's `embeddings: POST …` line says the embedding runtime loaded (#1765; `embeddings: not loaded` leaves it unset) | `TestBigQueryMLRemoteGenerateEmbedding` (#1760, with `CLOUDBURROW_TEST_BIGQUERY`), `TestEmbeddingGemmaThroughTheOfficialSDK`, `TestEmbeddingGemmaThroughThePredictionClient`, `TestEmbedContentThroughThePredictionClient`, `TestRawPredictOnTheEmbeddingModel`, `TestStreamingPredictOnTheEmbeddingModel` and, with `CLOUDBURROW_TEST_CONSOLE`, `TestEmbedContentEmbedsImagesThroughThePredictionClient` (#1454, which downloads and loads `embeddinggemma-2-onnx-community`, 882 MB, through the console's Local models), `TestEmbedContentEmbedsAudioThroughThePredictionClient` (#1651, the same, and with `CLOUDBURROW_TEST_STORAGE`; it fetches the model card's 1.9 MB `jfk.wav` from Hugging Face, pinned by SHA-256), `TestEmbedContentEmbedsMP3ThroughThePredictionClient` (#1721, the same; it embeds `testdata/jfk.mp3` beside that WAV), `TestEmbedContentEmbedsMPEG25MP3ThroughThePredictionClient` (#1734, the same; it embeds `testdata/jfk-mpeg25-8k.mp3` and `testdata/jfk-mpeg25-11k.mp3`), `TestEmbedContentEmbedsAVideosAudioTrackThroughThePredictionClient` (#1732, the same; it embeds `testdata/turtle-jfk.mp4` with its audio track), `TestEmbedContentEmbedsVP9AndAV1ThroughThePredictionClient` (#1731, the same; VP9 and AV1 clips from `internal/embedding/testdata`), `TestEmbedContentEmbedsMultichannelWAVAndGrayVideoThroughThePredictionClient` (#1651, the same; a 5.1 copy of `jfk.wav`, `testdata/jfk-alaw.wav`, a monochrome H.265 clip and a 5.1 PCM MOV from `internal/embedding/testdata`), `TestEmbedContentEmbedsADPCMWAVAndLosslessAndMultichannelTracksThroughThePredictionClient` (#1651, the same; `testdata/jfk-ima.wav`, `testdata/jfk-ms.wav` and clips with FLAC, ALAC and 5.1 AAC tracks, `testdata/va-jfk-*.mp4`), `TestEmbedContentEmbedsSurroundAACAndG711TracksAnd3BitADPCMThroughThePredictionClient` (#1651, the same; clips with 7.1, 5.1 HE-AAC and µ-law tracks, `testdata/va-jfk-*`, and `testdata/jfk-ima3.wav`), `TestEmbedContentEmbeds2And5BitADPCMAndMP3WAVsThroughThePredictionClient` (#1651, the same; `testdata/jfk-ima2.wav`, `testdata/jfk-ima5.wav` and `testdata/jfk-mp3.wav`), `TestEmbedContentEmbedsHEICAndAnimatedWebPThroughThePredictionClient` (#1724, the same, with `CLOUDBURROW_TEST_STORAGE`), `TestConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK` (#1305) and `TestConsoleLocalModelsUnloadDeleteDownloadLoad` (#1306, which downloads the model again) and `TestConsoleLocalModelsLoadEmbedUnload` (#1396, with `CLOUDBURROW_TEST_CONTROL` and the admin token); only from a `make build-onnx` binary started with `--local-ai-embeddings` and `ONNXRUNTIME_LIB` set (#41) |
 | `CLOUDBURROW_TEST_ONNX` | set by hand (`1`) when the instance is a `make build-onnx` binary started with `ONNXRUNTIME_LIB` set | `TestBigQueryMLImportedONNXModel` (#1711, BigQuery ML's imported ONNX models, with `CLOUDBURROW_TEST_STORAGE`); without it, `TestBigQueryMLONNXNeedsTheOnnxBuild` checks the default build's 501 |
 | `CLOUDBURROW_TEST_SPARK` | set by hand (`1`), or by the spark shard of scripts/compat-shards.sh, on a host whose Docker may pull the pinned `apache/spark` images (about 1.5 GB each, one per Spark of the runtime versions) and fetch Google's BigQuery connectors for Spark from Maven Central | `TestBigQuerySparkStoredProcedures`, `TestBqSparkStoredProcedure`, `TestBigQuerySparkProcedureRuntimesAndTypes`, `TestBigQuerySparkProcedureContainerImage` (with `CLOUDBURROW_TEST_RUN`, whose port serves Artifact Registry) and `TestBigQuerySparkProcedureInvoker` (with `CLOUDBURROW_TEST_METADATA` and Resource Manager) (#2104, BigQuery's stored procedures for Apache Spark, with `CLOUDBURROW_TEST_BIGQUERY`, `CLOUDBURROW_TEST_STORAGE` and `CLOUDBURROW_TEST_LOGGING`); set nightly by nightly-sql-ephemeral.yml's spark job, and never in ci.yml, whose `never` list names them |
+| `CLOUDBURROW_TEST_REMOTE_STANDIN`, `CLOUDBURROW_TEST_REMOTE_INGRESS` | set for an instance started with `up --compute ssh://…` on the stand-in remote host (#2209): the stand-in's container name, which `scripts/remote-compute-standin.sh` prints, and the instance's ingress, `127.0.0.1:<--port-ingress>`, which the host publishes and the instance forwards here; run the tests with the `DOCKER_HOST` `cloudburrow env` exports for the instance, so `kind load` reaches the host | `TestRemoteComputeTheClusterRunsOnTheHost`, `TestRemoteComputeServesTheDefaultServices` ([remote-compute.md](../../docs/remote-compute.md)); the rest of the suite runs against such an instance unchanged |
 | `CLOUDBURROW_TEST_DOWNLOADS` | set by hand (`1`) to let tests download test data that is not cached yet; not an instance's | `TestEmbedContentEmbedsAFullParametricStereoTrackThroughThePredictionClient` (#1754, with `CLOUDBURROW_TEST_EMBEDDINGS` and `CLOUDBURROW_TEST_CONSOLE`, as the other EmbedContent tests): it reads ISO/IEC 14496-26's `al_sbr_ps_06.mp4` and `al_sbr_ps_06_ur.wav` through `internal/isoconformance`, which fetches them (about 3 MB, by HTTP range requests out of ISO's zips, pinned by SHA-256 and ISO's MD5) into the user's cache directory, never the repository; without the variable a file not cached yet skips the test |
-| `CLOUDBURROW_TEST_GCLOUD` | `--gcloud`, else `gcloud` on PATH | the gcloud and gsutil tests |
-| `CLOUDBURROW_TEST_TOFU` | `--tofu`, else `tofu` on PATH | the `TestTofu*` tests |
+| `CLOUDBURROW_TEST_GCLOUD` | `--gcloud`, else `gcloud` on PATH | the gcloud, gsutil and bq tests, which then fail rather than skip without the tools container; the gcloud that runs is always the tools image's (#2174) |
+| `CLOUDBURROW_TEST_TOFU` | `--tofu`, else `tofu` on PATH | the `TestTofu*` tests, which then fail rather than skip without the tools container; the tofu that runs is the tools image's (#2174) |
 
 Not set by the script, because no instance has a value for them: each is a test mode or a
 fixture a job makes for itself. `test/repo` fails when a variable in `test/compat` is in
@@ -213,15 +217,61 @@ The cluster name is needed to `kind load` the fixture image into **CloudBurrow's
 cluster, and the kubeconfig to port-forward the Knative gateway — CloudBurrow does not
 publish it on a host port. Both are skips, not failures, when unset.
 
-The gcloud, gsutil and bq tests run the gcloud named by `CLOUDBURROW_TEST_GCLOUD`, which must
-then exist, and the gsutil and bq beside it, or else the ones on PATH, and skip when there are
-none. CI
-sets it to the Google Cloud CLI release it installs, 593.0.0, whose archive checksum
-dependencies.json records. The Terraform and OpenTofu modules require `hashicorp/google`
-exactly, and each test copies `testdata/terraform/.terraform.lock.hcl` into its module before
-init, so a provider package that matches no locked hash fails init. Every one of these tests
-logs `gcloud version`, `gsutil version`, `bq version`, or `terraform version -json`
-(`tofu version -json`).
+### gcloud and Terraform run behind a network-layer egress block (#2174)
+
+Every gcloud, gsutil, bq, docker-credential-gcloud, Terraform and OpenTofu command the
+tests run, runs in the **tools container** (`toolscontainer_test.go`), never on the host:
+
+- **The image** (`testdata/tools/Dockerfile`) is Google's `google/cloud-sdk:593.0.0-slim`, by
+  digest, with Terraform 1.16.6, OpenTofu 1.12.6, and the `hashicorp/google` and
+  `google-beta` 8.12.0 providers in a filesystem mirror. Each download is checked against a
+  pinned SHA-256 at build time. The image's Terraform configuration names only that
+  mirror, so `init` never reaches a registry. The image is linux/amd64, the one platform
+  Google publishes, and runs emulated on an arm64 host.
+- **The network** is a `docker network create --internal` network, with no route out. The
+  test checks that Docker reports it as internal before any tool runs.
+  - The one other container on it is a relay, which forwards to a listener in the test
+    process. That listener dials only the host's loopback, and only for a connection that
+    carries the run's token.
+  - In the tools container, the nat table (`testdata/tools/init.sh`) does four things:
+    - it carries every TCP connection to a loopback address to the same port on the
+      host's loopback, where the instance and the tests' own servers listen;
+    - it answers every DNS query with 198.18.0.1, which is routed nowhere. That covers
+      `*.googleapis.com`, `*.google.com` and `metadata.google.internal`;
+    - it sends every other connection or datagram to the sink, which logs it and
+      refuses it (`testdata/egress/sink`);
+    - it refuses IPv6.
+  - Each logged attempt is an **escape**. The test whose tool made it fails, and so does
+    the run, at the end.
+- **The shim** (`testdata/tools/shim`) is what `PATH` names `gcloud`, `terraform` and the
+  rest. `TestMain` puts it first on `PATH`, before any test runs. It runs the tool with
+  `docker exec`, with the caller's working directory, environment and uid.
+  - Only the temporary directory (read-write), the repository, and the instance's state
+    directory, fixture and kubeconfig are mounted. Each is mounted at its own path.
+  - The shim refuses a path outside those mounts, and any path under
+    `~/.config/gcloud`. Until a test has started the container, it runs nothing.
+- **It fails closed.** Without Docker, or without an internal network, these tests skip and
+  give the reason. They fail instead when `CLOUDBURROW_TEST_GCLOUD` or
+  `CLOUDBURROW_TEST_TOFU` is set, as CI sets them. A tool is never run on the host.
+- **The proxy guards stay as a second layer.** `egressGuard` and `noGoogleEgress` still set
+  the proxy variables. Their proxies listen on the host's loopback, which the relay reaches.
+
+`TestToolsContainerBlocksGoogleAtTheNetworkLayer` is the self-test. It runs on a stack of its
+own, and checks these things:
+
+- a bare container on the internal network cannot reach 192.0.2.1 or 169.254.169.254, and
+  cannot resolve `storage.googleapis.com`;
+- in the tools container, with no proxy variable set, curl to `https://storage.googleapis.com`,
+  `http://169.254.169.254` and `http://metadata.google.internal` fails, and so does gcloud
+  with no endpoint override. Each attempt is logged as an escape;
+- the relay still reaches a server on the host's loopback.
+
+None of these requests leaves the machine.
+
+The Terraform and OpenTofu modules require `hashicorp/google` exactly. Each test copies
+`testdata/terraform/.terraform.lock.hcl` into its module before init, so a provider package
+that matches no locked hash fails init. Every one of these tests logs `gcloud version`,
+`gsutil version`, `bq version`, or `terraform version -json` (`tofu version -json`).
 
 `TestCloudRunRevisionReachesStorageAndPubSubWithNoClientOptions` needs Cloud Run, Storage and
 Pub/Sub in one instance. It reads `CLOUDBURROW_TEST_RUN_STORAGE` and `CLOUDBURROW_TEST_RUN_PUBSUB`
@@ -240,9 +290,8 @@ instance without Cloud Run, and needs `CLOUDBURROW_TEST_BIGQUERY`, `CLOUDBURROW_
 `CLOUDBURROW_TEST_KUBECONFIG` and `CLOUDBURROW_TEST_CLUSTER`, with docker, kind and go to build the
 env probe; it skips where Cloud Run is enabled, whose tests cover it.
 
-The `TestTofu*` tests run `cloudburrow terraform --binary tofu`. They use the OpenTofu binary
-named by `CLOUDBURROW_TEST_TOFU`, which must then exist, or else `tofu` on PATH, and skip when
-there is neither. CI's storage shard sets the variable.
+The `TestTofu*` tests run `cloudburrow terraform --binary tofu`, with the tools image's
+OpenTofu. CI's storage shard sets `CLOUDBURROW_TEST_TOFU`, so they fail there without it.
 
 `TestFunctionsFrameworkBuiltWithBuildpacks` (#678) runs only with
 `CLOUDBURROW_TEST_FUNCTIONS=1`, and then needs `CLOUDBURROW_TEST_CLUSTER`,

@@ -310,14 +310,29 @@ func (b *bigqueryIAM) sync(ctx context.Context, force bool) error {
 	return nil
 }
 
+// issued pushes the front's payload as token t is minted, before the
+// client that asked for it is answered, when t is one the payload gives:
+// the instance's own account's tokens are not given (payload), so for
+// them there is nothing to push, and the client is not kept waiting on
+// the front. It used to push for every token, and while the front was
+// slow to answer (a loaded machine, a Dataflow job writing to BigQuery) a
+// metadata-server token request waited up to the push's 5 seconds, as
+// long as Go's metadata client waits for an answer; each retry minted
+// another token and waited again, until the Go SDK's job submission
+// failed with "cannot fetch token" (#2215 round 7).
+func (b *bigqueryIAM) issued(ctx context.Context, t metadata.IssuedToken) {
+	if t.Email == "" || strings.EqualFold(t.Email, b.creds.Email) {
+		return
+	}
+	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	_ = b.sync(sctx, true)
+	cancel()
+}
+
 // start keeps the front's tokens and roles current until ctx ends, and
 // pushes each token as it is minted.
 func (b *bigqueryIAM) start(ctx context.Context) {
-	b.creds.OnIssue(func(metadata.IssuedToken) {
-		sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		_ = b.sync(sctx, true)
-		cancel()
-	})
+	b.creds.OnIssue(func(t metadata.IssuedToken) { b.issued(ctx, t) })
 	go func() {
 		t := time.NewTicker(bigqueryIAMEvery)
 		defer t.Stop()

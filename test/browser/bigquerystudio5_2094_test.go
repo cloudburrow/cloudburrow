@@ -171,6 +171,19 @@ func TestBigQueryStudioConnectToARuntimeThroughThePage(t *testing.T) {
 	t.Cleanup(func() {
 		consoleDo(t, http.MethodDelete, "/api/resources/colab-runtimes"+rq+"&name="+url.QueryEscape(rt), "")
 	})
+	// The dialog lists the region's running runtimes when it opens, and
+	// the assignment answers while the runtime is still starting (#2234:
+	// the dialog listed none on an instance whose runtime image was built).
+	for deadline := time.Now().Add(5 * time.Minute); ; {
+		id, status := runtimeNamed(existing)
+		if id == rt && status == "Running" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the runtime %s made through the API is %q after 5 minutes, want Running", rt, status)
+		}
+		time.Sleep(2 * time.Second)
+	}
 	p.clickExpr(`document.querySelector(` + fmt.Sprintf("%q", more) + `)`)
 	p.clickText(".bq-menu:not([hidden]) .bq-menu-item", "Connect to a runtime")
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#bq-rt-runtimes option")].some((o) => o.value === %q)`, rt))

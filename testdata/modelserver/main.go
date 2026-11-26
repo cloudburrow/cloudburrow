@@ -54,7 +54,9 @@ func main() {
 	mux.HandleFunc(health, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc(predict, func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Instances  []float64 `json:"instances"`
+			// Each instance is a number, or an object {"x": number}
+			// (Model Monitoring's instances name their features, #2214).
+			Instances  []xInstance `json:"instances"`
 			Parameters struct {
 				Report string `json:"report"`
 			} `json:"parameters"`
@@ -67,7 +69,8 @@ func main() {
 		var out struct {
 			Predictions []any `json:"predictions"`
 		}
-		for _, x := range req.Instances {
+		for _, in := range req.Instances {
+			x := float64(in)
 			switch req.Parameters.Report {
 			case "env":
 				out.Predictions = append(out.Predictions, env)
@@ -81,6 +84,25 @@ func main() {
 		_ = json.NewEncoder(w).Encode(out)
 	})
 	log.Fatal(http.ListenAndServe("0.0.0.0:"+port, mux))
+}
+
+// xInstance is an instance: a number, or {"x": number}.
+type xInstance float64
+
+func (x *xInstance) UnmarshalJSON(b []byte) error {
+	var n float64
+	if err := json.Unmarshal(b, &n); err == nil {
+		*x = xInstance(n)
+		return nil
+	}
+	var o struct {
+		X *float64 `json:"x"`
+	}
+	if err := json.Unmarshal(b, &o); err != nil || o.X == nil {
+		return fmt.Errorf("instance %s is neither a number nor {\"x\": number}", b)
+	}
+	*x = xInstance(*o.X)
+	return nil
 }
 
 func load(uri string) (model, error) {

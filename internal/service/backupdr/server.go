@@ -14,8 +14,10 @@
 //
 // Compute Engine instances and disks are protected through the instance's
 // Compute Engine API (#2075, compute.go), and backups.restore restores
-// them to a new VM or disk. Other workload types (AlloyDB, Filestore) need
-// servers CloudBurrow does not run, and are refused with that reason.
+// them to a new VM or disk. AlloyDB clusters and Filestore instances are
+// protected through their services (#1524, workloads.go), which restore
+// them. Regional disks, which Compute Engine here does not serve, are
+// refused with that reason.
 //
 // Every mutation is a long-running operation (google.longrunning), answered
 // done or running as the work is, and operations.get answers it
@@ -171,6 +173,8 @@ type Server struct {
 	// compute is the Compute Engine API (#2075), nil until it is served.
 	// mu guards it.
 	compute func() Compute
+	// workloads are AlloyDB's and Filestore's (#1524), by resource type.
+	workloads map[string]func() Workload
 }
 
 // state is every record, as it is kept.
@@ -186,6 +190,8 @@ type state struct {
 	Jobs map[string]*Job `json:"jobs,omitempty"`
 	// ComputeRuns are the Compute Engine backups' runs (#2075), by run ID.
 	ComputeRuns map[string]*computeRun `json:"computeRuns,omitempty"`
+	// WorkloadRuns are the AlloyDB and Filestore backups' runs (#1524).
+	WorkloadRuns map[string]*workloadRun `json:"workloadRuns,omitempty"`
 }
 
 type vault struct {
@@ -234,6 +240,8 @@ type association struct {
 	Name, Plan, Resource, ResourceType, DataSource, CreateTime, UpdateTime string
 	// LastBackup is by rule ID: the last backup's state and time.
 	LastBackup map[string]lastBackup
+	// Props are an AlloyDB or Filestore association's properties (#1524).
+	Props map[string]any `json:",omitempty"`
 }
 
 type lastBackup struct {

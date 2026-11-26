@@ -103,6 +103,8 @@ type adminDeps struct {
 	alloyDB *alloyDBService
 	// filestore is Filestore (#2192), nil unless enabled.
 	filestore *filestoreService
+	// dataflow is Dataflow (#2215), nil unless enabled.
+	dataflow *dataflowService
 	// trace is Cloud Trace (#2118), nil unless enabled.
 	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
@@ -262,6 +264,9 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	}
 	if d.filestore != nil {
 		api.RegisterResetter(&filestoreResetter{svc: d.filestore})
+	}
+	if d.dataflow != nil {
+		api.RegisterResetter(&dataflowResetter{svc: d.dataflow})
 	}
 	if d.trace != nil {
 		api.RegisterResetter(&traceResetter{svc: d.trace})

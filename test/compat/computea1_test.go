@@ -304,7 +304,8 @@ func TestComputeRegionalDisksThroughTheGoClient(t *testing.T) {
 		}
 		types = append(types, dt.GetName())
 	}
-	if strings.Join(types, ",") != "pd-balanced,pd-ssd,pd-standard" {
+	// Hyperdisk Balanced High Availability is a regional type too (#2206).
+	if strings.Join(types, ",") != "hyperdisk-balanced-high-availability,pd-balanced,pd-ssd,pd-standard" {
 		t.Fatalf("regional disk types = %v", types)
 	}
 	if dt, err := rdts.Get(ctx, &computepb.GetRegionDiskTypeRequest{Project: p, Region: region, DiskType: "pd-standard"}); err != nil || dt.GetValidDiskSize() != "200GB-65536GB" {

@@ -146,6 +146,7 @@ type Server struct {
 	lastEval   time.Time
 	logs       LogMatcher
 	publish    Publisher
+	mailer     Mailer
 	consoleURL string
 	uptime     uptimeState
 	// promStates are PromQL and MQL conditions' evaluation state.

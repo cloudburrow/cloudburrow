@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -149,7 +150,15 @@ func exportedEnv(cfg config.Config, info runtimeInfo, live bool) (config.Config,
 		return cfg, nil, err
 	}
 
-	return cfg, envVars(cfg, proj, adcPath), nil
+	vars := envVars(cfg, proj, adcPath)
+	if live && info.DockerHost != "" {
+		// Remote compute (#2209): the developer's docker and kind (a `kind
+		// load`, a `docker ps`) reach the instance's Docker on the host
+		// through the running up's connection, as CloudBurrow's own do.
+		vars = append(vars, envVar{"DOCKER_HOST", info.DockerHost,
+			"the instance's Docker on " + info.Compute + ", through the running up's SSH connection"})
+	}
+	return cfg, vars, nil
 }
 
 // gcloudOverridePrefix heads the variable gcloud reads each
@@ -404,6 +413,17 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			vars = append(vars, envVar{"CLOUDBURROW_FIRESTORE_MONGODB_CA_FILE", filepath.Join(cfg.InstanceDir(), firestoreadmin.MongoCAFile),
 				"Firestore with MongoDB compatibility's CA certificate; put it in the connection string as tlsCAFile"})
 		}
+		// Spanner's client libraries export built-in metrics to Cloud
+		// Monitoring (monitoring.googleapis.com), whatever endpoint they
+		// dial, unless this is "true": read by the Go (spanner v1.96.1
+		// client.go), Java (SpannerOptions, 6.128.0), Python (spanner_v1
+		// client.py, 3.71.0) and Node (index.js configureMetrics_, 9.1.1)
+		// clients. SPANNER_EMULATOR_HOST also stops them, but only in a
+		// client that reads it; one given an endpoint of its own does not.
+		if s == config.ServiceSpanner {
+			vars = append(vars, envVar{"SPANNER_DISABLE_BUILTIN_METRICS", "true",
+				"read by the official Spanner clients: keeps their built-in metrics from exporting to Google's Cloud Monitoring"})
+		}
 		// Spanner's REST API, a second port of the same emulator (#1331):
 		// the Terraform provider's instance and database admin calls use
 		// it, as spanner_custom_endpoint. The client libraries do not.
@@ -520,19 +540,22 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 
 	// Cloud SQL for PostgreSQL (#584): the libpq variables, which psql, pgx,
 	// lib/pq, psycopg and node-postgres all read, plus one URL for code that
-	// takes a connection string. No PGPASSWORD: the server trusts every
-	// connection (docs/cloudsql.md), so there is no password to export, as
-	// there is for MySQL. sslmode=disable because the server has no
-	// certificate: there is no TLS to negotiate.
+	// takes a connection string. PGPASSWORD is the user's generated
+	// password, which the server checks (#2208), as MySQL's is.
+	// sslmode=disable because the server has no certificate: there is no
+	// TLS to negotiate.
 	if serviceEnabled(cfg, config.ServiceCloudSQL) && cfg.Endpoints.CloudSQL != 0 {
-		vars = append(vars,
-			envVar{"PGHOST", host, "Cloud SQL for PostgreSQL: a local PostgreSQL; not the Cloud SQL Admin API"},
-			envVar{"PGPORT", fmt.Sprint(cfg.Endpoints.CloudSQL), "Cloud SQL for PostgreSQL port"},
-			envVar{"PGUSER", components.CloudSQLUser, "Cloud SQL for PostgreSQL user; trust auth, no password"},
-			envVar{"PGDATABASE", components.CloudSQLDatabase, "Cloud SQL for PostgreSQL default database"},
-			envVar{"PGSSLMODE", "disable", "the local server has no TLS"},
-			envVar{"CLOUDBURROW_CLOUDSQL_URL", cloudSQLURL(addr(cfg.Endpoints.CloudSQL)),
-				"the same, as one connection string"})
+		if creds, err := loadOrCreatePostgresCredentials(cfg); err == nil {
+			vars = append(vars,
+				envVar{"PGHOST", host, "Cloud SQL for PostgreSQL: a local PostgreSQL; not the Cloud SQL Admin API"},
+				envVar{"PGPORT", fmt.Sprint(cfg.Endpoints.CloudSQL), "Cloud SQL for PostgreSQL port"},
+				envVar{"PGUSER", components.CloudSQLUser, "Cloud SQL for PostgreSQL user"},
+				envVar{"PGPASSWORD", creds.Password, "generated for this instance; local only"},
+				envVar{"PGDATABASE", components.CloudSQLDatabase, "Cloud SQL for PostgreSQL default database"},
+				envVar{"PGSSLMODE", "disable", "the local server has no TLS"},
+				envVar{"CLOUDBURROW_CLOUDSQL_URL", cloudSQLURL(addr(cfg.Endpoints.CloudSQL)),
+					"the same, as one connection string; the password is PGPASSWORD, which libpq and pgx read"})
+		}
 	}
 
 	// The Cloud SQL Admin API (#1301). gcloud sql calls v1beta4 under
@@ -662,6 +685,16 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"the Telemetry API's OTLP trace ingestion (telemetry.googleapis.com); set OTEL_EXPORTER_OTLP_ENDPOINT to it, with OTEL_EXPORTER_OTLP_INSECURE=true for gRPC"})
 	}
 
+	// Dataflow (#2215): gcloud dataflow, the Go client, and the Apache
+	// Beam SDKs' DataflowRunner (--dataflow_endpoint; Python speaks REST
+	// to an endpoint whose host is localhost).
+	if dataflowEnabled(cfg) && cfg.Endpoints.Dataflow != 0 {
+		df := addr(cfg.Endpoints.Dataflow)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_DATAFLOW", "http://" + df + "/", "read by gcloud; gcloud dataflow"},
+			envVar{cliEndpointVar("dataflow"), df,
+				"Dataflow v1b3, gRPC and JSON, plaintext; read by no client library: pass it to option.WithEndpoint, or --dataflow_endpoint=http://localhost:PORT to the Beam SDKs"})
+	}
 	// Filestore (#2192): the Go client and gcloud filestore (file).
 	if filestoreEnabled(cfg) && cfg.Endpoints.Filestore != 0 {
 		fs := addr(cfg.Endpoints.Filestore)
@@ -810,11 +843,20 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 // the page shows nothing a credential's holder alone should see.
 var envSecrets = map[string]string{
 	"MYSQL_PASSWORD": "the password generated for this instance's Cloud SQL for MySQL; `cloudburrow env` prints it",
+	"PGPASSWORD":     "the password generated for this instance's Cloud SQL for PostgreSQL; `cloudburrow env` prints it",
 }
 
-// cloudSQLURL is the connection string for the local PostgreSQL at addr.
+// cloudSQLURL is the connection string for the local PostgreSQL at addr,
+// without its password.
 func cloudSQLURL(addr string) string {
 	return fmt.Sprintf("postgres://%s@%s/%s?sslmode=disable", components.CloudSQLUser, addr, components.CloudSQLDatabase)
+}
+
+// cloudSQLURLWithPassword is cloudSQLURL signing in with password.
+func cloudSQLURLWithPassword(addr, password string) string {
+	u := url.URL{Scheme: "postgres", User: url.UserPassword(components.CloudSQLUser, password), Host: addr,
+		Path: "/" + components.CloudSQLDatabase, RawQuery: "sslmode=disable"}
+	return u.String()
 }
 
 // unexportableEmulators names the enabled emulators whose port `env` cannot
@@ -922,6 +964,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"apphub":                 &e.AppHub,
 		"alloydb":                &e.AlloyDB,
 		"filestore":              &e.Filestore,
+		"dataflow":               &e.Dataflow,
 		"trace":                  &e.Trace,
 		// The local AI endpoint, which serves Vertex AI's Model Registry
 		// and Endpoints (#1940) to gcloud-setup and terraform, and Document

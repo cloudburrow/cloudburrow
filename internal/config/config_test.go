@@ -118,7 +118,7 @@ func TestValidateRejects(t *testing.T) {
 		},
 		{
 			name:      "unknown service",
-			mutate:    func(c *Config) { c.Services = []Service{"dataflow"} },
+			mutate:    func(c *Config) { c.Services = []Service{"cloudcomposer"} },
 			wantField: "services",
 			wantMsg:   "unknown service",
 		},

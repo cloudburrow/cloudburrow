@@ -163,7 +163,7 @@ func TestCloudSQLPrivateNetworkCheckedAgainstComputeEngine(t *testing.T) {
 		"a network that does not exist": {PrivateNetwork: "projects/" + project + "/global/networks/no-such-" + network},
 		"an unknown allocated range":    {PrivateNetwork: "projects/" + project + "/global/networks/" + network, AllocatedIpRange: "not-allocated"},
 	} {
-		_, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "vpc-refused", DatabaseVersion: "POSTGRES_17",
+		_, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "vpc-refused", DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1",
 			Region: "us-central1", Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", IpConfiguration: ip}}).Do()
 		wantHTTP(t, "instances.insert with "+what, err, 400)
 	}

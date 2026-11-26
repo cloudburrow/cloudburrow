@@ -120,7 +120,7 @@ func TestCloudSQLPostgresOldVersionsAndRefusals(t *testing.T) {
 	project := h.Project()
 	e := sqlEngine{}
 	name := fmt.Sprintf("pg-old-%d", time.Now().UnixNano()%1e6)
-	in := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_10",
+	in := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_10", RootPassword: "Root-pass1",
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}})
 	if in.DatabaseInstalledVersion != "POSTGRES_10_23" {
 		t.Errorf("installed version %s", in.DatabaseInstalledVersion)
@@ -243,7 +243,7 @@ func TestGcloudSQLOldPostgresVersion(t *testing.T) {
 	g := newGcloudSession(t, h)
 	name := fmt.Sprintf("gcloud-pg12-%d", time.Now().UnixNano()%1e6)
 	g.must("sql", "instances", "create", name, "--project", g.project, "--database-version=POSTGRES_12",
-		"--tier=db-custom-1-3840", "--region=us-central1", "--no-backup", "--quiet")
+		"--root-password=Root-pass1", "--tier=db-custom-1-3840", "--region=us-central1", "--no-backup", "--quiet")
 	defer g.run(nil, "sql", "instances", "delete", name, "--project", g.project, "--quiet")
 	out := g.must("sql", "instances", "describe", name, "--project", g.project, "--format=value(databaseVersion,databaseInstalledVersion)")
 	if !strings.Contains(out, "POSTGRES_12_22") {
@@ -280,6 +280,7 @@ resource "google_sql_database_instance" "main" {
   name                = %[2]q
   region              = "us-central1"
   database_version    = "POSTGRES_11"
+  root_password       = "Root-pass1"
   deletion_protection = false
   settings {
     tier = "db-custom-1-3840"

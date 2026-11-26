@@ -23,8 +23,10 @@ import (
 // Dataproc, because Landing 168's new tests fell to it as "the rest".
 //
 // Every test of test/browser but the never-run ones
-// (COMPAT_BROWSER_NEVER_TESTS) is selected by exactly one browser shard
-// (compat_browser_select in scripts/compat-shards.sh), and that shard's
+// (COMPAT_BROWSER_NEVER_TESTS) is selected by exactly one browser shard,
+// ci.yml's (COMPAT_BROWSER_SHARDS) or a nightly job's
+// (COMPAT_BROWSER_NIGHTLY_SHARDS, #2234), by compat_browser_select in
+// scripts/compat-shards.sh, and that shard's
 // --services (compat_shard) serve every screen it asks for by name, here
 // or in a function of test/browser it calls, by consoleCoverages.
 func TestBrowserTestsRunWhereTheirScreensAreServed(t *testing.T) {
@@ -36,8 +38,8 @@ func TestBrowserTestsRunWhereTheirScreensAreServed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prog := `set -eu; . "$1"; echo "NEVER=$COMPAT_BROWSER_NEVER_TESTS"; echo "SHARDS=$COMPAT_BROWSER_SHARDS"
-for s in $COMPAT_BROWSER_SHARDS; do compat_shard "$s"; compat_browser_select "$s"
+	prog := `set -eu; . "$1"; echo "NEVER=$COMPAT_BROWSER_NEVER_TESTS"; echo "SHARDS=$COMPAT_BROWSER_SHARDS $COMPAT_BROWSER_NIGHTLY_SHARDS"
+for s in $COMPAT_BROWSER_SHARDS $COMPAT_BROWSER_NIGHTLY_SHARDS; do compat_shard "$s"; compat_browser_select "$s"
 echo "$s.SERVICES=$SERVICES"; echo "$s.RUN=$BROWSER_RUN"; echo "$s.SKIP=$BROWSER_SKIP"; done`
 	out, err := exec.Command(bash, "-c", prog, "bash", script).CombinedOutput()
 	if err != nil {

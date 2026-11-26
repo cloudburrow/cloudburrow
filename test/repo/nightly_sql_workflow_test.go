@@ -1,6 +1,8 @@
 package repo
 
 import (
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -115,5 +117,44 @@ func TestNightlySQLEphemeralIsPinnedAndReadOnly(t *testing.T) {
 	}
 	if strings.Contains(body, "secrets.") {
 		t.Errorf("%s reads a secret; it needs only the run's token", nightlySQLWorkflow)
+	}
+}
+
+// The console tests only the nightly spark shard's instance serves
+// (COMPAT_BROWSER_NIGHTLY_SHARDS, #2234) run in the spark job's browser
+// step, split by compat_browser_select as ci.yml's are, and every test it
+// selects must pass, not skip.
+func TestNightlySparkRunsItsBrowserTests(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is not on PATH")
+	}
+	out, err := exec.Command(bash, "-c", `set -eu; . "$1"; echo "$COMPAT_BROWSER_NIGHTLY_SHARDS"`, "bash",
+		filepath.Join("..", "..", "scripts", "compat-shards.sh")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("compat-shards.sh: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "spark" {
+		t.Fatalf("COMPAT_BROWSER_NIGHTLY_SHARDS = %q; the spark job's browser step runs %q", got, "spark")
+	}
+	_, jobs := workflowJobs(t, nightlySQLWorkflow)
+	j := jobs["spark"]
+	for _, want := range []string{
+		"SHARD: spark",
+		`printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args"`,
+		"- name: Console in a headless browser",
+		`mapfile -t CB < "$RUNNER_TEMP/cb-args"`,
+		`compat_browser_prepare "$SHARD"`,
+		`compat_browser_select "$SHARD"`,
+		`SELECT=(-skip "$BROWSER_SKIP"); [ -z "$BROWSER_RUN" ] || SELECT+=(-run "$BROWSER_RUN")`,
+		`go test -tags=browser -count=1 -timeout 90m -v "${SELECT[@]}" ./test/browser/`,
+		`grep -q -- "^--- PASS: $t (" browser.log`,
+	} {
+		if !strings.Contains(j, want) {
+			t.Errorf("%s's spark job does not contain %q", nightlySQLWorkflow, want)
+		}
+	}
+	if m := regexp.MustCompile(`\$COMPAT_BROWSER_[A-Z_]+_TESTS`).FindString(j); m != "" {
+		t.Errorf("%s's spark job reads %s itself; compat_browser_select picks the shard's browser tests", nightlySQLWorkflow, m)
 	}
 }

@@ -22,7 +22,38 @@ import (
 
 // bdrComputeType is whether t is one of Compute Engine's types.
 func bdrComputeType(t string) bool {
-	return t == backupdr.ComputeInstanceResourceType || t == backupdr.ComputeDiskResourceType
+	return t == backupdr.ComputeInstanceResourceType || bdrDiskType(t)
+}
+
+// bdrDiskType is whether t is a zonal or a regional disk (#2206).
+func bdrDiskType(t string) bool {
+	return t == backupdr.ComputeDiskResourceType || t == backupdr.ComputeRegionDiskResourceType
+}
+
+// computeRegionDisks are the project's regional disks, by name, each with
+// its region.
+func (p backupDRProvider) computeRegionDisks(project string) map[string]string {
+	out := map[string]string{}
+	api, err := p.computeAPI()
+	if err != nil || project == "" {
+		return out
+	}
+	res, err := api.Call(http.MethodGet, project, "aggregated/disks", nil, nil)
+	if err != nil {
+		return out
+	}
+	items, _ := res["items"].(map[string]any)
+	for _, scoped := range items {
+		m, _ := scoped.(map[string]any)
+		l, _ := m["disks"].([]any)
+		for _, e := range l {
+			o, _ := e.(map[string]any)
+			if r := str(o, "region"); r != "" {
+				out[str(o, "name")] = lastSegment(r)
+			}
+		}
+	}
+	return out
 }
 
 // computeAPI is the Compute Engine API, or an error when it is not served.
@@ -53,6 +84,9 @@ func (p backupDRProvider) computeResources(project, collection string) map[strin
 		l, _ := m[collection].([]any)
 		for _, e := range l {
 			o, _ := e.(map[string]any)
+			if str(o, "zone") == "" {
+				continue // a regional disk: computeRegionDisks
+			}
 			out[str(o, "name")] = lastSegment(str(o, "zone"))
 		}
 	}
@@ -73,18 +107,30 @@ func bdrResourceOptions(m map[string]string) ([]string, map[string]string) {
 func (p bdrVaultedProvider) scheduleCompute(ctx context.Context, project string, v map[string]string) (string, error) {
 	typ := v["resourceType"]
 	coll, field := "instances", "vm"
-	if typ == backupdr.ComputeDiskResourceType {
+	switch typ {
+	case backupdr.ComputeDiskResourceType:
 		coll, field = "disks", "disk"
+	case backupdr.ComputeRegionDiskResourceType:
+		coll, field = "disks", "regionDisk"
 	}
 	name := v[field]
 	if name == "" {
-		return "", fmt.Errorf("choose the %s to back up", bdrTypeLabel(typ))
+		return "", fmt.Errorf("choose the %s to back up", strings.ToLower(bdrTypeLabel(typ)))
 	}
-	zone, ok := p.api.computeResources(project, coll)[name]
+	var zone, region, scope string
+	var ok bool
+	if typ == backupdr.ComputeRegionDiskResourceType {
+		region, ok = p.api.computeRegionDisks(project)[name]
+		scope = "regions/" + region
+	} else {
+		zone, ok = p.api.computeResources(project, coll)[name]
+		if ok {
+			region, scope = zone[:strings.LastIndex(zone, "-")], "zones/"+zone
+		}
+	}
 	if !ok {
 		return "", fmt.Errorf("%s %s does not exist in project %s", bdrTypeLabel(typ), name, project)
 	}
-	region := zone[:strings.LastIndex(zone, "-")]
 	if v["region"] != "" && region != v["region"] {
 		return "", fmt.Errorf("%s is in %s, not %s", name, region, v["region"])
 	}
@@ -96,14 +142,14 @@ func (p bdrVaultedProvider) scheduleCompute(ctx context.Context, project string,
 	}
 	loc := "projects/" + project + "/locations/" + region
 	_, err := p.api.call(ctx, p.api.bdr, http.MethodPost, "/v1/"+loc+"/backupPlanAssociations?backupPlanAssociationId="+bdrAssocID(name),
-		map[string]any{"backupPlan": v["plan"], "resourceType": typ, "resource": "projects/" + project + "/zones/" + zone + "/" + coll + "/" + name})
+		map[string]any{"backupPlan": v["plan"], "resourceType": typ, "resource": "projects/" + project + "/" + scope + "/" + coll + "/" + name})
 	return name, err
 }
 
 // bdrComputeSummary are a VM's or disk's rows on its Vaulted backups page.
 func bdrComputeSummary(s bdrSource) []console.Property {
 	g := nested(s.ds, "dataSourceGcpResource")
-	if str(g, "type") == backupdr.ComputeDiskResourceType {
+	if bdrDiskType(str(g, "type")) {
 		d := nested(g, "diskDatasourceProperties")
 		return []console.Property{{Label: "Disk type", Value: lastSegment(str(d, "type"))}, {Label: "Size", Value: str(d, "sizeGb") + " GB"}}
 	}
@@ -128,7 +174,12 @@ func bdrRestoreName(source string, now time.Time) string {
 // new resource's properties, pre-filled from the backup.
 func (p bdrVaultedProvider) computeRestoreAction(ctx context.Context, project string, s bdrSource, backups []string) console.Action {
 	typ := str(nested(s.ds, "dataSourceGcpResource"), "type")
-	zones := computeZonesOf(s.location())
+	home := s.location()
+	if compute.IsRegion(home) {
+		// A regional disk's: its region's first zone.
+		home = compute.Zones(home)[0]
+	}
+	zones := computeZonesOf(home)
 	fields := []console.Field{}
 	if backups != nil {
 		fields = append(fields, console.Field{Name: "backup", Label: "Backup creation time", Type: "select", Required: true, Options: backups,
@@ -161,7 +212,21 @@ func (p bdrVaultedProvider) computeRestoreAction(ctx context.Context, project st
 		console.Field{Name: "project", Label: "Restore project name", Type: "text", Required: true, Section: "Choose the restore destination",
 			Default: project, Help: "The project the new resource is made in."},
 		console.Field{Name: "zone", Label: "Zone", Type: "select", Required: true, Section: "Choose the restore destination", Options: zones,
-			Default: s.location(), Help: "The zone of the new resource."},
+			Default: home, Help: "The zone of the new resource."})
+	if bdrDiskType(typ) {
+		// Google's disk restore: --target-zone, or --target-region with
+		// --replica-zones (disk-restore).
+		loc := "Single zone"
+		if typ == backupdr.ComputeRegionDiskResourceType {
+			loc = "Regional"
+		}
+		fields = append(fields,
+			console.Field{Name: "location", Label: "Location", Type: "radio", Section: "Choose the restore destination",
+				Options: []string{"Single zone", "Regional"}, Default: loc},
+			console.Field{Name: "replicaZone", Label: "Replica zone", Type: "select", Section: "Choose the restore destination", Options: zones,
+				Default: secondZone(home), ShowWhen: "location=Regional", Help: "The second zone of the regional disk, in the zone's region."})
+	}
+	fields = append(fields,
 		console.Field{Name: "name", Label: "Name", Type: "text", Required: true, Section: "Properties", Default: name,
 			Pattern: `[a-z]([a-z0-9\-]{0,61}[a-z0-9])?`, Help: "The new resource's name: lowercase letters, digits and hyphens, starting with a letter."})
 	if typ == backupdr.ComputeInstanceResourceType {
@@ -224,10 +289,29 @@ func (p bdrVaultedProvider) restoreCompute(ctx context.Context, s bdrSource, v m
 		}
 		body = map[string]any{"diskTargetEnvironment": map[string]any{"project": v["project"], "zone": v["zone"]},
 			"diskRestoreProperties": map[string]any{"name": v["name"], "instanceBackupSource": map[string]any{"sourceDeviceName": v["device"]}}}
+	case v["location"] == "Regional":
+		region := v["zone"][:strings.LastIndex(v["zone"], "-")]
+		body = map[string]any{"regionDiskTargetEnvironment": map[string]any{"project": v["project"], "region": region,
+			"replicaZones": []any{"zones/" + v["zone"], "zones/" + v["replicaZone"]}},
+			"diskRestoreProperties": map[string]any{"name": v["name"]}}
 	default:
 		body = map[string]any{"diskTargetEnvironment": map[string]any{"project": v["project"], "zone": v["zone"]},
 			"diskRestoreProperties": map[string]any{"name": v["name"]}}
 	}
 	_, err := p.api.call(ctx, p.api.bdr, http.MethodPost, "/v1/"+str(s.ds, "name")+"/backups/"+v["backup"]+":restore", body)
 	return err
+}
+
+// secondZone is the first zone of zone's region other than zone.
+func secondZone(zone string) string {
+	i := strings.LastIndex(zone, "-")
+	if i < 0 {
+		return ""
+	}
+	for _, z := range compute.Zones(zone[:i]) {
+		if z != zone {
+			return z
+		}
+	}
+	return ""
 }

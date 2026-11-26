@@ -280,12 +280,18 @@ func TestMainPushGateRefuses(t *testing.T) {
 }
 
 // A small repository shaped like main: v0.3.0, then landing 1 (a feat/ and
-// a fix/ branch), then landing 2 (a fix/ branch only).
+// a fix/ branch, and a feat/ branch merged with git's own "Merge branch"
+// message), then landing 2 (a fix/ branch only), then pull requests that fix
+// CI or a flaky test, one for users, and a squashed commit whose subject
+// carries two pull request references. feat/11-thing and fix/21-other add
+// CHANGELOG.md entries under Unreleased.
 type schedRepo struct {
 	dir                  string
 	t0                   int64
 	base, landing1, head string
 }
+
+const schedChangelog = "# Changelog\n\n## [Unreleased]\n\n## [0.3.0] - 2026-11-18\n\n- old\n\n[Unreleased]: https://example.com\n"
 
 func gitIn(t *testing.T, dir string, env []string, args ...string) string {
 	t.Helper()
@@ -306,24 +312,42 @@ func newSchedRepo(t *testing.T) schedRepo {
 	t.Helper()
 	r := schedRepo{dir: t.TempDir(), t0: 1795000000}
 	g := func(args ...string) string { return gitIn(t, r.dir, nil, args...) }
-	commit := func(file string) {
-		if err := os.WriteFile(filepath.Join(r.dir, file), []byte(file), 0o644); err != nil {
+	write := func(file, body string) {
+		if err := os.WriteFile(filepath.Join(r.dir, file), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		g("add", file)
+	}
+	commit := func(file string) {
+		write(file, file)
 		g("commit", "-q", "-m", "add "+file)
 	}
+	// The CHANGELOG.md each branch leaves, when it adds an entry.
+	entries := map[string]string{
+		"feat/11-thing": strings.Replace(schedChangelog, "## [Unreleased]\n\n",
+			"## [Unreleased]\n\n### Added\n\n- The thing, for users (#11).\n\n", 1),
+		"fix/21-other": strings.Replace(schedChangelog, "## [Unreleased]\n\n",
+			"## [Unreleased]\n\n### Added\n\n- The thing, for users (#11).\n\n### Fixed\n\n- The other bug (#21).\n\n", 1),
+	}
 	g("init", "-q", "-b", "main")
+	write("CHANGELOG.md", schedChangelog)
 	commit("base")
 	r.base = g("rev-parse", "HEAD")
 	gitIn(t, r.dir, []string{"GIT_COMMITTER_DATE=@" + strconv.FormatInt(r.t0, 10) + " +0000"}, "tag", "-a", "v0.3.0", "-m", "v0.3.0")
 	landing := func(n int, branches ...string) string {
 		for _, b := range branches {
 			g("checkout", "-q", "-b", b, "main")
+			if e, ok := entries[b]; ok {
+				write("CHANGELOG.md", e)
+			}
 			commit(strings.ReplaceAll(b, "/", "-"))
 		}
 		g("checkout", "-q", "-b", fmt.Sprintf("land/%d", n), "main")
 		for i, b := range branches {
+			if strings.HasSuffix(b, "-lb-a") {
+				g("merge", "-q", "--no-ff", "--no-edit", b)
+				continue
+			}
 			g("merge", "-q", "--no-ff", b, "-m", fmt.Sprintf("Merge %s (#%d%d: change %s) into Landing %d", b, n, i, b, n))
 		}
 		g("checkout", "-q", "main")
@@ -331,8 +355,22 @@ func newSchedRepo(t *testing.T) schedRepo {
 			"-m", fmt.Sprintf("Merge pull request #%d from o/land/%d", 100+n, n), "-m", fmt.Sprintf("Landing %d: things", n))
 		return g("rev-parse", "HEAD")
 	}
-	r.landing1 = landing(1, "feat/11-thing", "fix/12-bug")
-	r.head = landing(2, "fix/21-other")
+	pr := func(n int, branch, title string) {
+		g("checkout", "-q", "-b", branch, "main")
+		commit(strings.ReplaceAll(branch, "/", "-"))
+		g("checkout", "-q", "main")
+		g("merge", "-q", "--no-ff", branch, "-m", fmt.Sprintf("Merge pull request #%d from o/%s", n, branch), "-m", title)
+	}
+	r.landing1 = landing(1, "feat/11-thing", "fix/12-bug", "feat/13-lb-a")
+	landing(2, "fix/21-other")
+	pr(200, "fix/main-ci-after-2", "Fix main CI after Landing 2 (round 3)")
+	pr(201, "fix/flaky-x", "Fix flaky TestX and TestY")
+	pr(202, "fix/ci-shards", "CI: account for the compat tests that run in no shard")
+	pr(203, "fix/two-tests", "Fix two tests main run 45512599402 failed on")
+	pr(204, "docs/logo", "README: a new logo")
+	write("README", "readme")
+	g("commit", "-q", "-m", "docs: refresh README branding (#2202) (#2203)")
+	r.head = g("rev-parse", "HEAD")
 	return r
 }
 
@@ -393,15 +431,94 @@ func TestScheduledReleaseReleasesMainsHeadAfter24Hours(t *testing.T) {
 	if first, _, _ := strings.Cut(notes, "\n"); first != "<!-- cloudburrow-release-notes: generated -->" {
 		t.Errorf("the notes do not start with the marker release-notes.sh looks for:\n%s", notes)
 	}
-	for _, want := range []string{
-		"### Added\n\n- #10: change feat/11-thing (`feat/11-thing`, Landing 1)\n",
-		"### Fixed\n\n- #20: change fix/21-other (`fix/21-other`, Landing 2)\n- #11: change fix/12-bug (`fix/12-bug`, Landing 1)\n",
-		"### Landings\n\n- Landing 2: things (#102)\n- Landing 1: things (#101)\n",
-		"https://github.com/o/r/compare/v0.3.0...v0.4.0",
+	short := gitIn(t, r.dir, nil, "rev-parse", "--short", r.head)
+	want := "<!-- cloudburrow-release-notes: generated -->\n" +
+		"Built from [`" + short + "`](https://github.com/o/r/commit/" + r.head + ") on main after its full CI run passed,\n" +
+		"compatibility shards included. Changes since [v0.3.0](https://github.com/o/r/releases/tag/v0.3.0):\n" +
+		"[full diff](https://github.com/o/r/compare/v0.3.0...v0.4.0). Only a row marked Verified in\n" +
+		"[docs/compatibility.md](docs/compatibility.md) is a support claim.\n\n" +
+		"### Added\n\n- The thing, for users (#11).\n\n### Fixed\n\n- The other bug (#21).\n\n" +
+		"<details><summary>Pull requests</summary>\n\n" +
+		"- README: a new logo (#204)\n- docs: refresh README branding (#2203)\n\n" +
+		"Fixes to CI and the tests are left out; the [full diff](https://github.com/o/r/compare/v0.3.0...v0.4.0) has every change.\n\n" +
+		"</details>\n"
+	if notes != want {
+		t.Errorf("got:\n%s\nwant:\n%s", notes, want)
+	}
+}
+
+// TestScheduledReleaseNotesNameNoBranches: v0.7.0's Added listed
+// `feat/2160-lb-4-e` and the like, from "Merge branch '...'" subjects.
+// No branch name, landing or CI fix reaches the notes, and no pull request
+// reference is doubled.
+func TestScheduledReleaseNotesNameNoBranches(t *testing.T) {
+	r := newSchedRepo(t)
+	_, notes := r.plan(t, 30, green(r.head))
+	for _, banned := range []string{
+		"feat/", "fix/", "Merge", "Landing", "round 3", "flaky", "CI: ", "main run", "(#2202)",
+		"#10", "#11:", "#12", "#13", "change ",
 	} {
-		if !strings.Contains(notes, want) {
-			t.Errorf("the notes lack %q:\n%s", want, notes)
+		if strings.Contains(notes, banned) {
+			t.Errorf("the notes hold %q:\n%s", banned, notes)
 		}
+	}
+}
+
+// TestScheduledReleaseBlockedByAnEmptyUnreleased: with no CHANGELOG.md entry
+// added since the last tag there is no release and no notes file, and the
+// reason, which the dry run's summary shows and scheduled-release.yml fails
+// on, says "CHANGELOG Unreleased is empty". A ## [X.Y.Z] section written for
+// the version instead is enough.
+func TestScheduledReleaseBlockedByAnEmptyUnreleased(t *testing.T) {
+	r := newSchedRepo(t)
+	// v0.4.0 at main's head: no entry since. A later commit adds none.
+	gitIn(t, r.dir, []string{"GIT_COMMITTER_DATE=@" + strconv.FormatInt(r.t0, 10) + " +0000"}, "tag", "-a", "v0.4.0", "-m", "v0.4.0", r.head)
+	if err := os.WriteFile(filepath.Join(r.dir, "later"), []byte("later"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, r.dir, nil, "add", "later")
+	gitIn(t, r.dir, nil, "commit", "-q", "-m", "add later")
+	head := gitIn(t, r.dir, nil, "rev-parse", "HEAD")
+	got, notes := r.plan(t, 50, green(head))
+	if got["release"] != "false" || got["blocked"] != "true" || got["tag"] != "v0.4.1" {
+		t.Errorf("an empty Unreleased was not blocked: %v", got)
+	}
+	if !strings.HasPrefix(got["reason"], "CHANGELOG Unreleased is empty") {
+		t.Errorf("the reason does not say the Unreleased section is empty: %q", got["reason"])
+	}
+	if notes != "" {
+		t.Errorf("notes were written for a blocked release:\n%s", notes)
+	}
+
+	// A ## [0.4.1] section written for the version is used instead.
+	cl := strings.Replace(schedChangelog, "## [0.3.0]", "## [0.4.1] - 2026-11-26\n\n### Fixed\n\n- Written by hand (#400).\n\n## [0.3.0]", 1)
+	if err := os.WriteFile(filepath.Join(r.dir, "CHANGELOG.md"), []byte(cl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, r.dir, nil, "commit", "-q", "-am", "changelog for 0.4.1")
+	head = gitIn(t, r.dir, nil, "rev-parse", "HEAD")
+	got, notes = r.plan(t, 50, green(head))
+	if got["release"] != "true" || got["blocked"] == "true" || !strings.Contains(notes, "\n### Fixed\n\n- Written by hand (#400).\n") {
+		t.Errorf("the version's own section did not make the notes: %v\n%s", got, notes)
+	}
+}
+
+// TestScheduledReleaseWorkflowFailsWhenBlocked: the plan job shows a
+// blocked release in the summary, dry run or not, and then fails, so the
+// tag job (which needs release == 'true') never runs.
+func TestScheduledReleaseWorkflowFailsWhenBlocked(t *testing.T) {
+	plan := job(t, workflowJobs(t, filepath.Join("..", "..", ".github", "workflows", "scheduled-release.yml")), "plan")
+	for _, want := range []string{
+		"          BLOCKED: ${{ steps.plan.outputs.blocked }}\n",
+		"            if [ \"${BLOCKED}\" = true ]; then\n              echo \"**Blocked**: ",
+		"          if [ \"${BLOCKED}\" = true ]; then\n            echo \"::error::${REASON}\"\n            exit 1\n          fi\n",
+	} {
+		if !strings.Contains(plan, want) {
+			t.Errorf("scheduled-release.yml's plan job lacks %q", want)
+		}
+	}
+	if strings.Index(plan, "exit 1\n") < strings.Index(plan, "GITHUB_STEP_SUMMARY") {
+		t.Error("the plan job fails before it writes the summary, so a dry run would not show why")
 	}
 }
 
@@ -450,15 +567,12 @@ func TestScheduledReleaseVersions(t *testing.T) {
 }
 
 // release-notes.sh takes a scheduled release's notes from its annotated tag
-// when CHANGELOG.md has no section, verbatim (headings included) after the
-// What's new section it adds, and only when the message carries the marker.
+// when CHANGELOG.md has no section, verbatim, and only when the message
+// carries the marker; a CHANGELOG.md section still wins.
 func TestReleaseNotesFromAGeneratedTag(t *testing.T) {
 	r := newSchedRepo(t)
-	if err := os.WriteFile(filepath.Join(r.dir, "CHANGELOG.md"), []byte("# Changelog\n\n## [0.3.0] - 2026-11-18\n\n- old\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	msg := filepath.Join(t.TempDir(), "msg")
-	body := "CloudBurrow v0.4.0\n\n<!-- cloudburrow-release-notes: generated -->\nReleased automatically.\n\n### Added\n\n- a thing, see [docs](docs/x.md)\n"
+	body := "CloudBurrow v0.4.0\n\n<!-- cloudburrow-release-notes: generated -->\nBuilt from main.\n\n### Added\n\n- a thing, see [docs](docs/x.md)\n"
 	if err := os.WriteFile(msg, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -478,11 +592,7 @@ func TestReleaseNotesFromAGeneratedTag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("release-notes.sh v0.4.0: %v\n%s", err, out)
 	}
-	// No CHANGELOG.md is committed, so What's new is the landed branches'
-	// issues, named by branch with no RELEASE_NOTES_REPO to read titles from.
-	if want := "Released automatically.\n\n### What's new\n\nNo CHANGELOG.md entry was added since v0.3.0; these are the issues its landings closed:\n\n#### Other\n\n" +
-		"- `feat/11-thing` (#11)\n- `fix/12-bug` (#12)\n- `fix/21-other` (#21)\n\n" +
-		"### Added\n\n- a thing, see [docs](https://github.com/o/r/blob/v0.4.0/docs/x.md)\n"; out != want {
+	if want := "Built from main.\n\n### Added\n\n- a thing, see [docs](https://github.com/o/r/blob/v0.4.0/docs/x.md)\n"; out != want {
 		t.Errorf("got:\n%s\nwant:\n%s", out, want)
 	}
 	if out, err := run("v0.4.1"); err == nil {

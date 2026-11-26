@@ -198,6 +198,11 @@ func (p computeLBProvider) lbEditForm(project string, lm lbModel) *console.EditF
 					console.Field{Name: "sessionAffinity", Label: "Session affinity", Type: "select", Default: vpcOr(vpcStr(o, "sessionAffinity"), "NONE"), Section: back,
 						Options: []string{"NONE", "CLIENT_IP", "GENERATED_COOKIE", "HEADER_FIELD", "HTTP_COOKIE"}},
 					console.Field{Name: "enableCDN", Label: "Enable Cloud CDN", Type: "checkbox", Default: strconv.FormatBool(o["enableCDN"] == true), Section: back},
+					// Advanced configurations › Connection draining timeout
+					// (load-balancing/docs/enabling-connection-draining, #2226).
+					console.Field{Name: "drainingTimeoutSec", Label: "Connection draining timeout", Type: "text",
+						Default: vpcOr(num2s(vmMap(o, "connectionDraining"), "drainingTimeoutSec"), "0"), Section: back, Pattern: `^[0-9]{1,4}$`,
+						Help: "Seconds, 0 to 3600: how long a VM leaving a backend keeps its requests in flight."},
 				)
 			}
 			fields = append(fields,
@@ -283,6 +288,13 @@ func (p computeLBProvider) Edit(ctx context.Context, project string, path []stri
 		}
 		if changed("sessionAffinity") {
 			patch["sessionAffinity"] = v["sessionAffinity"]
+		}
+		if changed("drainingTimeoutSec") {
+			n, err := strconv.Atoi(strings.TrimSpace(v["drainingTimeoutSec"]))
+			if err != nil || n < 0 || n > 3600 {
+				return errors.New("Connection draining timeout: 0 to 3600 seconds")
+			}
+			patch["connectionDraining"] = map[string]any{"drainingTimeoutSec": float64(n)}
 		}
 		if changed("healthCheck") {
 			patch["healthChecks"] = []any{link("healthChecks", strings.TrimSpace(v["healthCheck"]))}

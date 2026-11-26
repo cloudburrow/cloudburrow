@@ -123,6 +123,8 @@ type consoleDeps struct {
 	alloyDB *alloyDBService
 	// filestore is Filestore (#2192), nil unless enabled.
 	filestore *filestoreService
+	// dataflow is Dataflow (#2215), nil unless enabled.
+	dataflow *dataflowService
 	// trace is Cloud Trace (#2118), nil unless enabled.
 	trace *traceService
 	// gke is the Kubernetes Engine API (#1913), nil unless enabled.
@@ -299,13 +301,18 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			// My notebooks, Executions and Schedules (consolecolabexec.go).
 			colabNotebooksProvider{api: api, df: d.dataform.API}, colabExecutionsProvider{api: api}, colabSchedulesProvider{api: api},
 			// Vertex AI Pipelines' Runs and Schedules (consolepipelines.go, #2173).
-			pipelineRunsProvider{api: api, storage: map[bool]string{true: storageAddr}[enabled[config.ServiceStorage]]}, pipelineSchedulesProvider{colabSchedulesProvider{api: api}})
+			pipelineRunsProvider{api: api, storage: map[bool]string{true: storageAddr}[enabled[config.ServiceStorage]]}, pipelineSchedulesProvider{colabSchedulesProvider{api: api}},
+			// Vertex ML Metadata's Artifacts, Executions and Contexts (consolemetadata.go, #2205).
+			metadataProvider{api: api, kind: "artifacts"}, metadataProvider{api: api, kind: "executions"}, metadataProvider{api: api, kind: "contexts"},
+			// Vertex AI Training's Training pipelines and Custom jobs, and
+			// Batch inference (consoletraining.go, #2210).
+			trainingPipelinesProvider{api: api}, customJobsProvider{api: api}, hpTuningProvider{api: api}, nasJobsProvider{api: api}, batchPredictionsProvider{api: api},
+			// Vertex AI managed datasets (consoledatasets.go, #2210).
+			datasetsProvider{api: api},
+			// Agent Platform's Monitoring page (consolemodelmonitoring.go, #2214).
+			modelMonitorsProvider{api: api}, monitoringSchedulesProvider{colabSchedulesProvider{api: api}}, mdmJobsProvider{api: api})
 		// Vertex AI Workbench's Instances (consoleworkbench.go, #2173).
-		wb := workbenchProvider{api: api}
-		if d.localAI != nil {
-			wb.exec = d.localAI.WorkbenchExecute
-		}
-		providers = append(providers, wb)
+		providers = append(providers, workbenchProvider{api: api})
 	}
 	if enabled[config.ServiceRun] {
 		// Two screens of one product: services, and jobs with their
@@ -353,7 +360,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			buildWorkerPoolsProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
 			// Cloud Build's Dashboard, Repositories and Settings (#1854).
 			buildDashboardProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
-			buildRepositoriesProvider{ssm: sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}}},
+			buildRepositoriesProvider{ssm: sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
+				secretsAddr: runAddrOf(d.secrets)},
 			buildSettingsProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}, registry: d.projects},
 			// Secure Source Manager's instances and repositories (#1527).
 			sourceManagerProvider{b: runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)}},
@@ -410,6 +418,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceFilestore] && d.filestore != nil {
 		providers = append(providers, filestoreProvider{svc: d.filestore}, filestoreBackupsProvider{svc: d.filestore}, filestoreSnapshotsProvider{svc: d.filestore})
 	}
+	// Dataflow (#2215), in process: Jobs, Snapshots.
+	if enabled[config.ServiceDataflow] && d.dataflow != nil {
+		providers = append(providers, dataflowProvider{svc: d.dataflow, logging: d.logging}, dataflowSnapshotsProvider{svc: d.dataflow})
+	}
 	// App Hub (#2110), in process: Applications, Services and workloads,
 	// Settings.
 	if enabled[config.ServiceDataproc] && d.dataproc != nil {
@@ -419,7 +431,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// AlloyDB for PostgreSQL (#2191), in process: Clusters, a cluster's
 	// Overview, Backups, Users and Databases.
 	if enabled[config.ServiceAlloyDB] && d.alloyDB != nil {
-		providers = append(providers, alloyDBProvider{svc: d.alloyDB}, alloyDBBackupsProvider{svc: d.alloyDB})
+		providers = append(providers, alloyDBProvider{svc: d.alloyDB,
+			savedQueries: filepath.Join(d.cfg.InstanceDir(), alloyDBSavedQueriesFile),
+			iamPrincipal: metadata.ServiceAccountEmail(d.cfg.DefaultProject())}, alloyDBBackupsProvider{svc: d.alloyDB})
 	}
 	if enabled[config.ServiceAppHub] && d.appHub != nil {
 		providers = append(providers, appHubProvider{svc: d.appHub}, appHubDiscoveredProvider{svc: d.appHub}, appHubSettingsProvider{svc: d.appHub})
@@ -500,7 +514,11 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			// Compute Engine (#1965): VM instances, disks, snapshots,
 			// images and machine types, over the same API.
 			computeInstancesProvider{screen}, computeDisksProvider{screen}, computeSnapshotsProvider{screen},
-			computeImagesProvider{screen}, computeMachineTypesProvider{screen}, computeMetadataProvider{screen})
+			computeImagesProvider{screen}, computeMachineTypesProvider{screen}, computeMetadataProvider{screen},
+			// Asynchronous replication and consistency groups (#2206).
+			computeAsyncReplicationProvider{screen}, computeConsistencyGroupsProvider{screen},
+			// Snapshot schedules and instance schedules (#2206).
+			computeSnapshotSchedulesProvider{screen}, computeInstanceSchedulesProvider{screen})
 	}
 	// BigQuery's Data transfers and Scheduled queries pages (#1948).
 	if d.dataTransfer != nil {
@@ -519,7 +537,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if d.serviceUsage != nil {
 		providers = append(providers, serviceUsageProvider{api: d.serviceUsage, metrics: d.requestMetrics, history: d.requestHistory, apiKeys: d.apiKeys, quotas: d.cloudQuotas, sites: d.siteVerify, auth: d.authPlatform, metaAddr: d.metaAddr}, serviceUsageOperationsProvider{api: d.serviceUsage})
 	}
-	// Backup and DR (#1433), in process, restoring through Cloud SQL.
+	// Backup and DR (#1433), in process, restoring through Cloud SQL,
+	// Compute Engine, AlloyDB and Filestore.
 	if enabled[config.ServiceBackupDR] && d.backupdr != nil {
 		p := backupDRProvider{bdr: d.backupdr}
 		if d.sqlAdmin != nil {
@@ -528,6 +547,14 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		if enabled[config.ServiceCompute] && d.compute != nil {
 			// Compute Engine VMs and disks (#2075).
 			p.compute = d.compute.API
+		}
+		// AlloyDB clusters and Filestore instances (#1524), restored by
+		// their own APIs.
+		if enabled[config.ServiceAlloyDB] && d.alloyDB != nil {
+			p.alloydb = d.alloyDB.REST
+		}
+		if enabled[config.ServiceFilestore] && d.filestore != nil {
+			p.filestore = d.filestore.REST
 		}
 		// Google's menu (#1844): Overview, Vaulted backups, Backup plans,
 		// Backup plan associations, Backup vaults (p) and Jobs.
@@ -595,7 +622,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			return bigtableInstancesProvider{endpoint: a, savedQueries: filepath.Join(d.cfg.InstanceDir(), bigtableSavedQueriesFile)}
 		}},
 		{config.ServiceSpanner, func(a string) console.Provider { return spannerProvider{endpoint: a} }},
-		{config.ServiceCloudSQL, func(a string) console.Provider { return cloudSQLProvider{endpoint: a} }},
+		{config.ServiceCloudSQL, func(a string) console.Provider {
+			creds, _ := loadOrCreatePostgresCredentials(d.cfg)
+			return cloudSQLProvider{endpoint: a, password: creds.Password}
+		}},
 		{config.ServiceCloudSQLMySQL, func(a string) console.Provider { return newCloudSQLMySQLProvider(a, d.mysql) }},
 		// Memorystore's Instances page, through the admin API (#1302).
 		{config.ServiceMemorystore, func(a string) console.Provider { return newMemorystoreProvider(d.cfg, a, d.memorystore) }},
@@ -660,7 +690,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}
 		instances := cloudSQLInstancesProvider{
 			endpoint: net.JoinHostPort(host, strconv.Itoa(d.cfg.Endpoints.SQLAdmin)), versions: versions, srv: d.sqlAdmin,
-			metrics: monitoringAdmin{api: monitoringServerOf(d.monitoring)}}
+			metrics:      monitoringAdmin{api: monitoringServerOf(d.monitoring)},
+			savedQueries: filepath.Join(d.cfg.InstanceDir(), cloudSQLSavedQueriesFile),
+			iamPrincipal: metadata.ServiceAccountEmail(d.cfg.DefaultProject())}
 		if enabled[config.ServiceCompute] && d.compute != nil {
 			instances.compute = d.compute.API
 		}
@@ -930,6 +962,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceAppHub:           "App Hub",
 	config.ServiceAlloyDB:          "AlloyDB",
 	config.ServiceFilestore:        "Filestore",
+	config.ServiceDataflow:         "Dataflow",
 	config.ServiceTrace:            "Cloud Trace",
 }
 

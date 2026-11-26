@@ -441,6 +441,7 @@ resource "google_sql_database_instance" "i" {
   name                = %[2]q
   region              = "us-central1"
   database_version    = "POSTGRES_17"
+  root_password       = "Root-pass1"
   deletion_protection = false
   settings {
     tier        = "db-custom-1-3840"

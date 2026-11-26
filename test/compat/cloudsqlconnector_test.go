@@ -106,7 +106,7 @@ func TestCloudSQLConnectorDialsBothServers(t *testing.T) {
 			}
 			defer cleanup()
 			db, err := sql.Open("cloudsql-postgres", fmt.Sprintf(
-				"host=%s:us-central1:postgres user=cloudburrow dbname=cloudburrow sslmode=disable", project))
+				"host=%s:us-central1:postgres user=cloudburrow password=%s dbname=cloudburrow sslmode=disable", project, upPGPassword()))
 			if err != nil {
 				t.Fatal(err)
 			}

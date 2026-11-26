@@ -38,7 +38,7 @@ func init() {
 		}
 	}
 	// Colab Enterprise (#2105), v1 only as served.
-	for _, s := range []string{"NotebookService", "ScheduleService", "PipelineService"} {
+	for _, s := range []string{"NotebookService", "ScheduleService", "PipelineService", "MetadataService", "JobService", "DatasetService"} {
 		Services["google.cloud.aiplatform.v1."+s] = VertexAI
 	}
 	Services["google.cloud.documentai.v1.DocumentProcessorService"] = DocumentAI
@@ -194,6 +194,82 @@ func colabMethods() map[string]Method {
 			"ListPipelineJobs": {"aiplatform.pipelineJobs.list", "parent"}, "DeletePipelineJob": {"aiplatform.pipelineJobs.delete", "name"},
 			"CancelPipelineJob": {"aiplatform.pipelineJobs.cancel", "name"}, "BatchDeletePipelineJobs": {"aiplatform.pipelineJobs.delete", "parent"},
 			"BatchCancelPipelineJobs": {"aiplatform.pipelineJobs.cancel", "parent"},
+			// TrainingPipelines (#2210): each trainingPipelines method's
+			// page names aiplatform.trainingPipelines.P (read 2026-11-24).
+			"CreateTrainingPipeline": {"aiplatform.trainingPipelines.create", "parent"}, "GetTrainingPipeline": {"aiplatform.trainingPipelines.get", "name"},
+			"ListTrainingPipelines": {"aiplatform.trainingPipelines.list", "parent"}, "DeleteTrainingPipeline": {"aiplatform.trainingPipelines.delete", "name"},
+			"CancelTrainingPipeline": {"aiplatform.trainingPipelines.cancel", "name"},
+		},
+		// Managed datasets (#2210): each method's REST reference page
+		// (read 2026-11-24): aiplatform.datasets.P on the dataset (create
+		// and list on the parent); savedQueries.list aiplatform.datasets.get
+		// and savedQueries.delete aiplatform.datasets.delete;
+		// searchDataItems and dataItems.list aiplatform.dataItems.list;
+		// annotations.list aiplatform.annotations.list on the data item;
+		// datasetVersions.P on the version (create and list on the
+		// dataset). UNVERIFIED (re-read 2026-11-24): datasetVersions.patch's page names no
+		// permission, and Google's index has no
+		// aiplatform.datasetVersions.update; aiplatform.datasetVersions.create
+		// guards it.
+		p + "DatasetService/": {
+			"CreateDataset": {"aiplatform.datasets.create", "parent"}, "GetDataset": {"aiplatform.datasets.get", "name"},
+			"ListDatasets": {"aiplatform.datasets.list", "parent"}, "UpdateDataset": {"aiplatform.datasets.update", "dataset.name"},
+			"DeleteDataset": {"aiplatform.datasets.delete", "name"}, "ImportData": {"aiplatform.datasets.import", "name"},
+			"ExportData": {"aiplatform.datasets.export", "name"}, "ListDataItems": {"aiplatform.dataItems.list", "parent"},
+			"SearchDataItems": {"aiplatform.dataItems.list", "dataset"}, "ListSavedQueries": {"aiplatform.datasets.get", "parent"},
+			"DeleteSavedQuery": {"aiplatform.datasets.delete", "name"}, "GetAnnotationSpec": {"aiplatform.annotationSpecs.get", "name"},
+			"ListAnnotations": {"aiplatform.annotations.list", "parent"}, "CreateDatasetVersion": {"aiplatform.datasetVersions.create", "parent"},
+			"GetDatasetVersion": {"aiplatform.datasetVersions.get", "name"}, "ListDatasetVersions": {"aiplatform.datasetVersions.list", "parent"},
+			"UpdateDatasetVersion": {"aiplatform.datasetVersions.create", "dataset_version.name"}, "DeleteDatasetVersion": {"aiplatform.datasetVersions.delete", "name"},
+			"RestoreDatasetVersion": {"aiplatform.datasetVersions.restore", "name"},
+		},
+		// CustomJobs and BatchPredictionJobs (#2210): each method's REST
+		// page names aiplatform.customJobs.P and
+		// aiplatform.batchPredictionJobs.P (read 2026-11-24).
+		p + "JobService/": {
+			"CreateCustomJob": {"aiplatform.customJobs.create", "parent"}, "GetCustomJob": {"aiplatform.customJobs.get", "name"},
+			"ListCustomJobs": {"aiplatform.customJobs.list", "parent"}, "DeleteCustomJob": {"aiplatform.customJobs.delete", "name"},
+			"CancelCustomJob":          {"aiplatform.customJobs.cancel", "name"},
+			"CreateBatchPredictionJob": {"aiplatform.batchPredictionJobs.create", "parent"}, "GetBatchPredictionJob": {"aiplatform.batchPredictionJobs.get", "name"},
+			"ListBatchPredictionJobs": {"aiplatform.batchPredictionJobs.list", "parent"}, "DeleteBatchPredictionJob": {"aiplatform.batchPredictionJobs.delete", "name"},
+			"CancelBatchPredictionJob": {"aiplatform.batchPredictionJobs.cancel", "name"},
+			// HyperparameterTuningJobs (#2210): each method's REST page names
+			// aiplatform.hyperparameterTuningJobs.P (read 2026-11-24).
+			"CreateHyperparameterTuningJob": {"aiplatform.hyperparameterTuningJobs.create", "parent"},
+			"GetHyperparameterTuningJob":    {"aiplatform.hyperparameterTuningJobs.get", "name"},
+			"ListHyperparameterTuningJobs":  {"aiplatform.hyperparameterTuningJobs.list", "parent"},
+			"DeleteHyperparameterTuningJob": {"aiplatform.hyperparameterTuningJobs.delete", "name"},
+			"CancelHyperparameterTuningJob": {"aiplatform.hyperparameterTuningJobs.cancel", "name"},
+		},
+		// Vertex ML Metadata (#2205): each method's REST reference page
+		// (read 2026-11-24): metadataStores, artifacts, contexts, executions
+		// and metadataSchemas .create on the parent, .get, .update and
+		// .delete on the resource, .list on the parent; the Purges .delete
+		// on the parent; RemoveContextChildren
+		// aiplatform.contexts.addContextChildren and
+		// QueryArtifactLineageSubgraph aiplatform.artifacts.get, as their
+		// pages name.
+		p + "MetadataService/": {
+			"CreateMetadataStore": {"aiplatform.metadataStores.create", "parent"}, "GetMetadataStore": {"aiplatform.metadataStores.get", "name"},
+			"ListMetadataStores": {"aiplatform.metadataStores.list", "parent"}, "DeleteMetadataStore": {"aiplatform.metadataStores.delete", "name"},
+			"CreateArtifact": {"aiplatform.artifacts.create", "parent"}, "GetArtifact": {"aiplatform.artifacts.get", "name"},
+			"ListArtifacts": {"aiplatform.artifacts.list", "parent"}, "UpdateArtifact": {"aiplatform.artifacts.update", "artifact.name"},
+			"DeleteArtifact": {"aiplatform.artifacts.delete", "name"}, "PurgeArtifacts": {"aiplatform.artifacts.delete", "parent"},
+			"QueryArtifactLineageSubgraph": {"aiplatform.artifacts.get", "artifact"},
+			"CreateContext":                {"aiplatform.contexts.create", "parent"}, "GetContext": {"aiplatform.contexts.get", "name"},
+			"ListContexts": {"aiplatform.contexts.list", "parent"}, "UpdateContext": {"aiplatform.contexts.update", "context.name"},
+			"DeleteContext": {"aiplatform.contexts.delete", "name"}, "PurgeContexts": {"aiplatform.contexts.delete", "parent"},
+			"AddContextArtifactsAndExecutions": {"aiplatform.contexts.addContextArtifactsAndExecutions", "context"},
+			"AddContextChildren":               {"aiplatform.contexts.addContextChildren", "context"},
+			"RemoveContextChildren":            {"aiplatform.contexts.addContextChildren", "context"},
+			"QueryContextLineageSubgraph":      {"aiplatform.contexts.queryContextLineageSubgraph", "context"},
+			"CreateExecution":                  {"aiplatform.executions.create", "parent"}, "GetExecution": {"aiplatform.executions.get", "name"},
+			"ListExecutions": {"aiplatform.executions.list", "parent"}, "UpdateExecution": {"aiplatform.executions.update", "execution.name"},
+			"DeleteExecution": {"aiplatform.executions.delete", "name"}, "PurgeExecutions": {"aiplatform.executions.delete", "parent"},
+			"AddExecutionEvents":             {"aiplatform.executions.addExecutionEvents", "execution"},
+			"QueryExecutionInputsAndOutputs": {"aiplatform.executions.queryExecutionInputsAndOutputs", "execution"},
+			"CreateMetadataSchema":           {"aiplatform.metadataSchemas.create", "parent"}, "GetMetadataSchema": {"aiplatform.metadataSchemas.get", "name"},
+			"ListMetadataSchemas": {"aiplatform.metadataSchemas.list", "parent"},
 		},
 		"/google.iam.v1.IAMPolicy/": {
 			"GetIamPolicy": {"aiplatform.notebookRuntimeTemplates.getIamPolicy", "resource"},
@@ -219,6 +295,15 @@ func colabMethods() map[string]Method {
 	pj := m[p+"PipelineService/CreatePipelineJob"]
 	pj.ActAs = []string{"pipeline_job.service_account"}
 	m[p+"PipelineService/CreatePipelineJob"] = pj
+	cj := m[p+"JobService/CreateCustomJob"]
+	cj.ActAs = []string{"custom_job.job_spec.service_account"}
+	m[p+"JobService/CreateCustomJob"] = cj
+	hp := m[p+"JobService/CreateHyperparameterTuningJob"]
+	hp.ActAs = []string{"hyperparameter_tuning_job.trial_job_spec.service_account"}
+	m[p+"JobService/CreateHyperparameterTuningJob"] = hp
+	bp := m[p+"JobService/CreateBatchPredictionJob"]
+	bp.ActAs = []string{"batch_prediction_job.service_account"}
+	m[p+"JobService/CreateBatchPredictionJob"] = bp
 	return m
 }
 

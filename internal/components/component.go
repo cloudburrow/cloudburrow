@@ -26,6 +26,7 @@ type LifecycleComponent struct {
 	// mysql is the instance's generated MySQL credentials, for Cloud SQL for
 	// MySQL.
 	mysql MySQLCredentials
+	pg    PostgresCredentials
 	// mongoCert and mongoKey are Firestore with MongoDB compatibility's
 	// TLS server certificate and key, PEM (#1738).
 	mongoCert, mongoKey string
@@ -192,6 +193,10 @@ func (c *LifecycleComponent) SetBigQueryImage(ref string) { c.bigQueryImage = re
 // with.
 func (c *LifecycleComponent) SetMySQLCredentials(m MySQLCredentials) { c.mysql = m }
 
+// SetPostgresCredentials supplies the passwords the PostgreSQL backend's
+// application user and management role sign in with (#2208).
+func (c *LifecycleComponent) SetPostgresCredentials(p PostgresCredentials) { c.pg = p }
+
 // SetFirestoreMongoTLS supplies the server certificate and key, PEM,
 // Firestore's front serves Firestore with MongoDB compatibility's TLS with
 // (#1738).
@@ -281,6 +286,11 @@ func (c *LifecycleComponent) Backends() []Backend {
 			}
 			if s == config.ServiceCloudSQLMySQL {
 				out = append(out, CloudSQLMySQLBackend(persistent, c.mysql))
+				continue
+			}
+			if s == config.ServiceCloudSQL {
+				b, _ := OptionalBackend(s, project, persistent)
+				out = append(out, WithPostgresAuth(b, PGAdminUser, c.pg.AdminPassword, CloudSQLUser, c.pg.Password))
 				continue
 			}
 			if b, ok := OptionalBackend(s, project, persistent); ok {

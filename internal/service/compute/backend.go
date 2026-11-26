@@ -21,8 +21,21 @@ type VMBackend interface {
 	ResizeDisk(ctx context.Context, d DiskSpec) error
 	// Snapshot copies a disk's contents into a snapshot's storage.
 	Snapshot(ctx context.Context, d DiskSpec, snapshotKey string) error
+	// CopyDisk makes dst's contents a copy of src's, what dst held before
+	// removed: a clone (sourceDisk) and Asynchronous Replication to a
+	// secondary disk.
+	CopyDisk(ctx context.Context, src, dst DiskSpec) error
 	// DeleteSnapshot removes a snapshot's storage.
 	DeleteSnapshot(ctx context.Context, snapshotKey string) error
+	// SealDisk closes an encrypted disk (d.DataKey) no running instance
+	// uses: its decrypted device is removed, and its storage, CryptFile,
+	// stays ciphertext as it always is (diskseal.go). A disk not open is
+	// left as it is.
+	SealDisk(ctx context.Context, d DiskSpec) error
+	// UnsealDisk opens an encrypted disk's device with d.DataKey for an
+	// instance to use it, its storage still ciphertext; ErrSealed with a
+	// wrong key. A disk already open is left as it is.
+	UnsealDisk(ctx context.Context, d DiskSpec) error
 	// Start boots the instance (its boot disk seeded from its image on
 	// first boot) and returns once it is running.
 	Start(ctx context.Context, vm VMSpec) error
@@ -54,6 +67,20 @@ type DiskSpec struct {
 	Image *PublicImage
 	// SourceSnapshot is the snapshot key the disk is made from, or "".
 	SourceSnapshot string
+	// DataKey is the disk's unwrapped 256-bit data key when it is
+	// encrypted with a customer-managed or customer-supplied key (its
+	// storage is then a dm-crypt image, ciphertext at all times,
+	// diskseal.go), nil otherwise. CreateDisk, CopyDisk and Snapshot leave
+	// a disk with a DataKey encrypted with it.
+	DataKey []byte
+	// SourceDataKey is the data key the source's storage (a snapshot, or
+	// CopyDisk's src) is encrypted with, nil when it is not.
+	SourceDataKey []byte
+	// Open is set when another running instance has the disk open (a
+	// multi-writer disk): SealDisk then leaves it as it is.
+	Open bool
+
+	rel string // the disk's relative name
 }
 
 // AttachedDisk is a non-boot disk of an instance.

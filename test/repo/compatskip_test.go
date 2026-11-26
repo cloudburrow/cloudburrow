@@ -128,7 +128,7 @@ func compatEndpointVars(t *testing.T) map[string]bool {
 		t.Fatal("compat-env.sh has no ALL=( ... ) list")
 	}
 	notEndpoints := map[string]bool{}
-	for _, v := range strings.Fields("CREDENTIALS KUBECONFIG CLUSTER ADMIN_TOKEN CLI CLI_ARGS CORS_ORIGIN MEMORYSTORE_PROJECT MYSQL_PASSWORD BIGQUERY_PROJECT GCLOUD TOFU") {
+	for _, v := range strings.Fields("CREDENTIALS KUBECONFIG CLUSTER ADMIN_TOKEN CLI CLI_ARGS CORS_ORIGIN MEMORYSTORE_PROJECT MYSQL_PASSWORD CLOUDSQL_PASSWORD BIGQUERY_PROJECT GCLOUD TOFU") {
 		notEndpoints[v] = true
 	}
 	vars := map[string]bool{}

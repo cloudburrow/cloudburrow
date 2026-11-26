@@ -28,8 +28,12 @@ type Server struct {
 
 	// aliases maps a requested model ID to the generator's model. It is empty
 	// by default: an unconfigured alias is an error, never a substitution.
-	mu      sync.RWMutex
-	aliases map[string]string
+	mu sync.RWMutex
+	// alertNotifier delivers Model Monitoring's alerts (monitoralerts.go).
+	alertNotifier AlertNotifier
+	// anomalyLogger writes Model Monitoring's anomaly log entries.
+	anomalyLogger AnomalyLogger
+	aliases       map[string]string
 
 	// embedders serve :predict and :embedContent, by embedding model ID
 	// (EmbeddingGemma and EmbeddingGemma 2, #1454); a model with none
@@ -68,6 +72,8 @@ type Server struct {
 	// keys are Document AI's and Speech-to-Text's customer-managed keys
 	// (cmek.go, #1950), set by UseCMEK.
 	keys atomic.Pointer[cmek.Keys]
+	// clockOffset is how far clock:advance moved the clock (clock.go).
+	clockOffset atomic.Int64
 
 	// caches are the cached contents (cachedcontent.go, #2107), served over
 	// gRPC and through cacheTranscoder.
@@ -152,15 +158,33 @@ func (s *Server) Handler() http.Handler {
 	// operations (notebookruntimes.go, #2105).
 	// Notebook executions, schedules and the templates' IAM policies
 	// (notebookjobs.go, schedules.go, notebookiam.go) too.
-	// Vertex AI pipeline jobs (pipelines.go, #2173) too.
-	for _, c := range []string{"notebookRuntimeTemplates", "notebookRuntimes", "notebookExecutionJobs", "schedules", "pipelineJobs"} {
+	// Vertex AI pipeline jobs (pipelines.go, #2173) and ML Metadata
+	// (metadata.go, #2205) too.
+	for _, c := range []string{"notebookRuntimeTemplates", "notebookRuntimes", "notebookExecutionJobs", "schedules", "pipelineJobs", "metadataStores",
+		"customJobs", "batchPredictionJobs", "trainingPipelines", "hyperparameterTuningJobs", "datasets", "nasJobs"} {
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c, s.serveNotebookREST)
 		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
+		// Their operations as the Python SDK polls them, under /ui (#1940).
+		mux.HandleFunc("GET /ui/projects/{project}/locations/{location}/"+c+"/{id}/operations/{op}", s.serveNotebookREST)
+		mux.HandleFunc("GET /ui/projects/{project}/locations/{location}/"+c+"/{id}/{sub}/{subid}/operations/{op}", s.serveNotebookREST)
 	}
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/notebookRuntimes:assign", s.serveNotebookREST)
 	// Workbench instances, notebooks.googleapis.com v2 (#2173).
 	mux.HandleFunc("/v2/projects/{project}/locations/{location}/instances", s.serveNotebookREST)
 	mux.HandleFunc("/v2/projects/{project}/locations/{location}/instances/", s.serveNotebookREST)
+	// Model Monitoring and data labeling jobs (#2214): v1's
+	// modelDeploymentMonitoringJobs and dataLabelingJobs, v1beta1's
+	// modelMonitors and schedules (a monitoring run's).
+	for _, c := range []string{"modelDeploymentMonitoringJobs", "dataLabelingJobs"} {
+		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c, s.serveNotebookREST)
+		mux.HandleFunc("/v1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
+	}
+	for _, c := range []string{"modelMonitors", "schedules"} {
+		mux.HandleFunc("/v1beta1/projects/{project}/locations/{location}/"+c, s.serveNotebookREST)
+		mux.HandleFunc("/v1beta1/projects/{project}/locations/{location}/"+c+"/", s.serveNotebookREST)
+	}
+	// CloudBurrow's clock (clock.go).
+	mux.HandleFunc(ClockAdvancePath, s.serveClock)
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/pipelineJobs:batchDelete", s.serveNotebookREST)
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/pipelineJobs:batchCancel", s.serveNotebookREST)
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/notebookRuntimeTemplates:setDefault", s.setDefaultREST)

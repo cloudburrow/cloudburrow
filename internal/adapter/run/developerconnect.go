@@ -592,6 +592,9 @@ func (d *DeveloperConnectServer) FetchGitRefs(ctx context.Context, req *dcpb.Fet
 // devConnectLinkRepo is the Secure Source Manager repository a git
 // repository link names, for a triggers file's devConnectGitRepositoryLink.
 func devConnectLinkRepo(link string) (string, error) {
+	if cb2RepoRE.MatchString(link) {
+		return cb2RepoTarget(link) // a Cloud Build repository (#2197)
+	}
 	ssmState.mu.Lock()
 	defer ssmState.mu.Unlock()
 	loadDCLocked()

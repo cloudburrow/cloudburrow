@@ -15,6 +15,7 @@ Do not edit these files by hand.
 | [Cloud Run v2](run.md) | 46 | 46 | 0 | 0 | 0 | 0 | 0 | 1 |
 | [Artifact Registry](artifactregistry.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Build](cloudbuild.md) | 19 | 19 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Cloud Build repositories (2nd gen)](cloudbuildv2.md) | 14 | 14 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secure Source Manager](securesourcemanager.md) | 53 | 53 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Developer Connect](developerconnect.md) | 26 | 25 | 0 | 1 | 0 | 0 | 0 | 0 |
 | [Eventarc](eventarc.md) | 42 | 42 | 0 | 0 | 0 | 0 | 0 | 0 |
@@ -28,11 +29,11 @@ Do not edit these files by hand.
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 38 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 43 | 0 | 0 | 0 | 0 | 0 | 2 |
-| [Vertex AI PredictionService](vertexai.md) | 134 | 119 | 0 | 12 | 3 | 0 | 0 | 0 |
+| [Vertex AI PredictionService](vertexai.md) | 220 | 208 | 0 | 7 | 5 | 0 | 0 | 0 |
 | [Vertex AI Workbench](workbench.md) | 12 | 10 | 0 | 2 | 0 | 0 | 0 | 0 |
 | [Document AI v1beta3 datasets](documentaiv1beta3.md) | 7 | 7 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Speech-to-Text v1](speechv1.md) | 13 | 13 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Vertex AI PredictionService v1beta1](vertexaiv1beta1.md) | 22 | 10 | 0 | 0 | 12 | 0 | 0 | 0 |
+| [Vertex AI PredictionService v1beta1](vertexaiv1beta1.md) | 40 | 27 | 0 | 0 | 13 | 0 | 0 | 0 |
 | [Memorystore for Redis](memorystore.md) | 73 | 73 | 0 | 0 | 0 | 0 | 0 | 1 |
 | [Pub/Sub](pubsub.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 86 | 83 | 0 | 3 | 0 | 0 | 0 | 33 |
@@ -48,7 +49,7 @@ Do not edit these files by hand.
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [API Keys API (v2)](apikeys.md) | 9 | 9 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Firebase Rules API (v1)](firebaserules.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Compute Engine API (v1): VPC networking](compute.md) | 584 | 226 | 0 | 84 | 274 | 0 | 0 | 0 |
+| [Compute Engine API (v1): VPC networking](compute.md) | 586 | 259 | 0 | 66 | 261 | 0 | 0 | 0 |
 | [Network Connectivity API (v1)](networkconnectivity.md) | 62 | 18 | 0 | 44 | 0 | 0 | 0 | 0 |
 | [Cloud Storage companion APIs (Batch Operations, Insights, Transfer v1)](storagejobs.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Backup and DR Service API (v1)](backupdr.md) | 61 | 47 | 0 | 14 | 0 | 0 | 0 | 0 |
@@ -63,9 +64,11 @@ Do not edit these files by hand.
 | [Dataform (v1)](dataform.md) | 74 | 74 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Dataform (v1beta1)](dataformv1beta1.md) | 81 | 81 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Dataproc (v1): clusters, jobs, workflow templates, autoscaling policies and Serverless for Apache Spark](dataproc.md) | 44 | 44 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Dataflow (v1b3): jobs, messages, metrics, snapshots and templates](dataflow.md) | 18 | 18 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [App Hub (v1)](apphub.md) | 31 | 31 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [AlloyDB for PostgreSQL (v1)](alloydb.md) | 37 | 37 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Filestore (v1)](filestore.md) | 18 | 18 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Filestore (v1beta1)](filestorev1beta1.md) | 23 | 10 | 0 | 0 | 13 | 0 | 0 | 0 |
 | [Cloud Trace API (v1 and v2)](trace.md) | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Serverless VPC Access (v1)](vpcaccess.md) | 4 | 4 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Certificate Manager (v1)](certificatemanager.md) | 30 | 25 | 0 | 0 | 5 | 0 | 0 | 0 |

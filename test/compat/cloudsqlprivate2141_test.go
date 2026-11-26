@@ -53,7 +53,7 @@ func TestCloudSQLZonesPrivateIPAndPSCEndpoints(t *testing.T) {
 
 	create := func(name string, ic *sqladmin.IpConfiguration, loc *sqladmin.LocationPreference, avail string) *sqladmin.DatabaseInstance {
 		t.Helper()
-		op, err := svc.Instances.Insert(p, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", Region: region,
+		op, err := svc.Instances.Insert(p, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1", Region: region,
 			Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", AvailabilityType: avail, IpConfiguration: ic, LocationPreference: loc}}).Do()
 		if err != nil {
 			t.Fatalf("create %s: %v", name, err)
@@ -198,7 +198,7 @@ func TestCloudSQLPrivateIPAndPSCReachableFromAVM(t *testing.T) {
 	t.Cleanup(func() { _, _ = gaddrs.Delete(ctx, &computepb.DeleteGlobalAddressRequest{Project: p, Address: rng}) })
 	create := func(name, version string, ic *sqladmin.IpConfiguration) *sqladmin.DatabaseInstance {
 		t.Helper()
-		op, err := svc.Instances.Insert(p, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: version, Region: region,
+		op, err := svc.Instances.Insert(p, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: version, RootPassword: "Root-pass1", Region: region,
 			Settings: &sqladmin.Settings{Tier: "db-perf-optimized-N-2", Edition: "ENTERPRISE_PLUS", IpConfiguration: ic,
 				ConnectionPoolConfig: &sqladmin.ConnectionPoolConfig{ConnectionPoolingEnabled: true}}}).Do()
 		if err != nil {

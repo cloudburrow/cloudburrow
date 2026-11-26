@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/frontstate"
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestResetProjectDropsOnlyThatProject (#1540): ResetPath?project= deletes
@@ -101,7 +102,7 @@ func TestResetProjectDropsTablesOfInstancesItNeverMade(t *testing.T) {
 		if err := ac.CreateTable(ctx, "t"); err != nil {
 			t.Fatalf("CreateTable in %s: %v", p, err)
 		}
-		c, err := bigtable.NewClient(ctx, p, "never-made", opt)
+		c, err := localclient.Bigtable(ctx, p, "never-made", opt)
 		if err != nil {
 			t.Fatal(err)
 		}

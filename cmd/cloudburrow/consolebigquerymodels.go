@@ -33,6 +33,7 @@ const bigqueryModelsSegment = "models"
 const (
 	actDeleteModel = "deletemodel"
 	actEditModel   = "editmodel"
+	actExportModel = "exportmodel"
 )
 
 func modelPath(datasetID, modelID string) []string {
@@ -45,6 +46,48 @@ func isModelPath(path []string) bool {
 
 func deleteModelAction() console.Action {
 	return console.Action{ID: actDeleteModel, Label: "Delete model", Destructive: true, Leaves: true}
+}
+
+// exportModelAction is the model page's Export model (#2210): Google's
+// console exports a model to a Cloud Storage location it asks for, in the
+// model's format ("Export models": TF SavedModel, or XGBoost Booster for
+// boosted tree and random forest models), as bq extract -m does.
+func exportModelAction() console.Action {
+	return console.Action{ID: actExportModel, Label: "Export model", Fields: []console.Field{
+		{Name: "uri", Label: "Cloud Storage location", Type: "text", Required: true, Pattern: "gs://.+",
+			Help: "The folder the model is exported to, gs://bucket/path. The bucket must be in the dataset's location."},
+	}}
+}
+
+// exportModel exports a model to values["uri"] with an extract job
+// (Model.ExtractorTo), in its type's format.
+func (p bigqueryProvider) exportModel(ctx context.Context, datasetID, modelID string, values map[string]string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	c, err := p.client(ctx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	m := c.Dataset(datasetID).Model(modelID)
+	md, err := m.Metadata(ctx)
+	if err != nil {
+		return bigqueryRefusal(err)
+	}
+	ref := bigquery.NewGCSReference(strings.TrimSpace(values["uri"]))
+	ref.DestinationFormat = bigquery.TFSavedModel
+	if strings.HasPrefix(md.Type, "BOOSTED_TREE_") || strings.HasPrefix(md.Type, "RANDOM_FOREST_") {
+		ref.DestinationFormat = bigquery.XGBoostBooster
+	}
+	job, err := m.ExtractorTo(ref).Run(ctx)
+	if err != nil {
+		return bigqueryRefusal(err)
+	}
+	st, err := job.Wait(ctx)
+	if err != nil {
+		return bigqueryRefusal(err)
+	}
+	return bigqueryRefusal(st.Err())
 }
 
 func editModelAction(md *bigquery.ModelMetadata) console.Action {

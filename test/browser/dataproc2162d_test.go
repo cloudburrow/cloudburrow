@@ -61,7 +61,7 @@ func TestDataprocOnGKEThroughThePage(t *testing.T) {
 		t.Fatalf("create the virtual cluster = %d: %s", code, resp)
 	}
 	t.Cleanup(func() {
-		consoleDo(t, "POST", "/api/act/dataproc-clusters?project="+project+"&name="+cluster+"&action=delete", "{}")
+		dpDeleteCluster(t, project, cluster)
 	})
 	dpWait(t, "dataproc-clusters", project, cluster, `"Running"`, 10*time.Minute)
 

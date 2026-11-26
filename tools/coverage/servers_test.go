@@ -54,10 +54,12 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/billing"
 	"github.com/cloudburrow/cloudburrow/internal/service/certificatemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/cloudquotas"
+	dataflowsvc "github.com/cloudburrow/cloudburrow/internal/service/dataflow"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataform"
 	"github.com/cloudburrow/cloudburrow/internal/service/dataproc"
 	"github.com/cloudburrow/cloudburrow/internal/service/datatransfer"
 	"github.com/cloudburrow/cloudburrow/internal/service/filestore"
+	"github.com/cloudburrow/cloudburrow/internal/service/filestore/filestorev1beta1pb"
 	"github.com/cloudburrow/cloudburrow/internal/service/gke"
 	"github.com/cloudburrow/cloudburrow/internal/service/iap"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
@@ -145,6 +147,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	dataprocpb.RegisterAutoscalingPolicyServiceServer(srv, dp)
 	dataprocpb.RegisterWorkflowTemplateServiceServer(srv, dp)
 	dataprocpb.RegisterNodeGroupControllerServer(srv, dp)
+	// Dataflow (#2215): its six services, no engine.
+	dfl, err := dataflowsvc.NewServer(dataflowsvc.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dfl.Register(srv)
 	// App Hub alone (#2110): its mixins are other services' rows.
 	ah, err := apphub.NewServer("", apphub.Options{})
 	if err != nil {
@@ -164,6 +172,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	filestorepb.RegisterCloudFilestoreManagerServer(srv, fst)
+	filestorev1beta1pb.RegisterCloudFilestoreManagerServer(srv, fst.Beta())
 	// Cloud Trace (#2118): v1 and v2.
 	tr, err := trace.NewServer("")
 	if err != nil {
@@ -288,6 +297,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	runSrv.CloudBuild().Register(srv)
 	runSrv.SecureSourceManager(func() string { return "" }).Register(srv)
 	runSrv.DeveloperConnect().Register(srv)
+	runSrv.Builds(nil, nil).RepositoryManager().Register(srv) // #2197
 	grafeas.NewServer(grafeas.NewStore(nil)).Register(srv)
 	// FunctionService alone: its IAM and Locations mixins are KMS's above;
 	// and Cloud Functions v1 (#1428) over the same functions.

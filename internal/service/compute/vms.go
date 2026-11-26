@@ -271,7 +271,7 @@ func sizeGb(v any) (int64, bool, error) {
 // diskSpecLocked is a stored disk as the backend sees it.
 func (s *Server) diskSpecLocked(d obj) DiskSpec {
 	n, _, _ := sizeGb(d["sizeGb"])
-	sp := DiskSpec{Key: vmKey("disk", d), SizeGb: n, Type: lastSeg(str(d, "type"))}
+	sp := DiskSpec{Key: vmKey("disk", d), SizeGb: n, Type: lastSeg(str(d, "type")), rel: str(d, "selfLink"), DataKey: s.specKeyLocked(d)}
 	if si := str(d, "sourceImage"); si != "" {
 		if img, err := LookupImage(si); err == nil {
 			sp.Image = &img
@@ -280,6 +280,7 @@ func (s *Server) diskSpecLocked(d obj) DiskSpec {
 	if ss := str(d, "sourceSnapshot"); ss != "" {
 		if so, ok := s.res[ss]; ok {
 			sp.SourceSnapshot = vmKey("snap", so)
+			sp.SourceDataKey = s.specKeyLocked(so)
 		}
 	}
 	// A disk made from a custom image, a machine image or another disk
@@ -330,6 +331,10 @@ func (s *Server) newDiskLocked(project, zone string, b obj, field string) (obj, 
 		d["labelFingerprint"] = labelFingerprint(l)
 	}
 	minSize := lim.min
+	if ap, ok := b["asyncPrimaryDisk"].(map[string]any); ok && str(ap, "disk") != "" &&
+		(str(b, "sourceImage") != "" || str(b, "sourceSnapshot") != "" || str(b, "sourceDisk") != "") {
+		return nil, invalid("Invalid value for field '%s.asyncPrimaryDisk': secondary disks must be blank when created: they can't be created from images, snapshots, or other disks.", field)
+	}
 	switch {
 	case str(b, "sourceImage") != "":
 		img, custom, err := s.imageSeedLocked(str(b, "sourceImage"), project)
@@ -376,25 +381,25 @@ func (s *Server) newDiskLocked(project, zone string, b obj, field string) (obj, 
 			return nil, invalid("Invalid value for field '%s.sizeGb': '%d'. Requested disk size cannot be smaller than the snapshot size (%d GB)", field, size, ssz)
 		}
 	case str(b, "sourceDisk") != "":
-		// Clone disk (#2139, disks/create-disk-from-source): a copy of a
-		// disk of the same zone.
-		sr := Rel(str(b, "sourceDisk"), project)
-		if !strings.Contains(sr, "/") {
-			sr = zoneRel(project, zone, "disks", sr)
+		src, ok := resolveDisk(str(b, "sourceDisk"), project)
+		if !ok {
+			return nil, invalid("Invalid value for field '%s.sourceDisk': '%s'.", field, str(b, "sourceDisk"))
 		}
-		so, ok := s.res[sr]
-		if !ok || !strings.Contains(sr, "/disks/") {
-			return nil, notFound(sr)
+		so, ok := s.res[src]
+		if !ok {
+			return nil, notFound(src)
 		}
-		if !diskInZone(so, zone) {
-			return nil, invalid("Invalid value for field '%s.sourceDisk': '%s'. The source disk must be in zone '%s'.", field, str(b, "sourceDisk"), zone)
+		// A zonal disk is cloned in its zone; a regional disk into one of
+		// its replica zones.
+		if (isRegional(so) && !hasStr(replicaZones(so), zone)) || (!isRegional(so) && lastSeg(str(so, "zone")) != zone) {
+			return nil, invalid("Invalid value for field '%s.sourceDisk': '%s'. A zonal disk can be cloned only from a disk in its own zone (or a regional disk replicated in it).", field, src)
 		}
 		if str(so, "status") != "READY" {
-			return nil, errf(http.StatusBadRequest, "resourceNotReady", "The resource '%s' is not ready", sr)
+			return nil, errf(http.StatusBadRequest, "resourceNotReady", "The resource '%s' is not ready", src)
 		}
-		d["sourceDisk"], d["sourceDiskId"] = sr, so["id"]
-		// The clone's storage is a copy of the source's claim.
-		d["_seedKey"] = vmKey("disk", so)
+		d["sourceDisk"], d["sourceDiskId"] = src, so["id"]
+		// The clone runs the public image its source came from; its
+		// storage is a copy of the source's (insertDiskLocked).
 		if si := s.diskImageLocked(so); si != "" {
 			d["_seedImage"] = si
 		}
@@ -409,6 +414,21 @@ func (s *Server) newDiskLocked(project, zone string, b obj, field string) (obj, 
 			return nil, invalid("Invalid value for field '%s.sizeGb': '%d'. Requested disk size cannot be smaller than the source disk's size (%d GB)", field, size, ssz)
 		}
 	}
+	if ap, ok := b["asyncPrimaryDisk"].(map[string]any); ok && str(ap, "disk") != "" {
+		prel, pd, err := s.asyncPrimaryLocked(project, str(ap, "disk"), regionOfZone(zone), typ, field)
+		if err != nil {
+			return nil, err
+		}
+		psz, _, _ := sizeGb(pd["sizeGb"])
+		if !set {
+			size, set = psz, true
+		}
+		if size != psz {
+			return nil, invalid("Invalid value for field '%s.sizeGb': '%d'. The primary and secondary disk must have the same size: the primary disk is %d GB.", field, size, psz)
+		}
+		d["asyncPrimaryDisk"] = obj{"disk": prel, "diskId": pd["id"]}
+		d["resourceStatus"] = obj{"asyncPrimaryDisk": obj{"state": "CREATED"}}
+	}
 	if k := str(b, "_seedKey"); k != "" && d["sourceImage"] == nil && d["sourceSnapshot"] == nil && d["sourceDisk"] == nil {
 		// A machine image's saved disk (templates.go), copied.
 		d["_seedKey"] = k
@@ -422,13 +442,6 @@ func (s *Server) newDiskLocked(project, zone string, b obj, field string) (obj, 
 			}
 		}
 	}
-	if pols := strsAny(b["resourcePolicies"]); len(pols) > 0 {
-		rels, err := s.diskPoliciesLocked(project, regionOfZone(zone), pols, field+".resourcePolicies")
-		if err != nil {
-			return nil, err
-		}
-		d["resourcePolicies"] = toAny(rels)
-	}
 	if !set && size == 0 {
 		size = 100
 		if typ == "pd-standard" {
@@ -439,6 +452,9 @@ func (s *Server) newDiskLocked(project, zone string, b obj, field string) (obj, 
 		return nil, invalid("Invalid value for field '%s.sizeGb': '%d'. Disk size must be between %d GB and %d GB for %s.", field, size, minSize, lim.max, typ)
 	}
 	d["sizeGb"] = strconv.FormatInt(size, 10)
+	if err := s.finishNewDiskLocked(d, b, field); err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 
@@ -447,6 +463,7 @@ func (s *Server) disks(c call, zone string) (obj, error) {
 	coll := "projects/" + c.project + "/zones/" + zone + "/disks"
 	scope := "zones/" + zone
 	get, post, del := c.method == http.MethodGet, c.method == http.MethodPost, c.method == http.MethodDelete
+	patch := c.method == http.MethodPatch
 	switch {
 	case n == 3 && get:
 		return s.listOut("compute#diskList", coll, s.res, c.query)
@@ -463,23 +480,20 @@ func (s *Server) disks(c call, zone string) (obj, error) {
 		if err != nil {
 			return nil, err
 		}
-		rel := str(d, "selfLink")
-		s.res[rel] = norm(d)
-		s.markScheduledLocked(s.res[rel], strs(s.res[rel], "resourcePolicies"))
-		spec := s.diskSpecLocked(s.res[rel])
-		return s.runOpLocked(c.project, scope, "insert", rel, func(ctx context.Context) error {
-			return s.opts.VMs.CreateDisk(ctx, spec)
-		}, func(err error) {
+		if pols := strs(c.body, "resourcePolicies"); len(pols) > 0 {
+			l, err := s.checkDiskPoliciesLocked(c.project, d, pols, "resource.resourcePolicies")
 			if err != nil {
-				delete(s.res, rel)
-				return
+				return nil, err
 			}
-			if o, ok := s.res[rel]; ok {
-				o["status"] = "READY"
-			}
-		})
+			d["resourcePolicies"] = l
+		}
+		return s.insertDiskLocked(c.project, scope, d)
+	case n == 4 && post && p[3] == "bulkInsert":
+		return s.bulkInsertDisks(c.project, scope, regionOfZone(zone), c.body)
+	case n == 4 && post && p[3] == "stopGroupAsyncReplication":
+		return s.stopGroupAsyncReplication(c.project, scope, regionOfZone(zone), c.body)
 	}
-	if n < 4 || (n == 4 && !get && !del) || (n == 5 && !servedDiskVerbs[p[4]]) || n > 5 {
+	if n < 4 || (n == 4 && !get && !del && !patch) || (n == 5 && !(post && regionDiskVerbs[p[4]])) || n > 5 {
 		return nil, unimplemented("%s on disks/%s is not served (#1963)", c.method, strings.Join(p[3:], "/"))
 	}
 	rel := coll + "/" + p[3]
@@ -491,49 +505,32 @@ func (s *Server) disks(c call, zone string) (obj, error) {
 	case n == 4 && get:
 		return d, nil
 	case n == 4 && del:
-		if users := strs(d, "users"); len(users) > 0 {
-			return nil, errf(http.StatusBadRequest, "resourceInUseByAnotherResource",
-				"The disk resource '%s' is already being used by '%s'", rel, users[0])
-		}
-		spec := s.diskSpecLocked(d)
-		d["status"] = "DELETING"
-		return s.runOpLocked(c.project, scope, "delete", rel, func(ctx context.Context) error {
-			return s.opts.VMs.DeleteDisk(ctx, spec)
-		}, func(err error) {
-			if err == nil {
-				delete(s.res, rel)
-			} else if o, ok := s.res[rel]; ok {
-				o["status"] = "READY"
-			}
-		})
-	case n == 5 && post && p[4] == "resize":
-		size, set, err := sizeGb(c.body["sizeGb"])
-		if err != nil {
-			return nil, err
-		}
-		cur, _, _ := sizeGb(d["sizeGb"])
-		if !set {
-			return nil, required("sizeGb")
-		}
-		if size <= cur {
-			return nil, invalid("Invalid value for field 'sizeGb': '%d'. New disk size '%d' GB must be larger than existing size '%d' GB.", size, size, cur)
-		}
-		if lim := diskTypes[lastSeg(str(d, "type"))]; size > lim.max {
-			return nil, invalid("Invalid value for field 'sizeGb': '%d'. Disk size must be at most %d GB.", size, lim.max)
-		}
-		d["sizeGb"] = strconv.FormatInt(size, 10)
-		spec := s.diskSpecLocked(d)
-		return s.runOpLocked(c.project, scope, "resizeDisk", rel, func(ctx context.Context) error {
-			return s.opts.VMs.ResizeDisk(ctx, spec)
-		}, nil)
-	case n == 5 && post && p[4] == "setLabels":
-		return s.setLabelsAsync(c.project, scope, rel, c.body)
-	case n == 5 && post && p[4] == "createSnapshot":
-		return s.createSnapshot(c.project, rel, c.body, scope)
-	case n == 5 && post && (p[4] == "addResourcePolicies" || p[4] == "removeResourcePolicies"):
-		return s.attachPolicies(c.project, scope, rel, d, c.body, p[4] == "addResourcePolicies", "snapshotSchedulePolicy")
+		return s.deleteDiskLocked(c.project, scope, rel, d)
+	case n == 4 && patch:
+		return s.updateDiskLocked(c, scope, rel, d)
 	}
-	return nil, unimplemented("%s on disks/%s is not served (#1963)", c.method, strings.Join(p[3:], "/"))
+	return s.diskVerbLocked(c, scope, rel, d)
+}
+
+// diskVerbLocked serves a POST verb on a zonal or regional disk.
+func (s *Server) diskVerbLocked(c call, scope, rel string, d obj) (obj, error) {
+	switch c.parts[4] {
+	case "resize":
+		return s.resizeDiskLocked(c.project, scope, rel, d, c.body)
+	case "setLabels":
+		return s.setLabels(c.project, scope, rel, c.body)
+	case "createSnapshot":
+		return s.createSnapshot(c.project, rel, c.body, scope)
+	case "addResourcePolicies", "removeResourcePolicies":
+		return s.diskPolicies(c.project, scope, rel, d, c.body, c.parts[4] == "addResourcePolicies")
+	case "startAsyncReplication":
+		return s.startAsyncReplication(c.project, scope, rel, d, c.body)
+	case "stopAsyncReplication":
+		return s.stopAsyncReplication(c.project, scope, rel, d)
+	case "updateKmsKey":
+		return s.updateDiskKmsKeyLocked(c.project, scope, rel, d, c.body)
+	}
+	return nil, unimplemented("%s on %s/%s is not served (#2206)", c.method, rel, c.parts[4])
 }
 
 var servedDiskVerbs = map[string]bool{"resize": true, "setLabels": true, "createSnapshot": true,
@@ -559,6 +556,19 @@ func (s *Server) createSnapshot(project, diskRel string, b obj, scope string) (o
 	d := s.res[diskRel]
 	if str(d, "status") != "READY" {
 		return nil, errf(http.StatusBadRequest, "resourceNotReady", "The resource '%s' is not ready", diskRel)
+	}
+	if s.syncSecondaryLocked(d) != nil {
+		// "Secondary disks can't be attached, deleted, or snapshotted
+		// while they are in the process of replication" (async-pd/about).
+		return nil, errf(http.StatusBadRequest, "resourceInUseByAnotherResource",
+			"The disk resource '%s' is a secondary disk in the process of replication: it can't be snapshotted until replication stops.", diskRel)
+	}
+	// "You can't ... create a snapshot from the disk" with a revoked key;
+	// a customer-supplied key is given as sourceDiskEncryptionKey.
+	sk, _ := b["sourceDiskEncryptionKey"].(map[string]any)
+	dek, err := s.diskKeyLocked(d, sk, "resource.sourceDiskEncryptionKey")
+	if err != nil {
+		return nil, err
 	}
 	snap := obj{"kind": "compute#snapshot", "id": newID(), "name": name, "status": "CREATING", "selfLink": rel,
 		"sourceDisk": diskRel, "sourceDiskId": d["id"], "diskSizeGb": d["sizeGb"], "storageBytes": "0",
@@ -594,6 +604,11 @@ func (s *Server) createSnapshot(project, diskRel string, b obj, scope string) (o
 	}
 	if si := str(d, "sourceImage"); si != "" {
 		snap["_sourceImage"] = si
+	}
+	// A CMEK disk's snapshot is "encrypted with the same key" (#2206); a
+	// CSEK disk's with snapshotEncryptionKey, or the service's own key.
+	if err := s.snapshotKeyLocked(snap, d, b, dek); err != nil {
+		return nil, err
 	}
 	if v, _ := b[VaultSnapshot].(bool); v {
 		// A Backup and DR vault's (#2075): kept out of the project's own

@@ -6,8 +6,8 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
-	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,12 +18,35 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// EnvCloudSQL is the host address of Cloud SQL's PostgreSQL.
-const EnvCloudSQL = "CLOUDBURROW_TEST_CLOUDSQL"
+// EnvCloudSQL is the host address of Cloud SQL's PostgreSQL, and
+// EnvCloudSQLPassword its cloudburrow user's generated password, which the
+// server checks (#2208; `cloudburrow env`'s PGPASSWORD).
+const (
+	EnvCloudSQL         = "CLOUDBURROW_TEST_CLOUDSQL"
+	EnvCloudSQLPassword = "CLOUDBURROW_TEST_CLOUDSQL_PASSWORD"
+)
+
+// upPGPassword is the password of the cloudburrow user of the PostgreSQL
+// server `up` runs: the harness's, or PGPASSWORD, which `cloudburrow env`
+// exports.
+func upPGPassword() string {
+	if v := os.Getenv(EnvCloudSQLPassword); v != "" {
+		return v
+	}
+	return os.Getenv("PGPASSWORD")
+}
+
+// upPGURL is a pgx URL for database on `up`'s PostgreSQL at addr, as the
+// cloudburrow user with its password.
+func upPGURL(addr, database string) string {
+	u := url.URL{Scheme: "postgres", User: url.UserPassword("cloudburrow", upPGPassword()), Host: addr,
+		Path: "/" + database, RawQuery: "sslmode=disable"}
+	return u.String()
+}
 
 func pgConnect(t *testing.T, h *Harness, database string) *pgx.Conn {
 	t.Helper()
-	c, err := pgx.Connect(h.Context(), fmt.Sprintf("postgres://cloudburrow@%s/%s?sslmode=disable", h.Endpoint(EnvCloudSQL), database))
+	c, err := pgx.Connect(h.Context(), upPGURL(h.Endpoint(EnvCloudSQL), database))
 	if err != nil {
 		t.Fatalf("connect to %s: %v", database, err)
 	}

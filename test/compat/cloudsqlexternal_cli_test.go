@@ -34,7 +34,7 @@ func TestGcloudSQLExternalPostgresOffline(t *testing.T) {
 	n := time.Now().UnixNano() % 1e6
 	srcName, repName, offName := fmt.Sprintf("gx-src-%d", n), fmt.Sprintf("gx-rep-%d", n), fmt.Sprintf("gx-rep-%d-off", n)
 	g.must("sql", "instances", "create", srcName, "--project", g.project, "--database-version=POSTGRES_17",
-		"--tier=db-custom-1-3840", "--region=us-central1", "--database-flags=cloudsql.logical_decoding=on", "--quiet")
+		"--root-password=Root-pass1", "--tier=db-custom-1-3840", "--region=us-central1", "--database-flags=cloudsql.logical_decoding=on", "--quiet")
 	defer g.run(nil, "sql", "instances", "delete", srcName, "--project", g.project, "--quiet")
 	src, err := svc.Instances.Get(g.project, srcName).Do()
 	if err != nil {
@@ -42,7 +42,7 @@ func TestGcloudSQLExternalPostgresOffline(t *testing.T) {
 	}
 	db := e.root(t, h, src.ConnectionName)
 	eventually(t, "the source's database", func() error { _, err := db.Exec("CREATE DATABASE shop"); return err })
-	shop := e.open(t, h, src.ConnectionName, "postgres", "x", "shop")
+	shop := e.open(t, h, src.ConnectionName, "postgres", pgRootPassword, "shop")
 	for _, q := range []string{"CREATE TABLE orders (id int PRIMARY KEY, item text)", "INSERT INTO orders VALUES (1, 'copied')"} {
 		if _, err := shop.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)
@@ -50,14 +50,14 @@ func TestGcloudSQLExternalPostgresOffline(t *testing.T) {
 	}
 	op, err := svc.Instances.Insert(g.project, &sqladmin.DatabaseInstance{Name: repName, DatabaseVersion: "POSTGRES_17",
 		InstanceType: "ON_PREMISES_INSTANCE", OnPremisesConfiguration: &sqladmin.OnPremisesConfiguration{
-			HostPort: "sqlinst-" + srcName + ":5432", Username: "postgres"}}).Do()
+			HostPort: "sqlinst-" + srcName + ":5432", Username: "postgres", Password: pgRootPassword}}).Do()
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitSQLOpDone(t, svc, g.project, op)
 	defer g.run(nil, "sql", "instances", "delete", repName, "--project", g.project, "--quiet")
 	g.must("sql", "instances", "create", offName, "--project", g.project, "--master-instance-name="+repName,
-		"--tier=db-custom-1-3840", "--region=us-central1", "--quiet")
+		"--root-password="+pgRootPassword, "--tier=db-custom-1-3840", "--region=us-central1", "--quiet")
 	defer g.run(nil, "sql", "instances", "delete", offName, "--project", g.project, "--quiet")
 	off, err := svc.Instances.Get(g.project, offName).Do()
 	if err != nil || off.InstanceType != "READ_REPLICA_INSTANCE" || !strings.HasSuffix(off.MasterInstanceName, ":"+repName) {
@@ -75,7 +75,7 @@ func TestGcloudSQLExternalPostgresOffline(t *testing.T) {
 	if op = waitSQLOpDone(t, svc, g.project, op); op.Error != nil {
 		t.Fatalf("startExternalSync OFFLINE: %+v", op.Error.Errors[0])
 	}
-	odb := e.open(t, h, off.ConnectionName, "postgres", "x", "shop")
+	odb := e.open(t, h, off.ConnectionName, "postgres", pgRootPassword, "shop")
 	eventually(t, "the offline copy", func() error {
 		var c int
 		if err := odb.QueryRow("SELECT count(*) FROM orders").Scan(&c); err != nil {

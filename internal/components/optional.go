@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -600,11 +601,12 @@ func bigQueryBackend(project string) Backend {
 
 // cloudSQLBackend runs PostgreSQL in the cluster.
 //
-// Authentication is trust, deliberately and consistently with the rest of
-// CloudBurrow: nothing here authenticates a request, and a password would be a
-// shared secret that implied otherwise while being printed in the startup
-// banner anyway. This is why the endpoint is bound to loopback and why the
-// documentation is explicit that it must never be exposed.
+// Every TCP sign-in is checked by password, as Cloud SQL checks it (#2208,
+// pgauth.go): the image initialises the data directory with trust, and
+// pgStartCommand then holds every host line of pg_hba.conf to the
+// password, leaving only the socket in the pod trusted. The application's
+// user and CloudBurrow's management role get their passwords from
+// WithPostgresAuth.
 //
 // Unlike the emulators beside it this is a real database, so it is given a
 // volume when the instance is persistent and keeps its data across a restart.
@@ -613,8 +615,11 @@ func cloudSQLBackend(persistent bool) Backend {
 		Name:  "cloudsql",
 		Image: CloudSQLImage,
 		Port:  CloudSQLPort,
+		// The entrypoint's own pg_hba.conf, which pgStartCommand rewrites.
+		Command: pgStartCommand,
 		Env: map[string]string{
-			// trust, not a password: see above.
+			// Initialised with no password, which WithPostgresAuth then
+			// sets; pg_hba.conf asks for it (pgauth.go).
 			"POSTGRES_HOST_AUTH_METHOD": "trust",
 			"POSTGRES_USER":             CloudSQLUser,
 			"POSTGRES_DB":               CloudSQLDatabase,
@@ -1108,6 +1113,24 @@ func CloudSQLInstanceBackend(name, version string, persistent bool, rootPassword
 		if version == "MYSQL_5_7" || version == "MYSQL_5_6" {
 			b.Args = append(b.Args, legacyMySQLArgs...)
 		}
+		if version == "MYSQL_8_0" {
+			// "Cloud SQL for MySQL 8.0 uses mysql_native_password as the
+			// default authentication plugin for new users instead of
+			// caching_sha2_password" (#2208, docs.cloud.google.com/sql/docs/
+			// mysql/features); the default_authentication_plugin flag,
+			// after it, still wins. 8.4's default is caching_sha2_password,
+			// as the image's is, and 5.7's and 5.6's mysql_native_password.
+			b.Args = append(b.Args, "--default-authentication-plugin=mysql_native_password")
+		}
+		if version == "MYSQL_8_4" {
+			// "Cloud SQL for MySQL 8.4 continues to support existing
+			// accounts that use mysql_native_password ... they can
+			// continue to connect after an instance is upgraded" (same
+			// page): the plugin MySQL 8.4 leaves unloaded is loaded, so an
+			// 8.0 instance's users, copied by a major version upgrade,
+			// keep signing in. New users still get caching_sha2_password.
+			b.Args = append(b.Args, "--mysql-native-password=ON")
+		}
 		for _, f := range flags {
 			b.Args = append(b.Args, "--"+f.Name+"="+f.Value)
 		}
@@ -1239,7 +1262,7 @@ if ` + rebuild + `; then
   # the new timeline. 'latest', 12's default, follows it (#1524).
   if [ -f "$PGDATA/recovery.conf" ]; then echo "recovery_target_timeline = 'latest'" >> "$PGDATA/recovery.conf"; fi` + mark + `
 fi
-exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
+` + pgAuthPrelude + `exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
 	b.Args = nil
 	return b
 }
@@ -1301,7 +1324,7 @@ if [ "$(cat "$marker" 2>/dev/null)" != "$CLOUDSQL_STANDBY_EPOCH" ]; then
 		` application_name=` + SQLStandbyApplicationName + `'" >> "$conf"
   echo "$CLOUDSQL_STANDBY_EPOCH" > "$marker"
 fi
-exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
+` + pgAuthPrelude + `exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
 	b.Args = nil
 	return b
 }
@@ -1339,7 +1362,7 @@ if [ "$(cat "$marker" 2>/dev/null)" != "$CLOUDSQL_STANDBY_EPOCH" ]; then
   rm -rf /var/lib/mysql/data
   echo "$CLOUDSQL_STANDBY_EPOCH" > "$marker"
 fi
-exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
+` + pgAuthPrelude + `exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
 	b.Args = nil
 	return b
 }
@@ -1411,4 +1434,73 @@ func CloudSQLServerBackend(name, version, pid, saPassword string, eulaAccepted b
 		b.Env["ACCEPT_EULA"] = "Y"
 	}
 	return b
+}
+
+// Google's AlloyDB Omni images (#2207), google/alloydbomni of each major
+// version Google publishes on Docker Hub, pinned by the multi-arch index
+// digest (linux/amd64 and linux/arm64, arm64 in preview), read from the
+// registry's manifest API without pulling anything (2026-11-24): the
+// 15, 16 and 17 tags were then 15.18.0, 16.14.0 and 17.10.0. Its use is
+// governed by Google's AlloyDB Omni licence terms, so a node pulls one only
+// for an AlloyDB cluster whose user accepted them.
+const (
+	AlloyDBOmni15Image = "google/alloydbomni:15.18.0@sha256:8d626c5540b7c8eda0635fb62005833cd44d9c9aff588a509cbe9223a5cf9120"
+	AlloyDBOmni16Image = "google/alloydbomni:16.14.0@sha256:6f9f2a87354dac2eed5e3a84fb1e6ccfce0429d4176623a3396a6012e6fc5e47"
+	AlloyDBOmni17Image = "google/alloydbomni:17.10.0@sha256:ee3a5ed22fe0d239db05c990b2e0bdee6af9a40e6b7f3566fc2be4c1d4947a3e"
+)
+
+// AlloyDBOmniImage is the Omni image of an AlloyDB database version
+// (POSTGRES_15 ...), "" for a version Google publishes none of.
+func AlloyDBOmniImage(version string) string {
+	switch version {
+	case "POSTGRES_15":
+		return AlloyDBOmni15Image
+	case "POSTGRES_16":
+		return AlloyDBOmni16Image
+	case "POSTGRES_17":
+		return AlloyDBOmni17Image
+	}
+	return ""
+}
+
+// alloyDBOmniColumnarMiB is google_columnar_engine.memory_size_in_mb's
+// default (docs.cloud.google.com/alloydb/omni/containers/current/docs/columnar-engine/configure).
+const alloyDBOmniColumnarMiB = 1024
+
+// AlloyDBOmniBackend makes b, an AlloyDB instance's PostgreSQL server of
+// version (CloudSQLInstanceBackend), run Google's AlloyDB Omni image of
+// that version instead: the image takes the official PostgreSQL image's
+// environment (POSTGRES_*, PGDATA) and arguments, as its Docker Hub page
+// documents. Its own shared_preload_libraries (the columnar engine, the
+// index advisor and the rest) are kept, so the server is given none; its
+// shared memory is sized for the columnar engine's store (Google's fix for
+// "insufficient shared memory" is the container's shared memory); and it
+// asks for the 2 GB of memory Google's requirements name. ok is false, and
+// b is unchanged, for a version Google publishes no Omni image of.
+func AlloyDBOmniBackend(b Backend, version string, flags []SQLInstanceFlag) (Backend, bool) {
+	img := AlloyDBOmniImage(version)
+	if img == "" {
+		return b, false
+	}
+	b.Image = img
+	var args []string
+	for i := 0; i < len(b.Args); i++ {
+		if b.Args[i] == "-c" && i+1 < len(b.Args) && b.Args[i+1] == pgPreload {
+			i++
+			continue
+		}
+		args = append(args, b.Args[i])
+	}
+	b.Args = args
+	columnar := alloyDBOmniColumnarMiB
+	for _, f := range flags {
+		if f.Name == "google_columnar_engine.memory_size_in_mb" {
+			if n, err := strconv.Atoi(f.Value); err == nil && n > 0 {
+				columnar = n
+			}
+		}
+	}
+	b.ShmSize = fmt.Sprintf("%dMi", columnar+256)
+	b.MemoryRequest = "2Gi"
+	return b, true
 }

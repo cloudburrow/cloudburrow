@@ -35,7 +35,7 @@ func TestDataprocHDFSHighAvailabilityThroughThePage(t *testing.T) {
 	p.submitForm(map[string]string{"clusterName": "hdfs-ha", "clusterType": "HA", "workerLocalSsds": "1", "workerLocalSsdInterface": "nvme"}, "clusterName")
 	cluster := "projects/" + project + "/regions/us-central1/clusters/hdfs-ha"
 	t.Cleanup(func() {
-		consoleDo(t, "POST", "/api/act/dataproc-clusters?project="+project+"&name="+cluster+"&action=delete", "{}")
+		dpDeleteCluster(t, project, cluster)
 	})
 	dpWait(t, "dataproc-clusters", project, cluster, `"Running"`, 30*time.Minute)
 	p.navigate("/dataproc/clusters?project=" + project)

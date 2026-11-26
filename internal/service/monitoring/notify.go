@@ -14,18 +14,39 @@ import (
 	"cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/cloudburrow/cloudburrow/internal/egress"
 )
 
 // Notification delivery (#1964) stays on the machine: a webhook channel's
 // URL must be local (loopback, a private address, localhost, a cluster
-// service name or host.docker.internal), and a Pub/Sub channel publishes
-// to the instance's own Pub/Sub. Every other channel type is recorded,
-// never sent.
+// service name or host.docker.internal), a Pub/Sub channel publishes to
+// the instance's own Pub/Sub, and an email channel's mail goes to the
+// instance's local mail sink (internal/mailsink, #2214), which keeps it
+// for the console's Mail page and relays nothing. Every other channel
+// type is recorded, never sent.
 
 // Publisher publishes one message to a topic of the local Pub/Sub.
 type Publisher func(ctx context.Context, topic string, data []byte, attrs map[string]string) error
+
+// Mailer hands one plain-text email to the local mail sink. source names
+// the service that sent it.
+type Mailer func(ctx context.Context, source, from string, to []string, subject, text string) error
+
+// AlertsSender is the From address of Cloud Monitoring's email. Google's
+// is alerting-noreply@google.com; the local one names no Google domain.
+const AlertsSender = "alerting-noreply@cloudburrow.localhost"
+
+// SetMailer sets how email channels and other services' emails are sent.
+func (s *Server) SetMailer(m Mailer) {
+	s.mu.Lock()
+	s.mailer = m
+	s.mu.Unlock()
+}
+
+// mail is one email notification's subject and text.
+type mail struct{ subject, text string }
 
 // Delivery states.
 const (
@@ -165,12 +186,16 @@ func severityName(v monitoringpb.AlertPolicy_Severity) string {
 // It runs without mu held and records what happened.
 func (s *Server) notify(ctx context.Context, in Incident, p *monitoringpb.AlertPolicy, channels []*monitoringpb.NotificationChannel, publish Publisher) {
 	payload := s.incidentPayload(&in, p)
+	s.mu.Lock()
+	mailer := s.mailer
+	m := s.incidentMail(&in, p)
+	s.mu.Unlock()
 	for _, c := range channels {
 		d := Delivery{Channel: c.GetName(), Type: c.GetType(), Kind: "incident", Incident: in.ID}
 		if !c.GetEnabled().GetValue() && c.Enabled != nil {
 			d.State, d.Detail = DeliveryRecorded, "not sent: the channel is disabled"
 		} else {
-			d.State, d.Detail = deliver(ctx, c, payload, publish)
+			d.State, d.Detail = deliverTo(ctx, c, payload, publish, mailer, m)
 		}
 		s.mu.Lock()
 		s.recordDelivery(d)
@@ -184,8 +209,23 @@ var webhookClient = egress.Client(&http.Client{Timeout: 10 * time.Second,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }})
 
 func deliver(ctx context.Context, c *monitoringpb.NotificationChannel, payload []byte, publish Publisher) (state, detail string) {
+	return deliverTo(ctx, c, payload, publish, nil, mail{})
+}
+
+// deliverTo delivers payload to c, or for an email channel m, through
+// mailer.
+func deliverTo(ctx context.Context, c *monitoringpb.NotificationChannel, payload []byte, publish Publisher, mailer Mailer, m mail) (state, detail string) {
 	t := channelTypeOf(c.GetType())
 	switch {
+	case t != nil && t.local == "email":
+		to := c.GetLabels()["email_address"]
+		if mailer == nil || m.subject == "" {
+			return DeliveryRecorded, "not sent: this instance has no local mail sink. To: " + to
+		}
+		if err := mailer(ctx, "monitoring", AlertsSender, []string{to}, m.subject, m.text); err != nil {
+			return DeliveryFailed, "the local mail sink refused the email to " + to + ": " + err.Error()
+		}
+		return DeliverySent, "sent to " + to + " through the local mail sink (the console's Mail page)"
 	case t == nil || t.local == "":
 		return DeliveryRecorded, fmt.Sprintf("not sent: CloudBurrow never sends %s notifications off the machine", c.GetType())
 	case t.local == "pubsub":
@@ -231,7 +271,7 @@ func deliver(ctx context.Context, c *monitoringpb.NotificationChannel, payload [
 func (s *Server) SendTestNotification(ctx context.Context, name string) (Delivery, error) {
 	s.mu.Lock()
 	c, _ := s.get(kindChannels, name).(*monitoringpb.NotificationChannel)
-	publish := s.publish
+	publish, mailer := s.publish, s.mailer
 	now := s.now()
 	s.mu.Unlock()
 	if c == nil {
@@ -242,9 +282,108 @@ func (s *Server) SendTestNotification(ctx context.Context, name string) (Deliver
 		"policy_name": "Test notification", "condition_name": "Test notification",
 		"summary": "This is a test notification from Cloud Monitoring."}})
 	d := Delivery{Time: now, Channel: c.GetName(), Type: c.GetType(), Kind: "test"}
-	d.State, d.Detail = deliver(ctx, c, payload, publish)
+	d.State, d.Detail = deliverTo(ctx, c, payload, publish, mailer, mail{subject: "Test notification",
+		text: "This is a test notification from Cloud Monitoring for the notification channel " + c.GetDisplayName() + " (" + c.GetName() + ").\n"})
 	s.mu.Lock()
 	s.recordDelivery(d)
 	s.mu.Unlock()
 	return d, nil
+}
+
+// NotifyChannels delivers another service's alert (Agent Platform Model
+// Monitoring's, #2214) to the named notification channels as an
+// incident's notification is delivered: a Pub/Sub channel publishes to
+// the instance's Pub/Sub, a local webhook is posted to, and every other
+// type is recorded. Each delivery is recorded with the channel's, of kind
+// kind; a channel that does not exist is a failed delivery.
+func (s *Server) NotifyChannels(ctx context.Context, kind string, names []string, payload []byte, m ...string) []Delivery {
+	var em mail
+	if len(m) == 2 {
+		em = mail{subject: m[0], text: m[1]}
+	}
+	s.mu.Lock()
+	publish, mailer := s.publish, s.mailer
+	var chans []*monitoringpb.NotificationChannel
+	var out []Delivery
+	for _, n := range names {
+		c, _ := s.get(kindChannels, n).(*monitoringpb.NotificationChannel)
+		if c == nil {
+			d := Delivery{Channel: n, Kind: kind, State: DeliveryFailed, Detail: "the notification channel does not exist"}
+			s.recordDelivery(d)
+			out = append(out, d)
+			continue
+		}
+		chans = append(chans, proto.Clone(c).(*monitoringpb.NotificationChannel))
+	}
+	s.mu.Unlock()
+	for _, c := range chans {
+		d := Delivery{Channel: c.GetName(), Type: c.GetType(), Kind: kind}
+		if c.GetEnabled() != nil && !c.GetEnabled().GetValue() {
+			d.State, d.Detail = DeliveryRecorded, "not sent: the channel is disabled"
+		} else {
+			d.State, d.Detail = deliverTo(ctx, c, payload, publish, mailer, em)
+		}
+		s.mu.Lock()
+		s.recordDelivery(d)
+		s.mu.Unlock()
+		out = append(out, d)
+	}
+	return out
+}
+
+// SendEmail sends another service's email (Model Monitoring's, #2214)
+// to addresses in project, of kind kind, from from, through the local
+// mail sink, and records the delivery with the project's. Without a sink
+// the email is recorded, never sent.
+func (s *Server) SendEmail(ctx context.Context, project, kind, from string, to []string, subject, body string) Delivery {
+	s.mu.Lock()
+	mailer := s.mailer
+	s.mu.Unlock()
+	d := Delivery{Channel: "projects/" + project, Type: "email", Kind: kind}
+	head := "To: " + strings.Join(to, ", ") + "\nSubject: " + subject
+	switch {
+	case mailer == nil:
+		d.State, d.Detail = DeliveryRecorded, "not sent: this instance has no local mail sink. "+head+"\n\n"+body
+	default:
+		if err := mailer(ctx, kind, from, to, subject, body); err != nil {
+			d.State, d.Detail = DeliveryFailed, "the local mail sink refused it: "+err.Error()+". "+head
+		} else {
+			d.State, d.Detail = DeliverySent, "sent through the local mail sink (the console's Mail page). "+head
+		}
+	}
+	s.mu.Lock()
+	s.recordDelivery(d)
+	s.mu.Unlock()
+	return d
+}
+
+// incidentMail is an incident's email; the caller holds mu.
+//
+// UNVERIFIED (re-read 2026-11-24,
+// https://docs.cloud.google.com/monitoring/support/notification-options:
+// Google documents the email's content, not its layout): the subject and
+// the text's order.
+func (s *Server) incidentMail(in *Incident, p *monitoringpb.AlertPolicy) mail {
+	state := "opened"
+	if in.State == IncidentClosed {
+		state = "closed"
+	}
+	subj := fmt.Sprintf("[ALERT - %s] %s: incident %s", severityName(p.GetSeverity()), p.GetDisplayName(), state)
+	if d := p.GetDocumentation().GetSubject(); d != "" {
+		subj = d
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Incident %s was %s for the policy %s, condition %s.\n\n", in.ID, state, p.GetDisplayName(), in.ConditionName)
+	if in.Summary != "" {
+		fmt.Fprintf(&b, "%s\n\n", in.Summary)
+	}
+	fmt.Fprintf(&b, "Project: %s\nResource: %s\nMetric: %s\nStarted: %s\n", in.Project, in.ResourceType, in.MetricType, in.Started.UTC().Format(time.RFC3339))
+	if !in.Ended.IsZero() {
+		fmt.Fprintf(&b, "Ended: %s\n", in.Ended.UTC().Format(time.RFC3339))
+	}
+	if c := p.GetDocumentation().GetContent(); c != "" {
+		fmt.Fprintf(&b, "\nDocumentation:\n%s\n", c)
+	}
+	fmt.Fprintf(&b, "\nView incident: %s/monitoring/alerting/incidents/%s?project=%s\n", s.consoleURL, in.ID, url.QueryEscape(in.Project))
+	return mail{subject: subj, text: b.String()}
 }

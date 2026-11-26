@@ -13,6 +13,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestBigtableRowKeySchemas (#1900) runs, through the official admin
@@ -42,7 +44,7 @@ func TestBigtableRowKeySchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ac.Close() })
-	c, err := bigtable.NewClient(ctx, h.Project(), id)
+	c, err := localclient.Bigtable(ctx, h.Project(), id)
 	if err != nil {
 		t.Fatal(err)
 	}

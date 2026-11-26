@@ -164,7 +164,7 @@ var Compute = &Service{
 // ComputeIAMTest is the resource a Compute testIamPermissions call names
 // (an instance's, disk's, snapshot's or subnetwork's), "" for any other
 // path.
-var ComputeIAMTest = regexp.MustCompile(`^/compute/v1/(projects/[^/]+/(?:zones/[^/]+/(?:instances|disks)|global/snapshots|regions/[^/]+/subnetworks)/[^/]+)/testIamPermissions$`)
+var ComputeIAMTest = regexp.MustCompile(`^/compute/v1/(projects/[^/]+/(?:zones/[^/]+/(?:instances|disks)|global/snapshots|regions/[^/]+/(?:subnetworks|disks))/[^/]+)/testIamPermissions$`)
 
 // ComputeJSON are Compute's served methods by path, under /compute/v1/:
 // the group each pattern captures is the resource checked, the project
@@ -209,8 +209,21 @@ var ComputeJSON = func() []JSONMethod {
 	coll(global, "routes", "routes", false, nil)
 	coll(region, "addresses", "addresses", true, map[string]string{"setLabels": "compute.addresses.setLabels"})
 	coll(global, "addresses", "globalAddresses", false, map[string]string{"setLabels": "compute.globalAddresses.setLabels"})
-	coll(zone, "disks", "disks", true, map[string]string{"createSnapshot": "compute.disks.createSnapshot",
-		"resize": "compute.disks.resize", "setLabels": "compute.disks.setLabels"})
+	// Zonal and regional disks share compute.disks.* (regionDisks
+	// reference, #2206).
+	diskVerbs := map[string]string{"createSnapshot": "compute.disks.createSnapshot", "resize": "compute.disks.resize",
+		"setLabels": "compute.disks.setLabels", "addResourcePolicies": "compute.disks.addResourcePolicies",
+		"removeResourcePolicies": "compute.disks.removeResourcePolicies", "startAsyncReplication": "compute.disks.startAsyncReplication",
+		"stopAsyncReplication": "compute.disks.stopAsyncReplication"}
+	coll(zone, "disks", "disks", true, diskVerbs)
+	coll(region, "disks", "disks", false, diskVerbs)
+	for _, scope := range []string{zone, region} {
+		add("POST", `(`+p+`)`+scope+`/disks/bulkInsert`, "compute.disks.create")
+		add("POST", `(`+p+`)`+scope+`/disks/stopGroupAsyncReplication`, "compute.disks.stopGroupAsyncReplication")
+	}
+	coll(region, "resourcePolicies", "resourcePolicies", true, nil)
+	add("GET", `(`+p+`)`+region+`/diskTypes`, "compute.diskTypes.list")
+	add("GET", `(`+p+region+`/diskTypes/[^/]+)`, "compute.diskTypes.get")
 	coll(global, "snapshots", "snapshots", false, map[string]string{"setLabels": "compute.snapshots.setLabels"})
 	// Private Service Connect (#2140): endpoints and service attachments.
 	coll(global, "forwardingRules", "globalForwardingRules", false, map[string]string{"setLabels": "compute.globalForwardingRules.setLabels"})
@@ -225,7 +238,7 @@ var ComputeJSON = func() []JSONMethod {
 	add("GET", `(`+p+zone+`/instances/[^/]+)/serialPort`, "compute.instances.getSerialPortOutput")
 	// The allow policies of the resources that keep one (#2112).
 	for scope, kind := range map[string]string{zone + "/instances": "instances", zone + "/disks": "disks",
-		global + "/snapshots": "snapshots", region + "/subnetworks": "subnetworks"} {
+		region + "/disks": "disks", global + "/snapshots": "snapshots", region + "/subnetworks": "subnetworks"} {
 		one := `(` + p + scope + `/[^/]+)`
 		add("GET", one+`/getIamPolicy`, "compute."+kind+".getIamPolicy")
 		add("POST", one+`/setIamPolicy`, "compute."+kind+".setIamPolicy")
@@ -251,6 +264,7 @@ var ComputeJSON = func() []JSONMethod {
 	add("GET", `(`+p+`)`+zone+`/machineTypes`, "compute.machineTypes.list")
 	add("GET", `(`+p+zone+`/machineTypes/[^/]+)`, "compute.machineTypes.get")
 	add("GET", `(`+p+`)`+zone+`/diskTypes`, "compute.diskTypes.list")
+	add("GET", `(`+p+`)/aggregated/diskTypes`, "compute.diskTypes.list")
 	add("GET", `(`+p+zone+`/diskTypes/[^/]+)`, "compute.diskTypes.get")
 	add("GET", `(`+p+`)`, "compute.projects.get")
 	add("POST", `(`+p+`)/setCommonInstanceMetadata`, "compute.projects.setCommonInstanceMetadata")

@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	grpcstatus "google.golang.org/grpc/status"
 
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 	pb "github.com/cloudburrow/cloudburrow/internal/service/storage/storagev2pb"
 )
 
@@ -49,7 +50,7 @@ func grpcClients(t *testing.T) (grpcc, jsonc *gcs.Client, addr string) {
 	}
 	addr = grpcFixture(t, s)
 	ctx := context.Background()
-	grpcc, err = gcs.NewGRPCClient(ctx, option.WithEndpoint(addr), option.WithoutAuthentication(),
+	grpcc, err = localclient.StorageGRPC(ctx, option.WithEndpoint(addr), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
 	if err != nil {
 		t.Fatal(err)

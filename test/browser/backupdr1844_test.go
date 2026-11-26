@@ -49,7 +49,7 @@ func bdrPGRows(t *testing.T, conn, table string, stmts ...string) []string {
 		t.Fatal(err)
 	}
 	defer func() { _ = cleanup() }()
-	db, err := sql.Open(drv, fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn))
+	db, err := sql.Open(drv, fmt.Sprintf("host=%s user=postgres password=%s dbname=postgres sslmode=disable", conn, "Root-pass1"))
 	if err != nil {
 		t.Fatal(err)
 	}

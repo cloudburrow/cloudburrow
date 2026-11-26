@@ -26,6 +26,11 @@ env:
   # at runtime, but keeping them unset means a mistake cannot cost money.
   GOOGLE_APPLICATION_CREDENTIALS: ""
   GOOGLE_CLOUD_PROJECT: ""
+  # The official Spanner clients (Go, Java, Python, Node) export built-in
+  # metrics to Cloud Monitoring (monitoring.googleapis.com) whatever endpoint
+  # they dial, unless this is "true"; internal/localclient also turns them off
+  # in every Go client the repository makes.
+  SPANNER_DISABLE_BUILTIN_METRICS: "true"
 
 jobs:
   # Decides whether a pull request touches code the slow suites cover.
@@ -397,14 +402,15 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           # scripts/compat-env.sh, compat-shards.sh, verify-local.sh, localai-models.sh,
-          # oci-tools.sh and bigquery-engine-soak.sh are bash, and checked as bash below.
-          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh ! -name compat-shards.sh ! -name verify-local.sh ! -name bigquery-engine-soak.sh ! -name endpoint-inventory.sh ! -name localai-models.sh ! -name oci-tools.sh -exec shellcheck -s sh {} +
+          # oci-tools.sh, bigquery-engine-soak.sh and remote-compute-standin.sh are bash, and checked as bash below.
+          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh ! -name compat-shards.sh ! -name verify-local.sh ! -name bigquery-engine-soak.sh ! -name endpoint-inventory.sh ! -name localai-models.sh ! -name oci-tools.sh ! -name remote-compute-standin.sh -exec shellcheck -s sh {} +
           # Bash helpers the workflows source (#675), and the compat
           # environment generator (#711), checked as bash.
           shellcheck -s bash .github/scripts/*.sh scripts/compat-env.sh
           # The BigQuery engine soak that reproduces #989, the localai shard's model fetch (#1985) and
-          # the iam shard's registry clients (#2111), as bash.
-          shellcheck -s bash scripts/bigquery-engine-soak.sh scripts/localai-models.sh scripts/oci-tools.sh
+          # the iam shard's registry clients (#2111) and the stand-in remote
+          # compute host (#2209), as bash.
+          shellcheck -s bash scripts/bigquery-engine-soak.sh scripts/localai-models.sh scripts/oci-tools.sh scripts/remote-compute-standin.sh
           # The endpoint inventory of the pinned tools (#1975), as bash.
           shellcheck -s bash scripts/endpoint-inventory.sh
           # The compat job's shards and their local run (#705), as bash.
@@ -467,7 +473,7 @@ jobs:
       # request does not run. third_party is bqengine's and is left alone.
       - name: go mod tidy leaves no diff
         run: |
-          MODULES=(. test/oracle/fakekms testdata/worker testdata/function testdata/sourcebuild)
+          MODULES=(. test/oracle/fakekms testdata/worker testdata/function testdata/sourcebuild testdata/dataflowgo)
           files=()
           for m in "${MODULES[@]}"; do
             (cd "$m" && go mod tidy && go mod verify)
@@ -564,8 +570,11 @@ jobs:
     # vCPUs, before a suite of up to 120 minutes (COMPAT_TIMEOUT). The
     # storage shard's 105: its job took 78 minutes in main run 45126544176
     # with the browser suite cut off at 20 of them, and that suite's
-    # timeout is now 30m (below).
-    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || matrix.shard == 'storage' && 105 || 90 }}
+    # timeout is now 30m (below). The crossservice shard's 105 too: Landing
+    # 169's Vertex AI pages took its browser suite to its 30m, and the job
+    # past 90 minutes in run 45680873104's re-run (a 60-minute suite); its
+    # browser suite has 40m.
+    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || (matrix.shard == 'storage' || matrix.shard == 'crossservice') && 105 || 90 }}
     # Same rule as integration: the suite that caught #268 only after it merged.
     needs: [changes, bigquery-emulator]
     if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
@@ -1267,7 +1276,7 @@ jobs:
           # and the Compute Engine API, whose VMs and disks Backup and DR backs
           # up and restores through the pages (#2084's round, TestBackupDRCompute*),
           # and Cloud Storage, which AlloyDB's Export writes to (#2191).
-          if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE; fi
+          if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE,ALLOYDB; fi
           # The served shard's: the Kubernetes Engine API, whose cluster the
           # pages make is removed through it by name whatever the test
           # reached, and the kubeconfig the Deploy test cleans up with
@@ -1326,7 +1335,7 @@ jobs:
           # through the pages beside its compat suite's 766 s.
           # served's GKE browser tests take about 2 minutes each, and its
           # suite reached 20m (main run 45477746718), so it gets 30m too.
-          BROWSER_TIMEOUT=10m; case "$SHARD" in served|run|crossservice|storage|sql|vpcvms) BROWSER_TIMEOUT=30m ;; esac
+          BROWSER_TIMEOUT=10m; case "$SHARD" in served|run|storage|sql|vpcvms) BROWSER_TIMEOUT=30m ;; crossservice) BROWSER_TIMEOUT=40m ;; esac
           go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
           for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | grep -E "${BROWSER_RUN:-^Test}" | grep -vE "$BROWSER_SKIP"); do
             grep -q -- "^--- PASS: $t (" browser.log ||
@@ -1450,19 +1459,27 @@ jobs:
           # which no runner here is. TestCloudSQLServerInstance
           # starts SQL Server, whose licence only the end user accepts
           # (CLOUDBURROW_ACCEPT_MSSQL_EULA=Y): CI never accepts it for them,
-          # so it skips in the sql shard and runs only locally. BigQuery's
+          # so it skips in the sql shard and runs only locally; so does
+          # TestAlloyDBOmniEngine, which runs Google's AlloyDB Omni, whose
+          # terms only the end user accepts (#2207). BigQuery's
           # Spark procedures (#2104) run spark-submit in the 1.8 GB
           # apache/spark image with Google's connector from Maven Central,
           # on an --internal Docker network: CLOUDBURROW_TEST_SPARK, run
           # nightly by nightly-sql-ephemeral.yml's spark job (the spark
           # shard of scripts/compat-shards.sh) and locally. So do the
-          # Dataproc tests (#2162, #2234), which that job runs too. #2245:
+          # Dataproc tests (#2162, #2234), which that job runs too, and the
+          # Dataflow ones, whose Beam pipelines run on the pinned Flink job
+          # server (#2215), which its dataflow job runs. The remote compute tests (#2209) need the stand-in
+          # remote host, a privileged Docker-in-Docker container with sshd
+          # (scripts/remote-compute-standin.sh) that the instance is started
+          # on; they run locally, until a shard starts one. #2245:
           # twelve tests from Landing 168 have no shard yet whose instance
           # gives them what they need (Compute Engine VMs together with
           # Cloud Run, Cloud Storage, Resource Manager or IAM enforcement,
           # or the pipeline task image); they run locally, and each leaves
-          # this list once a shard runs it.
-          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|ModelGardenDeploysHuggingFaceModels|ModelGardenDeploysOnHuggingFacePyTorchInference|ModelGardenDeploysAnONNXModel|ModelGardenDeploysAnMLXModel|ModelGardenDeploysAGGUFModelOnTheAppleGPU|ModelGardenDeploysAnMLXModelOnTheAppleGPU|GenerateContentOnTheAppleGPU|CloudSQLServerInstance|BigQuerySparkStoredProcedures|BqSparkStoredProcedure|BigQuerySparkProcedureRuntimesAndTypes|BigQuerySparkProcedureContainerImage|BigQuerySparkProcedureInvoker|BigQuerySparkProcedureStagingAndCMEK|Dataproc[A-Za-z0-9_]*|GcloudDataproc|CloudNATTranslatesVMTraffic2140|CloudNATEndpointIndependentMappingAndDynamicPorts2140|SharedVPCThroughTheGoClient2140|SharedVPCIndividualSubnetsThroughTheGoClient2140|RunVPCEgressThroughTheGoClient2140|RunReachesVMsThroughConnectorsAndDirectVPCEgress2140|ComputeImageImportFromCloudStorageThroughTheGoClient|ComputeImageImportFromAVirtualDiskThroughTheGoClient|VMAccessScopesLimitTokens2179|VertexAIPipelineJobs|VertexAIPipelineSchedules|IAMEnforcementVertexAIRunIdentity)$'
+          # this list once a shard runs it. TestVertexAIPipelineResolverAndLimits
+          # (#2205) needs the pipeline task image too.
+          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|ModelGardenDeploysHuggingFaceModels|ModelGardenDeploysOnHuggingFacePyTorchInference|ModelGardenDeploysAnONNXModel|ModelGardenDeploysAnMLXModel|ModelGardenDeploysAGGUFModelOnTheAppleGPU|ModelGardenDeploysAnMLXModelOnTheAppleGPU|GenerateContentOnTheAppleGPU|CloudSQLServerInstance|BigQuerySparkStoredProcedures|BqSparkStoredProcedure|BigQuerySparkProcedureRuntimesAndTypes|BigQuerySparkProcedureContainerImage|BigQuerySparkProcedureInvoker|BigQuerySparkProcedureStagingAndCMEK|Dataproc[A-Za-z0-9_]*|GcloudDataproc|PythonDataflow[A-Za-z0-9_]*|JavaDataflow[A-Za-z0-9_]*|GoDataflow[A-Za-z0-9_]*|DataflowJobsAPI|DataflowSnapshots|DataflowProvided[A-Za-z0-9_]*|GcloudDataflow|TerraformDataflow[A-Za-z0-9_]*|AlloyDBOmniEngine|RemoteCompute[A-Za-z0-9_]*|CloudNATTranslatesVMTraffic2140|CloudNATEndpointIndependentMappingAndDynamicPorts2140|SharedVPCThroughTheGoClient2140|SharedVPCIndividualSubnetsThroughTheGoClient2140|RunVPCEgressThroughTheGoClient2140|RunReachesVMsThroughConnectorsAndDirectVPCEgress2140|ComputeImageImportFromCloudStorageThroughTheGoClient|ComputeImageImportFromAVirtualDiskThroughTheGoClient|VMAccessScopesLimitTokens2179|VertexAIPipelineJobs|VertexAIPipelineSchedules|VertexAIPipelineResolverAndLimits|IAMEnforcementVertexAIRunIdentity)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1

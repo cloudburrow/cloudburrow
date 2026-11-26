@@ -175,9 +175,8 @@ func (s *Server) restoreToNewInstance(r *http.Request, base, project, dest strin
 		return nil, Errorf(http.StatusPreconditionFailed, "Invalid request: a %s instance runs an image this instance was not started with.",
 			spec.DatabaseVersion)
 	}
-	if !spec.MySQL() {
-		spec.RootPassword = ""
-	}
+	// PostgreSQL's postgres, as MySQL's root, signs in with the source's
+	// rootPassword, or the one the request gives (#2208).
 	if spec.Regional() && spec.HAPassword == "" {
 		spec.HAPassword, spec.HAEpochs[1] = newReplicationPassword(), 1
 	}

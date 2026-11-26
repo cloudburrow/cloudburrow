@@ -5,7 +5,7 @@
 # can run offline. See docs/credentials.md.
 export CLOUDBURROW_APIKEYS_ENDPOINT="127.0.0.1:9029"  # the API Keys API v2, REST, plaintext; read by no client library: pass http://127.0.0.1:9029/ to option.WithEndpoint
 export CLOUDBURROW_BILLING_ENDPOINT="127.0.0.1:9007"  # Cloud Billing and Budget APIs, gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint
-export CLOUDBURROW_CLOUDSQL_URL="postgres://cloudburrow@127.0.0.1:9019/cloudburrow?sslmode=disable"  # the same, as one connection string
+export CLOUDBURROW_CLOUDSQL_URL="postgres://cloudburrow@127.0.0.1:9019/cloudburrow?sslmode=disable"  # the same, as one connection string; the password is PGPASSWORD, which libpq and pgx read
 export CLOUDBURROW_DOMAIN="cloudburrow.localhost"  # services are named <service>.<namespace>.cloudburrow.localhost
 export CLOUDBURROW_INGRESS="http://127.0.0.1:9080"  # Cloud Run services are served here; see docs/networking.md
 export CLOUDBURROW_RESOURCEMANAGER_ENDPOINT="127.0.0.1:9007"  # gRPC and REST, plaintext; read by no client library: pass it to option.WithEndpoint
@@ -32,6 +32,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="/host/only/adc.json"  # a locally generat
 export GOOGLE_CLOUD_PROJECT="golden"  # the project every local resource lives under
 export PGDATABASE="cloudburrow"  # Cloud SQL for PostgreSQL default database
 export PGHOST="127.0.0.1"  # Cloud SQL for PostgreSQL: a local PostgreSQL; not the Cloud SQL Admin API
+export PGPASSWORD="golden-password"  # generated for this instance; local only
 export PGPORT="9019"  # Cloud SQL for PostgreSQL port
 export PGSSLMODE="disable"  # the local server has no TLS
-export PGUSER="cloudburrow"  # Cloud SQL for PostgreSQL user; trust auth, no password
+export PGUSER="cloudburrow"  # Cloud SQL for PostgreSQL user

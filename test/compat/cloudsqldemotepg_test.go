@@ -31,14 +31,14 @@ func TestCloudSQLDemotePostgres(t *testing.T) {
 	n := time.Now().UnixNano() % 1e6
 	srcName, repName, dstName := fmt.Sprintf("pgd-src-%d", n), fmt.Sprintf("pgd-rep-%d", n), fmt.Sprintf("pgd-dst-%d", n)
 	tier := &sqladmin.Settings{Tier: "db-custom-1-3840"}
-	src := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: srcName, DatabaseVersion: "POSTGRES_16", Settings: &sqladmin.Settings{
+	src := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: srcName, DatabaseVersion: "POSTGRES_16", RootPassword: "Root-pass1", Settings: &sqladmin.Settings{
 		Tier: "db-custom-1-3840", DatabaseFlags: []*sqladmin.DatabaseFlags{{Name: "cloudsql.logical_decoding", Value: "on"}}}})
 	db := e.root(t, h, src.ConnectionName)
 	for _, q := range []string{"CREATE DATABASE shop", "CREATE ROLE migrator LOGIN REPLICATION PASSWORD 'Repl-pass1'"} {
 		q := q
 		eventually(t, q, func() error { _, err := db.Exec(q); return err })
 	}
-	shop := e.open(t, h, src.ConnectionName, "postgres", "x", "shop")
+	shop := e.open(t, h, src.ConnectionName, "postgres", pgRootPassword, "shop")
 	for _, q := range []string{"CREATE TABLE orders (id int PRIMARY KEY, item text)", "INSERT INTO orders VALUES (1, 'from the source')",
 		"ALTER TABLE orders OWNER TO migrator", "GRANT CREATE ON DATABASE shop TO migrator"} {
 		q := q
@@ -62,14 +62,14 @@ func TestCloudSQLDemotePostgres(t *testing.T) {
 
 	// The existing destination, with a database named as the migrated one
 	// and one of its own.
-	dst := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: dstName, DatabaseVersion: "POSTGRES_16",
+	dst := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: dstName, DatabaseVersion: "POSTGRES_16", RootPassword: "Root-pass1",
 		Region: "us-central1", Settings: tier})
 	ddb := e.root(t, h, dst.ConnectionName)
 	for _, q := range []string{"CREATE DATABASE shop", "CREATE DATABASE keep"} {
 		q := q
 		eventually(t, q, func() error { _, err := ddb.Exec(q); return err })
 	}
-	stale := e.open(t, h, dst.ConnectionName, "postgres", "x", "shop")
+	stale := e.open(t, h, dst.ConnectionName, "postgres", pgRootPassword, "shop")
 	for _, q := range []string{"CREATE TABLE orders (id int PRIMARY KEY, item text)", "INSERT INTO orders VALUES (1, 'stale')"} {
 		if _, err := stale.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)
@@ -100,7 +100,7 @@ func TestCloudSQLDemotePostgres(t *testing.T) {
 	if op = waitSQLOpDone(t, svc, project, op); op.Error != nil {
 		t.Fatalf("startExternalSync: %+v", op.Error.Errors[0])
 	}
-	rdb := e.open(t, h, dst.ConnectionName, "postgres", "x", "shop")
+	rdb := e.open(t, h, dst.ConnectionName, "postgres", pgRootPassword, "shop")
 	item := func(what string, id int, want string) {
 		t.Helper()
 		eventually(t, what, func() error {

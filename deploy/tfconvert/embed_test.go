@@ -31,7 +31,7 @@ func TestTagAndTar(t *testing.T) {
 		}
 		names = append(names, h.Name)
 	}
-	if strings.Join(names, ",") != "Dockerfile,convert.py" {
+	if strings.Join(names, ",") != "Dockerfile,convert.py,transform.py" {
 		t.Fatalf("tar holds %v", names)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Studio is a provider with a workspace screen of its own (#1861), such as
@@ -18,6 +19,12 @@ import (
 type Studio interface {
 	// StudioCall answers one call. An unknown call is an error.
 	StudioCall(ctx context.Context, project, call string, body json.RawMessage) (any, error)
+}
+
+// StudioTimeouter is a Studio whose call may run longer than a read: Cloud
+// SQL Studio's run, which Google cancels after five minutes (#2208).
+type StudioTimeouter interface {
+	StudioTimeout(call string) time.Duration
 }
 
 func (s *Server) handleStudio(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +48,12 @@ func (s *Server) handleStudio(w http.ResponseWriter, r *http.Request) {
 		body = json.RawMessage("{}")
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), readBudget)
+	if t, ok := p.(StudioTimeouter); ok {
+		if d := t.StudioTimeout(call); d > 0 {
+			cancel()
+			ctx, cancel = context.WithTimeout(r.Context(), d)
+		}
+	}
 	defer cancel()
 	project := r.URL.Query().Get("project")
 	opID := s.logs.StartOperation("studio "+call, p.Title(), project)

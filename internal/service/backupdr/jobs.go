@@ -239,6 +239,10 @@ func (s *Server) RestoreStarted(category, source, restoreProject, restoreInstanc
 	}
 	payload := map[string]any{"jobCategory": category, "resourceType": "Cloud SQL",
 		"restoreResourceName": "projects/" + restoreProject + "/instances/" + restoreInstance, "dataSourceName": dsName}
+	if strings.Contains(restoreInstance, "/") {
+		// An AlloyDB cluster's or a Filestore instance's full name (#1524).
+		payload["restoreResourceName"] = restoreInstance
+	}
 	if backupName != "" {
 		payload["backupName"] = backupName
 	}
@@ -254,6 +258,11 @@ func (s *Server) RestoreStarted(category, source, restoreProject, restoreInstanc
 		payload["sourceResourceName"] = "projects/" + d.Project + "/instances/" + d.Instance
 		payload["sourceResourceId"] = d.Instance
 		payload["sourceResourceLocation"] = d.Info.Region
+		if isWorkload(d.Kind) {
+			payload["resourceType"] = jobResourceType(d.Kind)
+			payload["sourceResourceName"], payload["sourceResourceId"] = d.Instance, lastSeg(d.Instance)
+			payload["sourceResourceLocation"] = strings.Split(d.Instance, "/")[3]
+		}
 	}
 	// The job is the restore's project's, where it runs.
 	j := s.startJobLocked(BackupRestoreJobsLog, restoreProject, loc, payload)

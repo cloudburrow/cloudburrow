@@ -226,7 +226,7 @@ func TestCloudSQLCustomerManagedCA(t *testing.T) {
 		return &sqladmin.IpConfiguration{ServerCaMode: mode, ServerCaPool: pool, ForceSendFields: []string{"ServerCaPool"}}
 	}
 	inst := func(n string, c *sqladmin.IpConfiguration) *sqladmin.DatabaseInstance {
-		return &sqladmin.DatabaseInstance{Name: n, DatabaseVersion: "POSTGRES_17", Region: "us-central1",
+		return &sqladmin.DatabaseInstance{Name: n, DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1", Region: "us-central1",
 			Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", IpConfiguration: c}}
 	}
 

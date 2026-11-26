@@ -33,7 +33,8 @@ import (
 // image at first boot, so what the guest changes survives stop and
 // start), each attached disk a PersistentVolumeClaim mounted at
 // /mnt/disks/DEVICE_NAME (a directory, not a block device), its port 22
-// forwarded to a port on this machine.
+// forwarded to a port on this machine. A disk with a customer-managed or
+// customer-supplied key is sealed at rest (computeseal.go).
 type computeVMs struct {
 	cfg       config.Config
 	installer *components.Installer
@@ -52,7 +53,10 @@ type computeVMs struct {
 	// lbTunnels are load balancers' tunnels to instances' ports (#2153,
 	// computelb.go), by instance key and port.
 	lbTunnels map[string]*netfwd.Forwarder
-	build     sync.Mutex
+	// cryptNodes are the kind nodes the open encrypted disks are mounted
+	// on (computeseal.go), by claim.
+	cryptNodes map[string]string
+	build      sync.Mutex
 }
 
 func newComputeVMs(cfg config.Config, bg context.Context) *computeVMs {
@@ -140,6 +144,22 @@ func pvcManifest(ns, name string, sizeGb int64, kind string) string {
 // copyPVC copies one claim's files into another with a pod of the Debian
 // image (cp -a), and waits for it.
 func (b *computeVMs) copyPVC(ctx context.Context, src, dst string) error {
+	return b.copyPVCCmd(ctx, src, dst, "cp -a /src/. /dst/ && sync")
+}
+
+// CopyDisk makes dst a copy of src: what dst held is removed first (a
+// clone, or a secondary disk taking its primary's data).
+func (b *computeVMs) CopyDisk(ctx context.Context, src, dst compute.DiskSpec) error {
+	if err := b.installer.Apply(ctx, pvcManifest(b.ns(), dst.Key, dst.SizeGb, "disk")); err != nil {
+		return err
+	}
+	if err := b.copyPVCCmd(ctx, src.Key, dst.Key, "find /dst -mindepth 1 -delete && cp -a /src/. /dst/ && sync"); err != nil {
+		return err
+	}
+	return b.rekey(ctx, dst.Key, dst.SizeGb, src.DataKey, dst.DataKey)
+}
+
+func (b *computeVMs) copyPVCCmd(ctx context.Context, src, dst, script string) error {
 	ref, err := b.ensureImage(ctx, compute.PublicImages[0])
 	if err != nil {
 		return err
@@ -152,7 +172,7 @@ func (b *computeVMs) copyPVC(ctx context.Context, src, dst string) error {
 		"metadata": map[string]any{"name": name, "namespace": b.ns(), "labels": map[string]string{k8s.OwnedLabel: k8s.OwnedValue, k8s.ServiceLabel: "compute"}},
 		"spec": map[string]any{"restartPolicy": "Never", "automountServiceAccountToken": false,
 			"containers": []any{map[string]any{"name": "copy", "image": ref, "imagePullPolicy": "Never",
-				"command":      []string{"/bin/sh", "-c", "cp -a /src/. /dst/ && sync"},
+				"command":      []string{"/bin/sh", "-c", script},
 				"volumeMounts": []any{map[string]any{"name": "src", "mountPath": "/src", "readOnly": true}, map[string]any{"name": "dst", "mountPath": "/dst"}}}},
 			"volumes": []any{map[string]any{"name": "src", "persistentVolumeClaim": map[string]any{"claimName": src}},
 				map[string]any{"name": "dst", "persistentVolumeClaim": map[string]any{"claimName": dst}}}}}
@@ -175,20 +195,31 @@ func (b *computeVMs) CreateDisk(ctx context.Context, d compute.DiskSpec) error {
 		return err
 	}
 	if d.SourceSnapshot != "" {
-		return b.copyPVC(ctx, d.SourceSnapshot, d.Key)
+		if err := b.copyPVC(ctx, d.SourceSnapshot, d.Key); err != nil {
+			return err
+		}
+		return b.rekey(ctx, d.Key, d.SizeGb, d.SourceDataKey, d.DataKey)
 	}
-	return nil
+	return b.rekey(ctx, d.Key, d.SizeGb, nil, d.DataKey)
 }
 
 func (b *computeVMs) DeleteDisk(ctx context.Context, d compute.DiskSpec) error {
+	if d.DataKey != nil {
+		if node := b.cryptNode(d.Key); node != "" {
+			_ = closeCrypt(ctx, node, b.cryptName(d.Key), b.cryptMount(d.Key))
+		}
+	}
 	_, err := b.kubectl(ctx, "delete", "pvc", d.Key, "--ignore-not-found", "--wait=true", "--timeout=2m")
 	return err
 }
 
-// ResizeDisk records the new size on the claim's request where the storage
-// class allows expansion; kind's local-path class neither enforces sizes nor
-// expands, so the disk's directory already has the machine's free space.
+// ResizeDisk: kind's local-path class neither enforces sizes nor expands,
+// so a disk's directory already has the machine's free space; an
+// encrypted disk's image (computeseal.go) is grown, with its file system.
 func (b *computeVMs) ResizeDisk(ctx context.Context, d compute.DiskSpec) error {
+	if d.DataKey != nil {
+		return b.growCrypt(ctx, d)
+	}
 	return nil
 }
 
@@ -196,7 +227,12 @@ func (b *computeVMs) Snapshot(ctx context.Context, d compute.DiskSpec, key strin
 	if err := b.installer.Apply(ctx, pvcManifest(b.ns(), key, d.SizeGb, "snapshot")); err != nil {
 		return err
 	}
-	return b.copyPVC(ctx, d.Key, key)
+	if err := b.copyPVC(ctx, d.Key, key); err != nil {
+		return err
+	}
+	// A snapshot of an encrypted disk is sealed with its data key, which
+	// the snapshot keeps (wrapped) too.
+	return b.rekey(ctx, key, d.SizeGb, d.DataKey, d.DataKey)
 }
 
 func (b *computeVMs) DeleteSnapshot(ctx context.Context, key string) error {
@@ -215,15 +251,24 @@ func (b *computeVMs) podManifest(vm compute.VMSpec, ref string) string {
 		mounts = append(mounts, map[string]any{"name": "boot", "mountPath": "/" + d, "subPath": d})
 	}
 	mounts = append(mounts, map[string]any{"name": "run", "mountPath": "/run"}, map[string]any{"name": "tmp", "mountPath": "/tmp"})
+	boot := map[string]any{"name": "boot", "persistentVolumeClaim": map[string]any{"claimName": vm.BootDisk.Key}}
+	if vm.BootDisk.DataKey != nil {
+		// An encrypted disk: the node's mount of its decrypted device.
+		boot = b.cryptVolume("boot", vm.BootDisk)
+	}
 	volumes := []any{
-		map[string]any{"name": "boot", "persistentVolumeClaim": map[string]any{"claimName": vm.BootDisk.Key}},
+		boot,
 		map[string]any{"name": "run", "emptyDir": map[string]any{"medium": "Memory"}},
 		map[string]any{"name": "tmp", "emptyDir": map[string]any{}},
 	}
 	for i, d := range vm.Disks {
 		vn := "disk" + strconv.Itoa(i)
 		mounts = append(mounts, map[string]any{"name": vn, "mountPath": "/mnt/disks/" + d.DeviceName, "readOnly": d.ReadOnly})
-		volumes = append(volumes, map[string]any{"name": vn, "persistentVolumeClaim": map[string]any{"claimName": d.Disk.Key, "readOnly": d.ReadOnly}})
+		if d.Disk.DataKey != nil {
+			volumes = append(volumes, b.cryptVolume(vn, d.Disk))
+		} else {
+			volumes = append(volumes, map[string]any{"name": vn, "persistentVolumeClaim": map[string]any{"claimName": d.Disk.Key, "readOnly": d.ReadOnly}})
+		}
 	}
 	guest := ""
 	if b.guestBase != nil {
@@ -266,6 +311,15 @@ func (b *computeVMs) podManifest(vm compute.VMSpec, ref string) string {
 			"volumes": volumes}}
 	// A Shielded VM's vTPM (#2179, computevtpm.go).
 	spec := pod["spec"].(map[string]any)
+	// An encrypted disk is open on one node: the VM runs there. A node
+	// selector, not nodeName, so the scheduler still binds the VM's other,
+	// new claims (kind's local-path class binds a claim at its first
+	// consumer's scheduling, which nodeName skips).
+	for _, d := range vm.Encrypted() {
+		if n := b.cryptNode(d.Key); n != "" {
+			spec["nodeSelector"] = map[string]string{"kubernetes.io/hostname": n}
+		}
+	}
 	vmc := spec["containers"].([]any)[0].(map[string]any)
 	vmc["volumeMounts"] = vtpmPod(vm, ref, spec, mounts)
 	// metadata.google.internal (and metadata, under the google.internal

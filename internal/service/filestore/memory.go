@@ -39,6 +39,15 @@ func (m *MemoryBackend) Ensure(_ context.Context, key, ip string, spec Spec) (st
 	return ip, nil
 }
 
+// RemoveShare forgets the share's data.
+func (m *MemoryBackend) RemoveShare(_ context.Context, key, share string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.init()
+	delete(m.data, key+"/"+share)
+	return nil
+}
+
 // Remove forgets the server and its data.
 func (m *MemoryBackend) Remove(_ context.Context, key string) error {
 	m.mu.Lock()

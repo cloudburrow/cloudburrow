@@ -215,7 +215,8 @@ func (p *sqlProvisioner) Engine(spec sqladmin.Spec) sqladmin.Engine {
 	}
 	if spec.MySQL() {
 		return &sqladmin.MySQL{Name: spec.Name, Version: spec.DatabaseVersion,
-			RootPassword: spec.RootPassword, Admin: sqladmin.MySQLAdminUser, HostAddr: p.hostAddr(spec.ServerName())}
+			RootPassword: spec.RootPassword, Admin: sqladmin.MySQLAdminUser, AdminPassword: postgresAdminPassword(p.cfg),
+			HostAddr: p.hostAddr(spec.ServerName())}
 	}
 	user := "postgres"
 	if spec.MasterUp && !spec.AwaitingPrimary {
@@ -224,7 +225,8 @@ func (p *sqlProvisioner) Engine(spec sqladmin.Spec) sqladmin.Engine {
 	}
 	pg := &sqladmin.Postgres{Name: spec.Name, Version: spec.DatabaseVersion,
 		User: user, Database: user, HostAddr: p.hostAddr(spec.ServerName()), Logical: spec.External != nil,
-		PoolerHostAddr: p.poolerAddr(spec.ServerName())}
+		PoolerHostAddr: p.poolerAddr(spec.ServerName()),
+		AdminUser:      components.PGAdminUser, AdminPassword: postgresAdminPassword(p.cfg)}
 	if spec.MasterInstanceName == "" {
 		// A primary's failed sign-ins lock a user with a lock after
 		// failed attempts (#2014); a replica's users are the primary's.
@@ -319,6 +321,15 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 			b.Args = append(append([]string{}, b.Args...), "--init-file=/var/lib/mysql/"+physicalInitFile)
 		}
 	}
+	if !spec.MySQL() {
+		// Every TCP sign-in is checked by password (#2208): CloudBurrow's
+		// management role, and postgres's rootPassword at the first start.
+		b = components.WithPostgresAuth(b, components.PGAdminUser, postgresAdminPassword(p.cfg), "postgres", spec.RootPassword)
+	} else {
+		// CloudBurrow's MySQL account signs in with the management
+		// password, which no user knows (#2208), not rootPassword.
+		b = components.WithMySQLAdmin(b, postgresAdminPassword(p.cfg))
+	}
 	return b
 }
 
@@ -404,7 +415,7 @@ sro=$(mysql $MYSQL_LOCAL -N -e 'SELECT @@GLOBAL.super_read_only' 2>/dev/null || 
 // account at its first start after it.
 func (p *sqlProvisioner) mysqlSystemAccounts(ctx context.Context, deployment string, spec sqladmin.Spec) error {
 	var out strings.Builder
-	sql := sqladmin.MySQLSystemAccountsSQL(spec.DatabaseVersion, spec.RootPassword)
+	sql := sqladmin.MySQLSystemAccountsSQL(spec.DatabaseVersion, postgresAdminPassword(p.cfg))
 	if err := nodeExec(p.cfg, deployment)(ctx, strings.NewReader(sql), &out, "sh", "-c", mysqlSystemAccountsScript); err != nil {
 		return fmt.Errorf("create CloudBurrow's account on %s: %w %s", deployment, err, strings.TrimSpace(out.String()))
 	}
@@ -727,7 +738,7 @@ export PGPASSWORD="$CLOUDSQL_REPLICATION_PASSWORD"
 conn="host=$CLOUDSQL_PRIMARY_HOST port=${CLOUDSQL_PRIMARY_PORT:-5432} user=$CLOUDSQL_PRIMARY_USER"
 # An empty "password=" would take the next keyword as its value.
 if [ -n "$CLOUDSQL_REPLICATION_PASSWORD" ]; then conn="$conn password=$CLOUDSQL_REPLICATION_PASSWORD"; fi
-dst() { PGPASSWORD= psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -qAt "$@"; }
+dst() { PGPASSWORD= psql -U postgres -v ON_ERROR_STOP=1 -qAt "$@"; }
 dbs="$CLOUDSQL_DATABASES"
 if [ -z "$dbs" ]; then
   dbs=$(psql "$conn dbname=postgres" -qAt -c "SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate AND datname NOT IN ('template0','template1','cloudsqladmin','rdsadmin') ORDER BY 1")
@@ -743,7 +754,7 @@ for db in $dbs; do
   if [ -z "$(dst -d template1 -c "SELECT 1 FROM pg_database WHERE datname = '$db'")" ]; then
     dst -d template1 -c "CREATE DATABASE \"$db\""
   fi
-  pg_dump "$conn dbname=$db" --schema-only --no-owner --no-privileges --no-publications --no-subscriptions | PGPASSWORD= psql -h 127.0.0.1 -U postgres -q -d "$db" >/dev/null
+  pg_dump "$conn dbname=$db" --schema-only --no-owner --no-privileges --no-publications --no-subscriptions | PGPASSWORD= psql -U postgres -q -d "$db" >/dev/null
   if [ "$CLOUDSQL_SYNC_MODE" = OFFLINE ]; then
     pg_dump "$conn dbname=$db" --data-only --no-owner --no-privileges --no-publications --no-subscriptions | dst -d "$db" >/dev/null
     continue

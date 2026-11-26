@@ -108,7 +108,9 @@ func TestCustomImagesAndCloneDisk(t *testing.T) {
 	cl := s.res["projects/p2139/zones/us-central1-a/disks/clone"]
 	cspec := s.diskSpecLocked(cl)
 	s.mu.Unlock()
-	if cl["sizeGb"] != "20" || !strings.HasPrefix(cspec.SourceSnapshot, "disk-") || cspec.Image == nil {
+	// Its storage is copied from the source's (CopyDisk, #2206), and it
+	// runs the source's image.
+	if cl["sizeGb"] != "20" || str(cl, "sourceDisk") == "" || cspec.Image == nil {
 		t.Fatalf("clone = %v %+v", cl, cspec)
 	}
 	if _, err := s.Call("POST", "p2139", "zones/us-central1-a/disks", nil, obj{"name": "far", "sourceDisk": "projects/p2139/zones/us-east1-b/disks/src"}); err == nil {
@@ -152,7 +154,9 @@ func TestSnapshotSchedulesRun(t *testing.T) {
 		s.mu.Lock()
 		from := *now
 		*now = to
-		s.runSchedulesLocked(from, to)
+		_ = from
+		s.runSchedulesLocked()
+		s.runInstanceSchedulesLocked(to)
 		s.mu.Unlock()
 		s.waitOp(context.Background(), "")
 		waitIdle(t, s)
@@ -204,7 +208,9 @@ func TestInstanceSchedulesStartAndStop(t *testing.T) {
 		s.mu.Lock()
 		from := *now
 		*now = to
-		s.runSchedulesLocked(from, to)
+		_ = from
+		s.runSchedulesLocked()
+		s.runInstanceSchedulesLocked(to)
 		s.mu.Unlock()
 		s.waitOp(context.Background(), "")
 		waitIdle(t, s)
@@ -237,6 +243,15 @@ func TestTemplatesMachineImagesAndGroups(t *testing.T) {
 		"disks":      []any{map[string]any{"boot": true, "initializeParams": map[string]any{"sourceImage": "projects/debian-cloud/global/images/family/debian-12"}}},
 		"scheduling": obj{"provisioningModel": "SPOT", "automaticRestart": true}}}); err == nil {
 		t.Error("a Spot template that restarts automatically was accepted")
+	}
+	// A template's numeric id in place of its name, as the Terraform
+	// provider reads it.
+	id := str(call("GET", "global/instanceTemplates/web", nil, nil), "id")
+	if byID := call("GET", "global/instanceTemplates/"+id, nil, nil); str(byID, "name") != "web" || str(byID, "id") != id {
+		t.Fatalf("the template by its id = %v", byID)
+	}
+	if _, err := s.Call("GET", "p2139", "global/instanceTemplates/12345", nil, nil); err == nil {
+		t.Error("an unknown template id was found")
 	}
 	call("POST", "zones/us-central1-a/instances", map[string][]string{"sourceInstanceTemplate": {"global/instanceTemplates/web"}}, obj{"name": "w1"})
 	w1 := call("GET", "zones/us-central1-a/instances/w1", nil, nil)

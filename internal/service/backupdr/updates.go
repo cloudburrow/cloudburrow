@@ -303,6 +303,9 @@ func (s *Server) patchPlan(r *http.Request, name string) (any, error) {
 			if err != nil {
 				return nil, err
 			}
+			if n > 0 && !logRetentionType(p.ResourceType) {
+				return nil, invalid("backupPlan.logRetentionDays applies to Cloud SQL and AlloyDB plans only, not %s.", p.ResourceType)
+			}
 			next.LogRetentionDays = n
 		}
 	}
@@ -317,6 +320,9 @@ func (s *Server) patchPlan(r *http.Request, name string) (any, error) {
 	*p = next
 	s.addRevisionLocked(p)
 	s.planJobLocked("UPDATE_BACKUP_PLAN", name, &prev, p, nil, nil)
+	if prev.LogRetentionDays != p.LogRetentionDays {
+		s.reprotectLocked(name)
+	}
 	if err := s.saveLocked(); err != nil {
 		return nil, err
 	}
@@ -351,6 +357,11 @@ func (s *Server) patchAssociation(r *http.Request, name string) (any, error) {
 		return nil, invalid("backupPlanAssociation.backupPlan %s does not exist.", body.Plan)
 	case p.ResourceType != a.ResourceType:
 		return nil, invalid("Backup plan %s protects %s, not %s.", p.Name, p.ResourceType, a.ResourceType)
+	case isWorkload(a.ResourceType) && s.st.Plans[a.Plan] != nil && s.st.Plans[a.Plan].Vault != p.Vault:
+		// "The new plan must use the same backup vault and be in the same
+		// region" (the AlloyDB and Filestore backup guides).
+		return nil, invalid("Backup plan %s uses backup vault %s: the new backup plan of %s must use the same backup vault, %s.",
+			p.Name, p.Vault, a.Resource, s.st.Plans[a.Plan].Vault)
 	}
 	now := s.stamp()
 	if old := s.st.DataSources[a.DataSource]; old == nil || !strings.HasPrefix(old.Name, p.Vault+"/") {
@@ -383,6 +394,9 @@ func (s *Server) patchAssociation(r *http.Request, name string) (any, error) {
 	a.Plan, a.UpdateTime = p.Name, now
 	// The new plan's rules start over.
 	a.LastBackup = map[string]lastBackup{}
+	if isWorkload(a.ResourceType) {
+		s.reprotectLocked(p.Name)
+	}
 	if err := s.saveLocked(); err != nil {
 		return nil, err
 	}
@@ -552,8 +566,14 @@ func (s *Server) referenceJSON(loc string, d *dataSource) map[string]any {
 			"name": res, "databaseInstalledVersion": d.Info.DatabaseVersion, "instanceCreateTime": d.Info.CreateTime,
 			"instanceTier": d.Info.Tier}}
 	if d.Kind != "" {
-		g := d.computeGcpResource()
+		g := d.gcpResource()
 		gcp = map[string]any{"gcpResourcename": g["gcpResourcename"], "location": g["location"], "type": g["type"]}
+		switch d.Kind {
+		case AlloyDBResourceType:
+			gcp["alloyDbClusterProperties"] = map[string]any{"name": d.Instance}
+		case FilestoreResourceType:
+			gcp["filestoreInstanceProperties"] = map[string]any{"name": d.Instance, "instanceCreateTime": str(d.Props, "instanceCreateTime")}
+		}
 	}
 	return map[string]any{"name": loc + "/dataSourceReferences/" + d.Name[strings.LastIndex(d.Name, "/")+1:],
 		"dataSource": d.Name, "createTime": d.CreateTime, "dataSourceBackupConfigState": ds["configState"],

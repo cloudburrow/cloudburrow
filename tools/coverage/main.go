@@ -50,6 +50,7 @@ import (
 	rpccode "google.golang.org/genproto/googleapis/rpc/code"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	_ "github.com/cloudburrow/cloudburrow/internal/service/filestore/filestorev1beta1pb"
 	gcs "github.com/cloudburrow/cloudburrow/internal/service/storage"
 	bqv2 "google.golang.org/api/bigquery/v2"
 	bqconnection "google.golang.org/api/bigqueryconnection/v1"
@@ -84,9 +85,11 @@ import (
 	_ "cloud.google.com/go/billing/budgets/apiv1/budgetspb"
 	_ "cloud.google.com/go/certificatemanager/apiv1/certificatemanagerpb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	_ "cloud.google.com/go/cloudbuild/apiv2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	_ "cloud.google.com/go/container/apiv1/containerpb"
+	_ "cloud.google.com/go/dataflow/apiv1beta3/dataflowpb"
 	_ "cloud.google.com/go/dataform/apiv1/dataformpb"
 	_ "cloud.google.com/go/dataform/apiv1beta1/dataformpb"
 	_ "cloud.google.com/go/dataproc/v2/apiv1/dataprocpb"
@@ -168,6 +171,9 @@ var areas = []area{
 	// repository calls and the builds SubmitBuild runs.
 	{Key: "artifactregistry", Title: "Artifact Registry", Own: true, Services: []string{"google.devtools.artifactregistry.v1.ArtifactRegistry"}},
 	{Key: "cloudbuild", Title: "Cloud Build", Own: true, Services: []string{"google.devtools.cloudbuild.v1.CloudBuild"}},
+	// Cloud Build repositories, 2nd gen (#2197), on the Run port:
+	// connections to this instance's git server and linked repositories.
+	{Key: "cloudbuildv2", Title: "Cloud Build repositories (2nd gen)", Own: true, Services: []string{"google.devtools.cloudbuild.v2.RepositoryManager"}},
 	// Secure Source Manager (#1521), on the Run port: a repository is a git
 	// host whose pushes run Cloud Build triggers.
 	{Key: "securesourcemanager", Title: "Secure Source Manager", Own: true, Services: []string{"google.cloud.securesourcemanager.v1.SecureSourceManager"}},
@@ -250,7 +256,13 @@ var areas = []area{
 		// its schedules of notebook executions.
 		"google.cloud.aiplatform.v1.NotebookService", "google.cloud.aiplatform.v1.ScheduleService",
 		// Vertex AI Pipelines' pipeline jobs (#2173).
-		"google.cloud.aiplatform.v1.PipelineService"},
+		"google.cloud.aiplatform.v1.PipelineService",
+		// Custom training and batch prediction jobs (#2210).
+		"google.cloud.aiplatform.v1.JobService",
+		// Vertex ML Metadata (#2205).
+		"google.cloud.aiplatform.v1.MetadataService",
+		// Managed datasets (#2210).
+		"google.cloud.aiplatform.v1.DatasetService"},
 		// The runtime templates' IAM policies (#2105): the IAMPolicy mixin,
 		// whose keys the kms area holds, so named by their discovery IDs.
 		Extra: []string{"aiplatform.projects.locations.notebookRuntimeTemplates.getIamPolicy",
@@ -269,7 +281,9 @@ var areas = []area{
 	{Key: "documentaiv1beta3", Title: "Document AI v1beta3 datasets", Own: true, Services: []string{"google.cloud.documentai.v1beta3.DocumentService"}},
 	{Key: "speechv1", Title: "Speech-to-Text v1", Own: true, Services: []string{"google.cloud.speech.v1.Speech", "google.cloud.speech.v1.Adaptation"}},
 	{Key: "vertexaiv1beta1", Title: "Vertex AI PredictionService v1beta1", Own: true, Services: []string{"google.cloud.aiplatform.v1beta1.PredictionService",
-		"google.cloud.aiplatform.v1beta1.LlmUtilityService", "google.cloud.aiplatform.v1beta1.GenAiCacheService"}},
+		"google.cloud.aiplatform.v1beta1.LlmUtilityService", "google.cloud.aiplatform.v1beta1.GenAiCacheService",
+		// Model Monitoring v2 and its schedules of runs (#2214).
+		"google.cloud.aiplatform.v1beta1.ModelMonitoringService", "google.cloud.aiplatform.v1beta1.ScheduleService"}},
 	// The Memorystore for Redis admin API (#1302), over the one Valkey
 	// server --services memorystore runs, and Memorystore for Redis
 	// Cluster and Memorystore for Valkey (#1519) on the same port.
@@ -396,6 +410,11 @@ var areas = []area{
 		"google.cloud.dataproc.v1.ClusterController", "google.cloud.dataproc.v1.JobController", "google.cloud.dataproc.v1.WorkflowTemplateService",
 		"google.cloud.dataproc.v1.AutoscalingPolicyService", "google.cloud.dataproc.v1.NodeGroupController",
 		"google.cloud.dataproc.v1.BatchController", "google.cloud.dataproc.v1.SessionController", "google.cloud.dataproc.v1.SessionTemplateController"}},
+	// Dataflow (#2215): CloudBurrow's own, gRPC and JSON on one port; jobs
+	// run on Apache Beam's Flink runner (internal/beamrun).
+	{Key: "dataflow", Title: "Dataflow (v1b3): jobs, messages, metrics, snapshots and templates", Own: true, Services: []string{
+		"google.dataflow.v1beta3.JobsV1Beta3", "google.dataflow.v1beta3.MessagesV1Beta3", "google.dataflow.v1beta3.MetricsV1Beta3",
+		"google.dataflow.v1beta3.SnapshotsV1Beta3", "google.dataflow.v1beta3.TemplatesService", "google.dataflow.v1beta3.FlexTemplatesService"}},
 	// App Hub (#2110): CloudBurrow's own, gRPC and JSON on one port; its
 	// Locations, Operations and IAM mixins are other areas' rows.
 	{Key: "apphub", Title: "App Hub (v1)", Own: true, Services: []string{"google.cloud.apphub.v1.AppHub"}},
@@ -406,6 +425,9 @@ var areas = []area{
 	// Filestore (#2192): CloudBurrow's own, gRPC and JSON on one port; its
 	// Locations and Operations mixins are other areas' rows.
 	{Key: "filestore", Title: "Filestore (v1)", Own: true, Services: []string{"google.cloud.filestore.v1.CloudFilestoreManager"}},
+	// Filestore v1beta1 (#2194): multishare instances and their shares,
+	// on the same port; the rest is v1's.
+	{Key: "filestorev1beta1", Title: "Filestore (v1beta1)", Own: true, Services: []string{"google.cloud.filestore.v1beta1.CloudFilestoreManager"}},
 	// Cloud Trace (#2118): CloudBurrow's own, v1 and v2 gRPC and JSON on
 	// one port, beside OTLP's ingestion (not a googleapis service).
 	{Key: "trace", Title: "Cloud Trace API (v1 and v2)", Own: true,

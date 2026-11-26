@@ -69,6 +69,8 @@ func cliEndpointVar(service string) string {
 		return "CLOUDBURROW_ALLOYDB_ENDPOINT"
 	case "filestore":
 		return "CLOUDBURROW_FILESTORE_ENDPOINT"
+	case "dataflow":
+		return "CLOUDBURROW_DATAFLOW_ENDPOINT"
 	case "trace":
 		return "CLOUDBURROW_TRACE_ENDPOINT"
 	case "gke":

@@ -82,6 +82,11 @@ var terraformEndpoints = []terraformEndpoint{
 	// TestTerraformCloudBuildTriggerAndWorkerPool (#1422).
 	{config.ServiceRun, "artifact_registry_custom_endpoint", "GOOGLE_ARTIFACT_REGISTRY_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	{config.ServiceRun, "cloud_build_custom_endpoint", "GOOGLE_CLOUD_BUILD_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Cloud Build repositories, 2nd gen (#2197), at Google's /v2/ paths on
+	// the Run port: google_cloudbuildv2_connection (a GitLab host at the
+	// instance's git server) and google_cloudbuildv2_repository apply, plan
+	// clean and destroy in TestTerraformCloudBuildV2.
+	{config.ServiceRun, "cloudbuildv2_custom_endpoint", "GOOGLE_CLOUDBUILDV2_CUSTOM_ENDPOINT", "/v2/", true, ""},
 	// Secure Source Manager (#1521, #1527), on the Run port under its
 	// prefix: google_secure_source_manager_instance, _repository and their
 	// *_iam_member (stored, never enforced) apply, plan clean, update and
@@ -198,6 +203,9 @@ var terraformEndpoints = []terraformEndpoint{
 	// apply, plan clean, update in place and destroy in
 	// TestTerraformFilestore.
 	{config.ServiceFilestore, "filestore_custom_endpoint", "GOOGLE_FILESTORE_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Dataflow (#2215): google_dataflow_job applies, plans clean and
+	// destroys (cancels, or drains with on_delete) in TestTerraformDataflow.
+	{config.ServiceDataflow, "dataflow_custom_endpoint", "GOOGLE_DATAFLOW_CUSTOM_ENDPOINT", "/", true, ""},
 	// Cloud Monitoring (#1939): google_monitoring_metric_descriptor.
 	{config.ServiceMonitoring, "monitoring_custom_endpoint", "GOOGLE_MONITORING_CUSTOM_ENDPOINT", "/", true, ""},
 	// The Compute Engine API's VPC networking (#1936), on its own port,
@@ -418,6 +426,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceMonitoring:       cfg.Endpoints.Monitoring,
 		config.ServiceCompute:          cfg.Endpoints.Compute,
 		config.ServiceFilestore:        cfg.Endpoints.Filestore,
+		config.ServiceDataflow:         cfg.Endpoints.Dataflow,
 		config.ServiceWorkflows:        cfg.Endpoints.Workflows,
 		config.ServiceParameterManager: cfg.Endpoints.ParameterManager,
 		config.ServiceDataform:         cfg.Endpoints.Dataform,
@@ -445,6 +454,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	enabled[config.ServiceDataform] = dataformEnabled(cfg)
 	enabled[config.ServiceAppHub] = appHubEnabled(cfg)
 	enabled[config.ServiceAlloyDB] = alloyDBEnabled(cfg)
+	enabled[config.ServiceDataflow] = dataflowEnabled(cfg)
 	enabled[localAIEndpoint] = localAIServed(cfg)
 	enabled[storageTransferService] = storageJobsEnabled(cfg)
 	enabled[storageInsightsService] = storageJobsEnabled(cfg)
@@ -641,14 +651,13 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 			unpointedPrefix{"google_cloud_run_", "this instance does not serve Cloud Run"},
 			unpointedPrefix{"google_artifact_registry_", "this instance does not serve Artifact Registry (it is on the Run port)"},
 			unpointedPrefix{"google_cloudbuild_", "this instance does not serve Cloud Build (it is on the Run port)"},
+			unpointedPrefix{"google_cloudbuildv2_", "this instance does not serve Cloud Build repositories (they are on the Run port)"},
 			unpointedPrefix{"google_secure_source_manager_", "this instance does not serve Secure Source Manager (it is on the Run port)"},
 			unpointedPrefix{"google_developer_connect_", "this instance does not serve Developer Connect (it is on the Run port)"},
 			unpointedPrefix{"google_cloudfunctions2_", "this instance does not serve Cloud Functions (it is on the Run port)"},
 			unpointedPrefix{"google_cloudfunctions_", "this instance does not serve Cloud Functions (it is on the Run port)"})
 	}
-	// Whatever is enabled: no instance serves Cloud Build v2's repository
-	// connections, so the provider has no local endpoint for them (#1304).
-	// Cloud Functions v2 (#1377) and v1 (#1428) are served on the Run port.
+	// Whatever is enabled: Cloud Functions v2 (#1377) and v1 (#1428) are served on the Run port.
 	// Three list data sources call a fixed Google URL whatever the
 	// provider's custom endpoints say (measured with hashicorp/google 8.4.0,
 	// #1304): google_storage_buckets lists at
@@ -666,7 +675,6 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 	// Before #1578 the wrapper let them through, to real Google, whenever the
 	// Run port or Resource Manager was served.
 	out = append(out,
-		unpointedPrefix{"google_cloudbuildv2_", "CloudBurrow does not serve Cloud Build v2 connections"},
 		unpointedPrefix{"google_storage_buckets", "the provider lists buckets at storage.googleapis.com, ignoring storage_custom_endpoint"},
 		unpointedPrefix{"google_projects", "the provider lists projects at cloudresourcemanager.googleapis.com, ignoring resource_manager_custom_endpoint"},
 		unpointedPrefix{"google_folders", "the provider lists folders at cloudresourcemanager.googleapis.com, ignoring resource_manager_v3_custom_endpoint"},
@@ -901,6 +909,7 @@ func runTerraform(args []string, stdout, stderr io.Writer) error {
 	// locally (#1975); the environment carries those the provider reads
 	// from one, after the user's own, so these win.
 	env := append(os.Environ(), terraformRefusalEnv(cfg)...)
+	env = append(env, terraformMetadataEnv(cfg)...)
 	if h := bigtableHost(cfg); h != "" {
 		env = append(env, "BIGTABLE_EMULATOR_HOST="+h)
 	}
@@ -945,4 +954,17 @@ func runTerraform(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 	}
+}
+
+// terraformMetadataEnv points the provider's metadata lookups at this
+// instance's metadata server, as `cloudburrow env` does for every client
+// (#2038). Without them the provider's Go auth library probed
+// metadata.google.internal and 169.254.169.254 on every run, which the
+// compat tests' tools container caught at the network layer (#2174).
+func terraformMetadataEnv(cfg config.Config) []string {
+	if cfg.Endpoints.Metadata == 0 {
+		return nil
+	}
+	addr := net.JoinHostPort(cfg.BindAddress, fmt.Sprint(cfg.Endpoints.Metadata))
+	return []string{"GCE_METADATA_HOST=" + addr, "GCE_METADATA_ROOT=" + addr, "GCE_METADATA_IP=" + addr}
 }

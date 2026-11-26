@@ -268,7 +268,18 @@ locally on a notebook's first Connect; pip installs Google's
 google-cloud-bigquery and bigquery-magics (Apache License, Version 2.0),
 IPython, pandas (BSD 3-Clause License), pyarrow (Apache License, Version
 2.0), db-dtypes and matplotlib into it. None of them is part of this
-repository or of the binary.
+repository or of the binary. For Vertex AI Workbench instances (#2198) the
+same image holds JupyterLab and Jupyter Server (BSD 3-Clause License),
+ipykernel (BSD 3-Clause License), terminado (BSD 2-Clause License) and
+Google's google-cloud-storage (Apache License, Version 2.0), every package
+pinned and hash-locked in internal/nbruntime/image/requirements.txt; they
+are installed only into that locally built image. So are Google's
+JupyterLab plugins (dataproc-jupyter-plugin, bigquery-jupyter-plugin,
+gcs-jupyter-plugin, scheduler-jupyter-plugin, google-cloud-jupyter-config,
+kernels-mixer; Apache License, Version 2.0) with their dependencies
+(Apache License, Version 2.0, MIT License, BSD 3-Clause License), and the
+Google Cloud CLI 594.0.1 (Apache License, Version 2.0), which the image
+build fetches from Google and checks against a pinned SHA-256.
 
 The darwin/arm64 release archive carries, in litert-lm/, a macOS build of
 cloudburrow_generate (#2159): Google's LiteRT-LM
@@ -296,3 +307,24 @@ code ported from Google's go-tpm-tools (github.com/google/go-tpm-tools
 v0.4.11: server.CreateImportBlob and the client package's EK and AK
 templates), Copyright Google LLC, under the Apache License, Version 2.0
 (internal/service/compute/mdsmtls.go and vtpm.go, #2179).
+
+Bring your own cloud (#2209) links Amazon's AWS SDK for Go v2
+(github.com/aws/aws-sdk-go-v2 and its service modules, with
+github.com/aws/smithy-go), Copyright Amazon.com, Inc. or its affiliates,
+under the Apache License, Version 2.0; Microsoft's Azure SDK for Go
+(github.com/Azure/azure-sdk-for-go/sdk/...) and the Microsoft
+Authentication Library for Go
+(github.com/AzureAD/microsoft-authentication-library-for-go), Copyright (c)
+Microsoft Corporation, under the MIT License; and
+github.com/zalando/go-keyring, Copyright (c) 2016 Zalando SE, under the MIT
+License, with github.com/godbus/dbus/v5 (BSD 2-Clause License) and
+github.com/alessio/shellescape (MIT License). Its Session Manager tunnel
+(internal/byoc/awsprov/ssmtunnel) speaks the protocol of AWS's
+session-manager-plugin (https://github.com/aws/session-manager-plugin,
+Apache License 2.0), reimplemented, with github.com/xtaci/smux, Copyright
+(c) 2016-2017 xtaci, under the MIT License, and github.com/gorilla/websocket,
+Copyright (c) 2023 The Gorilla Authors, under the BSD 2-Clause License. The
+VM it creates in the
+user's own account installs Docker, kind and, for GPU sizes, NVIDIA's driver
+and container toolkit from their publishers; CloudBurrow redistributes none
+of them.

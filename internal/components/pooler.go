@@ -22,9 +22,10 @@ const PoolerContainer = "pooler"
 
 // poolerScript writes PgBouncer's configuration and runs it. Every
 // database is the server's on the pod's loopback; a client's password is
-// checked against the server's own pg_shadow, read as postgres (whom the
-// server trusts on its loopback), so a user signs in through the pooler
-// with the password it has on the server, SCRAM or MD5. The settings
+// checked against the server's own pg_shadow, read as CloudBurrow's
+// management role (CLOUDSQL_ADMIN_USER, with its password, which the
+// server asks for as it asks every TCP sign-in, #2208), so a user signs in
+// through the pooler with the password it has on the server, SCRAM or MD5. The settings
 // come in CLOUDSQL_POOLER_SETTINGS, one name = value per line.
 //
 // PoolerStatsUser reads SHOW POOLS and SHOW STATS on the pooler's own
@@ -37,6 +38,7 @@ const poolerScript = `set -e
 d=/tmp/pgbouncer
 mkdir -p "$d"
 printf '"%s" "-"\n' "${CLOUDSQL_POOLER_STATS_USER}" > "$d/userlist.txt"
+if [ -n "${CLOUDSQL_ADMIN_USER:-}" ]; then printf '"%s" "%s"\n' "${CLOUDSQL_ADMIN_USER}" "${CLOUDSQL_ADMIN_PASSWORD}" >> "$d/userlist.txt"; fi
 cat > "$d/hba.conf" <<EOF
 host pgbouncer ${CLOUDSQL_POOLER_STATS_USER} 127.0.0.1/32 trust
 host pgbouncer ${CLOUDSQL_POOLER_STATS_USER} ::1/128 trust
@@ -57,7 +59,7 @@ auth_type = hba
 auth_hba_file = $d/hba.conf
 auth_file = $d/userlist.txt
 stats_users = ${CLOUDSQL_POOLER_STATS_USER}
-auth_user = postgres
+auth_user = ${CLOUDSQL_ADMIN_USER:-postgres}
 auth_dbname = postgres
 auth_query = SELECT usename, passwd FROM pg_catalog.pg_shadow WHERE usename = \$1
 ${CLOUDSQL_POOLER_SETTINGS}
@@ -125,9 +127,9 @@ const AlloyDBPoolerPort = 6432
 // Auth Proxy are pooled in: Google keeps them a pool of their own
 // (authproxy_pooler_count). Its clients have been authenticated by the
 // connectors' server-side proxy (the client certificate, and the token of
-// an IAM connection), as Google's is, so it checks no password: only
-// that the role exists, and only from the pod's loopback, where the
-// CLI's port-forward arrives (connectorPoolerHBA).
+// an IAM connection), as Google's is; a built-in user's password is
+// checked here as everywhere (#2208), and an IAM connection is signed in
+// by the proxy with its role's own password (connectorPoolerHBA).
 const AlloyDBConnectorPoolerPort = 6435
 
 // AlloyDBPoolers are the managed connection poolers beside an AlloyDB
@@ -156,12 +158,12 @@ host all all ::/0 md5
 // connectorPoolerHBA is the connectors' pool's: its one client is the
 // connectors' server-side proxy, which reaches it through the CLI's
 // port-forward, on the pod's loopback, once it has checked the client
-// certificate (and an IAM connection's token). So only loopback is
-// trusted; every other address, another pod's or a VM's, is refused,
-// and nothing reaches this pool with no password the way Google's
-// proxy alone reaches its own.
-const connectorPoolerHBA = `host all all 127.0.0.1/32 trust
-host all all ::1/128 trust
+// certificate (and an IAM connection's token). Every sign-in there is
+// checked by password, as the server checks it (#2208): a built-in user's
+// own, an IAM user's its role's, which the proxy sends; every other
+// address, another pod's or a VM's, is refused.
+const connectorPoolerHBA = `host all all 127.0.0.1/32 md5
+host all all ::1/128 md5
 host all all 0.0.0.0/0 reject
 host all all ::/0 reject
 `

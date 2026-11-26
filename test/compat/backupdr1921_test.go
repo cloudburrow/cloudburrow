@@ -162,7 +162,7 @@ func TestBackupDRPlanRuleChecks(t *testing.T) {
 		if sch.TimeZone == "" {
 			sch.TimeZone = "UTC"
 		}
-		sch.BackupWindow = &backupdr.BackupWindow{StartHourOfDay: 1, EndHourOfDay: 5}
+		sch.BackupWindow = &backupdr.BackupWindow{StartHourOfDay: 1, EndHourOfDay: 7}
 		return &backupdr.BackupRule{RuleId: id, BackupRetentionDays: days, StandardSchedule: sch}
 	}
 	n := 0
@@ -465,7 +465,7 @@ func TestGcloudBackupDRRetentionLockAndPlanDays(t *testing.T) {
 	}
 	run("us-central1", "backup-plans", "create", plan, "--backup-vault", "projects/"+g.project+"/locations/us/backupVaults/"+vault,
 		"--resource-type", "sqladmin.googleapis.com/Instance", "--max-custom-on-demand-retention-days", "40",
-		"--backup-rule", "rule-id=weekly,retention-days=14,recurrence=WEEKLY,backup-window-start=1,backup-window-end=5,"+
+		"--backup-rule", "rule-id=weekly,retention-days=14,recurrence=WEEKLY,backup-window-start=1,backup-window-end=7,"+
 			"days-of-week=MONDAY FRIDAY,time-zone=Europe/Paris")
 	defer g.run(nil, "backup-dr", "backup-plans", "delete", plan, "--location", "us-central1", "--project", g.project, "--quiet")
 	out = run("us-central1", "backup-plans", "describe", plan, "--format",

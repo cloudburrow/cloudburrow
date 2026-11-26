@@ -23,6 +23,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // Bigtable change streams (#1523), which the Bigtable front serves from a
@@ -57,7 +59,7 @@ func bigtableStreamTable(t *testing.T, h *Harness, table string, retention time.
 		t.Fatalf("CreateTable with a change stream: %v", err)
 	}
 	t.Cleanup(func() { _ = admin.DeleteTable(context.Background(), table) })
-	c, err := bigtable.NewClient(ctx, h.Project(), bigtableInstance)
+	c, err := localclient.Bigtable(ctx, h.Project(), bigtableInstance)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +306,7 @@ func TestBigtableChangeStreamGarbageCollectionAndDropRowRange(t *testing.T) {
 		t.Fatalf("CreateTable with rules and a change stream: %v", err)
 	}
 	t.Cleanup(func() { _ = admin.DeleteTable(context.Background(), "collected") })
-	c, err := bigtable.NewClient(ctx, h.Project(), bigtableInstance)
+	c, err := localclient.Bigtable(ctx, h.Project(), bigtableInstance)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +493,7 @@ func TestConsoleBigtableChangeStream(t *testing.T) {
 	if got := prefilled(); got != "2" {
 		t.Errorf("Edit change stream is prefilled with %s, want 2", got)
 	}
-	c, err := bigtable.NewClient(ctx, project, "cloudburrow")
+	c, err := localclient.Bigtable(ctx, project, "cloudburrow")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -531,9 +533,7 @@ func TestConsoleBigtableChangeStream(t *testing.T) {
 func TestTerraformBigtableTableChangeStream(t *testing.T) {
 	h := New(t)
 	t.Setenv("BIGTABLE_EMULATOR_HOST", h.Endpoint(EnvBigtable))
-	if _, err := exec.LookPath("terraform"); err != nil {
-		t.Skip("terraform is not on PATH")
-	}
+	toolBinary(t, "terraform") // in the tools container, never on the host (#2174)
 	cli := os.Getenv(EnvCLI)
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)

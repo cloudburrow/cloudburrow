@@ -24,11 +24,13 @@ func TestGcloudAppHub(t *testing.T) {
 	h := New(t)
 	c := appHubClients(t, h)["grpc"] // skips without CLOUDBURROW_TEST_APPHUB
 	h.Endpoint(EnvRun)
-	ctx := h.Context()
 	g := newGcloudSession(t, h)
 	detachAppHubProject(t, h, c, g.project)
 	suffix := time.Now().UnixNano() % 1e6
 	svcName, _ := deployAppHubResources(t, h, g.project, fmt.Sprintf("gc-ah-%d", suffix))
+	// The client's 60 seconds start once gcloud is ready: the first test
+	// of a shard to run it waits for the tools container to start.
+	ctx := h.Context()
 	run := func(a ...string) string {
 		t.Helper()
 		out, err := g.run(nil, append(append([]string{"apphub"}, a...), "--project", g.project, "--quiet")...)

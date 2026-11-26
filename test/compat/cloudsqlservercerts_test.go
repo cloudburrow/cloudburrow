@@ -88,7 +88,7 @@ func TestCloudSQLServerCertificates(t *testing.T) {
 	n := time.Now().UnixNano() % 1e6
 	name := fmt.Sprintf("cas-%d", n)
 
-	in := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17",
+	in := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1",
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840",
 			IpConfiguration: &sqladmin.IpConfiguration{ServerCaMode: "GOOGLE_MANAGED_CAS_CA"}}})
 	if in.Settings.IpConfiguration == nil || in.Settings.IpConfiguration.ServerCaMode != "GOOGLE_MANAGED_CAS_CA" || in.DnsName == "" {
@@ -163,7 +163,7 @@ func TestCloudSQLServerCertificates(t *testing.T) {
 	// Each CA mode's own methods.
 	_, err = svc.Instances.AddServerCa(project, name).Do()
 	wantCode(t, "addServerCa of a CAS instance", err, 400, "addServerCertificate")
-	plain := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: name + "-int", DatabaseVersion: "POSTGRES_17",
+	plain := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: name + "-int", DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1",
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}})
 	_, err = svc.Instances.ListServerCertificates(project, plain.Name).Do()
 	wantCode(t, "server certificates of an internal-CA instance", err, 400, "addServerCa")

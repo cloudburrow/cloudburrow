@@ -7,15 +7,134 @@ version may change behaviour.
 
 The release workflow publishes a tag's section of this file as the release notes. A scheduled
 release (every one to two days, [docs/ci.md](docs/ci.md#releasing)) commits nothing here: its
-notes are generated from the landings since the previous tag and kept in its annotated tag, and
-are used only when this file has no section for the tag. A tag with neither is refused. Those
-generated notes open with a **What's new** section made of the entries added under
-**Unreleased** since the previous tag (`scripts/release-notes.sh`), so every landing adds an entry
-here for each user-visible change it carries ([CONTRIBUTING.md](CONTRIBUTING.md#landings)). Before
-tagging `vX.Y.Z` by hand, move the entries under **Unreleased** into a new
-`## [X.Y.Z] - YYYY-MM-DD` section and add its link at the bottom.
+notes are the entries added under **Unreleased** since the previous tag (or this file's section for
+its version, when one was written first), kept in its annotated tag and used only when this file
+has no section for the tag. With no such entries it is not released: its run fails with
+"CHANGELOG Unreleased is empty", a dry run included, so every landing adds an entry here for each
+user-visible change it carries ([CONTRIBUTING.md](CONTRIBUTING.md#landings)). Before tagging
+`vX.Y.Z` by hand, move the entries under **Unreleased** into a new `## [X.Y.Z] - YYYY-MM-DD`
+section and add its link at the bottom.
 
 ## [Unreleased]
+
+### Compute and networking
+
+- Bring your own cloud, part of #2209: run an instance's compute on a VM in your own AWS account or
+  Azure subscription, created, resized, started, stopped and deleted from the console's Compute
+  capacity page or `cloudburrow cloud`, with the console and APIs staying on this machine;
+  `cloudburrow up --compute ssh://user@host` puts the instance's Docker on any Linux host, and
+  `cloudburrow cloud move` moves a running instance between machines and clouds.
+- Compute Engine regional disks with force-attach and asynchronous replication, disk consistency
+  groups, customer-managed and customer-supplied encryption keys, `disks.update`, snapshot and
+  instance schedules, and workload policies on managed instance groups (#2206).
+- Managed instance group autohealing driven by health checks (part of #2225), retries of VM
+  creations that fail with `listErrors` (part of #2220), and load balancer connection draining
+  with the `DRAINING` health state (#2226).
+
+### Databases
+
+- Cloud SQL and AlloyDB check passwords on every sign-in and refuse a wrong one, as Google does;
+  Cloud SQL Studio and AlloyDB Studio sign in with a password or IAM database authentication, and
+  `gcloud sql connect` and the Cloud SQL Auth Proxy are tested end to end (#2208).
+- AlloyDB Omni as an opt-in engine for AlloyDB clusters, run only once you accept Google's AlloyDB
+  Omni terms at provisioning (first part of #2207).
+- Backup and DR protects AlloyDB clusters and Filestore instances (part of #1524).
+- Filestore multishare instances (v1beta1) for GKE's `enterprise-multishare-rwx`, encryption at
+  rest with a customer-managed key, enforced performance limits and export `ip_ranges` (#2194).
+- Spanner query plans for `PLAN` and `PROFILE`, including Spanner Graph's documented statements,
+  with Spanner Studio's Run options and Query execution timeline (part of #2029).
+
+### Data and analytics
+
+- BigQuery stateful continuous queries, exporting to Pub/Sub, Bigtable and Spanner (#2193).
+- Dataflow jobs, classic and Flex Templates, Google-provided templates, snapshots and the Jobs
+  console with its Job graph, running Apache Beam pipelines (Python, Java, Go and Beam YAML) on a
+  local runner (part of #2215). Beam YAML pipelines run from the Beam SDK (`apache_beam.yaml.main`);
+  Google's YAML template (`Yaml_Template`) is not served yet (#2255).
+- Real JupyterLab in Vertex AI Workbench instances, Colab Enterprise runtimes and Dataproc
+  Component Gateway, with Google's JupyterLab plugins (#2198).
+
+### Agent Platform
+
+- Agent Platform Pipelines run nested DAGs, `ParallelFor`, conditions, exit handlers, importers and
+  caching (#2205), Google Cloud Pipeline Components and `template_uri` (#2210), with the run's
+  runtime graph and Pipeline run analysis in the console.
+- Vertex AI hyperparameter tuning jobs, managed datasets and batch predictions, and BigQuery ML
+  `EXPORT MODEL` of TRANSFORM models to SavedModels that import back (#2210).
+- Agent Platform Model Monitoring (v1 and v2), Neural Architecture Search and data labeling, with a
+  local mail sink for email notifications (the console's Mail page) and console clocks to advance
+  scheduled runs (#2214).
+
+### Developer tools
+
+- Cloud Build repositories (2nd gen): connections, linked repositories and their triggers, against
+  the instance's own git server (#2197).
+
+### Fixed
+
+- Official Spanner, Bigtable and Cloud Storage gRPC clients made by CloudBurrow no longer export
+  their built-in metrics to Google; `cloudburrow env` sets `SPANNER_DISABLE_BUILTIN_METRICS=true`.
+
+## [0.7.0] - 2026-11-25
+
+Released by the schedule from `b42906d73`. These entries were written after the release, from the
+landings since v0.6.0 (#2199 to #2246) and the issues they closed. Only a row of
+[docs/compatibility.md](docs/compatibility.md) marked Verified is a support claim.
+
+### New services
+
+- **AlloyDB for PostgreSQL**: clusters, primary instances and read pools, backups and point-in-time
+  restore, users and IAM sign-in, the Auth Proxy and connectors (#2191).
+- **Filestore**: instances served over NFS and mounted by GKE and Compute Engine VMs (#2192).
+- **Dataform**: BigQuery Studio files, source control and saved query versions (#2105).
+- **Serverless for Apache Spark**: Dataproc batches and interactive sessions, and BigQuery Studio
+  Spark notebooks (#2156).
+
+### Compute Engine and networking
+
+- **Load balancing**: forwarding rules, backend services, instance groups and service attachments
+  (#2153), then UDP, Cloud Armor, Cloud CDN, IAP, Certificate Manager, gRPC proxies and the load
+  balancer edit page (#2160).
+- **Metadata server**: a VM's metadata server answers its own instance metadata (#2177); an HTTPS
+  endpoint with vTPM-backed identity, guest-attribute limits and access-scope checks (#2179).
+- **Shielded VM** settings in the console: create, details, and edit while stopped (#2181).
+- **VPC firewall**: egress rules and UDP for VMs' relayed connections, and Firewall Rules Logging
+  (#2180).
+- Image import from VMDK, VHD and VHDX disks; Google's Ops Agent in every VM image (#2139).
+
+### Data and analytics
+
+- **BigQuery continuous queries** and the Reservation API's CONTINUOUS assignments, first part.
+  Stream-to-stream JOINs and window aggregations follow in v0.8 (#2193).
+- **Dataproc**: high-availability clusters with a YARN ResourceManager on every master (#2189).
+- **Colab Enterprise and Dataform**: pipeline schedules, service-account impersonation, Workbench
+  and permission checks (#2173).
+
+### Cloud SQL
+
+- Managed connection pooling for MySQL (#2141), and connection pooling metrics in Cloud Monitoring
+  (#2163).
+- More of what was refused before is now served, including Backup and DR for AlloyDB and Filestore
+  (part of #1524).
+
+### Kubernetes Engine
+
+- The ClusterManager methods that returned 501: IP rotation, network policy, legacy ABAC,
+  GetJSONWebKeys, upgrade info and autoscaling. Cluster logging now runs on every node, as on GKE
+  (#2100).
+
+### Console
+
+- BigQuery Studio, Compute Engine, VPC networking and Cloud SQL pages brought closer to Google's
+  console (#2094, #2139, #2140, #2141).
+
+### Terraform
+
+- Endpoint overrides for every served API and more provider resources tested (part of #1578).
+
+### Install script
+
+- On Apple Silicon, `install.sh` also installs the Apple GPU (Metal) runner (#2201).
 
 ## [0.6.0] - 2026-11-24
 
@@ -918,7 +1037,8 @@ operation in [docs/compatibility.md](docs/compatibility.md) and summarised in
   one `checksums.txt`, a Homebrew formula and an installer that refuses an archive it cannot
   verify (#71, #324).
 
-[Unreleased]: https://github.com/cloudburrow/cloudburrow/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/cloudburrow/cloudburrow/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/cloudburrow/cloudburrow/compare/v0.3.0...v0.4.0

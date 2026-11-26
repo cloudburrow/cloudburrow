@@ -272,6 +272,13 @@ func negEndpoints(attach bool) func(s *Server, x lbCtx, o, b obj) (obj, error) {
 		}
 		return s.lbSet(x, o, op, func(g obj) error {
 			have := listOf(g["_endpoints"])
+			// Connection draining (#2226): a detached endpoint of a group
+			// whose backend services drain stays, DRAINING, until the
+			// largest timeout passes; attached again, it stops draining.
+			drain := s.drainTimeoutLocked(x.rel)
+			draining := objOf(g["_drainingEndpoints"])
+			t := str(g, "networkEndpointType")
+			canDrain := drain > 0 && t != "INTERNET_FQDN_PORT" && t != "INTERNET_IP_PORT"
 			for _, ep := range eps {
 				k, at := endpointKey(ep), -1
 				for i, h := range have {
@@ -282,13 +289,27 @@ func negEndpoints(attach bool) func(s *Server, x lbCtx, o, b obj) (obj, error) {
 				switch {
 				case attach && at < 0:
 					have = append(have, ep)
+				case attach:
+					delete(draining, k)
+				case !attach && at >= 0 && canDrain:
+					if draining == nil {
+						draining = obj{}
+					}
+					if draining[k] == nil {
+						now := s.opts.Now()
+						draining[k] = map[string]any{"start": float64(now.UnixNano()), "until": float64(now.Add(drain).UnixNano())}
+					}
 				case !attach && at >= 0:
 					have = append(have[:at], have[at+1:]...)
 				case !attach:
 					return invalid("Invalid value for field 'networkEndpoints': ''. The endpoint is not in the network endpoint group.")
 				}
 			}
-			t := str(g, "networkEndpointType")
+			if len(draining) > 0 {
+				g["_drainingEndpoints"] = map[string]any(draining)
+			} else {
+				delete(g, "_drainingEndpoints")
+			}
 			if (t == "INTERNET_FQDN_PORT" || t == "INTERNET_IP_PORT") && len(have) > 1 {
 				return invalid("Invalid value for field 'networkEndpoints': ''. An internet network endpoint group can have only one endpoint.")
 			}

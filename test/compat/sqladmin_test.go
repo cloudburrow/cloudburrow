@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -152,7 +153,7 @@ type sqlAdminEngine struct {
 func pgEngine(t *testing.T, h *Harness) sqlAdminEngine {
 	addr := h.Endpoint(EnvCloudSQL)
 	query := func(t *testing.T, q string) [][2]string {
-		c, err := pgx.Connect(h.Context(), fmt.Sprintf("postgres://cloudburrow@%s/cloudburrow?sslmode=disable", addr))
+		c, err := pgx.Connect(h.Context(), upPGURL(addr, "cloudburrow"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -188,10 +189,11 @@ func pgEngine(t *testing.T, h *Harness) sqlAdminEngine {
 			}
 			return m
 		},
-		login: func(user, _, database string) error {
-			// The server trusts every local connection, as docs/cloudsql.md
-			// says, so the password is stored but not checked.
-			c, err := pgx.Connect(h.Context(), fmt.Sprintf("postgres://%s@%s/%s?sslmode=disable", user, addr, database))
+		login: func(user, password, database string) error {
+			// The server checks the password, as Cloud SQL's does (#2208).
+			u := url.URL{Scheme: "postgres", User: url.UserPassword(user, password), Host: addr,
+				Path: "/" + database, RawQuery: "sslmode=disable"}
+			c, err := pgx.Connect(h.Context(), u.String())
 			if err != nil {
 				return err
 			}
@@ -385,21 +387,19 @@ func TestSQLAdminDatabasesAndUsersAreTheServers(t *testing.T) {
 			}
 			op, err = svc.Users.Update(p, e.instance, &sqladmin.User{Password: "second-Pass2"}).Name(user).Host(host).Do()
 			done("users.update", op, err)
-			if e.instance == "mysql" {
-				if err := e.login(user, "first-Pass1", db); err == nil {
-					t.Error("after users.update the old password still logs in")
-				}
-				if err := e.login(user, "second-Pass2", db); err != nil {
-					t.Errorf("after users.update the new password does not log in: %v", err)
-				}
+			if err := e.login(user, "first-Pass1", db); err == nil {
+				t.Error("after users.update the old password still logs in")
+			}
+			if err := e.login(user, "second-Pass2", db); err != nil {
+				t.Errorf("after users.update the new password does not log in: %v", err)
 			}
 			op, err = svc.Users.Delete(p, e.instance).Name(user).Host(host).Do()
 			done("users.delete", op, err)
 			if e.users != nil && e.users(t)[user] {
 				t.Errorf("after users.delete the server still has %s", user)
 			}
-			if err := e.login(user, "second-Pass2", db); err == nil && e.instance == "mysql" {
-				t.Error("a deleted MySQL user still logs in")
+			if err := e.login(user, "second-Pass2", db); err == nil {
+				t.Error("a deleted user still logs in")
 			}
 			_, err = svc.Users.Get(p, e.instance, user).Host(host).Do()
 			wantHTTP(t, "users.get after delete", err, http.StatusNotFound)

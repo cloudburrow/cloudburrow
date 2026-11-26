@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -45,9 +46,15 @@ type alloyDBService struct {
 	// storage is the address of the instance's Cloud Storage, for
 	// ExportCluster and ImportCluster; nil serves neither.
 	storage func() string
+	// backupDR resolves the Backup and DR backups and data sources a
+	// cluster is restored from (#1524); nil without backupdr.
+	backupDR alloydb.BackupDR
 
-	server    *grpctransport.Server
-	api       *alloydb.Server
+	server *grpctransport.Server
+	api    *alloydb.Server
+	// rest is the JSON API, in process, for Backup and DR's console
+	// pages (#1524); nil until started.
+	rest      http.Handler
 	engine    *alloyDBEngine
 	connector *alloydb.Connector
 	tlsFront  *alloyDBTLSFront
@@ -82,6 +89,14 @@ func (s *alloyDBService) API() *alloydb.Server {
 	return s.api
 }
 
+// REST is the JSON API in process, nil until started.
+func (s *alloyDBService) REST() http.Handler {
+	if s == nil {
+		return nil
+	}
+	return s.rest
+}
+
 // Addr is the bound address.
 func (s *alloyDBService) Addr() string {
 	if s == nil || s.server == nil {
@@ -113,7 +128,8 @@ func (s *alloyDBService) Start(ctx context.Context) error {
 	}
 	s.engine = newAlloyDBEngine(s.cfg, s.logw)
 	opts := alloydb.Options{Engine: s.engine, BackupsDir: filepath.Join(s.cfg.InstanceDir(), "alloydb-backups"),
-		ConnectorHost: s.cfg.BindAddress, Logf: s.logf}
+		ConnectorHost: s.cfg.BindAddress, Logf: s.logf,
+		AdminUser: components.AlloyDBAdminUser, AdminPassword: postgresAdminPassword(s.cfg)}
 	if net.ParseIP(s.cfg.BindAddress) == nil || net.ParseIP(s.cfg.BindAddress).IsUnspecified() {
 		opts.ConnectorHost = "127.0.0.1"
 	}
@@ -143,7 +159,22 @@ func (s *alloyDBService) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if s.backupDR != nil {
+		// Backup and DR backups and data sources restored (#1524).
+		api.SetBackupDR(s.backupDR)
+	}
 	s.api = api
+	// Google's AlloyDB Omni terms (#2207), when the user accepted them for
+	// every new cluster; recorded for `status`.
+	terms := omniTermsOf(s.cfg, time.Now().UTC().Format(time.RFC3339))
+	api.AcceptOmniTerms(terms)
+	if err := recordOmniTerms(s.cfg, terms); err != nil {
+		s.logf("AlloyDB: recording the AlloyDB Omni terms' acceptance: %v", err)
+	}
+	if terms != nil {
+		s.logf("AlloyDB: new clusters of POSTGRES_15, 16 and 17 run AlloyDB Omni, its terms (%s) accepted by %s via %s",
+			alloydb.OmniTermsURL, terms.AcceptedBy, terms.Via)
+	}
 	s.server = grpctransport.New(net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.AlloyDB)))
 	s.server.Observe(s.calls)
 	if s.tracing != nil {
@@ -153,6 +184,7 @@ func (s *alloyDBService) Start(ctx context.Context) error {
 		s.server.Interpose(i)
 	}
 	var jsonAPI http.Handler = alloydb.NewRESTHandler(api)
+	s.rest = jsonAPI
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}
@@ -281,6 +313,12 @@ func (e *alloyDBEngine) backend(spec alloydb.ServerSpec) components.Backend {
 	}
 	b := components.CloudSQLInstanceBackend(spec.Server, spec.Version, true, "", flags)
 	b.Name = spec.Server
+	if spec.Omni.Accepted() {
+		// Google's AlloyDB Omni image (#2207), only for a cluster whose
+		// record says who accepted its terms; a version Google publishes
+		// none of (POSTGRES_14) stays PostgreSQL, as the API decides too.
+		b, _ = components.AlloyDBOmniBackend(b, spec.Version, flags)
+	}
 	if spec.PITR {
 		if len(b.Args) == 0 {
 			b.Args = []string{"postgres"}
@@ -295,7 +333,10 @@ func (e *alloyDBEngine) backend(spec alloydb.ServerSpec) components.Backend {
 		// Cloud SQL's (#2141), with the connectors' pool beside it.
 		b.Sidecars = append(b.Sidecars, components.AlloyDBPoolers(spec.Pooler)...)
 	}
-	return b
+	// Every TCP sign-in is checked by password (#2208); CloudBurrow signs
+	// in as its management role. The initial user's password is set by
+	// the API (setupPrimary).
+	return components.WithPostgresAuth(b, components.AlloyDBAdminUser, postgresAdminPassword(e.cfg), "", "")
 }
 
 func sortedFlagNames(m map[string]string) []string {
@@ -348,7 +389,8 @@ func (e *alloyDBEngine) serves(ctx context.Context, server string) error {
 	for {
 		addr := e.Addr(server)
 		if addr != "" {
-			c, err := pgx.Connect(ctx, "postgres://postgres@"+addr+"/postgres?sslmode=disable&connect_timeout=5")
+			c, err := pgx.Connect(ctx, (&url.URL{Scheme: "postgres", User: url.UserPassword(components.AlloyDBAdminUser, postgresAdminPassword(e.cfg)),
+				Host: addr, Path: "/postgres", RawQuery: "sslmode=disable&connect_timeout=5"}).String())
 			if err == nil {
 				err = c.Ping(ctx)
 				_ = c.Close(ctx)

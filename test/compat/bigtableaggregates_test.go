@@ -11,6 +11,7 @@ import (
 
 	"cloud.google.com/go/bigtable"
 
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 	"github.com/cloudburrow/cloudburrow/third_party/zetasketch"
 )
 
@@ -30,7 +31,7 @@ func TestBigtableAggregateFamiliesMinMaxAndHLL(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ac.Close() })
-	c, err := bigtable.NewClient(ctx, h.Project(), bigtableInstance)
+	c, err := localclient.Bigtable(ctx, h.Project(), bigtableInstance)
 	if err != nil {
 		t.Fatal(err)
 	}

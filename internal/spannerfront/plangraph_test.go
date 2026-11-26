@@ -37,13 +37,13 @@ func TestGraphToSQL(t *testing.T) {
 		}
 	}
 	for _, gql := range []string{
-		"GRAPH MusicGraph MATCH (s:Singers)-[:Collabs]->{0,2}(o:Singers) RETURN o.FirstName",
+		// the engine refuses unbounded quantifiers before a plan is asked for
 		"GRAPH MusicGraph MATCH (s:Singers)-[:Collabs]->+(o:Singers) RETURN o.FirstName",
 		"GRAPH MusicGraph MATCH (s:Singers)-[c:Collabs]->{1,2}(o:Singers) RETURN c.OtherId",
-		"GRAPH MusicGraph MATCH (n) RETURN LABELS(n) AS l",
-		"GRAPH MusicGraph MATCH (s:Singers)-[c:Collabs]-(o:Singers) RETURN o.FirstName",
-		"GRAPH MusicGraph OPTIONAL MATCH (s:Singers) RETURN s.FirstName",
 		"GRAPH MusicGraph MATCH (s:Singers) RETURN s",
+		"GRAPH MusicGraph MATCH ANY CHEAPEST (s:Singers)-[:Collabs]->(o:Singers) RETURN o.FirstName",
+		"GRAPH MusicGraph MATCH p = (s:Singers)-[:Collabs]->(o:Singers) RETURN TO_JSON(p) AS j",
+		"GRAPH MusicGraph MATCH (s:Singers) ((a:Singers)-[:Collabs]->(b:Singers)){1,2} RETURN s.FirstName",
 	} {
 		if _, err := graphToSQL(gql, musicGraphs(t)); err == nil {
 			t.Errorf("%s: translated, want it refused by name", gql)

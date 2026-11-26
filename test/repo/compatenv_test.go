@@ -35,7 +35,12 @@ var compatEnvExceptions = map[string]string{
 	// The host is a Mac with Apple silicon whose GPU a test may use, and
 	// may download about 800 MB of models and runtimes (#2155); no instance
 	// reports what the host may download.
-	"CLOUDBURROW_TEST_METAL": "opt-in switch: darwin/arm64 host deploys GGUF and MLX models on the Apple GPU",
+	// An instance on the stand-in remote compute host (#2209): the
+	// stand-in is a container scripts/remote-compute-standin.sh starts, and
+	// no instance reports the container it runs in.
+	"CLOUDBURROW_TEST_REMOTE_STANDIN": "set by scripts/remote-compute-standin.sh: the stand-in host's container name",
+	"CLOUDBURROW_TEST_REMOTE_INGRESS": "set by hand with CLOUDBURROW_TEST_REMOTE_STANDIN: the remote instance's --port-ingress, forwarded from the host",
+	"CLOUDBURROW_TEST_METAL":          "opt-in switch: darwin/arm64 host deploys GGUF and MLX models on the Apple GPU",
 	// Test data, not an instance: internal/isoconformance downloads ISO's
 	// conformance files only when it is set (#1754).
 	"CLOUDBURROW_TEST_DOWNLOADS": "opt-in switch: tests may download test data not cached yet",
@@ -267,6 +272,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"MYSQL_PORT":                                  "9017",
 		"MYSQL_PASSWORD":                              "fixture-'pw'",
 		"PGHOST":                                      "127.0.0.1",
+		"PGPASSWORD":                                  "fixture-pg",
 		"PGPORT":                                      "9019",
 		"CLOUDBURROW_SQLADMIN_ENDPOINT":               "127.0.0.1:9020",
 		"CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT":     "127.0.0.1:3307",
@@ -284,6 +290,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"CLOUDBURROW_PARAMETERMANAGER_ENDPOINT":       "127.0.0.1:9047",
 		"CLOUDBURROW_DATAFORM_ENDPOINT":               "127.0.0.1:9058",
 		"CLOUDBURROW_DATAPROC_ENDPOINT":               "127.0.0.1:9066",
+		"CLOUDBURROW_DATAFLOW_ENDPOINT":               "127.0.0.1:9074",
 		"CLOUDBURROW_APPHUB_ENDPOINT":                 "127.0.0.1:9048",
 		"CLOUDBURROW_ALLOYDB_ENDPOINT":                "127.0.0.1:9063",
 		"CLOUDBURROW_ALLOYDB_CONNECTOR_ENDPOINT":      "127.0.0.1:55433",
@@ -406,6 +413,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"MYSQL":                    "127.0.0.1:9017",
 		"MYSQL_PASSWORD":           "fixture-'pw'",
 		"CLOUDSQL":                 "127.0.0.1:9019",
+		"CLOUDSQL_PASSWORD":        "fixture-pg",
 		"SQLADMIN":                 "127.0.0.1:9020",
 		"CLOUDSQL_CONNECTOR":       "127.0.0.1:3307",
 		"BACKUPDR":                 "127.0.0.1:9024",
@@ -418,6 +426,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"PARAMETERMANAGER":         "127.0.0.1:9047",
 		"DATAFORM":                 "127.0.0.1:9058",
 		"DATAPROC":                 "127.0.0.1:9066",
+		"DATAFLOW":                 "127.0.0.1:9074",
 		"APPHUB":                   "127.0.0.1:9048",
 		"ALLOYDB":                  "127.0.0.1:9063",
 		"ALLOYDB_CONNECTOR":        "127.0.0.1:55433",
@@ -448,12 +457,14 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"SQL_PRIVATECA":            "127.0.0.1:9028",
 		"SQL_COMPUTE":              "127.0.0.1:9031",
 		"MEMORYSTORE_COMPUTE":      "127.0.0.1:9031",
+		"FILESTORE_BACKUPDR":       "127.0.0.1:9024",
 		"RUN_COMPUTE":              "127.0.0.1:9031",
 		"MEMORYSTORE_PRIVATECA":    "127.0.0.1:9028",
 		"CLOUDSQL_SECRETS":         "127.0.0.1:9006",
 		"NOPUBSUB_STORAGE":         "http://127.0.0.1:50003",
 		"SQL_LOGGING":              "127.0.0.1:9009",
 		"SQL_MONITORING":           "127.0.0.1:9033",
+		"RUN_MONITORING":           "127.0.0.1:9033",
 		"APPENGINE_URL":            "http://127.0.0.1:18506",
 		"SCALE_RUN":                "127.0.0.1:50002",
 		"SCALE_SECRETS":            "127.0.0.1:9006",
@@ -568,7 +579,7 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`if [ "$SHARD" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
 		`if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,KUBECONFIG,MONITORING; fi`,
 		`if [ "$SHARD" = run ] || [ "$SHARD" = crossservice ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi`,
-		`if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE; fi`,
+		`if [ "$SHARD" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE,ALLOYDB; fi`,
 		`scripts/compat-env.sh --strict --only "$BROWSER_VARS"`,
 	} {
 		if !strings.Contains(ci["compat"], want) {
@@ -585,7 +596,7 @@ func TestWorkflowsSetCompatEnvThroughTheScript(t *testing.T) {
 		`if [ "$shard" = memorystore ]; then BROWSER_VARS+=,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi`,
 		`if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE,APIKEYS,STORAGE_BATCH,STORAGE_INSIGHTS,STORAGE_TRANSFER,KUBECONFIG,MONITORING; fi`,
 		`if [ "$shard" = run ] || [ "$shard" = crossservice ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT,RUN_SERVICEUSAGE,WORKFLOWS,STORAGE,MONITORING,KUBECONFIG,RUN_FIRESTORE,RUN_DATASTORE; fi`,
-		`if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE; fi`,
+		`if [ "$shard" = sql ]; then BROWSER_VARS+=,SQLADMIN,BACKUPDR,SECRETS,COMPUTE,STORAGE,ALLOYDB; fi`,
 		`scripts/compat-env.sh --only "$BROWSER_VARS"`,
 	} {
 		if !strings.Contains(string(verify), want) {

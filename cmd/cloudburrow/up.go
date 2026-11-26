@@ -7,12 +7,14 @@ import (
 	"fmt"
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/authplatform"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/egress"
 	"github.com/cloudburrow/cloudburrow/internal/faultgate"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/iamcheck"
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
+	"github.com/cloudburrow/cloudburrow/internal/mailsink"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/orgpolicy"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
@@ -29,6 +31,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/siteverification"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/storagejobs"
+	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -88,6 +91,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err := preflightPorts(cfg, doctor.RealEnv(), stderr); err != nil {
 		return err
 	}
+	// The compute host (#2209), before anything asks Docker a question:
+	// from here every docker and kind this process runs reaches it.
+	compute, err := connectCompute(ctx, cfg, stdout, true)
+	if err != nil {
+		return err
+	}
+	defer compute.Close()
 	// Before anything is created too: with --offline, every artifact the
 	// cluster would download must be in the cache, and the first that is
 	// not is named here rather than found as a pull timeout minutes in
@@ -277,6 +287,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		comps.SetMySQLCredentials(mysqlCreds)
 	}
+	// PostgreSQL's passwords (#2208): every PostgreSQL server checks them,
+	// so they are made whether or not `up` runs one of its own.
+	pgCreds, err := loadOrCreatePostgresCredentials(cfg)
+	if err != nil {
+		return fmt.Errorf("Cloud SQL for PostgreSQL credentials: %w", err)
+	}
+	comps.SetPostgresCredentials(pgCreds)
 
 	// Order matters: the control server first so health and readiness are
 	// observable while the cluster comes up, then the cluster, then the
@@ -293,7 +310,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// A database's tunnel is up once its user logs in through it (#1262).
 	for _, s := range []config.Service{config.ServiceCloudSQLMySQL, config.ServiceCloudSQL} {
 		if f := forwarderFor(forwarders, string(s)); f != nil {
-			f.SetHandshake(databaseHandshake(s, mysqlCreds))
+			f.SetHandshake(databaseHandshake(s, mysqlCreds, pgCreds))
 		}
 	}
 	for _, f := range forwarders {
@@ -465,6 +482,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// A VM's metadata server mints its service account's tokens (#2177).
 		computeSvc.tokens = creds
 		computeSvc.gke = gkeSvc
+		computeSvc.kms = kmsSvc
 		// Secure Web Proxy's TLS inspection issues its leaves from a CA
 		// pool of Certificate Authority Service (#2160).
 		computeSvc.privateca = privateCASvc
@@ -499,8 +517,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if filestoreSvc != nil && computeSvc != nil {
 		filestoreSvc.networks = computeSvc.filestoreNetworks
+		filestoreSvc.clients = computeSvc.filestoreClients
 	}
 	filestoreSvc.register(coord)
+	// Dataflow (#2215), in process; its jobs run on Flink's Beam job
+	// server in Docker, reaching the instance's Storage, Pub/Sub and
+	// BigQuery.
+	dataflowSvc := newDataflowService(cfg)
+	if dataflowSvc != nil {
+		dataflowSvc.live = boundAddrs
+	}
+	dataflowSvc.register(coord)
 	if gkeSvc != nil && runSvc != nil && runSvc.events != nil {
 		// Eventarc's GKE destinations (#1877) reach its clusters' services.
 		runSvc.events.gke = gkeSvc.clusterAccess
@@ -556,9 +583,20 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	traceSvc.register(coord)
 	// Cloud Monitoring (#1939), in process: log-based metrics' values come
 	// from this instance's Cloud Logging, request metrics from its counters.
+	// The local mail sink (#2214): an SMTP server on the loopback interface
+	// that keeps every message for the console's Mail page and relays
+	// none. Cloud Monitoring's email channels and Model Monitoring's
+	// email alerts are sent to it.
+	mailSink := mailsink.New()
+	if err := mailSink.Listen("127.0.0.1:0"); err != nil {
+		fmt.Fprintf(stderr, "cloudburrow up: warning: the local mail sink did not start (%v); email notifications are recorded, not sent\n", err)
+	} else {
+		defer mailSink.Close()
+	}
 	monitoringSvc := newMonitoringService(cfg)
 	if monitoringSvc != nil {
 		monitoringSvc.logging = loggingSvc
+		monitoringSvc.mail = mailSink
 		// Cloud Tasks' queue metrics come from its dispatch (#2064).
 		monitoringSvc.tasks = tasksSvc
 		// Pub/Sub notification channels publish to this instance's Pub/Sub
@@ -742,6 +780,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		appHub:           appHubSvc,
 		alloyDB:          alloyDBSvc,
 		filestore:        filestoreSvc,
+		dataflow:         dataflowSvc,
 		trace:            traceSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
@@ -851,6 +890,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		appHubSvc.calls = callEvents(recorder, requestMetrics, "apphub")
 		appHubSvc.interpose = append(appHubSvc.interpose, grpctransport.LogInterceptor(logger, "apphub"), faults.Interceptor("apphub"))
 		appHubSvc.requests = requestEvents(recorder, requestMetrics, "apphub")
+	}
+	if dataflowSvc != nil {
+		dataflowSvc.tracing = tracing
+		dataflowSvc.calls = callEvents(recorder, requestMetrics, "dataflow")
+		dataflowSvc.interpose = append(dataflowSvc.interpose, grpctransport.LogInterceptor(logger, "dataflow"), faults.Interceptor("dataflow"))
+		dataflowSvc.requests = requestEvents(recorder, requestMetrics, "dataflow")
 	}
 	if filestoreSvc != nil {
 		filestoreSvc.tracing = tracing
@@ -1034,7 +1079,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	// The runtime file straight after the control server, so it names an
 	// address already listening and `wait` can follow startup from the start.
-	runtime := &runtimeFile{cfg: cfg, control: control, detached: os.Getenv(detachedEnv) != "", token: adminToken}
+	runtime := &runtimeFile{cfg: cfg, control: control, detached: os.Getenv(detachedEnv) != "", token: adminToken, args: args, offline: offline}
 	// The cache on either side of the cluster: the node image must be in
 	// Docker before kind creates the node, and the backend and Knative
 	// images in the node before anything runs them.
@@ -1381,6 +1426,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			}
 			return nil
 		})
+		// AlloyDB clusters and Filestore instances (#1524), through
+		// their services in process.
+		useBackupDRWorkloads(backupDRSrv, alloyDBSvc, filestoreSvc)
 		if kmsSvc != nil {
 			// A vault's encryptionConfig (#1501) wraps its data key with
 			// this instance's Cloud KMS, in process.
@@ -1494,6 +1542,30 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// An Apache Spark notebook's sessions are Serverless for Apache
 	// Spark's (#2156).
 	notebooks.Dataproc = dataprocSvc.Addr
+	// A Workbench instance's google-cloud-storage reaches Cloud Storage
+	// (#2198).
+	notebooks.Storage = func() string {
+		if f := forwarderFor(forwarders, "storage"); f != nil {
+			return f.HostAddr()
+		}
+		return ""
+	}
+	// Its BigQuery JupyterLab plugin lists projects with Resource Manager
+	// and reads the BigQuery API's state from Service Usage (#2198).
+	notebooks.ResourceManager = func() string { return loopbackPort(cfg.Endpoints.ResourceManager) }
+	notebooks.ServiceUsage = func() string { return loopbackPort(cfg.Endpoints.ServiceUsage) }
+	notebooks.Compute = func() string {
+		if computeEnabled(cfg) {
+			return loopbackPort(cfg.Endpoints.Compute)
+		}
+		return ""
+	}
+	notebooks.KMS = func() string {
+		if serviceEnabled(cfg, config.ServiceKMS) {
+			return loopbackPort(cfg.Endpoints.KMS)
+		}
+		return ""
+	}
 	defer notebooks.Close()
 	// Colab Enterprise's runtime templates and runtimes (#2105), on the
 	// local Vertex AI endpoint, run on them.
@@ -1509,7 +1581,19 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		localAISrv.SetNotebookExecutor(colabExec)
 		// Vertex AI pipeline jobs and their schedules (#2173): each task's
 		// container on Docker, its artifacts in Cloud Storage.
-		localAISrv.SetPipelineRunner(colabPipelines{colabExecutor: colabExec, instance: cfg.Name})
+		localAISrv.SetPipelineRunner(colabPipelines{colabExecutor: colabExec, instance: cfg.Name, live: boundAddrs})
+		// Model Monitoring's alerts (#2214) go to Cloud Monitoring's
+		// notification channels, and its emails to the local mail sink.
+		localAISrv.SetAlertNotifier(monitoringAlertNotifier{srv: monitoringServerOf(monitoringSvc), mail: mailSink})
+		// Their anomalies go to Cloud Logging too, when enable_logging asks
+		// (#2214), through its own WriteLogEntries.
+		if loggingSvc != nil && loggingSvc.api != nil {
+			api := loggingSvc.api
+			localAISrv.SetAnomalyLogger(func(ctx context.Context, e *loggingpb.LogEntry) error {
+				_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
+				return err
+			})
+		}
 		// Executions, schedules and pipeline jobs run as the identity they
 		// name (#2173), with actAs checked on it.
 		localAISrv.SetIdentity(runIdentity(iamEnforcer, iameval.VertexAI, creds, func() *resourcemanager.Registry { return projectRegistry }))
@@ -1553,6 +1637,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		appHub:           appHubSvc,
 		alloyDB:          alloyDBSvc,
 		filestore:        filestoreSvc,
+		dataflow:         dataflowSvc,
 		trace:            traceSvc,
 		gke:              gkeSvc,
 		monitoring:       monitoringSvc,
@@ -1567,6 +1652,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// is not a path around the admin token (#553).
 		consoleSrv.SetFaults(adminHandler(adminAPI), adminTokenPath(cfg))
 		consoleSrv.SetRequestMetrics(requestMetrics)
+		// Vertex AI Workbench instances' JupyterLab (#2198), on their
+		// proxy_uri hosts at the console's port.
+		if localAISrv != nil {
+			localAISrv.SetWorkbenchConsole(consoleSrv.Addr)
+			consoleSrv.SetJupyterLabs(workbenchLabs{srv: localAISrv, iam: iamEnforcer})
+		}
 		coord.Register(consoleSrv)
 		// The metric sampler runs on the instance's own clock, so the history
 		// a chart draws exists whether or not anybody has the dashboard open.
@@ -1636,6 +1727,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		return creds.MintAccessTokenFor(email, metadata.TokenTTL), nil
 	}, cmekKeys(kmsSvc, iamEnforcer).Usable, func() string { return creds.MintAccessTokenFor(creds.Email, metadata.TokenTTL) })
+	if dataflowSvc != nil {
+		// A Flex Template's image is read as the instance's account (#2215).
+		dataflowSvc.registryToken = func() string { return creds.MintAccessTokenFor(creds.Email, metadata.TokenTTL) }
+	}
 	if sparkRunner != nil {
 		coord.Register(sparkRunner)
 		if dataprocSvc != nil {
@@ -1687,6 +1782,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := filestoreSvc.Addr(); a != "" {
 			live["filestore"] = a
+		}
+		if a := dataflowSvc.Addr(); a != "" {
+			live["dataflow"] = a
 		}
 		if a := traceSvc.Addr(); a != "" {
 			live["trace"] = a
@@ -1910,6 +2008,32 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// through the admin API in process with the token the page sends,
 		// never one the console holds (#553).
 		consoleSrv.SetInstance(newConsoleInstance(cfg, adminAPI), adminTokenPath(cfg))
+		consoleSrv.SetCompute(consoleCompute{})
+		// Settings > Compute and Compute capacity (#2209): the same state and
+		// keychain items as `cloudburrow cloud`, behind the admin token.
+		if m, err := processCloudManager(cfg); err == nil {
+			consoleSrv.SetCloudCompute(m, cfg.Name, nil)
+			consoleSrv.SetMover(consoleMover{cfg: cfg})
+			// Session Manager sessions this process opened end with it.
+			defer m.CloseTunnels()
+			// SSH-mode VMs' firewalls follow this machine's public address
+			// while the instance runs (#2209).
+			go m.WatchAddresses(ctx, 3*time.Minute, func(format string, args ...any) { fmt.Fprintf(stderr, format+"\n", args...) })
+		} else {
+			fmt.Fprintf(stderr, "cloudburrow: Compute is not available in the console: %v\n", err)
+		}
+		// The Mail page (#2214): the local mail sink's messages.
+		if mailSink.Addr() != "" {
+			consoleSrv.SetMail(mailSink)
+		}
+		// The Instance page's clocks (#2214): CloudBurrow's clock:advance
+		// calls, by the UI parity rule.
+		if localAISrv != nil {
+			consoleSrv.SetClocks([]console.Clock{{ID: "agent-platform", Title: "Agent Platform clock",
+				Help: "Moves the Agent Platform (Vertex AI) clock forward: model deployment monitoring jobs' runs, every hour at least, " +
+					"and Agent Platform schedules' runs that it passes start at once. POST " + vertexai.ClockAdvancePath + " on the Agent Platform port.",
+				Advance: localAISrv.AdvanceClock}})
+		}
 	}
 	// Last: ready hooks run once everything above has started, and shutdown
 	// hooks run first, before anything they use is stopped.
@@ -2237,6 +2361,9 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 
 	fmt.Fprintf(stdout, "instance:   %s\n", cfg.Name)
 	fmt.Fprintf(stdout, "project:    %s\n", projectLine(cfg))
+	if where, err := computeSummary(cfg); err == nil {
+		fmt.Fprintf(stdout, "compute:    %s\n", where)
+	}
 	fmt.Fprintf(stdout, "cluster:    %s (%s)\n", cfg.ClusterName(), cfg.Cluster.NodeImage)
 	fmt.Fprintf(stdout, "namespace:  %s\n", cfg.Cluster.Namespace)
 	fmt.Fprintf(stdout, "kubeconfig: %s\n", cfg.KubeconfigPath())
@@ -2254,6 +2381,10 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "containers: %s\n", unconfinedLine(unconfined))
 	// Microsoft's SQL Server licence (#1916): who accepted it, when, how.
 	for _, l := range mssqlEULALines(readMSSQLEULAStatus(cfg)) {
+		fmt.Fprintln(stdout, l)
+	}
+	// Google's AlloyDB Omni terms (#2207): who accepted them, when, how.
+	for _, l := range omniTermsLines(readOmniTermsStatus(cfg)) {
 		fmt.Fprintln(stdout, l)
 	}
 	fmt.Fprintln(stdout, "\nservice persistence:")
@@ -2274,6 +2405,16 @@ func runStatus(args []string, stdout, stderr io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	compute, err := connectCompute(ctx, cfg, io.Discard, false)
+	if err != nil {
+		fmt.Fprintf(stdout, "\ncluster state: unknown (%v)\n", err)
+		return nil
+	}
+	defer compute.Close()
+	if compute != nil {
+		st := compute.session.Status()
+		fmt.Fprintf(stdout, "\ncompute host:  %s, connected (%s; Docker %s, %s)\n", st.Target, st.Host.Size(), st.Host.DockerVersion, st.Host.Arch)
+	}
 
 	status, err := c.Status(ctx)
 	if err != nil {

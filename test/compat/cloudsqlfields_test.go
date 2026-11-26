@@ -94,7 +94,7 @@ func TestCloudSQLFieldsNeverSilentlyDropped(t *testing.T) {
 	wantSQLRefusal(t, "backupRuns.insert of a PHYSICAL backup", err, "backupKind")
 
 	name := "cmek-" + suffix
-	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", Settings: tier,
+	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1", Settings: tier,
 		DiskEncryptionConfiguration: &sqladmin.DiskEncryptionConfiguration{KmsKeyName: key}}).Do()
 	if err != nil {
 		t.Fatal(err)
@@ -164,6 +164,7 @@ resource "google_sql_database_instance" "main" {
   name                = %q
   region              = "us-central1"
   database_version    = "POSTGRES_17"
+  root_password       = "Root-pass1"
   deletion_protection = false
   encryption_key_name = %q
   settings {

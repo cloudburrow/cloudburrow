@@ -10,8 +10,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
@@ -36,7 +38,22 @@ func runIdentity(e *iameval.Enforcer, svc *iameval.Service, creds *metadata.Cred
 		},
 		Caller: func(ctx context.Context) string { return callerEmail(e, ctx) },
 		Mint:   func(account string) (string, error) { return mintRunToken(creds, reg, account) },
+		MintID: func(account string, claims map[string]any) (string, error) {
+			return mintRunIDToken(creds, reg, account, claims)
+		},
 	}
+}
+
+// mintRunIDToken is an identity token for account, which must be as
+// mintRunToken's, with claims, signed by the instance's key.
+func mintRunIDToken(creds *metadata.Credentials, reg func() *resourcemanager.Registry, account string, claims map[string]any) (string, error) {
+	if creds == nil {
+		return "", errors.New("this instance has no signing key for identity tokens")
+	}
+	if _, err := mintRunToken(creds, reg, account); err != nil {
+		return "", err
+	}
+	return creds.MintIDTokenClaims(claims, time.Now(), metadata.TokenTTL)
 }
 
 // callerEmail is the email the caller's bearer token was minted for, ""

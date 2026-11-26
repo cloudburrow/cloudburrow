@@ -84,6 +84,10 @@ type ServerSpec struct {
 	// Pooler, when not nil, runs the managed connection pooler beside the
 	// server, with these PgBouncer settings.
 	Pooler map[string]string
+	// Omni, when it records who accepted the AlloyDB Omni terms, runs the
+	// server on Google's AlloyDB Omni image of Version (#2207); nil runs
+	// PostgreSQL.
+	Omni *OmniAcceptance
 }
 
 // Engine runs the instances' PostgreSQL servers. Every method may take
@@ -134,6 +138,13 @@ type Options struct {
 	// IAMToken resolves an OAuth 2.0 access token minted by this instance
 	// to its principal's email; nil knows none.
 	IAMToken func(token string) (email string, ok bool)
+	// AdminUser and AdminPassword are CloudBurrow's management role on
+	// every server (#2208, components.AlloyDBAdminUser), which the API
+	// signs in as: every TCP sign-in is checked by password. An IAM
+	// user's role has a password derived from AdminPassword, which the
+	// connectors' server-side proxy signs in with once it has checked the
+	// connection's token.
+	AdminUser, AdminPassword string
 	// InstanceAddresses are the addresses instances take for their own,
 	// in order (DefaultInstanceAddresses); those the host does not have
 	// are skipped. With none, every instance has ConnectorHost.
@@ -179,6 +190,16 @@ type Server struct {
 	// bases are the times of each cluster's first continuous backup base
 	// on its current primary: the earliest it can be recovered to.
 	bases map[string]time.Time
+	// omni are the acceptances of the AlloyDB Omni terms the clusters that
+	// run Omni were created under, by cluster (#2207).
+	omni map[string]*OmniAcceptance
+	// omniTerms is the acceptance `up` was given for every new cluster;
+	// nil accepts nothing.
+	omniTerms *OmniAcceptance
+	// bdr is each cluster's Backup and DR protection (#1524), and bdrAPI
+	// the service that resolves its backups and data sources.
+	bdr    map[string]*bdrState
+	bdrAPI BackupDR
 
 	ca *authority
 	// conn is the listeners, once ServeConnector runs.
@@ -218,6 +239,8 @@ func (s *Server) clear() {
 	s.lastAuto = map[string]time.Time{}
 	s.bases = map[string]time.Time{}
 	s.epochs = map[string]int64{}
+	s.omni = map[string]*OmniAcceptance{}
+	s.bdr = map[string]*bdrState{}
 }
 
 // Wait waits for the background operations started so far.
@@ -466,6 +489,9 @@ type diskState struct {
 	LastAuto  map[string]time.Time `json:"lastAuto,omitempty"`
 	Bases     map[string]time.Time `json:"bases,omitempty"`
 	Epochs    map[string]int64     `json:"epochs,omitempty"`
+	// Omni is read by `cloudburrow status` too (cmd/cloudburrow).
+	Omni     map[string]*OmniAcceptance `json:"omni,omitempty"`
+	BackupDR map[string]*bdrState       `json:"backupdr,omitempty"`
 }
 
 func marshalAll[T proto.Message](m map[string]T) ([]json.RawMessage, error) {
@@ -515,6 +541,8 @@ func (s *Server) save() error {
 	}
 	st.Requests, st.Restores, st.Passwords, st.Versions, st.LastAuto, st.Bases = s.requests, s.restores, s.passwords, s.versions, s.lastAuto, s.bases
 	st.Epochs = s.epochs
+	st.Omni = s.omni
+	st.BackupDR = s.bdr
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
@@ -571,6 +599,12 @@ func (s *Server) load() error {
 	}
 	for k, v := range st.Epochs {
 		s.epochs[k] = v
+	}
+	for k, v := range st.Omni {
+		s.omni[k] = v
+	}
+	for k, v := range st.BackupDR {
+		s.bdr[k] = v
 	}
 	// An operation a restart interrupted ends in error, and its resource
 	// is left as it was recorded. UNVERIFIED: Google's operations survive
@@ -667,6 +701,7 @@ func (s *Server) ResetProject(ctx context.Context, project string) error {
 				delete(s.passwords, k)
 				delete(s.lastAuto, k)
 				delete(s.bases, k)
+				delete(s.omni, k)
 			}
 		}
 	}
@@ -675,6 +710,7 @@ func (s *Server) ResetProject(ctx context.Context, project string) error {
 		if strings.HasPrefix(k, prefix) {
 			dirs = append(dirs, s.backupDir(s.backups[k]))
 			delete(s.backups, k)
+			delete(s.passwords, k)
 		}
 	}
 	for k := range s.users {

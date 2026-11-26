@@ -59,7 +59,7 @@ func TestBackupDRVaultAndPlanThroughThePage(t *testing.T) {
 	p.navigate("/backupdr-plans/create?project=" + project)
 	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#f-vault option")].some((o) => o.value === %q)`, loc+"/backupVaults/"+vault))
 	p.submitForm(map[string]string{"id": plan, "vault": loc + "/backupVaults/" + vault,
-		"rules": `[{"ruleId":"nightly","recurrence":"DAILY","hourly":"","start":"1","end":"5","retention":"3"}]`}, "id")
+		"rules": `[{"ruleId":"nightly","recurrence":"DAILY","hourly":"","start":"1","end":"7","retention":"3"}]`}, "id")
 	p.waitFor(fmt.Sprintf(`location.pathname === "/backupdr-plans" &&
 		[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, plan))
 	got, err := bdr.Projects.Locations.BackupPlans.Get(loc + "/backupPlans/" + plan).Do()
@@ -67,9 +67,9 @@ func TestBackupDRVaultAndPlanThroughThePage(t *testing.T) {
 		t.Fatalf("backupPlans.get after Create Backup plan: %v", err)
 	}
 	if len(got.BackupRules) != 1 || got.BackupRules[0].RuleId != "nightly" || got.BackupRules[0].BackupRetentionDays != 3 ||
-		got.BackupRules[0].StandardSchedule.BackupWindow.StartHourOfDay != 1 || got.BackupRules[0].StandardSchedule.BackupWindow.EndHourOfDay != 5 ||
+		got.BackupRules[0].StandardSchedule.BackupWindow.StartHourOfDay != 1 || got.BackupRules[0].StandardSchedule.BackupWindow.EndHourOfDay != 7 ||
 		got.BackupVault != loc+"/backupVaults/"+vault {
-		t.Errorf("the plan made in the browser is %+v; want rule nightly, 01:00 to 05:00, 3 days, in %s", got, vault)
+		t.Errorf("the plan made in the browser is %+v; want rule nightly, 01:00 to 07:00, 3 days, in %s", got, vault)
 	}
 }
 

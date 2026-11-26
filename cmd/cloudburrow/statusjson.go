@@ -72,6 +72,9 @@ type statusReport struct {
 	// MSSQLEULA is who accepted Microsoft's SQL Server licence, when and
 	// how (#1916): for every instance at `up`, and per SQL Server instance.
 	MSSQLEULA *mssqlEULAStatus `json:"mssql_eula,omitempty"`
+	// OmniTerms is who accepted Google's AlloyDB Omni terms, when and how
+	// (#2207): for every new cluster at `up`, and per cluster that runs Omni.
+	OmniTerms *omniTermsStatus `json:"alloydb_omni_terms,omitempty"`
 }
 
 type statusCluster struct {
@@ -162,6 +165,7 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 		Mode:           string(cfg.Mode),
 		IAMEnforcement: iamEnforcementMode(cfg),
 		MSSQLEULA:      mssqlEULAReport(cfg),
+		OmniTerms:      omniTermsReport(cfg),
 		Bind:           cfg.BindAddress,
 		Cluster: statusCluster{Name: cfg.ClusterName(), State: clusterState, Kubernetes: kubernetes,
 			Pinned: statusPinned{NodeImage: cfg.Cluster.NodeImage, Knative: components.KnativeVersion}},

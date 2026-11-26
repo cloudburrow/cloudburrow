@@ -51,6 +51,11 @@ type Identity struct {
 	// Mint is a fresh access token for account (a service account, which
 	// must exist and be enabled, or a user).
 	Mint func(account string) (string, error)
+	// MintID is an identity token for account with the given claims
+	// (aud, sub, azp, and email and google for format=full), signed by
+	// the instance's IAM keys: a Workbench instance's metadata server's
+	// identity endpoint (#2198).
+	MintID func(account string, claims map[string]any) (string, error)
 }
 
 // SetIdentity installs the execution identity hooks.

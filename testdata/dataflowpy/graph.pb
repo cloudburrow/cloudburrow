@@ -1,0 +1,218 @@
+
+Ôö
+ÿ
+Oref_AppliedPTransform_Create-words-MaybeReshuffle-Reshuffle-RemoveRandomKeys_12Ñ
+ú	
+beam:transform:pardo:v1Ä	
+˝
+ beam:dofn:pickled_python_info:v1ÿQlpoOTFBWSZTWQoNK7gAAnD/+Pvf261RZ/hVr//cor/v/+ZjpA7oQFhAAABAQALsjcroHa4JU0QITTaTamQaGgyANDQADIGTQAAABkaaBqYpqeqZpjVPUaAAGgAHqGgaAB6gaAAAGgPKCU0koZDRiAAAAAANDQAAAADQDQAEohMRoKn4lBtqnpqPKAaANB6mmQAAAAAaAANLWQIr5QzgTuqDT2uZfgOftOGFX3Pdn1ZjDG1rXYiPhUiPqDhtppKGEmUHGijDh9xO1AqtEBJkItPosk0E1ZePioKLlCYE0O2vS6qCcI7IOk7EI6GiCcHWG0DgUwcLk2Aoh4BbqYSUREEBwOwBosRp7uipH3JQeS4EoJek4oiHQwmUHCMaotfqlUWt5pA5ufoYNgNN9P2UxsDFR9/rgHok1FO0pNG8lspUmMbwPFIqkCV4L9QgUIqprjswYQpt07GtZKJ+NqAYq4FGilCIARaqImyhqo+wNG/YGSkQnAeTkuKBlPF3jWPD5AfCik0x3yP58wu5c5tQFENDmOxKAwWgmREgjueqqPfCUAmMYgAE5bKpT1OCR4CFUIsrZEhPhM6IULhTFJAEGRVRchWyX3FJB0h8+peRbZFu2LynAXWWgBUZgw8c2ca4m5EB0khMJDOWaclg1NHaSEglBKaBtLWGvfjDZck4UoYkVKWZhQq94C5KzJZBzFzhFtwzcuCgKQchGAshohSiiCyoxgbtCDJoRIpnfBoDBGFiL1vjHMoEtTeG4CgtFUJAbeNapwbAS32h+DmBgLlUuSGi2qrAMoVSDG8D7Y0wWkUCaxjApgrAULwaLVJQJioNMkDYPnzOoreMwYRHQrNIKoDcQQSzScqtvLQUi8rYF1qTLnuXYNhs6u3BAq+MGWTIBByQD4g/Ciqjk2QR7qsgIkMCQ09KiueKnr39n/taXYRV6oUNS0o7SKEfEnxphE0Sh6O6IT5UIkxtakEK6VkbHXmCqyAan9YFJZTlXLze8gcdnsyslTEhQhKCBnduPX+JkreJcxED4fnSMPKNwFKS5on4bgpNoBiq9oa0OI80nTInXmIbzTI2ktiFoSUalTYhl+jmFS4/8XckU4UJAKDSu4A=%
+Noneref_PCollection_PCollection_6"%
+Noneref_PCollection_PCollection_7*6Create words/MaybeReshuffle/Reshuffle/RemoveRandomKeys2ç
+beam:display_data:labelled:v1l
+Transform Function/apache_beam.transforms.core.CallableWrapperDoFn2fn:!apache_beam.transforms.core.ParDo2t
+beam:display_data:labelled:v1S
+Transform Function<lambda>2fn:/apache_beam.transforms.core.CallableWrapperDoFn:%ref_Environment_default_environment_1B0
+python_type!apache_beam.transforms.core.ParDo
+Á
+)ref_AppliedPTransform_AppliedPTransform_1π$ref_AppliedPTransform_Create-words_2ref_AppliedPTransform_Upper_14ref_AppliedPTransform_Length_15*)ref_AppliedPTransform_AppliedPTransform_1:%ref_Environment_default_environment_1
+ï
+Dref_AppliedPTransform_Create-words-FlatMap-lambda-at-core-py-4094-_4Ã
+Ï
+beam:transform:pardo:v1–
+Õ
+ beam:dofn:pickled_python_info:v1®QlpoOTFBWSZTWczu4j0AAbV/5vvf+5jBb/gFDWucgr/v//JjpA6AQAAgAABAQAJckaC2wSp6iobU0/UExD1BkGQ00aMhp6jTQAMjQ0YmgA1MSPUAm0oaD1PSA0AAAAAAAAaaPUONDQNGmRpo0yAxMEAANAaA0yAwJkCU1BA0JpCep5GptQ0A00eo0aaABpk9QGNR6mmm1Hpu+evnW7t8kW0fznp0vnnRSCezJMzdCalMaUEW0jXIOvCHAeM8hwGaHGI+qE1TwgcZxHnJj1Hw3z0n3G0kkZRbCREirWI1gl5x6TtynRemjy17t7gTGdv40OdEbweOnwDYpNjhzHRcTnY+jdT2ITLt8aMs4m43TVGjlZj+yEEK3aueHajcO3IAYkzg3M7BnbwNPgM+/tPMn7vDSCggpFneDNw8PF9CPylIrOsRzluqamXivmAEN5YuiwhVEBpk07R3kkV3D5D0K0KoTaFW0CsuRcYKWuJvyiWwypihJgxRA24YOoTHnSx2gYmCyTrQNJsRW0v1iwoBNhZTUNvZXOTWMFExUTyJNjtj9r2o3LBr5TY19k1jmfyAsOGzZe652yUENUd04FRWEGpnHSENWyGVdWsGNqHRnnKBNszTvBzDjAvby0dRBLt9UxFRfEgkGGi1N2bw1/0HMbrY1jRqM6c3r9lmwZCyRrzBo122MI6yZwK1ORiRbS4cdIeK9yWuC4yWlNE0tqDnjklQQB5bApBCVQdkT0oRQ3zgUD4mNl44PFbo3+K42bNY+jpGpMEZGWSiCRJlmvMIcSYlAQoz3xwwK9DC7NT0GJGKO26bxRIJ+VzkSTlog5kkmeophubNp52XQis3XYnm+uDRbtMSOOsjODCy1ZYa0G/HWjlD87Qne8IolCJDOUJznFFI8cOO1DzCaajt4eSuS7V/i7kinChIZndxHoA=%
+Noneref_PCollection_PCollection_1"%
+Noneref_PCollection_PCollection_2*.Create words/FlatMap(<lambda at core.py:4094>)2ç
+beam:display_data:labelled:v1l
+Transform Function/apache_beam.transforms.core.CallableWrapperDoFn2fn:!apache_beam.transforms.core.ParDo2t
+beam:display_data:labelled:v1S
+Transform Function<lambda>2fn:/apache_beam.transforms.core.CallableWrapperDoFn:%ref_Environment_default_environment_1B0
+python_type!apache_beam.transforms.core.ParDo
+∑
+3ref_AppliedPTransform_Create-words-MaybeReshuffle_5ˇ
+Z
+#beam:transform:generic_composite:v13<MaybeReshuffle(PTransform) label=[MaybeReshuffle]>=ref_AppliedPTransform_Create-words-MaybeReshuffle-Reshuffle_6%
+Noneref_PCollection_PCollection_2"%
+Noneref_PCollection_PCollection_7*Create words/MaybeReshuffle:%ref_Environment_default_environment_1BP
+python_typeAapache_beam.transforms.core.Create.expand.<locals>.MaybeReshuffle
+ƒ
+Mref_AppliedPTransform_Create-words-MaybeReshuffle-Reshuffle-ReshufflePerKey_8Ú
+\
+#beam:transform:generic_composite:v15<ReshufflePerKey(PTransform) label=[ReshufflePerKey]>fref_AppliedPTransform_Create-words-MaybeReshuffle-Reshuffle-ReshufflePerKey-Map-reify_metadata_defau_9Yref_AppliedPTransform_Create-words-MaybeReshuffle-Reshuffle-ReshufflePerKey-GroupByKey_10gref_AppliedPTransform_Create-words-MaybeReshuffle-Reshuffle-ReshufflePerKey-FlatMap-restore_metadata_11%
+Noneref_PCollection_PCollection_3"%
+Noneref_PCollection_PCollection_6*5Create words/MaybeReshuffle/Reshuffle/ReshufflePerKey:%ref_Environment_default_environment_1B:
+python_type+apache_beam.transforms.util.ReshufflePerKey
+Ø
+ref_AppliedPTransform_Upper_14å
+ÿ
+beam:transform:pardo:v1º
+π
+ beam:dofn:pickled_python_info:v1îQlpoOTFBWSZTWfIE1kgAAgB/9P/f+4jJZ/wFLWucgr/v/+ZjpA7oAAgEAABAQAKuXZ0CW7oaaSBQ9qgD1AAyaNNHqAaA09IANNAANPUZlBohMJkBJoDTQABoAAaAAAABoAIamqfqkwhkyYmJpk0YTIxDTEYjTEwjTJk9TQ0YgEkRBMaiZMmjKaYjQaNGmQyaNNDQGmmhofqmQBocVQJSNccjxqx+vpcfHPatfsIYXVExF1CAqXDIQAGkFChw52IsE7Mf1K+woQ4TbN05C234zucjjA9TBEtOM3yc85LDvHkPmRgddiw962efMn7w2Av4y2BsbzX6lGQrG3fGFy/LllCid1m2wDpKXmDL4qKLt2a8XHWiZXkYx2S0NkwQNpeUkM+/cYvhEJhIHO+7uqoIbd16hEJyvClsSZItWrMbLbQjmTm0qb5udRzSklUpyVwNU93Dw8XFxlFNVhpkW5TmL/dpPBiTpOEX6o82FgwzD1FAi4o6DHjoDZwpyTOYCNS7RwJQgKKBeBBnWOk1I5U4hFXJgTo3koXIu4yiSlrRwXQ/AxAkU1PREg16eEM0r4GKAZPnrXhcO0tzYd2FdQVE40iRJdHAo6225y6ORD4CIYS6oJlddStTZcqu6kIweOmUR0sJDLMVFgRVapKyCViZDV1aAWKl5qJqTRnuO9JAGHBMfXGn4OWrUYJa/TL+gWKJAdgrDPpvMtbMQZviO+jKMtNMF9T5xq4JSymkSySGROL7ZFW1gwTXncU5XY5AcwCQangwJBXDw1kQ02RxSrWH3aSS4RMZKLkbRMcFVROV0Emb3i2pBypjDRIgBtSgNIyxsXZYLNqKC6pKwyrC+lGLSnNMwuVEjrb74vumEzFARx0LmZH+x5yhibdbEwbgHCbspDRWVHINQbNCIgPaRE2FYZD6DDJsFBGRYp7aAzFDiR+btO+0qSMggsFZwyg8jWsBpl8uQzqZoHgaDVtP+fK8RieQWHUJRBC4nudCalAOZZzzPEEqRYOoHQUql+rUpWJIqxl7f8XckU4UJDyBNZIA%
+Noneref_PCollection_PCollection_8"%
+Noneref_PCollection_PCollection_9*Upper2ç
+beam:display_data:labelled:v1l
+Transform Function/apache_beam.transforms.core.CallableWrapperDoFn2fn:!apache_beam.transforms.core.ParDo2q
+beam:display_data:labelled:v1P
+Transform Functionupper2fn:/apache_beam.transforms.core.CallableWrapperDoFn:%ref_Environment_default_environment_1B0
+python_type!apache_beam.transforms.core.ParDo
+ƒ
+gref_AppliedPTransform_Create-words-MaybeReshuffle-Reshuffle-ReshufflePerKey-FlatMap-restore_metadata_11ÿ
+∞
+beam:transform:pardo:v1î
+ë
+ beam:dofn:pickled_python_info:v1ÏQlpoOTFBWSZTWQDpcA4AAIR34HrMCwjAYQ1hlIK/59+iYIQOADAAy20NT1I0agGRphANANBpkGR+qDSZRlDZTygaaDRoAA0MgA1NU/UINqep6mjRibUAxDIGm0IEqxG34eRCgiNNY7qK4a6uuRgnBVOdrKGeQ4qAdI8zokWO3gj1xlAUDSbOrwlNVJCErgZIG71IaVQdfI2uJRkQsCRW8wlJYCPY8gOuYW9VDysL0QhuBGRQMGCRqElVT0KoCwLpluqsEZmcpfzyrHuAVl8hpeA0PlosdF+4sSiaRahGIloecWSmPaMC3iJ7Aw/NsUBdZ92nWojRYVajSvHpKRIgW/IkUzFmhP4u5IpwoSAB0uAc%
+Noneref_PCollection_PCollection_5"%
+Noneref_PCollection_PCollection_6*^Create words/MaybeReshuffle/Reshuffle/ReshufflePerKey/FlatMap(restore_metadata_default_window)2ç
+beam:display_data:labelled:v1l
+Transform Function/apache_beam.transforms.core.CallableWrapperDoFn2fn:!apache_beam.transforms.core.ParDo2ã
+beam:display_data:labelled:v1j
+Transform Functionrestore_metadata_default_window2fn:/apache_beam.transforms.core.CallableWrapperDoFn:%ref_Environment_default_environment_1B0
+python_type!apache_beam.transforms.core.ParDo
+â
+Kref_AppliedPTransform_Create-words-MaybeReshuffle-Reshuffle-AddRandomKeys_7π
+‘
+
+beam:transform:pardo:v1∏
+
+µ
+
+ beam:dofn:pickled_python_info:v1ê
+QlpoOTFBWSZTWdJmQxEAArn/+v//249R7/wNfeu/g7///+ZntA7oAEgAQCiAAEBQA28IgACoNCCgmR6j1AAGQNGmhoANAAHqGQADIDTQGg9Q4AAaAAaAyAAAGgADTQAAAAAaAHAADQADQGQAAA0AAaaAAAAADQA4AAaAAaAyAAAGgADTQAAAAAaACU0iDSaNGmkJsKTZQ8U8p6no1Ggek09TIZGgG1AA2oPSPKeUaehhtUszasiL2MFlAdu8s1N0RQyTgU+qABNo0gc2p9xThcqxxUuVPF4Q5cHjhjY+Zzog4fKmAuTQTSEE1Q4f75HaeiHT0zNNMnQIR6h5Npeggim0Lspiq9Kf8gXdDvB++hLxT8gj9oOk7EK0NEOQPEHxhOH1BOX8x3w8AfwGx3yJ1EkhBlkEjjA4f/gY6eH2UPdlDkobUjTMsSB1vBAoTM5wa4qEHQVIJDBT7igpZF2wRP+wmGNhoIcYMS6xo7rFIZoJMUCCt6y3bq5U88pTL6icUjBlRZthQIS875U2U4ECjh3cScxhgHVTqtQDuO2rJFkQzABmZpEXqQuafCG7tOGesYkBOSOu1aA6p9/hOyfb+IT0VVnVI/IdPKFvsSMgCGIcCcUbkBKI9ROzNPS03aSRTgIZCGZywC9NRzqaplMVhibAaeWGvbNDwweIxnagzKOEYeSQtmYshXziKw9dsFF6VeMqpmoUo8GkXNgysuwr4CaUMrGnGsyfZvfqu3vuOkkJ0w6Fyuf4miWrm49UmQwsmANMLmuDTaBpab6F72XSY5otUHd4MLGZkFj7Igw+MBdbEYcVEXUce0EpoD60QqCsIsSoFeIDEK2cYVc1XnAbA0HmppKRtaeiADs3XgWMvBzS2kBXv7ZHKF4tEgvAauirCmy71oNdsh0HAE4pIsbDT23v38wawX7wZePuVyA3M2hCk9ggJYncSLKU4IMgQFh8+TgTtiBaxWD02UXtgmrtoB9Dm3UTU4jOFlJDUChrc8UoahjBFM5Y7JGS1plt4zuGzZjj0T3ENjI2uz5zXyGJyem4LRFsb0yoFtXFur3kCV4DsRo6lTtuo9/rPzrymLMccTVXpUasAL5ndix9SFS9bcfir7RBplFbkyd0RXKiCeLtecc4V/anVEnCpGCEx/8Ij/gYO5yHBWsbJVhyiVChA3yQIEjsESR+S2C/NfehRMBGrpoHN9yOF/KKeqS3sG7OHtW8RIJY642lrMs4C3BEdREM4rjsFanFoaOwEaji0jadOOJutXP/rFPbOex8PPv7v+LuSKcKEhpMyGIg%
+Noneref_PCollection_PCollection_2"%
+Noneref_PCollection_PCollection_3*3Create words/MaybeReshuffle/Reshuffle/AddRandomKeys2ç
+beam:display_data:labelled:v1l
+Transform Function/apache_beam.transforms.core.CallableWrapperDoFn2fn:!apache_beam.transforms.core.ParDo2t
+beam:display_data:labelled:v1S
+Transform Function<lambda>2fn:/apache_beam.transforms.core.CallableWrapperDoFn:%ref_Environment_default_environment_1B0
+python_type!apache_beam.transforms.core.ParDo
+ø
+,ref_AppliedPTransform_Create-words-Impulse_3é
+
+beam:transform:impulse:v1"%
+Noneref_PCollection_PCollection_1*Create words/ImpulseB2
+python_type#apache_beam.transforms.core.Impulse
+û
+1ref_AppliedPTransform_Create-words-Map-decode-_13Ë
+†
+beam:transform:pardo:v1Ñ
+Å
+ beam:dofn:pickled_python_info:v1‹QlpoOTFBWSZTWZliIWYAAcz/8P/f26hBZ/lXLWuegr/v/+ZjpA7oAAgAQEACbp2AOyCVNFJ6T0aQaZogANDAmmQNGah6mgGRpk9IaaGmgap6TJpD0ib0p6IAYnqaYmEyGTJ6gNANNDQaGE02oNNESNRoaaMg0NANBoAGg0A0ZDRoNMj1APUEkRTNTNTSepPSeFHlPUHqNAD0gyAANNABppk0AQlrD7Qpj7ScVKD1xwzrw4fxwYmQuq2twEP1HkFMRSoyCI0uj+sRYLi/grWRDcOwbR8j3x+G6brPAZXa4g0NFs5iGPmdWK5eIvoJCN1DSyjzVjzWqoj5HlkDu9N2bCLoOcZvrs+67QIpXjaxMCygRZNbyjwOi9uMNvOt19Fj0ljH0LRlIQUtP9gyJzfKv6tAKGMNC7qveQb2rLYCk++CsiMS07AjfWwqL5s6HMs0rqoK8wcw2/Zubnr9xTKqZyCPbN8t0yMCZLtRfXuYGCA1RQIko7LMqBxrCGsQlYm9twp4Yie8nJltpxuPDVaL7cNCWZUkL6TyTMNlL0IVucI49RRLN0JFEbJQi5gKzytIGT408jItrrOOyLEF2gqV4msuGOzkwreitUmrUym6nupseO9ng7ZymGqPkiXSsIqVJUQSrTIaurCGVSe5TIlnopgDoc1k3k3pZWCvi65qDMckgVkBmCsMMrGWi+gt+hpWQbMytVHZ1JzyGYnjmNQLgxrI0xguX2dhYr0oDnEIDWTYLDKTJU0VQsjVWOUkaLxhJ0kOAqwF/FcIo2AaKwUZIiGYdWEE/twdGM7zzE7WGy6CCJIjhKhID/NqxFCDIAbCkC4QI500NgGIoMGSonQLqbTpLg48DbbKQ68WU5YoFQghGIgKBLEf4Af4gzaXk5+jLo5qNDDGV7WTTYiWHNpSCBNHahNnM2G6AQIVJGhTccB2UtqJZNGUgo5juMnNvEtDYOXBnf7YFwl2f4u5IpwoSEyxELMA%
+Noneref_PCollection_PCollection_7"%
+Noneref_PCollection_PCollection_8*Create words/Map(decode)2ç
+beam:display_data:labelled:v1l
+Transform Function/apache_beam.transforms.core.CallableWrapperDoFn2fn:!apache_beam.transforms.core.ParDo2r
+beam:display_data:labelled:v1Q
+Transform Functiondecode2fn:/apache_beam.transforms.core.CallableWrapperDoFn:%ref_Environment_default_environment_1B0
+python_type!apache_beam.transforms.core.ParDo
+å
+$ref_AppliedPTransform_Create-words_2„
+ı
+ beam:transform:pickled_python:v1–QlpoOTFBWSZTWTMLOAoAADh/4EsEACgAYQBACAAKAr9H3CJwxA4AIABqGqeieoRiPRqegNI2gm2oQRNNA9QNAAYgDcgKtv6gUkZHwBX5sMN9e4SvEAQ8an8c6Y6POYU8LxFwtAwNDRidA8L3iwwUQpDIsEgolgowrGIixYhbnNlYqAR1JiO6hwgOuKIizyJmvYu5IpwoSBmFnAUA,ref_AppliedPTransform_Create-words-Impulse_3Dref_AppliedPTransform_Create-words-FlatMap-lambda-at-core-py-4094-_43ref_AppliedPTransform_Create-words-MaybeReshuffle_51ref_AppliedPTransform_Create-words-Map-decode-_13"%
+Noneref_PCollection_PCollection_8*Create words:%ref_Environment_default_environment_1B1
+python_type"apache_beam.transforms.core.Create
+∏
+ref_AppliedPTransform_Length_15î
+‡
+beam:transform:pardo:v1ƒ
+¡
+ beam:dofn:pickled_python_info:v1úQlpoOTFBWSZTWTY5Fz8AAan/8fvf24hBZ/gFLWucgr/v/+ZjpA7oAAgAIABAQAJck6DmUNTU1NADQ0mTAAAmCYNNAAaA0RgjAGqeQmTTJT0yjIYg0DRpoyDCAAADQBoaDTRI1NTR6E02o0GQ9QDQaAGhkGgAA0BtQSRI0JtSYKPU8jR6oaD1NNMQ9QaGTQaaaBtT0mgekQdw/TG0emLb2X7fXTQcPR0fuRBumMFVIHNLb7IVtkEIuHSxMyitIrzBD3k3iMx9Dln5j5uMqoBMcxyG+GIwBNQOboXBxNINxqN5SR+wSXwOCdKdHVJCg2sgnnFBYAjG0LdzgYiDXUkIzQIqu1Lb86tw50Yi5NzECMujyBwa//IT+zuDkGqyV8U87DanFdgGWe4PBIzrc3UHOt1RuGbZc15CqUSvaDZOTj4/hykaKqzYJtBzl3epMCYWaZ+1PgYGBwBCgE5HbpJEMYbEDRpE6H5OCjhPFGiKuO1IuW60osioIagnpZhtYtzkK/yMWiM+WL24wvlXCxQDJ+snoNteXcd2CQFUSskSWTCTeRseFaIK+SV5MpOpZ02LFb2IbZB7CmGAfHMWiQTKooKyApJkNK1iDXVLz0UlNkaIA4nMJUz8ENFVjBLL2DGVl4ZgkGKm4y7d0C/nPCtYaxi8o+O7KWqWEqzDEPxjWq0hgnuGYDlmDEwQCfGQDxVEYYuGJD0sblIDApbxSDFhE4kFJBFFNKCZCJDgoShRaOhe4PlM88GeMsVZgQVQEgW4UBLaq3ihLwGkePcpNJUamcwgPIkgWxZVz1DiF+FUhp6sb0CoQUDGAgJ1TfoBvk09PvdBoR58qNFFMVWuqBzUESkNxH/LGbqJGLthEsdh5xEpKUubMROcUjVmg7BOexazfl6bVKY/d3/F3JFOFCQNjkXPwA==%
+Noneref_PCollection_PCollection_9"&
+Noneref_PCollection_PCollection_10*Length2ç
+beam:display_data:labelled:v1l
+Transform Function/apache_beam.transforms.core.CallableWrapperDoFn2fn:!apache_beam.transforms.core.ParDo2o
+beam:display_data:labelled:v1N
+Transform Functionlen2fn:/apache_beam.transforms.core.CallableWrapperDoFn:%ref_Environment_default_environment_1B0
+python_type!apache_beam.transforms.core.ParDo
+«
+Yref_AppliedPTransform_Create-words-MaybeReshuffle-Reshuffle-ReshufflePerKey-GroupByKey_10È
+ 
+beam:transform:group_by_key:v1%
+Noneref_PCollection_PCollection_4"%
+Noneref_PCollection_PCollection_5*@Create words/MaybeReshuffle/Reshuffle/ReshufflePerKey/GroupByKeyB5
+python_type&apache_beam.transforms.core.GroupByKey
+À
+fref_AppliedPTransform_Create-words-MaybeReshuffle-Reshuffle-ReshufflePerKey-Map-reify_metadata_defau_9‡
+¿
+beam:transform:pardo:v1§
+°
+ beam:dofn:pickled_python_info:v1¸QlpoOTFBWSZTWfU70goAAdr/+v/f34vQd/gFbWv8gr/v/+ZjpQ6AFGJAQHAAAEBAAm6QAyg1NEmiNoEwTRpkaGhpoNGIxMhmTUZGg09TAajCNMINTQVNtKeNTT1IxPUAYhoAADQAAAAAAA9qhxoaGhoBoDEDQGQAAaaABoBkAAADCSJDSYmmlPQMiepk0aaaA0aBo0AAaBkaaDI2k0aaCRDCUoMLVWx6Eq01XZZPjxKY3ITQ2PhVOhv+odAEaoQMYZSRwtdYGnebh/adk2PxQDi/sI/A754T6m3Jun0cYHpYCQZFoLhMeQeWao8RfCSBzkFBbMuZd2mrRO8gjA/6+mR4FMmuO8FF+zsAEY3wxozJAQCDmbb1hvNwms+qU9hCyqENNzAShiGW5LiIJef9PL7OaaJAkajNq15ZWGua92okDnzWD2EiR+E51dQQ5iWoo3TW0HMNtKhTFXRRoG1sGx8dsmja4NnHKzGI74bJe69JkJks6R5Mdgca0SiIqTtszE1hDIIW1EtSxVjRKVKUl24YLsLGkf3w5SWYokLEnnZgacyyuFPAMUktqo0YwtRhjBR5WIoZZJp9rKUlAdJaum7sFiCqYrNqwsUphwTGYauHMW9KsgrV5Mq7kFc3U2HDcvwds4jC8Px5C0VBIpidhqCCVKZDKmi+jNUXljOSE+c8YIdDmSm8e9PnsFOlnl8oLozBSjKnrZcykuILu6dBZY2axMpuxZVVgOQVUl+ZG/fWDcHtgyJrHcLc7OMXiA1dTIrMJUTxmtQrkmKMECcpLZOTrQKIhWETwtdFJEhomgnrAQHNHGFFVqV775S1pruQW84AgqMRCJ6EMFMTQkVqViOo5iJ8DOU2hAMEjOZQRZlOI0xlPK87EJnIM+k7sQGdsUjphkQaRsTIqYD1/7+AFKRN++dKqjKchkLW4jnuFGgfQRKQ+48swXVVI4FBbHHrQnCkIz4X2kUMBMiwIDxqOkkvIJ/+5qQryT0ShxZruH/F3JFOFCQ9TvSCgA==%
+Noneref_PCollection_PCollection_3"%
+Noneref_PCollection_PCollection_4*XCreate words/MaybeReshuffle/Reshuffle/ReshufflePerKey/Map(reify_metadata_default_window)2ç
+beam:display_data:labelled:v1l
+Transform Function/apache_beam.transforms.core.CallableWrapperDoFn2fn:!apache_beam.transforms.core.ParDo2â
+beam:display_data:labelled:v1h
+Transform Functionreify_metadata_default_window2fn:/apache_beam.transforms.core.CallableWrapperDoFn:%ref_Environment_default_environment_1B0
+python_type!apache_beam.transforms.core.ParDo
+†
+=ref_AppliedPTransform_Create-words-MaybeReshuffle-Reshuffle_6ﬁ
+
+beam:transform:reshuffle:v1Kref_AppliedPTransform_Create-words-MaybeReshuffle-Reshuffle-AddRandomKeys_7Mref_AppliedPTransform_Create-words-MaybeReshuffle-Reshuffle-ReshufflePerKey_8Oref_AppliedPTransform_Create-words-MaybeReshuffle-Reshuffle-RemoveRandomKeys_12%
+Noneref_PCollection_PCollection_2"%
+Noneref_PCollection_PCollection_7*%Create words/MaybeReshuffle/Reshuffle:%ref_Environment_default_environment_1B4
+python_type%apache_beam.transforms.util.Reshuffleæ
+ref_PCollection_PCollection_6ú
+e94Create words/MaybeReshuffle/Reshuffle/ReshufflePerKey/FlatMap(restore_metadata_default_window).Noneref_Coder_TupleCoder_3"ref_Windowing_Windowing_1l
+ref_PCollection_PCollection_9K
+5Upper.Noneref_Coder_FastPrimitivesCoder_8"ref_Windowing_Windowing_1ï
+ref_PCollection_PCollection_7t
+=54Create words/MaybeReshuffle/Reshuffle/RemoveRandomKeys.Noneref_Coder_BytesCoder_1"ref_Windowing_Windowing_1∏
+ref_PCollection_PCollection_4ñ
+_88Create words/MaybeReshuffle/Reshuffle/ReshufflePerKey/Map(reify_metadata_default_window).Noneref_Coder_TupleCoder_5"ref_Windowing_Windowing_2z
+ref_PCollection_PCollection_8Y
+24Create words/Map(decode).Noneref_Coder_StrUtf8Coder_12"ref_Windowing_Windowing_1†
+ref_PCollection_PCollection_5
+G64Create words/MaybeReshuffle/Reshuffle/ReshufflePerKey/GroupByKey.Noneref_Coder_TupleCoder_10"ref_Windowing_Windowing_2ç
+ref_PCollection_PCollection_2l
+546Create words/FlatMap(<lambda at core.py:4094>).Noneref_Coder_BytesCoder_1"ref_Windowing_Windowing_1s
+ref_PCollection_PCollection_1R
+20Create words/Impulse.Noneref_Coder_BytesCoder_1"ref_Windowing_Windowing_1í
+ref_PCollection_PCollection_3q
+:51Create words/MaybeReshuffle/Reshuffle/AddRandomKeys.Noneref_Coder_TupleCoder_3"ref_Windowing_Windowing_1f
+ref_PCollection_PCollection_10D
+6Length.Noneref_Coder_VarIntCoder_4"ref_Windowing_Windowing_1ï
+ref_Windowing_Windowing_2x
+"
+ beam:window_fn:global_windows:v1ref_Coder_GlobalWindowCoder_2"b (08HZ%ref_Environment_default_environment_1ï
+ref_Windowing_Windowing_1x
+"
+ beam:window_fn:global_windows:v1ref_Coder_GlobalWindowCoder_2": (08HZ%ref_Environment_default_environment_1"@
+ref_Coder_GlobalWindowCoder_2
+
+beam:coder:global_window:v1"
+ref_Coder_TupleCoder_6e
+
+beam:coder:tuple:v1ref_Coder_BytesCoder_1ref_Coder_NullableCoder_7ref_Coder_PaneInfoCoder_9"P
+ref_Coder_IterableCoder_112
+
+beam:coder:iterable:v1ref_Coder_TupleCoder_6"1
+ref_Coder_BytesCoder_1
+
+beam:coder:bytes:v1"d
+ref_Coder_TupleCoder_10I
+
+beam:coder:kv:v1ref_Coder_VarIntCoder_4ref_Coder_IterableCoder_11"ﬂ
+ref_Coder_FastPrimitivesCoder_8ª
+∏
+beam:coder:pickled_python:v1ó
+îFastPrimitivesCoder$eNprYJ2axgABPZKJBYnJGanxSamJuXrJ+SmpRcVQakqPsFticUlAUWZuZklmWWqxM0h4yuQpmo1Taqf08MenJebkJCUmZ8eD1U/JYOjhDshMzs5JRVGYVJykBwDOwCqZ"3
+ref_Coder_VarIntCoder_4
+
+beam:coder:varint:v1"X
+ref_Coder_NullableCoder_7;
+
+beam:coder:nullable:v1ref_Coder_FastPrimitivesCoder_8"_
+ref_Coder_TupleCoder_3E
+
+beam:coder:kv:v1ref_Coder_VarIntCoder_4ref_Coder_BytesCoder_1"•
+ref_Coder_PaneInfoCoder_9á
+Ñ
+beam:coder:pickled_python:v1d
+bPaneInfoCoder$eNprYJ1qygABPZKJBYnJGanxSamJuXrJ+SmpRcVQakoPb0BiXqpnXlq+M0hgyuQpmo1Taqck6QEAesMWaw=="_
+ref_Coder_TupleCoder_5E
+
+beam:coder:kv:v1ref_Coder_VarIntCoder_4ref_Coder_TupleCoder_6":
+ref_Coder_StrUtf8Coder_12
+
+beam:coder:string_utf8:v1*â
+%ref_Environment_default_environment_1ﬂbeam:env:docker:v1#
+!apache/beam_python3.12_sdk:2.78.0*beam:coder:bytes:v1*beam:coder:string_utf8:v1*beam:coder:kv:v1*beam:coder:bool:v1*beam:coder:varint:v1*beam:coder:double:v1*beam:coder:iterable:v1*beam:coder:timer:v1*beam:coder:interval_window:v1*beam:coder:length_prefix:v1*beam:coder:global_window:v1*beam:coder:windowed_value:v1*"beam:coder:param_windowed_value:v1*#beam:coder:state_backed_iterable:v1*beam:coder:custom_window:v1*beam:coder:row:v1*beam:coder:sharded_key:v1*beam:coder:nullable:v1*#beam:protocol:progress_reporting:v0*)beam:protocol:harness_monitoring_infos:v1*beam:protocol:worker_status:v1*beam:combinefn:packed_python:v1*7beam:version:sdk_base:apache/beam_python3.12_sdk:2.78.0*1beam:transform:sdf_truncate_sized_restrictions:v1*beam:transform:to_string:v1*beam:protocol:data_sampling:v1*,beam:protocol:sdk_consuming_received_data:v1*#beam:protocol:ordered_list_state:v1*#beam:protocol:named_data_streams:v1* beam:protocol:sibling_workers:v1)ref_AppliedPTransform_AppliedPTransform_1

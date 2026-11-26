@@ -79,6 +79,9 @@ func (t *jobText) merge(o jobText) {
 	if o.vectorStats != nil {
 		t.vectorStats = o.vectorStats
 	}
+	if o.ddl != nil { // a model statement's (models.go, #2210)
+		t.ddl = o.ddl
+	}
 }
 
 // patch puts the client's text back in a Job resource.

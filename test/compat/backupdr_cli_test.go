@@ -59,7 +59,7 @@ func TestGcloudBackupDR(t *testing.T) {
 	}
 	run("backup-plans", "create", plan, "--backup-vault", "projects/"+g.project+"/locations/us-central1/backupVaults/"+vault,
 		"--resource-type", "sqladmin.googleapis.com/Instance", "--log-retention-days", "7",
-		"--backup-rule", "rule-id=daily,retention-days=7,recurrence=DAILY,backup-window-start=1,backup-window-end=5")
+		"--backup-rule", "rule-id=daily,retention-days=7,recurrence=DAILY,backup-window-start=1,backup-window-end=7")
 	defer g.run(nil, append([]string{"backup-dr", "backup-plans", "delete", plan}, locFlags...)...)
 	if out := run("backup-plans", "describe", plan, "--format", "value(backupRules[0].ruleId)"); !strings.Contains(out, "daily") {
 		t.Errorf("backup-plans describe: %s", out)
@@ -118,7 +118,7 @@ resource "google_backup_dr_backup_plan" "p" {
       time_zone       = "UTC"
       backup_window {
         start_hour_of_day = 1
-        end_hour_of_day   = 5
+        end_hour_of_day   = 7
       }
     }
   }

@@ -18,7 +18,9 @@ func TestCloudSQLReplicaRebuild(t *testing.T) {
 	}
 	rebuilt := CloudSQLReplicaBackend(b, false, SQLReplicaSource{Host: "sqlinst-r", Password: "x", Epoch: 2})
 	script = strings.Join(rebuilt.Command, " ")
-	if rebuilt.Env["CLOUDSQL_REBUILD_EPOCH"] != "2" || strings.Contains(script, "PG_VERSION") ||
+	// (pgAuthPrelude, after it, reads PG_VERSION to know an initialised
+	// data directory, #2208; the rebuild's own test is the epoch's.)
+	if rebuilt.Env["CLOUDSQL_REBUILD_EPOCH"] != "2" || strings.Contains(script, `[ ! -s "$PGDATA/PG_VERSION" ]`) ||
 		strings.Count(script, "cloudsql-rebuild-epoch") != 2 || !strings.Contains(script, "pg_basebackup") {
 		t.Errorf("a rebuilt replica: env %v script %s", rebuilt.Env["CLOUDSQL_REBUILD_EPOCH"], script)
 	}

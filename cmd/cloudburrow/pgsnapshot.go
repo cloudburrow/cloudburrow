@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
@@ -164,6 +165,67 @@ func (p *postgresSnapshotter) Export(ctx context.Context, w admin.EntryWriter) e
 			return fmt.Errorf("dump %s: %w", name, err)
 		}
 	}
+	if p.bare {
+		return p.exportRoles(ctx, w)
+	}
+	return nil
+}
+
+// pgRolesEntry is a created instance's users: pg_dumpall --roles-only, each
+// role with its password hash, CloudBurrow's own roles left out. A restore
+// "takes the source instance's settings, databases, and users, and sets
+// them in the target instance" (Google's restore page), so the backup's
+// postgres password is the target's after it (#2208), as MySQL's accounts
+// are (#1993).
+const pgRolesEntry = "roles.sql"
+
+// pgInternalRole matches a line that names one of CloudBurrow's own roles,
+// quoted or not: the target keeps its own.
+var pgInternalRole = regexp.MustCompile(`(^|[^A-Za-z0-9_$])"?(` + regexp.QuoteMeta(components.PGAdminUser) + `|` +
+	regexp.QuoteMeta(components.SQLReplicaUser) + `)"?([^A-Za-z0-9_$]|$)`)
+
+// pgUserRoles is dump without CloudBurrow's roles' lines.
+func pgUserRoles(dump []byte) []byte {
+	var out bytes.Buffer
+	for _, line := range strings.SplitAfter(string(dump), "\n") {
+		if !pgInternalRole.MatchString(line) {
+			out.WriteString(line)
+		}
+	}
+	return out.Bytes()
+}
+
+func (p *postgresSnapshotter) exportRoles(ctx context.Context, w admin.EntryWriter) error {
+	var out bytes.Buffer
+	if err := p.exec(ctx, nil, &out, "pg_dumpall", "-U", p.user(), "--roles-only"); err != nil {
+		return fmt.Errorf("dump the roles: %w", err)
+	}
+	b := pgUserRoles(out.Bytes())
+	return w.Add(pgRolesEntry, int64(len(b)), bytes.NewReader(b))
+}
+
+// importRoles runs the archive's roles, when it has them (a backup taken
+// before has none, and the target keeps its own). The target's postgres
+// exists already, so CREATE ROLE postgres fails, which psql reports and
+// goes on from, as pg_dumpall's documentation says to expect; ALTER ROLE
+// then gives it the backup's attributes and password.
+func (p *postgresSnapshotter) importRoles(ctx context.Context, r admin.EntryReader) error {
+	f, err := r.Open(pgRolesEntry)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	b, err := io.ReadAll(io.LimitReader(f, 64<<20))
+	_ = f.Close()
+	if err != nil {
+		return err
+	}
+	if err := p.exec(ctx, bytes.NewReader(pgUserRoles(b)), io.Discard, "psql", "-X", "-q", "-U", p.user(), "-d", p.maintenance(),
+		"-v", "ON_ERROR_STOP=0"); err != nil {
+		return fmt.Errorf("restore the roles: %w", err)
+	}
 	return nil
 }
 
@@ -228,6 +290,13 @@ func (p *postgresSnapshotter) Import(ctx context.Context, r admin.EntryReader) e
 			if _, err := p.psql(ctx, "DROP DATABASE "+quotePGIdent(name)); err != nil {
 				return fmt.Errorf("drop %s: %w", name, err)
 			}
+		}
+	}
+	if p.bare {
+		// Before the databases, so a restored object's grants find their
+		// roles.
+		if err := p.importRoles(ctx, r); err != nil {
+			return err
 		}
 	}
 	restored := false

@@ -41,6 +41,8 @@ const AP_DOCS = "https://docs.cloud.google.com/gemini-enterprise-agent-platform/
 
 // Colab Enterprise's pages, drawn as one page's tabs.
 const COLAB_TABS = ["notebooks", "runtimes", "runtime-templates", "executions", "schedules"].map((p) => `${AP}/colab/${p}`);
+// Agent Platform's Monitoring page's tabs (#2214).
+const MONITOR_TABS = ["/agent-platform/model-monitoring/model-monitors", "/agent-platform/model-monitoring/schedules", "/agent-platform/model-monitoring/deployment-jobs"];
 
 function agentPlatformRoutes() {
   const base = { section: "AI and machine learning", product: "vertexai", productTitle: "Agent Platform", icon: "ai" };
@@ -89,8 +91,14 @@ function agentPlatformRoutes() {
     // Every endpoint (#1940): the registry's and Model Garden's, whose
     // own page (?endpoint=) keeps its deploy progress and test.
     page(AP_PATHS.endpoints, "Endpoints", "Models", { service: "vertex-endpoints", screen: "ap-endpoints", listedWhenOff: true }),
-    absent(`${AP}/batch-predictions`, "Batch inference", "Models", "projects.locations.batchPredictionJobs",
-      "Batch prediction jobs over Cloud Storage or BigQuery input", AP_DOCS + "models"),
+    // Batch inference (#2210): "go to the Batch predictions page", whose
+    // Create opens New batch prediction
+    // (https://docs.cloud.google.com/vertex-ai/docs/predictions/get-batch-predictions,
+    // read 2026-11-24).
+    page(`${AP}/batch-predictions`, "Batch inference", "Models", { service: "vertex-batch-predictions", listedWhenOff: true, kind: "Batch prediction",
+      api: "projects.locations.batchPredictionJobs", about: "Batch prediction jobs over Cloud Storage or BigQuery input",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/predictions/get-batch-predictions",
+      instead: "Start CloudBurrow with --services including run and storage: a batch prediction runs its model's container and reads and writes Cloud Storage." }),
     // Notebooks.
     // Colab Enterprise (#2105): its runtimes and runtime templates, whose
     // runtimes are the instance's notebook runtimes; the off state is the
@@ -126,12 +134,48 @@ function agentPlatformRoutes() {
       docs: "https://docs.cloud.google.com/vertex-ai/docs/workbench/instances/create-console-quickstart",
       instead: "Start CloudBurrow with --services including run and bigquery: run starts the local Vertex AI endpoint, and an instance's kernel queries BigQuery." }),
     // Model development.
-    absent(`${AP}/datasets`, "Datasets", "Model development", "projects.locations.datasets",
-      "Managed datasets for training", AP_DOCS + "machine-learning"),
+    // Datasets (#2210): "go to the Datasets page", "Click Create to open
+    // the create dataset details page"
+    // (https://docs.cloud.google.com/vertex-ai/docs/image-data/classification/create-dataset,
+    // read 2026-11-24).
+    page(`${AP}/datasets`, "Datasets", "Model development", { service: "vertex-datasets", listedWhenOff: true, kind: "Dataset",
+      api: "projects.locations.datasets", about: "Managed image, text, video and tabular datasets for training",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/image-data/classification/create-dataset",
+      instead: "Start CloudBurrow with --services including run and storage: a dataset imports its items from Cloud Storage." }),
     absent(`${AP}/feature-store`, "Feature Store", "Model development", "projects.locations.featureOnlineStores",
       "Feature groups and online stores", AP_DOCS + "machine-learning"),
-    absent(`${AP}/training`, "Training", "Model development", "projects.locations.customJobs and trainingPipelines",
-      "Managed Training jobs and pipelines", AP_DOCS + "machine-learning"),
+    // Training (#2210): "go to the Training pipelines page", whose Create
+    // opens Train new model, and its Custom jobs tab
+    // (https://docs.cloud.google.com/vertex-ai/docs/training/create-training-pipeline,
+    // read 2026-11-24).
+    page(`${AP}/training`, "Training", "Model development", { service: "vertex-training-pipelines", listedWhenOff: true, tabTitle: "Training pipelines",
+      pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`, `${AP}/training/hyperparameter-tuning-jobs`, `${AP}/training/nas-jobs`], kind: "Training pipeline",
+      api: "projects.locations.trainingPipelines", about: "Training pipelines, each a custom job that trains a model and uploads it to the Model Registry",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/training/create-training-pipeline",
+      instead: "Start CloudBurrow with --services including run and storage: a job's workers run on Docker and write to Cloud Storage." }),
+    page(`${AP}/training/custom-jobs`, "Training", "Model development", { service: "vertex-custom-jobs", listedWhenOff: true, tabTitle: "Custom jobs",
+      navHidden: true, navAs: `${AP}/training`, pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`, `${AP}/training/hyperparameter-tuning-jobs`, `${AP}/training/nas-jobs`], kind: "Custom job",
+      api: "projects.locations.customJobs", about: "Custom training jobs, each worker a container of its image",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/training/create-custom-job",
+      instead: "Start CloudBurrow with --services including run and storage." }),
+    // Its Hyperparameter tuning jobs tab (#2210): each trial a custom job
+    // (https://docs.cloud.google.com/vertex-ai/docs/training/using-hyperparameter-tuning,
+    // read 2026-11-24).
+    page(`${AP}/training/hyperparameter-tuning-jobs`, "Training", "Model development", { service: "vertex-hyperparameter-tuning-jobs", listedWhenOff: true,
+      tabTitle: "Hyperparameter tuning jobs", navHidden: true, navAs: `${AP}/training`,
+      pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`, `${AP}/training/hyperparameter-tuning-jobs`, `${AP}/training/nas-jobs`], kind: "Hyperparameter tuning job",
+      api: "projects.locations.hyperparameterTuningJobs", about: "Hyperparameter tuning jobs, each trial a custom job whose code reports metrics with cloudml-hypertune",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/training/using-hyperparameter-tuning",
+      instead: "Start CloudBurrow with --services including run and storage." }),
+    // Its Neural Architecture Search tab (#2214): each trial a custom job
+    // (https://docs.cloud.google.com/vertex-ai/docs/training/neural-architecture-search/overview,
+    // read 2026-11-24).
+    page(`${AP}/training/nas-jobs`, "Training", "Model development", { service: "vertex-nas-jobs", listedWhenOff: true,
+      tabTitle: "Neural Architecture Search", navHidden: true, navAs: `${AP}/training`,
+      pageTabs: [`${AP}/training`, `${AP}/training/custom-jobs`, `${AP}/training/hyperparameter-tuning-jobs`, `${AP}/training/nas-jobs`], kind: "NAS job",
+      api: "projects.locations.nasJobs", about: "Neural Architecture Search jobs, each search and train trial a custom job given --nas_params_str",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/training/neural-architecture-search/overview",
+      instead: "Start CloudBurrow with --services including run and storage." }),
     // Vertex AI Pipelines (#2173): the Pipelines page's Runs and Schedules
     // tabs ("Go to the Schedules tab on the Pipelines page":
     // https://docs.cloud.google.com/vertex-ai/docs/pipelines/schedule-pipeline-run,
@@ -149,15 +193,51 @@ function agentPlatformRoutes() {
       instead: "Start CloudBurrow with --services including run and storage." }),
     absent(`${AP}/experiments`, "Experiments", "Model development", "projects.locations.metadataStores (experiments)",
       "Experiment runs and their parameters and metrics", AP_DOCS + "machine-learning"),
-    absent(`${AP}/metadata`, "Metadata", "Model development", "projects.locations.metadataStores",
-      "Artifacts, executions and contexts of ML workflows", AP_DOCS + "machine-learning"),
+    // Vertex ML Metadata (#2205): "go to the Metadata page", which "lists
+    // the artifacts that have been created in the default metadata store",
+    // with a Region drop-down list
+    // (https://docs.cloud.google.com/vertex-ai/docs/pipelines/lineage, read
+    // 2026-11-24). The Executions and Contexts tabs are CloudBurrow's
+    // (UNVERIFIED, re-read 2026-11-24: the same page).
+    page(`${AP}/metadata/artifacts`, "Metadata", "Model development", { service: "vertex-metadata-artifacts", listedWhenOff: true, tabTitle: "Artifacts",
+      pageTabs: [`${AP}/metadata/artifacts`, `${AP}/metadata/executions`, `${AP}/metadata/contexts`], kind: "Artifact",
+      api: "projects.locations.metadataStores.artifacts", about: "Artifacts, executions and contexts of ML workflows, with each artifact's lineage",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/pipelines/lineage",
+      instead: "Start CloudBurrow with --services including run, which starts the local Vertex AI endpoint." }),
+    page(`${AP}/metadata/executions`, "Metadata", "Model development", { service: "vertex-metadata-executions", listedWhenOff: true, tabTitle: "Executions",
+      navHidden: true, navAs: `${AP}/metadata/artifacts`, pageTabs: [`${AP}/metadata/artifacts`, `${AP}/metadata/executions`, `${AP}/metadata/contexts`], kind: "Execution",
+      api: "projects.locations.metadataStores.executions", about: "Executions, each with its input and output artifacts",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/ml-metadata/tracking",
+      instead: "Start CloudBurrow with --services including run." }),
+    page(`${AP}/metadata/contexts`, "Metadata", "Model development", { service: "vertex-metadata-contexts", listedWhenOff: true, tabTitle: "Contexts",
+      navHidden: true, navAs: `${AP}/metadata/artifacts`, pageTabs: [`${AP}/metadata/artifacts`, `${AP}/metadata/executions`, `${AP}/metadata/contexts`], kind: "Context",
+      api: "projects.locations.metadataStores.contexts", about: "Contexts grouping artifacts and executions, such as a pipeline run",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/ml-metadata/tracking",
+      instead: "Start CloudBurrow with --services including run." }),
     absent(`${AP}/ray`, "Ray on Agent Platform", "Model development", "projects.locations.persistentResources (Ray clusters)",
       "Ray clusters for distributed training and serving", AP_DOCS + "machine-learning"),
     // Deploy and use.
     absent(`${AP}/matching-engine/indexes`, "Vector Search", "Deploy and use", "projects.locations.indexes and indexEndpoints",
       "Vector indexes and the endpoints that serve them", AP_DOCS + "build"),
-    absent(`${AP}/model-monitoring/model-monitors`, "Monitoring", "Deploy and use", "projects.locations.modelMonitors",
-      "Model monitors for drift and skew", AP_DOCS + "machine-learning"),
+    // Model Monitoring (#2214): "In the Google Cloud console, go to the
+    // Monitoring page. Click Configure monitoring"
+    // (https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/set-up-model-monitoring,
+    // read 2026-11-24). The tabs' names are CloudBurrow's (UNVERIFIED, re-read 2026-11-24).
+    page(`${AP}/model-monitoring/model-monitors`, "Monitoring", "Deploy and use", { service: "vertex-model-monitors", listedWhenOff: true, tabTitle: "Model monitors",
+      pageTabs: MONITOR_TABS, kind: "Model monitor",
+      api: "v1beta1 projects.locations.modelMonitors", about: "Model monitors, their runs, feature statistics and alerts",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/set-up-model-monitoring",
+      instead: "Start CloudBurrow with --services including run and storage: a monitor's model is in the Model Registry, and its datasets in Cloud Storage." }),
+    page(`${AP}/model-monitoring/schedules`, "Monitoring", "Deploy and use", { service: "vertex-model-monitoring-schedules", listedWhenOff: true, tabTitle: "Schedules",
+      navHidden: true, navAs: `${AP}/model-monitoring/model-monitors`, pageTabs: MONITOR_TABS, kind: "Schedule",
+      api: "v1beta1 projects.locations.schedules", about: "Recurring monitoring runs, with Pause, Resume and Delete",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/run-monitoring-job",
+      instead: "Start CloudBurrow with --services including run and storage." }),
+    page(`${AP}/model-monitoring/deployment-jobs`, "Monitoring", "Deploy and use", { service: "vertex-model-deployment-monitoring", listedWhenOff: true, tabTitle: "Deployment monitoring jobs",
+      navHidden: true, navAs: `${AP}/model-monitoring/model-monitors`, pageTabs: MONITOR_TABS, kind: "Monitoring job",
+      api: "projects.locations.modelDeploymentMonitoringJobs", about: "Skew and drift monitoring of an endpoint's deployed models, with Pause, Resume and Delete",
+      docs: "https://docs.cloud.google.com/vertex-ai/docs/model-monitoring/using-model-monitoring",
+      instead: "Start CloudBurrow with --services including run and storage: a job watches a Model Registry endpoint." }),
   ];
 }
 
@@ -368,6 +448,14 @@ const ROUTES = [
     section: "Storage", product: "filestore", productTitle: "Filestore" },
   { path: "/filestore/snapshots", service: "filestore-snapshots", icon: "filestore", title: "Snapshots", kind: "Snapshot",
     section: "Storage", product: "filestore", productTitle: "Filestore" },
+  // Dataflow (#2215): the Jobs list, a job's page (Job graph, Execution
+  // details, Job metrics, Autoscaling, Job logs and Worker logs) and
+  // Create job from template.
+  { path: "/dataflow/jobs", service: "dataflow", icon: "dataflow", title: "Jobs", kind: "Job",
+    section: "Databases", product: "dataflow", productTitle: "Dataflow" },
+  // Snapshots (#2215): a project's snapshots of streaming jobs.
+  { path: "/dataflow/snapshots", service: "dataflow-snapshots", icon: "dataflow", title: "Snapshots", kind: "Snapshot",
+    section: "Databases", product: "dataflow", productTitle: "Dataflow" },
 
   // Storage Transfer Service (#1957), Google's Data Transfer pages: Transfer
   // jobs, with each job's run history, and Agent pools for POSIX file
@@ -650,6 +738,12 @@ const ROUTES = [
   { path: "/compute/networkendpointgroups/list", service: "compute-negs", icon: "compute", title: "Network endpoint groups", kind: "Network endpoint group",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/disks", service: "compute-disks", icon: "compute", title: "Disks", kind: "Disk",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  // Asynchronous Replication (#2206): Google's Asynchronous replication
+  // and Consistency groups pages.
+  { path: "/compute/asynchronousReplication", service: "compute-asyncreplication", icon: "compute", title: "Asynchronous replication", kind: "Secondary disk",
+    section: "Compute", product: "compute", productTitle: "Compute Engine" },
+  { path: "/compute/consistencyGroups", service: "compute-consistencygroups", icon: "compute", title: "Consistency groups", kind: "Consistency group",
     section: "Compute", product: "compute", productTitle: "Compute Engine" },
   { path: "/compute/snapshots", service: "compute-snapshots", icon: "compute", title: "Snapshots", tabTitle: "Snapshots", kind: "Snapshot",
     pageTabs: COMPUTE_SNAPSHOT_TABS, section: "Compute", product: "compute", productTitle: "Compute Engine" },
@@ -1123,6 +1217,17 @@ const ROUTES = [
   // cloudburrow commands of those names. Also reached from Settings and
   // utilities.
   { path: "/instance", service: null, screen: "instance", title: "Instance", section: "Management tools" },
+  // Settings > Compute and Compute capacity (#2209): this instance's compute
+  // on a VM in the user's own AWS account or Azure subscription. Reached
+  // from Settings and utilities.
+  { path: "/settings/compute", service: null, screen: "compute-settings", title: "Compute", section: "Management tools" },
+  { path: "/settings/compute/create", service: null, screen: "compute-create", title: "Create VM" },
+  { path: "/settings/compute/operation", service: null, screen: "compute-operation", title: "Operation" },
+  { path: "/compute-capacity", service: null, screen: "compute-capacity", title: "Compute capacity", section: "Management tools" },
+  // Mail (#2214): what the local mail sink received, Cloud Monitoring's
+  // and Model Monitoring's email notifications among it. CloudBurrow's own
+  // page, also reached from Settings and utilities.
+  { path: "/mail", service: null, screen: "mail", title: "Mail", section: "Management tools" },
   // Billing (#2109), Google's Billing menu: Manage billing accounts, the
   // projects' Account management, Budgets & alerts and Pricing. Every
   // account is local: nothing asks for or shows payment details.
@@ -1194,6 +1299,8 @@ const pagesOf = (key) => {
 const ICONS = {
   // Filestore: a file folder over a server's drive.
   filestore: '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v4H3z"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 17h2"/>',
+  // Dataflow: a pipeline's steps joined top to bottom.
+  dataflow: '<rect x="4" y="3" width="7" height="5" rx="1"/><rect x="13" y="10" width="7" height="5" rx="1"/><rect x="4" y="16" width="7" height="5" rx="1"/><path d="M7.5 8v8M11 12.5h2"/>',
   // App Hub: three components grouped in one application.
   apphub: '<rect x="3" y="3" width="18" height="18" rx="3"/><rect x="6" y="6" width="5" height="5" rx="1"/><rect x="13" y="6" width="5" height="5" rx="1"/><rect x="6" y="13" width="12" height="5" rx="1"/>',
   // Cloud Run: a container with a run triangle.
@@ -1290,6 +1397,11 @@ const ICONS = {
   activity:  '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
   // Connect: a plug.
   connect:   '<path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>',
+  // Compute (#2209): a cloud with a server under it, for a VM in your own cloud.
+  "compute-settings": '<path d="M7 11a4 4 0 0 1 .6-7.9A5 5 0 0 1 17 5a3 3 0 0 1 0 6z"/><rect x="5" y="14" width="14" height="6" rx="1"/><path d="M8 17h.01M12 11v3"/>',
+  // Compute capacity (#2209): a gauge, for a VM's size.
+  "compute-capacity": '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/><path d="M4 20h16"/>',
+  mail:      '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
   dashboard: '<rect x="3" y="3" width="8" height="10" rx="1"/><rect x="13" y="3" width="8" height="6" rx="1"/><rect x="3" y="15" width="8" height="6" rx="1"/><rect x="13" y="11" width="8" height="10" rx="1"/>',
 };
 
@@ -4787,6 +4899,13 @@ async function renderDetail(view, route, resourcePath) {
         return drawAnalyticsSection(panel, section, note);
       case "media":
         return drawMediaSection(panel, section, note);
+      case "pipelinegraph":
+        // A pipeline run's runtime graph and its Pipeline run analysis
+        // pane (#2205).
+        return setChildren(panel, note, pipelineGraphView(section.pipeline || {}));
+      case "graph":
+        // A Dataflow job's graph (#2215).
+        return setChildren(panel, note, pipelineGraph(section.jobGraph || {}, section.label));
       case "result": {
         // An action's answer on a page of its own (#2084): Document AI's
         // analysis page, drawn as its result dialog draws it.
@@ -5714,6 +5833,7 @@ function listActionButtons(route, data, onDone) {
     // One that is a link opens its page: the Datastore page's Indexes
     // (#1846).
     onclick: () => (a.href ? openHref(a.href)
+      : a.openWindow ? openMinted(a.openWindow)
       : a.panel ? openActionPanel(route, [], a, onDone, a.label)
       : openActionForm(route, [], a, onDone, data.noun || route.title)),
   }));
@@ -10106,6 +10226,88 @@ function wfSourceSection(text, label) {
 // wfStepsVisualization is the Steps tab's visualization panel: the graph
 // of the revision that ran, each step marked with the state of its
 // entries, in a panel the expander opens and closes as Google's does.
+// pipelineGraph is a Dataflow job's Job graph (#2215): its steps in
+// layers by how far they are from the sources, each a box with its kind,
+// state and output, joined by lines to the steps it reads, as Google's
+// graph draws them; a step chosen (click, Enter or Space) shows its
+// properties in the Step info panel beside it.
+function pipelineGraph(pg, label) {
+  const steps = pg.steps || [];
+  if (!steps.length) return emptyState("No job graph yet", "The graph is drawn once the job's pipeline has been read.");
+  const byId = new Map(steps.map((st) => [st.id, st]));
+  const depth = new Map();
+  const depthOf = (id, seen) => {
+    if (depth.has(id)) return depth.get(id);
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    const ins = (byId.get(id).inputs || []).filter((i) => byId.has(i));
+    const d = ins.length ? 1 + Math.max(...ins.map((i) => depthOf(i, seen))) : 0;
+    depth.set(id, d);
+    return d;
+  };
+  steps.forEach((st) => depthOf(st.id, new Set()));
+  const layers = [];
+  steps.forEach((st) => { (layers[depth.get(st.id)] ||= []).push(st); });
+  const info = el("div", { class: "df-step-info", id: "df-step-info", "aria-live": "polite" },
+    el("p", { class: "form-help", text: "Choose a step to see its details." }));
+  const boxes = new Map();
+  const choose = (st) => {
+    boxes.forEach((b, id) => b.setAttribute("aria-pressed", String(id === st.id)));
+    setChildren(info, el("h3", { text: st.name }),
+      el("dl", { class: "df-step-props" },
+        ...[{ label: "Kind", value: st.kind || "—" }, { label: "State", value: st.state || "—" }, ...(st.properties || [])]
+          .flatMap((prop) => [el("dt", { text: prop.label }), el("dd", { text: prop.value || "—" })])));
+  };
+  const canvas = el("div", { class: "df-graph-canvas" });
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "df-graph-edges");
+  svg.setAttribute("aria-hidden", "true");
+  canvas.append(svg);
+  layers.forEach((layer) => {
+    const row = el("div", { class: "df-graph-layer" });
+    layer.forEach((st) => {
+      const state = String(st.state || "").toLowerCase().replace(/[^a-z]+/g, "-");
+      const reads = (st.inputs || []).map((i) => (byId.get(i) || {}).name).filter(Boolean);
+      const out = (st.properties || []).find((prop) => prop.label === "Elements added");
+      const box = el("button", { type: "button", class: `df-step is-${state}`, "data-step": st.id, "aria-pressed": "false",
+        "aria-controls": "df-step-info",
+        "aria-label": `${st.name}, ${st.kind || "step"}, ${st.state || "no state"}${reads.length ? `, reads ${reads.join(", ")}` : ""}`,
+        onclick: () => choose(st) },
+        el("span", { class: "df-step-name", text: st.name }),
+        el("span", { class: "df-step-meta", text: [st.kind, st.state].filter(Boolean).join(" · ") }),
+        out ? el("span", { class: "df-step-meta", text: `${out.value} elements` }) : null);
+      boxes.set(st.id, box);
+      row.append(box);
+    });
+    canvas.append(row);
+  });
+  // The lines, drawn once the boxes are laid out and again when the
+  // canvas changes size.
+  const draw = () => {
+    const base = canvas.getBoundingClientRect();
+    svg.setAttribute("width", String(canvas.scrollWidth));
+    svg.setAttribute("height", String(canvas.scrollHeight));
+    while (svg.firstChild) svg.firstChild.remove();
+    steps.forEach((st) => (st.inputs || []).forEach((i) => {
+      const a = boxes.get(i), b = boxes.get(st.id);
+      if (!a || !b) return;
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      const x1 = ra.left + ra.width / 2 - base.left, y1 = ra.bottom - base.top;
+      const x2 = rb.left + rb.width / 2 - base.left, y2 = rb.top - base.top;
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      const my = (y1 + y2) / 2;
+      path.setAttribute("d", `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`);
+      path.setAttribute("class", "df-edge");
+      svg.append(path);
+    }));
+  };
+  requestAnimationFrame(draw);
+  if (typeof ResizeObserver === "function") new ResizeObserver(draw).observe(canvas);
+  return el("div", { class: "df-graph" },
+    el("div", { class: "df-graph-panel card", role: "group", "aria-label": label || "Job graph" }, canvas),
+    el("aside", { class: "df-step-panel card", "aria-label": "Step info" }, el("h2", { text: "Step info" }), info));
+}
+
 function wfStepsVisualization(source, items) {
   const states = {};
   const rank = { FAILED: 3, IN_PROGRESS: 2, SUCCEEDED: 1 };
@@ -10119,6 +10321,156 @@ function wfStepsVisualization(source, items) {
   const details = el("details", { class: "wf-visualization", open: true },
     el("summary", { text: "Visualization" }), graph.node);
   return details;
+}
+
+// pipelineGraphView is a pipeline run's runtime graph (#2205), as
+// Google's run page draws it: the run's steps top to bottom, each DAG (a
+// nested pipeline, a condition, a loop and its iterations) a node that
+// expands in place, Expand artifacts drawing each step's artifacts after
+// it, and the Pipeline run analysis pane beside the graph, its summary
+// the run's details and parameters, and choosing a node its Node info.
+// The nodes are one list of buttons: Tab reaches the chosen one, the
+// arrow keys, Home and End move along them, Enter or Space opens its Node
+// info, and a DAG node's own Expand button opens it.
+function pipelineGraphView(graph) {
+  const nodes = graph.nodes || [];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const state = { artifacts: false, open: new Set(), chosen: "" };
+  const stateClass = (s) => "is-" + String(s || "").toLowerCase().replace(/[^a-z]+/g, "-");
+  const canvas = el("div", { class: "pl-canvas" });
+  const pane = el("aside", { class: "pl-pane", "aria-labelledby": "pl-pane-title" });
+  const toggle = el("input", { type: "checkbox", id: "pl-expand-artifacts" });
+  const groups = (gs) => (gs || []).filter((g) => (g.properties || []).length).map((g) =>
+    el("div", { class: "pl-pane-group" }, g.heading ? el("h3", { text: g.heading }) : null,
+      el("dl", {}, ...g.properties.flatMap((p) => [el("dt", { text: p.label }), propertyValue(p)]))));
+  const drawPane = () => {
+    const n = byId.get(state.chosen);
+    const body = el("div", { class: "pl-pane-body", "aria-live": "polite" });
+    if (n) {
+      setChildren(body, el("p", { class: "pl-pane-node" }, el("span", { class: `pl-dot ${stateClass(n.state)}`, "aria-hidden": "true" }),
+        el("strong", { text: n.name }), ` ${n.kind === "artifact" ? "artifact" : "step"}`), ...groups(n.info),
+        el("button", { type: "button", class: "link-button pl-pane-back", text: "Back to run summary",
+          onclick: () => { const id = state.chosen; state.chosen = ""; drawPane(); focusNode(id); } }));
+    } else {
+      setChildren(body, ...groups(graph.summary));
+    }
+    setChildren(pane, el("h2", { id: "pl-pane-title", text: n ? "Node info" : "Pipeline run analysis" }), body);
+  };
+  // The nodes drawn inside parent, in rows by how deep their upstream goes.
+  const level = (parent) => {
+    const kids = nodes.filter((n) => (n.parent || "") === parent && (state.artifacts || n.kind !== "artifact"));
+    const ids = new Set(kids.map((n) => n.id));
+    const deps = (n) => [...(n.after || []), ...(state.artifacts ? (n.inputs || []) : [])].filter((d) => ids.has(d));
+    const depth = new Map();
+    const depthOf = (n, seen = new Set()) => {
+      if (depth.has(n.id)) return depth.get(n.id);
+      if (seen.has(n.id)) return 0;
+      seen.add(n.id);
+      const d = Math.max(-1, ...deps(n).map((id) => depthOf(byId.get(id), seen))) + 1;
+      depth.set(n.id, d);
+      return d;
+    };
+    kids.forEach((n) => depthOf(n));
+    const rows = [];
+    for (const n of kids) (rows[depth.get(n.id)] = rows[depth.get(n.id)] || []).push(n);
+    const box = el("div", { class: "pl-level", "data-parent": parent });
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "pl-edges");
+    svg.setAttribute("aria-hidden", "true");
+    box.append(svg);
+    for (const row of rows.filter(Boolean)) {
+      box.append(el("div", { class: "pl-row" }, ...row.sort((a, b) => a.name.localeCompare(b.name)).map(nodeView)));
+    }
+    box._edges = kids.flatMap((n) => deps(n).map((d) => [d, n.id]));
+    return box;
+  };
+  const nodeView = (n) => {
+    const expandable = n.kind === "dag" || n.kind === "loop" || n.kind === "iteration";
+    const kindText = { dag: "DAG", loop: "Loop", iteration: "Iteration", artifact: "Artifact", task: "Step" }[n.kind] || "Step";
+    const button = el("button", { type: "button", class: `pl-node ${stateClass(n.state)} is-${n.kind}`, "data-node": n.id,
+      tabindex: "-1", "aria-pressed": state.chosen === n.id ? "true" : "false",
+      "aria-label": `${n.name}, ${kindText}, ${n.state}`,
+      onclick: () => { state.chosen = n.id; drawPane(); markChosen(); } },
+      el("span", { class: `pl-dot ${stateClass(n.state)}`, "aria-hidden": "true" }),
+      el("span", { class: "pl-node-name", text: n.name }),
+      el("span", { class: "pl-node-state", text: n.kind === "artifact" ? n.state : `${kindText} · ${n.state}` }));
+    const wrap = el("div", { class: "pl-node-wrap", "data-wrap": n.id }, button);
+    if (expandable) {
+      const open = state.open.has(n.id);
+      wrap.append(el("button", { type: "button", class: "link-button pl-expand", "aria-expanded": open ? "true" : "false",
+        "aria-label": `${open ? "Collapse" : "Expand"} ${n.name}`, text: open ? "Collapse" : "Expand",
+        onclick: () => { open ? state.open.delete(n.id) : state.open.add(n.id); draw(); focusExpand(n.id); } }));
+      if (open) wrap.append(el("div", { class: "pl-group" }, level(n.id)));
+    }
+    return wrap;
+  };
+  const allButtons = () => [...canvas.querySelectorAll("button.pl-node")];
+  const roving = (focusId) => {
+    const bs = allButtons();
+    const pick = bs.find((b) => b.dataset.node === (focusId || state.chosen)) || bs[0];
+    bs.forEach((b) => b.setAttribute("tabindex", b === pick ? "0" : "-1"));
+    return pick;
+  };
+  const focusNode = (id) => { const b = roving(id); if (b) b.focus(); };
+  const focusExpand = (id) => {
+    const b = canvas.querySelector(`[data-wrap="${CSS.escape(id)}"] > .pl-expand`);
+    if (b) b.focus();
+  };
+  const markChosen = () => {
+    allButtons().forEach((b) => b.setAttribute("aria-pressed", b.dataset.node === state.chosen ? "true" : "false"));
+    roving(state.chosen);
+  };
+  canvas.addEventListener("keydown", (e) => {
+    const bs = allButtons();
+    const i = bs.indexOf(document.activeElement);
+    if (i < 0) return;
+    const next = e.key === "ArrowDown" || e.key === "ArrowRight" ? i + 1 : e.key === "ArrowUp" || e.key === "ArrowLeft" ? i - 1
+      : e.key === "Home" ? 0 : e.key === "End" ? bs.length - 1 : null;
+    if (next === null) return;
+    e.preventDefault();
+    const b = bs[Math.max(0, Math.min(bs.length - 1, next))];
+    bs.forEach((x) => x.setAttribute("tabindex", x === b ? "0" : "-1"));
+    b.focus();
+  });
+  // Each level's edges, from the bottom of a node to the top of the one
+  // after it, drawn once the layout is known.
+  const drawEdges = () => {
+    for (const box of canvas.querySelectorAll(".pl-level")) {
+      const svg = box.querySelector(":scope > svg.pl-edges");
+      const at = box.getBoundingClientRect();
+      svg.setAttribute("width", Math.ceil(at.width));
+      svg.setAttribute("height", Math.ceil(at.height));
+      svg.replaceChildren();
+      for (const [from, to] of box._edges || []) {
+        const a = box.querySelector(`:scope > .pl-row > [data-wrap="${CSS.escape(from)}"] > .pl-node`);
+        const b = box.querySelector(`:scope > .pl-row > [data-wrap="${CSS.escape(to)}"] > .pl-node`);
+        if (!a || !b) continue;
+        const ra = a.parentElement.getBoundingClientRect(), rb = b.getBoundingClientRect();
+        const x1 = ra.left + ra.width / 2 - at.left, y1 = ra.bottom - at.top;
+        const x2 = rb.left + rb.width / 2 - at.left, y2 = rb.top - at.top;
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        const my = (y1 + y2) / 2;
+        path.setAttribute("d", `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`);
+        svg.append(path);
+      }
+    }
+  };
+  const draw = () => {
+    setChildren(canvas, level(""));
+    roving();
+    requestAnimationFrame(drawEdges);
+  };
+  toggle.addEventListener("change", () => { state.artifacts = toggle.checked; draw(); });
+  if (typeof ResizeObserver === "function") new ResizeObserver(() => requestAnimationFrame(drawEdges)).observe(canvas);
+  draw();
+  drawPane();
+  const tools = el("div", { class: "pl-tools" },
+    el("span", { class: "pl-tools-title", text: "Runtime graph" }),
+    el("label", { class: "pl-switch", for: "pl-expand-artifacts" }, toggle, " Expand artifacts"));
+  return el("div", { class: "pl-split" },
+    el("section", { class: "pl-graph", "aria-label": "Runtime graph" }, tools,
+      el("div", { class: "pl-scroll", role: "group", "aria-label": "Pipeline steps", tabindex: null }, canvas)),
+    pane);
 }
 
 // wfStepPanel is an execution's step detail panel (#2011): the step entry
@@ -11641,6 +11993,8 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
   // An action that is a link opens its page (#1847): a topic row's Create
   // subscription.
   if (action.href) return openHref(action.href);
+  // Open JupyterLab (#2198): the page a console route mints a link to.
+  if (action.openWindow) return openMinted(action.openWindow);
   // Run in Cloud Shell (#2049): the command, in the terminal's active tab.
   if (action.terminal) return runInTerminal(action.terminal);
   const path = Array.isArray(target) ? target : null;
@@ -12157,6 +12511,11 @@ function dispatch(view) {
   if (match.screen === "not-served") return renderNotServed(view, match);
   if (match.screen === "ap-overview") return renderAgentPlatformOverview(view);
   if (match.screen === "instance") return renderInstance(view);
+  if (match.screen === "compute-settings") return renderComputeSettings(view);
+  if (match.screen === "compute-create") return renderComputeCreate(view);
+  if (match.screen === "compute-operation") return renderComputeOperation(view);
+  if (match.screen === "compute-capacity") return renderComputeCapacity(view);
+  if (match.screen === "mail") return renderMail(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "metrics-explorer") return renderMetricsExplorer(view, match);
   if (match.screen === "trace-explorer") return renderTraceExplorer(view, match);
@@ -12238,6 +12597,1044 @@ const INSTANCE_TOKEN_KEY = "cb-admin-token";
 let INSTANCE_TOKEN = "";
 // A save or a load streams the whole archive; the server bounds either at
 // ten minutes.
+// --- Compute: bring your own cloud (#2209) ------------------------------
+//
+// Settings > Compute connects an AWS account (IAM Identity Center's device
+// sign-in, or an access key) or an Azure subscription (Microsoft's own
+// sign-in page), and creates the VM that runs this instance's compute
+// there. Compute capacity resizes, starts, stops and deletes it. Every
+// request carries the admin token, as the Instance page's do: these act on
+// the user's own cloud account.
+
+const COMPUTE_TITLE = "Compute";
+const COMPUTE_SUBTITLE = "Run this instance's compute (its cluster and containers) on a VM in your own AWS account or Azure subscription. " +
+  "The APIs, this console and every endpoint stay on this machine.";
+const CAPACITY_TITLE = "Compute capacity";
+const CAPACITY_SUBTITLE = "The VMs CloudBurrow made in your clouds: their size, price and state.";
+const CLOUD_TITLES = { aws: "AWS", azure: "Azure" };
+const PRESET_TITLES = { small: "Small", medium: "Medium", large: "Large", gpu: "GPU" };
+const AUTO_STOP_CHOICES = [[0, "Never"], [30, "After 30 minutes idle"], [60, "After 1 hour idle"], [120, "After 2 hours idle"],
+  [240, "After 4 hours idle"], [480, "After 8 hours idle"]];
+const COMPUTE_DEADLINE_MS = 70000;
+const HOURS_PER_MONTH = 730;
+const COMPUTE_TRANSITIONAL = ["provisioning", "starting", "stopping", "resizing", "deleting"];
+
+const usdFormat = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 3 });
+const usdMonthly = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+async function computeJSON(path, { method = "GET", body } = {}) {
+  const res = await instanceFetch(path, {
+    method, deadline: COMPUTE_DEADLINE_MS,
+    body: body === undefined ? undefined : JSON.stringify(body),
+    contentType: body === undefined ? undefined : "application/json",
+  });
+  return res.json();
+}
+
+function closeSettingsPanel() {
+  const settings = document.getElementById("settings-panel");
+  const button = document.getElementById("settings");
+  // Open is read from the button too: is-open lands a frame after it.
+  if (settings && (overlayOpen(settings) || (button && button.getAttribute("aria-expanded") === "true"))) {
+    hideOverlay(settings);
+    document.getElementById("settings").setAttribute("aria-expanded", "false");
+  }
+}
+
+// computeTokenForm asks for the admin token, then draws the page again.
+function computeTokenForm(view, err, title, subtitle, redraw) {
+  const hadToken = !!instanceToken();
+  setInstanceToken("");
+  const file = err.body && err.body.token_file;
+  const input = el("input", { id: "compute-token", type: "password", autocomplete: "off", spellcheck: "false" });
+  const error = el("p", { class: "form-error", role: "alert", id: "compute-token-error", hidden: !hadToken,
+    text: hadToken ? `The admin API refused that token: ${err.message}` : "" });
+  const submit = (e) => {
+    e.preventDefault();
+    const value = input.value.trim();
+    if (!value) {
+      error.textContent = "Paste the instance's admin token.";
+      error.hidden = false;
+      input.focus();
+      return;
+    }
+    setInstanceToken(value);
+    redraw();
+  };
+  setChildren(view, pageHeader(title, subtitle),
+    el("form", { class: "card", id: "compute-token-form", novalidate: true, onsubmit: submit },
+      el("h2", { text: "Admin token required" }),
+      el("p", { text: "Connecting a cloud and managing its VMs need the instance's admin token, as /admin does: " +
+        "a workload in the cluster can reach this console, and these pages act on your own cloud account." }),
+      file ? el("p", {}, el("span", { text: "The token is the contents of " }), el("code", { text: file }), el("span", { text: "." })) : null,
+      error,
+      el("div", { class: "form-row" },
+        el("label", { for: "compute-token", text: "Admin token" }),
+        input,
+        el("p", { class: "form-help", text: "Kept for this tab only, and sent with each request this page makes." })),
+      el("div", { class: "form-actions" }, el("button", { type: "submit", class: "primary", text: "Use token" }))));
+  input.focus();
+  announce("Admin token required");
+}
+
+// computeLoad reads /api/compute, or draws the token form or the error.
+async function computeLoad(view, path, title, subtitle, redraw) {
+  try {
+    return await computeJSON("/api/compute");
+  } catch (err) {
+    if (location.pathname !== path) return null;
+    if (err.status === 401) computeTokenForm(view, err, title, subtitle, redraw);
+    else setChildren(view, pageHeader(title, subtitle), errorState(`${title} unavailable`, err.message, redraw));
+    return null;
+  }
+}
+
+function sizeSummary(s) {
+  const parts = [`${s.vcpus} vCPU`, `${s.memory_gib} GB memory`];
+  if (s.gpus) parts.push(`${s.gpus} × ${s.gpu}`);
+  return parts.join(", ");
+}
+
+function hourly(s) {
+  return s && s.hourly_usd ? `${usdFormat.format(s.hourly_usd)}/hour` : "price unavailable";
+}
+
+function connectionLabel(c) {
+  const name = c.account_name ? `${c.account_name} (${c.account_id})` : c.account_id;
+  return `${CLOUD_TITLES[c.cloud] || c.cloud}: ${name}`;
+}
+
+// ---- Settings > Compute ----
+
+async function renderComputeSettings(view) {
+  closeSettingsPanel();
+  const path = location.pathname;
+  const redraw = () => renderComputeSettings(view);
+  setChildren(view, pageHeader(COMPUTE_TITLE, COMPUTE_SUBTITLE), loadingState(4));
+  const data = await computeLoad(view, path, COMPUTE_TITLE, COMPUTE_SUBTITLE, redraw);
+  if (!data || location.pathname !== path) return;
+  const create = el("button", { type: "button", class: "primary header-button", id: "compute-create", text: "Create VM",
+    disabled: !data.connections.length, onclick: () => navigate("/settings/compute/create") });
+  const capacity = el("button", { type: "button", class: "header-button", id: "compute-capacity-link", text: "Compute capacity",
+    onclick: () => navigate("/compute-capacity") });
+  const clouds = data.clouds || [];
+  setChildren(view,
+    pageHeader(COMPUTE_TITLE, COMPUTE_SUBTITLE, { actions: [create, capacity] }),
+    el("div", { class: "cards", id: "compute-connect-cards" },
+      clouds.includes("aws") ? computeConnectCard("aws", data, redraw) : null,
+      clouds.includes("azure") ? computeConnectCard("azure", data, redraw) : null),
+    computeMachinesCard(data),
+    el("section", { class: "card", id: "compute-security", "aria-labelledby": "compute-security-title" },
+      el("h2", { id: "compute-security-title", text: "What CloudBurrow does in your account" }),
+      el("ul", {},
+        el("li", { text: "Signs in through your cloud's own page; the credentials stay in this machine's keychain and Disconnect removes them." }),
+        el("li", { text: "Creates one network, a firewall that lets SSH in from your address only, one VM and its disk, each tagged cloudburrow-instance=<name>." }),
+        el("li", { text: "Delete removes everything with that tag, then checks that nothing is left." }),
+        el("li", { text: "Nothing is sent to Google Cloud, and no service is opened to the internet." }))),
+    data.engine && data.engine.message
+      ? el("p", { class: "form-help", id: "compute-engine-note", text: data.engine.message }) : null);
+}
+
+function computeConnectCard(cloud, data, redraw) {
+  const title = cloud === "aws" ? "Connect AWS" : "Connect Azure";
+  const conns = data.connections.filter((c) => c.cloud === cloud);
+  const status = el("div", { id: `compute-${cloud}-status`, role: "status" });
+  const error = el("p", { class: "form-error", role: "alert", id: `compute-${cloud}-error`, hidden: true });
+  const showError = (msg) => { error.textContent = msg; error.hidden = !msg; };
+
+  const list = conns.length
+    ? el("ul", { class: "compute-connections", id: `compute-${cloud}-connections` },
+        ...conns.map((c) => el("li", { "data-connection": c.id },
+          el("strong", { text: c.account_name || c.account_id }),
+          el("span", { class: "muted", text: ` ${c.account_id} · ${c.method === "access-key" ? "access key" : c.method === "sso" ? "IAM Identity Center" : "Microsoft sign-in"}` +
+            (c.principal ? ` · ${c.principal}` : "") }),
+          el("button", { type: "button", class: "link-button", "aria-label": `Disconnect ${c.account_id}`, text: "Disconnect",
+            onclick: () => computeDisconnect(c, data, redraw, showError) }))))
+    : el("p", { class: "muted", id: `compute-${cloud}-none`, text: `No ${CLOUD_TITLES[cloud]} account is connected.` });
+
+  let form;
+  if (cloud === "aws") {
+    const startURL = el("input", { id: "compute-aws-start-url", type: "url", placeholder: "https://d-1234567890.awsapps.com/start", autocomplete: "off" });
+    const region = el("input", { id: "compute-aws-sso-region", type: "text", value: "us-east-1", autocomplete: "off" });
+    form = el("form", { id: "compute-aws-sso", novalidate: true, onsubmit: (e) => {
+      e.preventDefault();
+      computeSignIn("aws", { cloud: "aws", start_url: startURL.value.trim(), region: region.value.trim() }, status, showError, redraw, e.submitter || e.target.querySelector("button"));
+    } },
+      el("div", { class: "form-row" },
+        el("label", { for: "compute-aws-start-url", text: "AWS access portal URL" }), startURL,
+        el("p", { class: "form-help", text: "IAM Identity Center > Settings > AWS access portal URL." })),
+      el("div", { class: "form-row" },
+        el("label", { for: "compute-aws-sso-region", text: "IAM Identity Center region" }), region),
+      el("div", { class: "form-actions" }, el("button", { type: "submit", class: "primary", id: "compute-aws-signin", text: "Sign in with IAM Identity Center" })));
+    form = el("div", {}, form, computeAccessKeyForm(showError, redraw));
+  } else {
+    const tenant = el("input", { id: "compute-azure-tenant", type: "text", autocomplete: "off", placeholder: "organizations" });
+    form = el("form", { id: "compute-azure-signin-form", novalidate: true, onsubmit: (e) => {
+      e.preventDefault();
+      computeSignIn("azure", { cloud: "azure", tenant: tenant.value.trim() }, status, showError, redraw, e.submitter || e.target.querySelector("button"));
+    } },
+      el("div", { class: "form-row" },
+        el("label", { for: "compute-azure-tenant", text: "Tenant (optional)" }), tenant,
+        el("p", { class: "form-help", text: "Your Microsoft Entra tenant ID or domain; leave empty for your account's home tenant." })),
+      el("div", { class: "form-actions" }, el("button", { type: "submit", class: "primary", id: "compute-azure-signin", text: "Sign in with Microsoft" })));
+  }
+  return el("section", { class: "card", id: `compute-${cloud}-card`, "aria-labelledby": `compute-${cloud}-title` },
+    el("h2", { id: `compute-${cloud}-title`, text: title }),
+    el("p", { text: cloud === "aws"
+      ? "Sign in through your AWS access portal. You confirm a code on AWS's own page; CloudBurrow never sees your password."
+      : "Sign in on Microsoft's own page, then pick the subscription the VM is billed to." }),
+    list, error, form, status);
+}
+
+function computeAccessKeyForm(showError, redraw) {
+  const id = el("input", { id: "compute-aws-key-id", type: "text", autocomplete: "off", spellcheck: "false" });
+  const secret = el("input", { id: "compute-aws-key-secret", type: "password", autocomplete: "off", spellcheck: "false" });
+  const token = el("input", { id: "compute-aws-key-token", type: "password", autocomplete: "off", spellcheck: "false" });
+  const button = el("button", { type: "submit", class: "secondary", id: "compute-aws-key-connect", text: "Connect with access key" });
+  const form = el("form", { id: "compute-aws-key-form", novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    showError("");
+    if (!id.value.trim() || !secret.value.trim()) {
+      showError("Paste both the access key ID and the secret access key.");
+      return;
+    }
+    setBusy(button, true);
+    const op = recordOperation("Connect AWS");
+    try {
+      const conn = await computeJSON("/api/compute/accesskey", { method: "POST",
+        body: { access_key_id: id.value, secret_access_key: secret.value, session_token: token.value } });
+      secret.value = "";
+      token.value = "";
+      op.succeeded(conn.account_id);
+      notify(`Connected AWS account ${conn.account_id}`);
+      redraw();
+    } catch (err) {
+      op.failed(err.message);
+      showError(`The access key was not accepted: ${err.message}`);
+    } finally {
+      setBusy(button, false);
+    }
+  } },
+    el("div", { class: "form-row" }, el("label", { for: "compute-aws-key-id", text: "Access key ID" }), id),
+    el("div", { class: "form-row" }, el("label", { for: "compute-aws-key-secret", text: "Secret access key" }), secret),
+    el("div", { class: "form-row" }, el("label", { for: "compute-aws-key-token", text: "Session token (optional)" }), token,
+      el("p", { class: "form-help", text: "For accounts without IAM Identity Center. The key goes to this machine's keychain, never to a file." })),
+    el("div", { class: "form-actions" }, button));
+  // A disclosure button rather than <details>: a closed form's fields are
+  // out of the Tab order until it is opened.
+  form.hidden = true;
+  const toggle = el("button", { type: "button", class: "link-button", id: "compute-aws-key-toggle", "aria-expanded": "false",
+    "aria-controls": "compute-aws-key-form", text: "Use an access key instead", onclick: () => {
+      form.hidden = !form.hidden;
+      toggle.setAttribute("aria-expanded", String(!form.hidden));
+      if (!form.hidden) id.focus();
+    } });
+  return el("div", { id: "compute-aws-key" }, toggle, form);
+}
+
+async function computeSignIn(cloud, body, status, showError, redraw, button) {
+  showError("");
+  if (cloud === "aws" && !/^https:\/\//.test(body.start_url)) {
+    showError("Paste your AWS access portal URL; it starts with https://.");
+    document.getElementById("compute-aws-start-url").focus();
+    return;
+  }
+  setBusy(button, true);
+  let st;
+  try {
+    st = await computeJSON("/api/compute/signin", { method: "POST", body });
+  } catch (err) {
+    setBusy(button, false);
+    showError(`The sign-in did not start: ${err.message}`);
+    return;
+  }
+  const path = location.pathname;
+  const cancel = el("button", { type: "button", class: "secondary", id: `compute-${cloud}-cancel`, text: "Cancel", onclick: async () => {
+    stopped = true;
+    try { await computeJSON(`/api/compute/signin/${encodeURIComponent(st.id)}`, { method: "DELETE" }); } catch { /* gone already */ }
+    setBusy(button, false);
+    setChildren(status);
+  } });
+  let stopped = false;
+  const waiting = () => setChildren(status,
+    st.prompt.user_code
+      ? el("p", {}, el("span", { text: "Confirm the code " }), el("strong", { class: "mono", id: `compute-${cloud}-code`, text: st.prompt.user_code }),
+          el("span", { text: " on AWS's sign-in page." }))
+      : el("p", { text: st.prompt.message || "Finish signing in in your browser." }),
+    st.prompt.url ? el("p", {}, el("a", { href: st.prompt.url, target: "_blank", rel: "noopener noreferrer", id: `compute-${cloud}-open`,
+      text: cloud === "aws" ? "Open the AWS sign-in page" : "Open Microsoft's sign-in page" })) : null,
+    el("p", { class: "muted", text: "Waiting for you to sign in…" }),
+    el("div", { class: "form-actions" }, cancel));
+  waiting();
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 1000));
+    if (stopped || location.pathname !== path) return;
+    try {
+      st = await computeJSON(`/api/compute/signin/${encodeURIComponent(st.id)}`);
+    } catch (err) {
+      setBusy(button, false);
+      showError(`The sign-in failed: ${err.message}`);
+      setChildren(status);
+      return;
+    }
+    if (st.state === "waiting") continue;
+    setBusy(button, false);
+    if (st.state === "failed") {
+      showError(`The sign-in failed: ${st.error}`);
+      setChildren(status);
+      return;
+    }
+    if (st.state === "choose") return computeChooseAccount(cloud, st, status, showError, redraw);
+    return redraw();
+  }
+}
+
+function computeChooseAccount(cloud, st, status, showError, redraw) {
+  const legend = cloud === "aws" ? "Account and role" : "Subscription";
+  const name = `compute-${cloud}-choice`;
+  const options = st.choices.map((c, i) => el("label", { class: "check-line" },
+    el("input", { type: "radio", name, value: c.id, checked: i === 0 }), el("span", { text: c.label })));
+  const button = el("button", { type: "submit", class: "primary", id: `compute-${cloud}-choose`, text: "Connect" });
+  const form = el("form", { id: `compute-${cloud}-choose-form`, novalidate: true, onsubmit: async (e) => {
+    e.preventDefault();
+    const picked = form.querySelector(`input[name="${name}"]:checked`);
+    if (!picked) return showError(`Choose ${legend.toLowerCase()}.`);
+    setBusy(button, true);
+    const op = recordOperation(`Connect ${CLOUD_TITLES[cloud]}`);
+    try {
+      const conn = await computeJSON(`/api/compute/signin/${encodeURIComponent(st.id)}/choose`, { method: "POST", body: { choice: picked.value } });
+      op.succeeded(conn.account_id);
+      notify(`Connected ${CLOUD_TITLES[cloud]} ${conn.account_name || conn.account_id}`);
+      redraw();
+    } catch (err) {
+      op.failed(err.message);
+      showError(`Not connected: ${err.message}`);
+      setBusy(button, false);
+    }
+  } },
+    el("fieldset", {}, el("legend", { text: legend }), ...options),
+    el("div", { class: "form-actions" }, button));
+  if (!st.choices.length) {
+    setChildren(status, el("p", { class: "form-error", role: "alert",
+      text: cloud === "aws" ? "Your sign-in has no account or role assigned in IAM Identity Center." : "Your account has no subscription." }));
+    return;
+  }
+  setChildren(status, el("p", { text: "Signed in." }), form);
+  form.querySelector("input").focus();
+}
+
+async function computeDisconnect(conn, data, redraw, showError) {
+  const machines = data.machines.filter((m) => m.connection === conn.id);
+  await confirmDestructive({
+    title: `Disconnect ${conn.account_id}`,
+    detail: machines.length
+      ? `Removes the credentials of ${connectionLabel(conn)} from this machine's keychain. ${machines.map((m) => m.instance).join(", ")} ` +
+        "would be left running in your account with no way to stop or delete it from here: delete it first."
+      : `Removes the credentials of ${connectionLabel(conn)} from this machine's keychain. Nothing in the account changes.`,
+    confirmWord: conn.account_id,
+    confirmLabel: "Disconnect",
+    consequence: "You can connect again by signing in.",
+    onConfirm: async () => {
+      const op = recordOperation(`Disconnect ${conn.account_id}`);
+      try {
+        await computeJSON(`/api/compute/connections/${encodeURIComponent(conn.id)}`, { method: "DELETE" });
+        op.succeeded(conn.account_id);
+        notify(`Disconnected ${conn.account_id}`);
+      } catch (err) {
+        op.failed(err.message);
+        showError(err.message);
+        throw err;
+      }
+      redraw();
+    },
+  });
+}
+
+function computeMachinesCard(data) {
+  return el("section", { class: "card", id: "compute-machines-card", "aria-labelledby": "compute-machines-title" },
+    el("h2", { id: "compute-machines-title", text: "VMs" }),
+    data.machines.length
+      ? el("ul", { id: "compute-machines" }, ...data.machines.map((m) => el("li", { "data-instance": m.instance },
+          el("a", { href: `/compute-capacity#${encodeURIComponent(m.instance)}`, text: m.instance }),
+          el("span", { text: ` · ${CLOUD_TITLES[m.cloud] || m.cloud} ${m.region} · ${m.size} · ${m.state}` }))))
+      : el("p", { class: "muted", text: data.connections.length ? "No VM yet: Create VM makes one." : "Connect a cloud first." }));
+}
+
+// ---- Settings > Compute > Create VM ----
+
+async function renderComputeCreate(view) {
+  closeSettingsPanel();
+  const path = location.pathname;
+  const title = "Create VM";
+  const subtitle = "A VM in your cloud that runs this instance's compute. The price is shown before anything is made.";
+  const redraw = () => renderComputeCreate(view);
+  const back = { back: "/settings/compute", backLabel: "Back to Compute" };
+  setChildren(view, pageHeader(title, subtitle, back), loadingState(6));
+  const data = await computeLoad(view, path, title, subtitle, redraw);
+  if (!data || location.pathname !== path) return;
+  if (!data.connections.length) {
+    setChildren(view, pageHeader(title, subtitle, back),
+      emptyState("No cloud connected", "Connect AWS or Azure in Settings > Compute first."));
+    return;
+  }
+  const want = new URLSearchParams(location.search).get("connection");
+  const connection = el("select", { id: "compute-connection" },
+    ...data.connections.map((c) => el("option", { value: c.id, text: connectionLabel(c), selected: c.id === want })));
+  const instance = el("input", { id: "compute-instance", type: "text", value: data.instance || "", autocomplete: "off", spellcheck: "false",
+    "aria-describedby": "compute-instance-help" });
+  const region = el("select", { id: "compute-region", disabled: true }, el("option", { text: "Reading regions…" }));
+  const sizes = el("div", { id: "compute-sizes", role: "radiogroup", "aria-labelledby": "compute-size-legend" });
+  const autoStop = el("select", { id: "compute-autostop" },
+    ...AUTO_STOP_CHOICES.map(([v, t]) => el("option", { value: String(v), text: t, selected: v === 60 })));
+  // How CloudBurrow reaches the VM (#2209): on AWS, Session Manager with
+  // nothing inbound, or SSH to the user's address; Azure has SSH only.
+  const connectSSM = el("input", { type: "radio", name: "compute-connect", id: "compute-connect-ssm", value: "ssm", checked: true });
+  const connectSSH = el("input", { type: "radio", name: "compute-connect", id: "compute-connect-ssh", value: "ssh" });
+  const connectHelp = el("p", { class: "form-help", id: "compute-connect-help" });
+  const connectGroup = el("fieldset", { class: "form-row compute-connect", id: "compute-connect", "aria-describedby": "compute-connect-help" },
+    el("legend", { text: "Connect" }),
+    el("div", { class: "radio-row" }, connectSSM, el("label", { for: "compute-connect-ssm", text: "Session Manager: nothing open to the internet" })),
+    el("div", { class: "radio-row" }, connectSSH, el("label", { for: "compute-connect-ssh", text: "SSH from your address only" })),
+    connectHelp);
+  const drawConnect = () => {
+    const c = data.connections.find((x) => x.id === connection.value);
+    const aws = !c || c.cloud === "aws";
+    connectSSM.disabled = !aws;
+    if (!aws) connectSSH.checked = true;
+    connectHelp.textContent = !aws
+      ? "Azure has no Session Manager: SSH is open to your public address only, and the firewall follows your address when it changes."
+      : connectSSM.checked
+        ? "The VM's SSM agent dials out to AWS and CloudBurrow reaches SSH through it: the firewall allows nothing inbound. The VM gets an IAM role with AmazonSSMManagedInstanceCore."
+        : "For a network that blocks Session Manager: SSH is open to your public address only, and the firewall follows your address when it changes.";
+  };
+  connection.addEventListener("change", drawConnect);
+  connectSSM.addEventListener("change", drawConnect);
+  connectSSH.addEventListener("change", drawConnect);
+  drawConnect();
+  const permissions = el("div", { id: "compute-permissions", role: "status" });
+  const error = el("p", { class: "form-error", role: "alert", id: "compute-create-error", hidden: true });
+  const create = el("button", { type: "submit", class: "primary", id: "compute-create-submit", text: "Create", disabled: true });
+  const priceMonthly = el("p", { class: "compute-price-monthly", id: "compute-price-monthly", text: "—" });
+  const priceHourly = el("p", { class: "muted", id: "compute-price-hourly" });
+  const priceDetail = el("p", { class: "form-help", id: "compute-price-detail" });
+  let sizeList = [];
+
+  const chosenSize = () => {
+    const r = sizes.querySelector("input[name=compute-size]:checked");
+    return r ? sizeList.find((s) => s.preset === r.value) : null;
+  };
+  const conn = () => data.connections.find((c) => c.id === connection.value);
+  const drawPrice = () => {
+    const s = chosenSize();
+    if (!s) {
+      priceMonthly.textContent = "—";
+      priceHourly.textContent = "";
+      priceDetail.textContent = "";
+      return;
+    }
+    if (!s.hourly_usd) {
+      priceMonthly.textContent = "Price unavailable";
+      priceHourly.textContent = s.price_error || "";
+      priceDetail.textContent = `See ${CLOUD_TITLES[conn().cloud]}'s pricing page for ${s.name}.`;
+      return;
+    }
+    const total = s.hourly_usd + (s.disk_hourly_usd || 0);
+    priceMonthly.textContent = usdMonthly.format(total * HOURS_PER_MONTH);
+    priceHourly.textContent = `That's about ${usdFormat.format(total)} hourly`;
+    const stop = Number(autoStop.value);
+    priceDetail.textContent = `${s.name}: ${usdFormat.format(s.hourly_usd)}/hour while it runs` +
+      (s.disk_hourly_usd ? `, plus its disk at ${usdFormat.format(s.disk_hourly_usd)}/hour while it exists` : "") +
+      `. Billed by ${CLOUD_TITLES[conn().cloud]} to ${conn().account_id}; ${s.price_source || "on-demand Linux price"}. ` +
+      (stop ? "Auto-stop ends the hourly VM charge while it is idle." : "Without auto-stop it is billed until you stop it.");
+  };
+  const loadPermissions = async () => {
+    setChildren(permissions, el("p", { class: "muted", text: "Checking permissions…" }));
+    try {
+      const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(connection.value)}/permissions?region=${encodeURIComponent(region.value)}`);
+      const missing = res.report.missing || [];
+      setChildren(permissions, missing.length
+        ? el("div", { class: "form-error", id: "compute-permissions-missing" },
+            el("p", { text: "This account cannot create the VM yet. Ask its administrator to grant:" }),
+            el("ul", {}, ...missing.map((m) => el("li", {}, el("code", { text: m.action }), el("span", { text: `: ${m.why}` })))))
+        : el("p", { class: "muted", id: "compute-permissions-ok", text: res.summary }));
+    } catch (err) {
+      setChildren(permissions, el("p", { class: "form-error", text: `The permissions could not be checked: ${err.message}` }));
+    }
+  };
+  const loadSizes = async () => {
+    create.disabled = true;
+    setChildren(sizes, el("p", { class: "muted", text: "Reading sizes and prices…" }));
+    try {
+      const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(connection.value)}/sizes?region=${encodeURIComponent(region.value)}`);
+      sizeList = res.sizes || [];
+    } catch (err) {
+      setChildren(sizes, el("p", { class: "form-error", text: `The sizes could not be read: ${err.message}` }));
+      return;
+    }
+    setChildren(sizes, ...sizeList.map((s, i) => el("label", { class: "check-line compute-size", "data-preset": s.preset },
+      el("input", { type: "radio", name: "compute-size", value: s.preset, checked: i === 0, onchange: drawPrice }),
+      el("span", {},
+        el("strong", { text: PRESET_TITLES[s.preset] || s.preset }),
+        el("span", { text: ` · ${s.name} · ${sizeSummary(s)} · ` }),
+        el("span", { class: "compute-size-price", text: hourly(s) }),
+        s.note ? el("span", { class: "form-help compute-size-note", text: ` ${s.note}` }) : null))));
+    drawPrice();
+    create.disabled = false;
+  };
+  const loadRegions = async () => {
+    region.disabled = true;
+    setChildren(region, el("option", { text: "Reading regions…" }));
+    try {
+      const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(connection.value)}/regions`);
+      setChildren(region, ...res.regions.map((r) => el("option", { value: r.name, selected: r.name === res.default,
+        text: r.display_name ? `${r.name} (${r.display_name})` : r.name })));
+      region.disabled = false;
+    } catch (err) {
+      setChildren(region, el("option", { text: "No regions" }));
+      error.textContent = `The regions could not be read: ${err.message}`;
+      error.hidden = false;
+      return;
+    }
+    await Promise.all([loadSizes(), loadPermissions()]);
+  };
+  connection.addEventListener("change", loadRegions);
+  region.addEventListener("change", () => Promise.all([loadSizes(), loadPermissions()]));
+  autoStop.addEventListener("change", drawPrice);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    const name = instance.value.trim();
+    if (!/^[a-z][a-z0-9-]{0,38}[a-z0-9]$/.test(name)) {
+      error.textContent = "The instance name is 2 to 40 lowercase letters, digits and hyphens, starting with a letter.";
+      error.hidden = false;
+      instance.focus();
+      return;
+    }
+    const s = chosenSize();
+    if (!s) return;
+    setBusy(create, true);
+    const op = recordOperation(`Create VM ${name}`);
+    try {
+      const started = await computeJSON("/api/compute/machines", { method: "POST", body: {
+        instance: name, connection: connection.value, region: region.value, preset: s.preset, auto_stop_minutes: Number(autoStop.value),
+        connect_mode: connectSSH.checked ? "ssh" : "ssm" } });
+      op.succeeded(name);
+      navigate(`/settings/compute/operation?id=${encodeURIComponent(started.id)}`);
+    } catch (err) {
+      op.failed(err.message);
+      error.textContent = `The VM was not created: ${err.message}`;
+      error.hidden = false;
+      setBusy(create, false);
+    }
+  };
+
+  setChildren(view, pageHeader(title, subtitle, back),
+    el("div", { class: "compute-create-layout" },
+      el("form", { class: "create-page", id: "compute-create-form", novalidate: true, onsubmit: submit },
+        el("h2", { class: "form-section-title", text: "Name and region" }),
+        el("div", { class: "form-row" }, el("label", { for: "compute-connection", text: "Cloud account" }), connection),
+        el("div", { class: "form-row" }, el("label", { for: "compute-instance", text: "Instance" }), instance,
+          el("p", { class: "form-help", id: "compute-instance-help", text: "The CloudBurrow instance whose compute runs on this VM. Every resource is tagged cloudburrow-instance with it." })),
+        el("div", { class: "form-row" }, el("label", { for: "compute-region", text: "Region" }), region,
+          el("p", { class: "form-help", text: "The closest to you is chosen first. A region can't be changed later." })),
+        el("h2", { class: "form-section-title", id: "compute-size-legend", text: "Machine configuration" }),
+        sizes,
+        el("h2", { class: "form-section-title", text: "Auto-stop" }),
+        el("div", { class: "form-row" }, el("label", { for: "compute-autostop", text: "Stop the VM" }), autoStop,
+          el("p", { class: "form-help", text: "Idle means no connection from CloudBurrow. A stopped VM keeps its disk, and the cluster's state on it. You can change it later on Compute capacity." })),
+        el("h2", { class: "form-section-title", text: "Connection" }),
+        connectGroup,
+        el("h2", { class: "form-section-title", text: "Permissions" }),
+        permissions,
+        error,
+        el("div", { class: "form-actions" }, create,
+          el("a", { class: "button secondary", href: "/settings/compute", text: "Cancel" }))),
+      el("aside", { class: "card compute-price", id: "compute-price", "aria-labelledby": "compute-price-title" },
+        el("h2", { id: "compute-price-title", text: "Monthly estimate" }),
+        priceMonthly, priceHourly, priceDetail)));
+  await loadRegions();
+}
+
+// ---- operation progress ----
+
+const COMPUTE_OP_TITLES = { create: "Creating", scale: "Resizing", start: "Starting", stop: "Stopping", delete: "Deleting" };
+
+function computeFailureHelp(op) {
+  switch (op.error_kind) {
+    case "permission": return "The account lacks a permission CloudBurrow needs. Ask its administrator to grant what is named above, then try again. Nothing was left behind.";
+    case "quota": return "The cloud refused for want of quota or capacity. Choose a smaller size or another region, or request more quota in the cloud's own console. Nothing was left behind.";
+    case "auth": return "The cloud no longer accepts the sign-in. Connect the account again in Settings > Compute.";
+    case "leftover": return "Some resources are still tagged with the instance. Delete again, or remove them in the cloud's own console.";
+  }
+  return "";
+}
+
+function computeEventList(op, id) {
+  return el("ol", { class: "compute-events", id },
+    ...op.events.map((e) => el("li", { "data-step": e.step, "data-status": e.status },
+      statusIcon(e.status === "done" ? "Succeeded" : e.status === "running" ? "Pending" : e.status === "failed" ? "Failed" : "Warning"),
+      el("span", { class: "compute-event-step", text: e.step }),
+      el("span", { text: ` ${e.message}` }))));
+}
+
+async function renderComputeOperation(view) {
+  closeSettingsPanel();
+  const path = location.pathname;
+  const id = new URLSearchParams(location.search).get("id") || "";
+  const back = { back: "/compute-capacity", backLabel: "Back to Compute capacity" };
+  let op;
+  for (;;) {
+    try {
+      op = await computeJSON(`/api/compute/operations/${encodeURIComponent(id)}`);
+    } catch (err) {
+      if (location.pathname !== path) return;
+      if (err.status === 401) return computeTokenForm(view, err, "Operation", "", () => renderComputeOperation(view));
+      setChildren(view, pageHeader("Operation", "", back), errorState("Operation unavailable", err.message, () => renderComputeOperation(view)));
+      return;
+    }
+    if (location.pathname !== path || new URLSearchParams(location.search).get("id") !== id) return;
+    const title = `${COMPUTE_OP_TITLES[op.kind] || op.kind} ${op.instance}`;
+    const outcome = !op.done
+      ? el("p", { class: "muted", id: "compute-op-running", role: "status", text: "In progress. You can leave this page; it carries on." })
+      : op.error
+        ? el("div", { class: "form-error", id: "compute-op-failed", role: "alert" },
+            el("p", { text: `Failed: ${op.error}` }), el("p", { text: computeFailureHelp(op) }))
+        : el("p", { id: "compute-op-done", role: "status", text: op.kind === "delete"
+            ? `${op.instance} is deleted, and nothing tagged with it is left.` : `${op.instance} is ${op.machine ? op.machine.state : "done"}.` });
+    keepingFocus(view, () => setChildren(view, pageHeader(title, op.kind === "create" ? "Network, firewall, VM and disk, then Docker and kind by cloud-init." : "", back),
+      el("section", { class: "card", id: "compute-op", "aria-labelledby": "compute-op-title" },
+        el("h2", { id: "compute-op-title", text: "Progress" }),
+        computeEventList(op, "compute-events"),
+        outcome,
+        op.done ? el("div", { class: "form-actions" },
+          el("a", { class: "button secondary", id: "compute-op-capacity", href: "/compute-capacity", text: "Compute capacity" })) : null)));
+    if (op.done) {
+      announce(op.error ? `${title} failed` : `${title}: done`);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+    if (location.pathname !== path) return;
+  }
+}
+
+// ---- Compute capacity ----
+
+// autoStopWords says an auto-stop setting as byoc.AutoStopWords does.
+function autoStopWords(n) {
+  if (!n) return "Never";
+  if (n % 60 === 0) return `After ${n / 60} hour${n === 60 ? "" : "s"} idle`;
+  return `After ${n} minutes idle`;
+}
+
+async function renderComputeCapacity(view) {
+  closeSettingsPanel();
+  const path = location.pathname;
+  const redraw = () => renderComputeCapacity(view);
+  setChildren(view, pageHeader(CAPACITY_TITLE, CAPACITY_SUBTITLE), loadingState(4));
+  const data = await computeLoad(view, path, CAPACITY_TITLE, CAPACITY_SUBTITLE, redraw);
+  if (!data || location.pathname !== path) return;
+  const create = el("button", { type: "button", class: "primary header-button", id: "capacity-create", text: "Create VM",
+    onclick: () => navigate("/settings/compute/create") });
+  if (!data.machines.length) {
+    setChildren(view, pageHeader(CAPACITY_TITLE, CAPACITY_SUBTITLE, { actions: [create] }),
+      emptyState("No VMs", data.connections.length ? "Create VM makes one in a connected cloud." : "Connect AWS or Azure in Settings > Compute, then create a VM."));
+    return;
+  }
+  const running = data.operations.filter((o) => !o.done);
+  setChildren(view, pageHeader(CAPACITY_TITLE, CAPACITY_SUBTITLE, { actions: [create] }),
+    computeInstanceSection(data, redraw),
+    ...data.machines.map((m) => computeMachineCard(m, data, running.find((o) => o.instance === m.instance), redraw)));
+  if (location.hash) {
+    const card = document.getElementById(`capacity-${decodeURIComponent(location.hash.slice(1))}`);
+    if (card) card.scrollIntoView();
+  }
+}
+
+function computeMachineCard(m, data, running, redraw) {
+  const conn = data.connections.find((c) => c.id === m.connection);
+  const idp = `capacity-${m.instance}`;
+  const busy = !!running || COMPUTE_TRANSITIONAL.includes(m.state);
+  const error = el("p", { class: "form-error", role: "alert", id: `${idp}-error`, hidden: true });
+  const progress = el("div", { id: `${idp}-progress` });
+  const showError = (msg) => { error.textContent = msg; error.hidden = !msg; };
+  const stateWord = { running: "Running", stopped: "Stopped", failed: "Failed", provisioning: "Pending", starting: "Pending",
+    stopping: "Pending", resizing: "Pending", deleting: "Pending", unknown: "Unknown" }[m.state] || m.state;
+
+  const slider = el("input", { type: "range", id: `${idp}-size`, min: "0", max: "0", step: "1", value: "0", disabled: true,
+    "aria-describedby": `${idp}-size-value` });
+  const sliderValue = el("output", { id: `${idp}-size-value`, for: `${idp}-size`, text: `${m.size} · ${m.hourly_usd ? usdFormat.format(m.hourly_usd) + "/hour" : ""}` });
+  const resize = el("button", { type: "button", class: "secondary", id: `${idp}-resize`, text: "Resize", disabled: true });
+  let ladder = [];
+  const drawSlider = () => {
+    const s = ladder[Number(slider.value)];
+    if (!s) return;
+    const cross = (s.preset === "gpu") !== (m.preset === "gpu");
+    const delta = s.hourly_usd && m.hourly_usd ? s.hourly_usd - m.hourly_usd : 0;
+    const diff = s.name === m.size ? "" : Math.abs(delta) < 0.0005 ? " · same price" : ` · ${delta > 0 ? "+" : "−"}${usdFormat.format(Math.abs(delta))}/hour`;
+    const text = `${PRESET_TITLES[s.preset]} · ${s.name} · ${sizeSummary(s)} · ${hourly(s)}${diff}${cross ? " · a new VM" : ""}`;
+    sliderValue.textContent = text;
+    slider.setAttribute("aria-valuetext", text);
+    resize.textContent = cross ? "Change VM" : "Resize";
+    resize.disabled = busy || s.name === m.size;
+  };
+  slider.addEventListener("input", drawSlider);
+  (async () => {
+    try {
+      const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(m.connection)}/sizes?region=${encodeURIComponent(m.region)}`);
+      // Every size: one of the other kind (to or from GPU, whose driver
+      // cloud-init installs at create) is a new VM, the instance moved
+      // onto it and this one deleted, as one guided action.
+      ladder = (res.sizes || []).slice();
+      slider.max = String(Math.max(ladder.length - 1, 0));
+      const at = ladder.findIndex((s) => s.name === m.size);
+      slider.value = String(at < 0 ? 0 : at);
+      slider.disabled = busy || ladder.length < 2;
+      drawSlider();
+    } catch (err) {
+      sliderValue.textContent = `The sizes could not be read: ${err.message}`;
+    }
+  })();
+
+  const act = async (label, path, body, method = "POST") => {
+    showError("");
+    const op = recordOperation(`${label} ${m.instance}`);
+    try {
+      const started = await computeJSON(path, { method, body });
+      op.succeeded(m.instance);
+      await computeFollow(started, progress, `${idp}-events`);
+      const done = await computeJSON(`/api/compute/operations/${encodeURIComponent(started.id)}`);
+      if (done.error) {
+        showError(`${label} failed: ${done.error} ${computeFailureHelp(done)}`);
+        notify(`${label} ${m.instance} failed`, "error");
+      } else {
+        notify(`${label}: ${m.instance} done`);
+      }
+    } catch (err) {
+      op.failed(err.message);
+      showError(`${label} failed: ${err.message}`);
+      return;
+    }
+    redraw();
+  };
+  const base = `/api/compute/machines/${encodeURIComponent(m.instance)}`;
+  resize.addEventListener("click", async () => {
+    const s = ladder[Number(slider.value)];
+    if (!s) return;
+    if ((s.preset === "gpu") === (m.preset === "gpu")) {
+      act("Resize", `${base}/scale`, { preset: s.preset, size: s.name });
+      return;
+    }
+    showError("");
+    let plan;
+    try {
+      plan = await computeJSON(`${base}/resize-plan?preset=${encodeURIComponent(s.preset)}`);
+    } catch (err) {
+      showError(`Change VM failed: ${err.message}`);
+      return;
+    }
+    const delta = plan.delta_usd;
+    confirmDestructive({
+      title: `Change ${m.instance} to ${plan.to.name}`,
+      detail: `${CLOUD_TITLES[m.cloud]} cannot resize ${plan.from.name} to ${plan.to.name} in place: a GPU VM's NVIDIA driver is installed when it is made. ` +
+        `${plan.note}. Price: ${hourly(plan.from)} now, ${hourly(plan.to)} after: ` +
+        `${Math.abs(delta) < 0.0005 ? "the same" : `${usdFormat.format(Math.abs(delta))}/hour ${delta > 0 ? "more" : "less"}`}. ` +
+        "If the move fails, the new VM is deleted and the instance stays here. The console restarts during the move.",
+      confirmLabel: "Change VM", consequence: `${m.instance} is deleted only once the instance runs on ${plan.new_name}.`, style: "confirm",
+      onConfirm: async () => {
+        try {
+          await computeJSON(`${base}/replace`, { method: "POST", body: { preset: s.preset, instance: data.instance } });
+        } catch (err) {
+          showError(`Change VM failed: ${err.message}`);
+          return;
+        }
+        // The old VM's card goes with it: the instance's section follows,
+        // and, drawn again, follows the finished change too.
+        const node = document.getElementById("capacity-instance-progress") || progress;
+        followMove(data.instance, node, "capacity-instance-move-steps", showError).then(redraw);
+      },
+    });
+  });
+  const start = el("button", { type: "button", class: "secondary", id: `${idp}-start`, text: "Start",
+    disabled: busy || m.state === "running", onclick: () => act("Start", `${base}/start`, {}) });
+  const stop = el("button", { type: "button", class: "secondary", id: `${idp}-stop`, text: "Stop",
+    disabled: busy || m.state !== "running", onclick: () => act("Stop", `${base}/stop`, {}) });
+  // A VM an instance runs on holds that instance's cluster and data: a
+  // plain Delete of it is refused (#2209). The instance moves off first, or
+  // the user chooses, typing the VM's name, to delete its data with it.
+  const user = m.in_use_by || "";
+  const inUse = user ? el("p", { class: "form-help", id: `${idp}-in-use`,
+    text: `${user} runs on this VM: its cluster and data are on the VM's disk. Move ${user} off the VM before you delete it, or delete the VM and ${user}'s data.` }) : null;
+  const del = el("button", { type: "button", class: "secondary danger", id: `${idp}-delete`,
+    text: user ? "Delete VM and this instance's data" : "Delete", disabled: busy,
+    "aria-describedby": user ? `${idp}-in-use` : null,
+    onclick: () => user ? confirmDestructive({
+      title: `Delete ${m.instance} and ${user}'s data`,
+      detail: `${user} runs on ${m.instance}. To keep ${user}'s cluster and data, cancel and move ${user} off the VM first (Move back to this machine, or Move instance here on another VM). ` +
+        `Deleting stops ${user}, then deletes the VM, its disk, network and firewall in ${CLOUD_TITLES[m.cloud]} ${m.region}: everything tagged cloudburrow-instance=${m.instance}, ` +
+        `with ${user}'s cluster, its volumes and every object in it. ${user} starts afresh on this machine at its next start.`,
+      confirmWord: m.instance, confirmLabel: "Delete VM and this instance's data",
+      consequence: `${user}'s data on the VM cannot be recovered.`,
+      onConfirm: async () => {
+        showError("");
+        await computeJSON(`${base}?with_instance_data=true`, { method: "DELETE" });
+        followMove(user, progress, `${idp}-delete-steps`, showError).then(redraw);
+      },
+    }) : confirmDestructive({
+      title: `Delete ${m.instance}`,
+      detail: `Deletes the VM, its disk, network and firewall in ${CLOUD_TITLES[m.cloud]} ${m.region}: everything tagged cloudburrow-instance=${m.instance}. ` +
+        "The cluster's state on the disk is gone afterwards.",
+      confirmWord: m.instance,
+      onConfirm: async () => { act("Delete", base, undefined, "DELETE"); },
+    }) });
+  const move = computeMoveButton(m, data, idp, busy, progress, showError, redraw);
+  // Auto-stop, editable after create: a running VM's setting changes at
+  // once, a stopped one's at its next start.
+  const autoStop = el("select", { id: `${idp}-autostop`, disabled: busy },
+    ...AUTO_STOP_CHOICES.map(([v, t]) => el("option", { value: String(v), text: t, selected: v === m.auto_stop_minutes })));
+  if (!AUTO_STOP_CHOICES.some(([v]) => v === m.auto_stop_minutes)) {
+    autoStop.prepend(el("option", { value: String(m.auto_stop_minutes), text: autoStopWords(m.auto_stop_minutes), selected: true }));
+  }
+  const saveAutoStop = el("button", { type: "button", class: "secondary", id: `${idp}-autostop-save`, text: "Save", disabled: true,
+    onclick: () => act("Change auto-stop", `${base}/settings`, { auto_stop_minutes: Number(autoStop.value) }) });
+  autoStop.addEventListener("change", () => { saveAutoStop.disabled = busy || Number(autoStop.value) === m.auto_stop_minutes; });
+  const ssm = m.connect_mode === "ssm";
+  const allow = ssm ? null : el("button", { type: "button", class: "secondary", id: `${idp}-allow-address`, text: "Allow my address",
+    disabled: busy || m.state !== "running" && m.state !== "stopped",
+    onclick: () => act("Allow my address", `${base}/allow-my-address`, {}) });
+  const connectText = ssm
+    ? "Session Manager; nothing inbound is open"
+    : `SSH from ${m.source_cidr || "an unrecorded address"} only` +
+      (m.source_updated_at ? ` (updated ${new Date(m.source_updated_at).toLocaleString()})` : "");
+  const resourcesOut = el("div", { id: `${idp}-resources` });
+  const resources = el("button", { type: "button", class: "link-button", id: `${idp}-resources-button`, text: "View resources",
+    onclick: async () => {
+      setChildren(resourcesOut, el("p", { class: "muted", text: "Listing…" }));
+      try {
+        const res = await computeJSON(`${base}/resources`);
+        setChildren(resourcesOut, el("table", { class: "compute-resources" },
+          el("caption", { text: `Tagged ${res.tag}` }),
+          el("thead", {}, el("tr", {}, el("th", { scope: "col", text: "Type" }), el("th", { scope: "col", text: "ID" }), el("th", { scope: "col", text: "State" }))),
+          el("tbody", {}, ...res.resources.map((r) => el("tr", {}, el("td", { text: r.type }), el("td", { class: "mono", text: r.id }), el("td", { text: r.state || "" }))))));
+      } catch (err) {
+        setChildren(resourcesOut, el("p", { class: "form-error", role: "alert", text: err.message }));
+      }
+    } });
+  const card = el("section", { class: "card compute-machine", id: idp, "data-instance": m.instance, "data-state": m.state, "aria-labelledby": `${idp}-title` },
+    el("h2", { id: `${idp}-title` }, statusIcon(stateWord), el("span", { text: ` ${m.instance}` })),
+    el("dl", {},
+      el("dt", { text: "Status" }), el("dd", { id: `${idp}-state`, text: stateWord }),
+      el("dt", { text: "Cloud" }), el("dd", { text: conn ? connectionLabel(conn) : `${CLOUD_TITLES[m.cloud]} ${m.connection}` }),
+      el("dt", { text: "Region" }), el("dd", { text: m.region }),
+      el("dt", { text: "Machine type" }), el("dd", { id: `${idp}-type`, text: m.size }),
+      el("dt", { text: "Price" }), el("dd", { id: `${idp}-price`, text: m.hourly_usd ? `${usdFormat.format(m.hourly_usd)}/hour while running` : "unavailable" }),
+      el("dt", { text: "External IP" }), el("dd", { text: m.public_ip || "None" }),
+      el("dt", { text: "Connection" }), el("dd", { id: `${idp}-connect`, text: connectText }),
+      el("dt", { text: "Auto-stop" }), el("dd", { id: `${idp}-autostop-value`, text: autoStopWords(m.auto_stop_minutes) })),
+    el("div", { class: "form-row compute-autostop" },
+      el("label", { for: `${idp}-autostop`, text: "Auto-stop" }), autoStop, saveAutoStop,
+      el("p", { class: "form-help", id: `${idp}-autostop-help`, text: m.state === "running"
+        ? "Idle means no connection from CloudBurrow. The VM's setting changes as soon as you save."
+        : "The VM is not running: the new setting is written when it next starts." })),
+    allow ? el("div", { class: "form-row compute-address" }, allow,
+      el("p", { class: "form-help", text: "CloudBurrow moves the firewall to this machine's public address before each connection and every few minutes; this does it now." })) : null,
+    el("div", { class: "form-row compute-slider" },
+      el("label", { for: `${idp}-size`, text: "Size" }), slider, sliderValue,
+      el("p", { class: "form-help", text: m.cloud === "aws"
+        ? "AWS resizes a stopped instance: a running one is stopped, resized and started again, its disk kept."
+        : "Azure resizes in place where it can, else deallocates, resizes and starts the VM, its disk kept." })),
+    inUse,
+    el("div", { class: "card-actions" }, resize, start, stop, move, del, resources),
+    error, progress, resourcesOut);
+  if (running) computeFollow(running, progress, `${idp}-events`).then(redraw);
+  return card;
+}
+
+// computeInstanceSection is where this instance runs (#2209): this
+// machine's Docker or one of the VMs, with Move back to this machine, and
+// Resume and Roll back for a move that was interrupted (its process ended,
+// or the machine slept).
+function computeInstanceSection(data, redraw) {
+  const instance = data.instance;
+  const id = "capacity-instance";
+  const error = el("p", { class: "form-error", role: "alert", id: `${id}-error`, hidden: true });
+  const progress = el("div", { id: `${id}-progress` });
+  const showError = (msg) => { error.textContent = msg; error.hidden = !msg; };
+  const where = data.local_compute ? "This machine's Docker"
+    : data.compute_machine ? `VM ${data.compute_machine}` : (data.engine && data.engine.message) || "A remote host";
+  const actions = el("div", { class: "card-actions", id: `${id}-actions` });
+  const whereNode = el("dd", { id: `${id}-where`, text: where });
+  // After a move the section says where the instance runs now; the outcome
+  // stays in view (a full redraw would drop it).
+  const refresh = async () => {
+    try {
+      const now = await computeJSON("/api/compute");
+      whereNode.textContent = now.local_compute ? "This machine's Docker" : now.compute_machine ? `VM ${now.compute_machine}` : where;
+      back.hidden = !!now.local_compute;
+      for (const b of actions.querySelectorAll(`#${id}-move-resume, #${id}-move-rollback, #${id}-move-interrupted`)) b.remove();
+      back.disabled = false;
+    } catch { /* the console is restarting; the next load reads it */ }
+  };
+  const post = async (label, path) => {
+    showError("");
+    try {
+      await computeJSON(path, { method: "POST", body: {} });
+    } catch (err) {
+      showError(`${label} failed: ${err.message}`);
+      return;
+    }
+    followMove(instance, progress, `${id}-move-steps`, showError).then(refresh);
+  };
+  const back = el("button", { type: "button", class: "secondary", id: `${id}-move-back`, text: "Move back to this machine",
+    onclick: () => confirmDestructive({
+      title: `Move ${instance} back to this machine`,
+      detail: `${instance} stops on ${data.compute_machine || "its host"}. Its cluster's state is copied to this machine's Docker, where it starts and is checked. ` +
+        "If any step fails, the move rolls back and the instance runs on the VM again. The VM is kept: stop or delete it afterwards.",
+      confirmLabel: "Move", consequence: "Nothing is removed from the VM until the instance runs here.", style: "confirm",
+      onConfirm: async () => post("Move", `/api/compute/moves/${encodeURIComponent(instance)}/back`),
+    }) });
+  back.hidden = !!data.local_compute;
+  actions.append(back);
+  const section = el("section", { class: "card", id, "aria-labelledby": `${id}-title` },
+    el("h2", { id: `${id}-title`, text: `Instance ${instance}` }),
+    el("dl", {}, el("dt", { text: "Runs on" }), whereNode),
+    actions, error, progress);
+  (async () => {
+    let st;
+    try {
+      st = await computeJSON(`/api/compute/moves/${encodeURIComponent(instance)}`);
+    } catch { return; }
+    if (!st || st.none) return;
+    if (st.interrupted) {
+      const resume = el("button", { type: "button", class: "primary", id: `${id}-move-resume`, text: "Resume move",
+        onclick: () => post("Resume", `/api/compute/moves/${encodeURIComponent(instance)}/resume`) });
+      const rollback = el("button", { type: "button", class: "secondary", id: `${id}-move-rollback`, text: "Roll back move",
+        onclick: () => confirmDestructive({
+          title: `Roll back the move of ${instance}`,
+          detail: `What the move made on ${st.to} is removed, and ${instance} starts where it ran before, with its state.`,
+          confirmLabel: "Roll back", consequence: "The copy made so far is lost; a new move starts from the beginning.", style: "confirm",
+          onConfirm: async () => post("Roll back", `/api/compute/moves/${encodeURIComponent(instance)}/rollback`),
+        }) });
+      actions.prepend(el("p", { class: "form-help", id: `${id}-move-interrupted`, role: "status",
+        text: `The move of ${instance} to ${st.to} was interrupted. Resume it from where it stopped, or roll it back.` }), resume, rollback);
+      back.disabled = true;
+      return;
+    }
+    // A move back here or a change of VM under way, or just finished (this
+    // page reloaded with the console's restart), is followed here; a move
+    // onto a VM, on that VM's card.
+    const onCard = st.kind !== "replace" && (data.machines || []).some((m) => m.instance === st.to);
+    if (!onCard && (!st.done || Date.now() - Date.parse(st.started) < 10 * 60 * 1000)) {
+      followMove(instance, progress, `${id}-move-steps`, showError);
+    }
+  })();
+  return section;
+}
+
+// computeMoveButton is the card's Move (#2209): this instance, running on
+// this machine's Docker or another VM, moves onto the VM. The move stops the instance's
+// up, which serves this page, so it runs in a process of its own and the
+// page follows its progress across the restart.
+function computeMoveButton(m, data, idp, busy, progress, showError, redraw) {
+  const instance = data.instance;
+  const usedByOther = m.used_by && m.used_by !== instance;
+  const here = !data.local_compute && data.compute_machine === m.instance;
+  const from = data.local_compute ? "this machine" : data.compute_machine || "its host";
+  const canMove = !here && m.state === "running" && !usedByOther;
+  const why = here ? `${instance} runs on this VM`
+    : m.state !== "running" ? "Start the VM first" : usedByOther ? `The VM is ${m.used_by}'s compute` : "";
+  const button = el("button", { type: "button", class: "secondary", id: `${idp}-move`, text: "Move instance here",
+    disabled: busy || !canMove, title: why || `Move ${instance} onto ${m.instance}`,
+    "aria-describedby": why ? `${idp}-move-why` : null,
+    onclick: () => confirmDestructive({
+      title: `Move ${instance} to ${m.instance}`,
+      detail: `${instance} stops on ${from}. Its cluster's state (the kind node, its volumes, and every container and volume of the instance) ` +
+        `is copied to ${m.instance} in ${CLOUD_TITLES[m.cloud]} ${m.region}, where it starts and is checked. ` +
+        `If any step fails, the move rolls back and the instance runs on ${from} again. An interrupted move resumes from where it stopped. The console restarts during the move.`,
+      confirmLabel: "Move", consequence: data.local_compute ? "Nothing is removed from this machine until the instance runs on the VM."
+        : `Nothing is removed from ${from} until the instance runs on ${m.instance}.`, style: "confirm",
+      onConfirm: async () => {
+        showError("");
+        try {
+          await computeJSON(`/api/compute/machines/${encodeURIComponent(m.instance)}/move`, { method: "POST", body: { instance } });
+        } catch (err) {
+          showError(`Move failed: ${err.message}`);
+          return;
+        }
+        followMove(instance, progress, `${idp}-move-steps`, showError).then(redraw);
+      },
+    }) });
+  // A move onto this VM under way (this page reloaded during it) is
+  // followed again.
+  (async () => {
+    try {
+      const st = await computeJSON(`/api/compute/moves/${encodeURIComponent(instance)}`);
+      if (st.to === m.instance && st.kind !== "replace" && !st.interrupted && (!st.done || Date.now() - Date.parse(st.started) < 10 * 60 * 1000)) {
+        followMove(instance, progress, `${idp}-move-steps`, showError);
+      }
+    } catch { /* no move */ }
+  })();
+  if (!why) return button;
+  return el("span", { class: "compute-move" }, button, el("span", { class: "sr-only", id: `${idp}-move-why`, text: why }));
+}
+
+// followMove draws a move's steps until it is done, waiting out the
+// console's own restart.
+async function followMove(instance, node, id, showError) {
+  const path = location.pathname;
+  const deadline = Date.now() + 3 * 60 * 60 * 1000;
+  let last = null;
+  while (Date.now() < deadline && location.pathname === path) {
+    let gap = "";
+    try {
+      last = await computeJSON(`/api/compute/moves/${encodeURIComponent(instance)}`);
+    } catch (err) {
+      gap = err.status === 401
+        ? "The instance restarted with a new admin token: reload the page and enter it to follow the move."
+        : "The console is restarting with the instance; this page reconnects when it is back.";
+    }
+    if (last) {
+      setChildren(node, el("ol", { class: "compute-events", id },
+        ...last.steps.map((s) => el("li", { "data-step": s.step },
+          statusIcon(s.step === "rollback" ? "Warning" : s.step === "done" ? "Succeeded" : "Pending"),
+          el("span", { class: "compute-event-step", text: s.step }),
+          el("span", { text: ` ${s.message}` })))),
+        gap ? el("p", { class: "muted", role: "status", id: `${id}-gap`, text: gap }) : null,
+        last.done ? el("p", { role: last.error ? "alert" : "status", class: last.error ? "form-error" : "", id: `${id}-outcome`,
+          text: last.kind === "delete" ? (last.error ? `The delete failed: ${last.error}` : `${last.to} and ${instance}'s data on it are deleted.`)
+            : last.interrupted ? `The ${last.kind === "replace" ? "change" : "move"} was interrupted: ${last.error || "its process ended"}. Resume it or roll it back.`
+            : last.error ? `The ${last.kind === "replace" ? "change" : "move"} failed${last.rolled_back ? " and was rolled back" : ""}: ${last.error}`
+              : `${instance} runs on ${last.to === "local" ? "this machine" : last.to}.` }) : null);
+      if (last.done) {
+        const what = last.kind === "replace" ? "Change of VM" : last.kind === "delete" ? "Delete" : "Move";
+        announce(last.kind === "delete" ? (last.error ? `Delete of ${last.to} failed` : `${last.to} deleted`)
+          : last.error ? `${what} of ${instance} failed` : `${instance} moved to ${last.to === "local" ? "this machine" : last.to}`);
+        if (last.error) showError(`${what} failed: ${last.error}`);
+        return last;
+      }
+    } else if (gap) {
+      setChildren(node, el("p", { class: "muted", role: "status", id: `${id}-gap`, text: gap }));
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  return last;
+}
+
+// computeFollow draws an operation's events into node until it is done.
+async function computeFollow(op, node, id) {
+  const path = location.pathname;
+  for (;;) {
+    setChildren(node, computeEventList(op, id));
+    if (op.done || location.pathname !== path) return op;
+    await new Promise((r) => setTimeout(r, 1000));
+    try {
+      op = await computeJSON(`/api/compute/operations/${encodeURIComponent(op.id)}`);
+    } catch {
+      return op;
+    }
+  }
+}
+
 const INSTANCE_DEADLINE_MS = 11 * 60 * 1000;
 
 function instanceToken() {
@@ -12346,10 +13743,260 @@ async function renderInstance(view) {
     return true;
   };
   setChildren(view, header(),
+    instanceComputeCard(refused),
     instanceSaveCard(info, refused),
     instanceLoadCard(info, instance, refused),
     instanceResetCard(info, refused),
-    instanceSeedCard(info, refused));
+    instanceSeedCard(info, refused),
+    await instanceClocksCard());
+  if (location.hash === "#clocks") {
+    const card = document.getElementById("instance-clocks-card");
+    if (card) card.scrollIntoView();
+  }
+}
+
+// instanceClocksCard is CloudBurrow's clock:advance calls (#2214), by the
+// UI parity rule: a service whose runs are hours apart (Agent Platform's
+// model deployment monitoring jobs and schedules) is reached by moving its
+// clock forward, never back. Each clock is its service's, of every
+// project. The calls need no admin token: the services' own clock:advance
+// endpoints take none.
+async function instanceClocksCard() {
+  let clocks = [];
+  let failure = "";
+  try {
+    const res = await fetch("/api/clocks", { headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error(`/api/clocks responded ${res.status}`);
+    clocks = (await res.json()).clocks || [];
+  } catch (err) {
+    failure = err.message;
+  }
+  const rows = clocks.map((c) => {
+    const id = `instance-clock-${c.id}`;
+    const input = el("input", { id: `${id}-duration`, type: "text", value: "1h", autocomplete: "off", spellcheck: "false",
+      "aria-describedby": `${id}-help` });
+    const result = instanceResult(`${id}-result`);
+    const error = el("p", { class: "form-error", role: "alert", id: `${id}-error`, hidden: true });
+    const button = el("button", { class: "primary", id: `${id}-advance`, text: `Advance ${c.title}` });
+    button.addEventListener("click", async () => {
+      error.hidden = true;
+      result.textContent = "";
+      setBusy(button, true);
+      const op = recordOperation(`Advance ${c.title} by ${input.value.trim()}`);
+      try {
+        const res = await fetch(`/api/clocks/${encodeURIComponent(c.id)}`, { method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ duration: input.value.trim() }) });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || `the console responded ${res.status}`);
+        op.succeeded(body.now);
+        result.textContent = `The ${c.title} is now ${body.now}, ${body.ahead} ahead of this machine's. The runs it passed have started.`;
+        notify(`Advanced the ${c.title} by ${body.advancedBy}`);
+      } catch (err) {
+        op.failed(err.message);
+        error.textContent = `The clock did not move: ${err.message}`;
+        error.hidden = false;
+      } finally {
+        setBusy(button, false);
+      }
+    });
+    return el("div", { class: "instance-clock", "data-clock": c.id },
+      el("h3", { text: c.title }),
+      el("div", { class: "form-row" },
+        el("label", { for: input.id, text: "Advance by" }), input,
+        el("p", { class: "form-help", id: `${id}-help`, text: `Days, hours, minutes and seconds, such as 1h, 7d or 1d12h. ${c.help}` })),
+      error,
+      el("div", { class: "form-actions" }, button),
+      result);
+  });
+  return el("section", { class: "card", id: "instance-clocks-card", "aria-labelledby": "instance-clocks-title" },
+    el("h2", { id: "instance-clocks-title", text: "Clocks" }),
+    el("p", { text: "CloudBurrow test extensions, not Google APIs: each moves a service's clock forward, and it can never be moved back. " +
+      "The clock is the whole instance's, for every project, and lives in memory: cloudburrow up starts it at this machine's time." }),
+    failure ? el("p", { class: "form-error", role: "alert", text: `The clocks could not be read: ${failure}` }) : null,
+    !failure && !rows.length ? el("p", { class: "muted", text: "No service on this instance has a clock to advance." }) : null,
+    ...rows);
+}
+
+// --- Mail (#2214) ------------------------------------------------------
+
+// The local mail sink's messages: Cloud Monitoring's email channels, Model
+// Monitoring's email alerts and whatever an application on the machine
+// sent to its SMTP address. It relays nothing, so no message here left the
+// machine.
+const MAIL_TITLE = "Mail";
+const MAIL_SUBTITLE = "Email that services and applications on this instance sent. The local mail sink keeps it here " +
+  "and delivers nothing off the machine.";
+
+const mailTime = (t) => (t ? new Date(t).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "medium" }) : "");
+
+async function renderMail(view, selected) {
+  const settings = document.getElementById("settings-panel");
+  if (settings && overlayOpen(settings)) {
+    hideOverlay(settings);
+    document.getElementById("settings").setAttribute("aria-expanded", "false");
+  }
+  const header = () => pageHeader(MAIL_TITLE, MAIL_SUBTITLE);
+  setChildren(view, header(), loadingState(4));
+  let data;
+  try {
+    const res = await fetch("/api/mail", { headers: { Accept: "application/json" } });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `/api/mail responded ${res.status}`);
+    data = body;
+  } catch (err) {
+    if (location.pathname !== "/mail") return;
+    setChildren(view, header(), errorState("Mail unavailable", err.message, () => renderMail(view)));
+    return;
+  }
+  if (location.pathname !== "/mail") return;
+  const msgs = data.messages || [];
+  const refresh = el("button", { class: "secondary", id: "mail-refresh", text: "Refresh" });
+  refresh.addEventListener("click", () => renderMail(view));
+  const clear = el("button", { class: "secondary danger", id: "mail-delete-all", text: "Delete all", disabled: !msgs.length });
+  clear.addEventListener("click", () => confirmDestructive({
+    title: "Delete every message", detail: `Deletes the ${msgs.length} messages the local mail sink holds.`,
+    confirmWord: "all", confirmLabel: "Delete all",
+    onConfirm: async () => {
+      const res = await fetch("/api/mail?all=true", { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `the console responded ${res.status}`);
+      notify("Deleted every message");
+      renderMail(view);
+    },
+  }));
+  const reader = el("section", { class: "card", id: "mail-message", "aria-live": "polite", hidden: true });
+  const open = async (m, row) => {
+    for (const r of view.querySelectorAll("#mail-list tbody tr")) r.removeAttribute("aria-selected");
+    if (row) row.setAttribute("aria-selected", "true");
+    reader.hidden = false;
+    setChildren(reader, loadingState(2));
+    try {
+      const res = await fetch(`/api/mail/${encodeURIComponent(m.id)}`, { headers: { Accept: "application/json" } });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `the console responded ${res.status}`);
+      const del = el("button", { class: "secondary danger", id: "mail-delete", text: "Delete" });
+      del.addEventListener("click", async () => {
+        const r = await fetch(`/api/mail?id=${encodeURIComponent(m.id)}`, { method: "DELETE" });
+        if (r.ok) {
+          notify(`Deleted "${m.subject || "(no subject)"}"`);
+          renderMail(view);
+        }
+      });
+      setChildren(reader,
+        el("h2", { id: "mail-message-subject", text: body.subject || "(no subject)" }),
+        el("dl", { class: "properties", id: "mail-message-headers" },
+          el("dt", { text: "From" }), el("dd", { text: body.from }),
+          el("dt", { text: "To" }), el("dd", { text: (body.to || []).join(", ") }),
+          el("dt", { text: "Received" }), el("dd", { text: mailTime(body.time) }),
+          el("dt", { text: "Sent by" }), el("dd", { text: body.source })),
+        el("pre", { class: "mail-text", id: "mail-message-text", tabindex: "0", "aria-label": "Message text", text: body.text || "" }),
+        el("details", {}, el("summary", { text: "Show original" }),
+          el("pre", { class: "mail-text", id: "mail-message-raw", "aria-label": "Original message", text: body.raw || "" })),
+        el("div", { class: "form-actions" }, del));
+    } catch (err) {
+      setChildren(reader, el("p", { class: "form-error", role: "alert", text: `The message could not be read: ${err.message}` }));
+    }
+  };
+  const rows = msgs.map((m) => {
+    const link = el("a", { href: `/mail#${m.id}`, text: m.subject || "(no subject)" });
+    const row = el("tr", { "data-id": m.id },
+      el("td", {}, link),
+      el("td", { text: m.from }),
+      el("td", { text: (m.to || []).join(", ") }),
+      el("td", { text: m.source }),
+      el("td", { text: mailTime(m.time) }));
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      history.replaceState(history.state, "", `/mail#${m.id}`);
+      open(m, row);
+    });
+    return row;
+  });
+  setChildren(view, header(),
+    el("section", { class: "card", id: "mail-smtp" },
+      el("h2", { text: "SMTP server" }),
+      el("p", { text: "An application on this machine can send mail here: plain SMTP with no TLS and no sign-in, " +
+        "on the loopback interface only." }),
+      el("dl", { class: "properties" },
+        el("dt", { text: "Address" }), el("dd", {}, el("code", { id: "mail-smtp-address", text: data.smtp || "-" })),
+        el("dt", { text: "Kept" }), el("dd", { text: `The newest ${data.limit} messages, in memory: they do not survive cloudburrow up's restart.` }))),
+    el("div", { class: "form-actions", id: "mail-actions" }, refresh, clear),
+    msgs.length
+      ? el("div", { class: "table-wrap" }, el("table", { class: "table", id: "mail-list" },
+          el("caption", { class: "sr-only", text: "Messages, newest first" }),
+          el("thead", {}, el("tr", {}, ...["Subject", "From", "To", "Sent by", "Received"].map((h) => el("th", { scope: "col", text: h })))),
+          el("tbody", {}, ...rows)))
+      : el("p", { class: "muted", id: "mail-empty", text: "No mail yet. Cloud Monitoring's email channels and Model Monitoring's email alerts arrive here." }),
+    reader);
+  const want = selected || decodeURIComponent(location.hash.slice(1));
+  const pick = msgs.find((m) => m.id === want);
+  if (pick) open(pick, rows[msgs.indexOf(pick)]);
+}
+
+// instanceComputeCard says where the instance's compute runs (#2209): this
+// machine's Docker, or a remote host over SSH, with its size and the
+// connection's state. Reconnect needs the admin token, like the cards below.
+function instanceComputeCard(refused) {
+  const body = el("div", { id: "instance-compute-body" }, el("p", { class: "muted", text: "Loading…" }));
+  const result = instanceResult("instance-compute-result");
+  const error = el("p", { class: "form-error", role: "alert", id: "instance-compute-error", hidden: true });
+  const button = el("button", { id: "instance-compute-reconnect", text: "Reconnect", hidden: true });
+  const row = (label, value, id) => [el("dt", { text: label }), el("dd", { id, text: value })];
+  const fill = (c) => {
+    if (c.location !== "ssh") {
+      setChildren(body, el("dl", { class: "info-fields", id: "instance-compute-details" },
+        ...row("Location", "This machine", "instance-compute-location"),
+        ...row("Runs on", "This machine's Docker", "instance-compute-target")));
+      button.hidden = true;
+      return;
+    }
+    const h = c.host || {};
+    setChildren(body, el("dl", { class: "info-fields", id: "instance-compute-details" },
+      ...row("Location", "Remote host over SSH", "instance-compute-location"),
+      ...row("Runs on", c.target || "", "instance-compute-target"),
+      ...row("Size", c.size || "unknown", "instance-compute-size"),
+      ...row("System", [h.os, h.arch, h.dockerVersion ? `Docker ${h.dockerVersion}` : ""].filter(Boolean).join(", "), "instance-compute-system"),
+      ...row("Connection", c.connected ? "Connected" : `Reconnecting${c.lastError ? `: ${c.lastError}` : ""}`, "instance-compute-state"),
+      ...row("Reconnects", String(c.reconnects || 0), "instance-compute-reconnects"),
+      ...row("Forwarded ports", (c.published || []).join(", ") || "none", "instance-compute-ports")));
+    button.hidden = false;
+  };
+  const load = async () => {
+    try {
+      const res = await fetch("/api/instance/compute", { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error(`/api/instance/compute responded ${res.status}`);
+      fill(await res.json());
+    } catch (err) {
+      setChildren(body, el("p", { class: "form-error", text: `Where the compute runs is unknown: ${err.message}` }));
+    }
+  };
+  button.addEventListener("click", async () => {
+    error.hidden = true;
+    result.textContent = "";
+    setBusy(button, true);
+    const op = recordOperation("Reconnect compute host");
+    try {
+      fill(await (await instanceFetch("/api/instance/compute/reconnect", { method: "POST", deadline: INSTANCE_DEADLINE_MS })).json());
+      op.succeeded("compute host");
+      result.textContent = "Reconnected.";
+    } catch (err) {
+      op.failed(err.message, err.operation);
+      if (refused(err)) return;
+      error.textContent = `The connection was not re-established: ${err.message}`;
+      error.hidden = false;
+    } finally {
+      setBusy(button, false);
+    }
+  });
+  load();
+  return el("section", { class: "card", id: "instance-compute-card", "aria-labelledby": "instance-compute-title" },
+    el("h2", { id: "instance-compute-title", text: "Compute" }),
+    el("p", { text: "Where this instance's cluster and containers run. The console, the APIs and the metadata server always run on this machine." }),
+    body,
+    error,
+    el("div", { class: "form-actions" }, button),
+    result);
 }
 
 // instanceResult is a card's outcome line.
@@ -12646,6 +14293,14 @@ function renderInstanceToken(view, err) {
       el("div", { class: "form-actions" }, el("button", { type: "submit", class: "primary", text: "Use token" }))));
   input.focus();
   announce("Admin token required");
+  // The clocks need no token (#2214): they are offered below the form.
+  instanceClocksCard().then((card) => {
+    if (location.pathname === "/instance" && document.getElementById("instance-token-form") &&
+      !document.getElementById("instance-clocks-card")) {
+      view.append(card);
+      if (location.hash === "#clocks") card.scrollIntoView();
+    }
+  });
 }
 
 // syncStickyOffsets measures the pinned blocks so the ones below them know
@@ -12773,6 +14428,18 @@ function openHref(href) {
   const url = new URL(href, location.origin);
   if (url.origin !== location.origin) return void window.open(url.href, "_blank", "noopener");
   return navigate(href);
+}
+
+// openMinted opens, in a new window, the page a console route answers a
+// one-time link to (Action.OpenWindow, #2198): Workbench's Open JupyterLab
+// opens the instance's JupyterLab on its proxy host.
+async function openMinted(path) {
+  try {
+    const r = await api(path, { method: "POST" });
+    if (r.url) window.open(r.url, "_blank", "noopener");
+  } catch (err) {
+    notify(err.message, "error");
+  }
 }
 
 function navigate(path) {
@@ -28387,7 +30054,7 @@ function btSaveDialog({ title, label, value, regions, submit }) {
 // scan", "Stream aggregate", "Distributed union".
 function spannerOpName(n) {
   const m = n.meta || {};
-  if (n.name === "Scan") return { TableScan: "Table scan", IndexScan: "Index scan", BatchScan: "Batch scan" }[m.scan_type] || "Scan";
+  if (n.name === "Scan") return { TableScan: "Table scan", IndexScan: "Index scan", BatchScan: "Batch scan", RecursiveSpoolScan: "Recursive spool scan" }[m.scan_type] || "Scan";
   if (n.name === "Aggregate" && m.iterator_type) return `${m.iterator_type} aggregate`;
   return n.name.charAt(0) + n.name.slice(1).toLowerCase();
 }
@@ -28461,6 +30128,25 @@ function spannerExplanation(r) {
       kids.length ? el("ul", { role: "group" }, ...kids.map((k) => subtree(k.node, k.type))) : null);
   };
   const st = r.stats || {};
+  // Query execution timeline: how long each machine group ran its part of
+  // the query, from the start of its first run to the end of its last
+  // (Google's visualizer page). A machine group is the root server and each
+  // remote call's servers; the engine runs every table in one split, so a
+  // Distributed union makes only its local call and the root group runs the
+  // whole query, for the query's elapsed time.
+  const timeline = () => {
+    if (!st.elapsedTime) return null;
+    const total = num(st.elapsedTime);
+    const ms = (v) => (v < 1 ? "<1 ms" : `${v.toFixed(2)} ms`);
+    const groups = [{ name: "Root", start: 0, end: total }];
+    return el("section", { class: "spanner-query-timeline", id: "spanner-query-timeline", "aria-label": "Query execution timeline" },
+      el("h4", { text: "Query execution timeline" }),
+      el("ol", { class: "spanner-timeline-rows" }, ...groups.map((g) => el("li", { class: "spanner-timeline-row" },
+        el("span", { class: "spanner-timeline-name", text: g.name }),
+        el("span", { class: "spanner-timeline-track", "aria-hidden": "true" },
+          el("span", { class: "spanner-plan-bar", style: `margin-left:${total ? Math.round(100 * g.start / total) : 0}%;width:${Math.max(4, total ? Math.round(100 * (g.end - g.start) / total) : 100)}%` })),
+        el("span", { class: "mono spanner-timeline-span", text: `${ms(g.start)} to ${ms(g.end)}` })))));
+  };
   const summary = () => el("section", { class: "spanner-query-summary", id: "spanner-query-summary", "aria-label": "Query summary" },
     el("h3", { text: "Query summary" }),
     el("dl", { class: "resource-summary" },
@@ -28475,6 +30161,7 @@ function spannerExplanation(r) {
         ["Highest row count", top.rows, (n) => n.stats.rows]].filter(([, n]) => n)
         .flatMap(([k, n, v]) => [el("dt", { text: k }), el("dd", {}, el("button", { type: "button", class: "link-button",
           "aria-label": `${k}: ${spannerOpName(n)}`, text: `${v(n)} (${spannerOpName(n)})`, onclick: () => select(n) }))])) : null,
+    timeline(),
     r.planNote ? el("p", { class: "unavailable", id: "spanner-plan-note", text: r.planNote }) : null);
   const iterator = (n) => {
     const m = n.meta || {};
@@ -28528,7 +30215,9 @@ function spannerExplanation(r) {
       el("aside", { class: "spanner-plan-side" }, download, info)));
 }
 
-const STUDIO_SECTIONS = { spanner: renderSpannerStudio, "bigtable-instances": renderBigtableStudio };
+const STUDIO_SECTIONS = { spanner: renderSpannerStudio, "bigtable-instances": renderBigtableStudio,
+  "cloudsql-instances": (panel, route, segments, project) => renderDBStudio(panel, route, segments, project, "cloudsql"),
+  alloydb: (panel, route, segments, project) => renderDBStudio(panel, route, segments, project, "alloydb") };
 
 function renderSpannerStudio(panel, route, segments, project) {
   const [instance, database] = segments;
@@ -28548,6 +30237,29 @@ function renderSpannerStudio(panel, route, segments, project) {
   const editor = el("textarea", { class: "mono spanner-editor", id: "spanner-editor", rows: "10", spellcheck: "false",
     "aria-label": "Query editor", placeholder: "SELECT * FROM ..." });
   const run = el("button", { class: "primary", id: "spanner-run", type: "button", text: "Run" });
+  // Run's drop-down, as Google's Spanner Studio has it: Run produces the
+  // results and the explanation (PROFILE mode) unless it is changed to
+  // Results only (NORMAL mode) or Explanation only (PLAN mode).
+  const modeKey = `cb.spanner.studio.runmode.${project}`;
+  let runMode = "both";
+  try { runMode = sessionStorage.getItem(modeKey) || "both"; } catch { /* per-page only */ }
+  const runModes = [["both", "Results and explanation"], ["results", "Results only"], ["explanation", "Explanation only"]];
+  if (!runModes.some(([id]) => id === runMode)) runMode = "both";
+  const setRunMode = (m) => {
+    runMode = m;
+    try { sessionStorage.setItem(modeKey, m); } catch { /* per-page only */ }
+    run.textContent = m === "both" ? "Run" : `Run (${runModes.find(([id]) => id === m)[1].toLowerCase()})`;
+  };
+  const runMenu = bqMenu("Run options", runModes.map(([id, label]) => ({ label, checked: () => runMode === id, run: () => setRunMode(id) })));
+  {
+    const b = runMenu.querySelector("button");
+    b.classList.remove("icon-button", "bq-node-menu");
+    b.classList.add("primary", "spanner-run-options");
+    b.id = "spanner-run-options";
+    b.setAttribute("title", "Run options");
+    b.textContent = "▾";
+  }
+  setRunMode(runMode);
   const explain = el("button", { class: "secondary", id: "spanner-explain", type: "button", text: "Explain" });
   const clear = el("button", { class: "secondary", id: "spanner-clear", type: "button", text: "Clear" });
   const resultTabs = el("div", { class: "tab-strip spanner-result-tabs", role: "tablist", "aria-label": "Query results" });
@@ -28603,11 +30315,12 @@ function renderSpannerStudio(panel, route, segments, project) {
   const execute = async (write = false) => {
     const sql = editor.value.trim();
     if (!sql) return;
+    if (runMode === "explanation" && !write) { last.results = null; return explainQuery(run); }
     setBusy(run, true);
     resultTab = "results"; drawResultTabs();
     setChildren(results, el("p", { class: "unavailable" }, spinner("Running"), " Running…"));
     try {
-      const res = await call("run", { sql, write });
+      const res = await call("run", { sql, write, mode: runMode === "results" ? "results" : "" });
       if (res.confirm) {
         setBusy(run, false);
         setChildren(results);
@@ -28618,7 +30331,7 @@ function renderSpannerStudio(panel, route, segments, project) {
       last.results = res;
       // Run is PROFILE mode: its plan and statistics are the Explanation
       // tab's.
-      if (res.kind === "query") last.explanation = res;
+      if (res.kind === "query") last.explanation = runMode === "results" ? null : res;
       if (res.kind !== "query") loadExplorer();
       announce(res.kind === "query" ? `Query complete: ${(res.rows || []).length} rows` : (res.message || "Done"));
     } catch (err) {
@@ -28629,19 +30342,23 @@ function renderSpannerStudio(panel, route, segments, project) {
     drawResults();
   };
   run.addEventListener("click", () => execute());
-  explain.addEventListener("click", async () => {
+  // Explain, and Run set to Explanation only: the query's plan (PLAN
+  // mode), on the Explanation tab.
+  const explainQuery = async (button) => {
     const sql = editor.value.trim();
     if (!sql) return;
-    setBusy(explain, true);
+    setBusy(button, true);
     try {
       last.explanation = await call("explain", { sql });
+      announce("Explanation ready");
     } catch (err) {
       last.explanation = { error: err.message };
     } finally {
-      setBusy(explain, false);
+      setBusy(button, false);
     }
     resultTab = "explanation"; drawResultTabs(); drawResults();
-  });
+  };
+  explain.addEventListener("click", () => explainQuery(explain));
   clear.addEventListener("click", () => { editor.value = ""; tabs[current].sql = ""; save(); editor.focus(); });
 
   const quote = (dialect, n) => (dialect === "POSTGRESQL" ? `"${n.replaceAll('"', '""')}"` : `\`${n.replaceAll("`", "\\`")}\``);
@@ -28689,11 +30406,392 @@ function renderSpannerStudio(panel, route, segments, project) {
     el("div", { class: "spanner-workspace" },
       strip,
       editor,
-      el("div", { class: "action-bar spanner-editor-actions" }, run, explain, clear),
+      el("div", { class: "action-bar spanner-editor-actions" }, el("span", { class: "spanner-run-split" }, run, runMenu), explain, clear),
       resultTabs,
       results)));
   loadExplorer();
 }
+// --- Cloud SQL Studio and AlloyDB Studio (#2208) ---------------------------
+//
+// An instance's Cloud SQL Studio and a cluster's AlloyDB Studio, as Google's
+// console draws them (https://docs.cloud.google.com/sql/docs/postgres/manage-data-using-studio,
+// https://docs.cloud.google.com/alloydb/docs/manage-data-using-studio): the
+// sign-in dialog (Database; Built-in database authentication with a User
+// and its Password, or IAM database authentication), the Explorer of the
+// database's schemas, tables (columns and indexes), views, sequences,
+// functions and procedures, each table with View actions that fill the
+// editor, and the saved queries; the editor's tabs (Editor 1, ...) with
+// Run, Run selected, Clear, Save and Save as; and the Results, with All
+// results when a script returns several, and Export. Ctrl+Enter (Command+
+// Enter) runs. The calls are the provider's Studio (consoledbstudio.go): the
+// sign-in is held there, and the page keeps only its session ID.
+
+const DBS_SAVED_NOTE = "CloudBurrow-only: Google keeps a saved query as a Studio asset of the project, which CloudBurrow does not serve. " +
+  "This one is kept in the instance's state directory, listed under Saved queries in the Explorer, and reachable by no API.";
+
+function renderDBStudio(panel, route, segments, project, product) {
+  const instance = segments[0];
+  const service = route.service;
+  const title = product === "alloydb" ? "AlloyDB Studio" : "Cloud SQL Studio";
+  const call = (name, body = {}) => send(
+    `/api/studio/${encodeURIComponent(service)}?project=${encodeURIComponent(project)}&call=${name}`, "POST", { instance, ...body });
+  const sessionKey = `cb.dbstudio.session.${service}.${project}.${instance}`;
+  const tabsKey = `cb.dbstudio.tabs.${service}.${project}.${instance}`;
+  const readJSON = (k, fallback) => { try { return JSON.parse(sessionStorage.getItem(k) || "null") ?? fallback; } catch { return fallback; } };
+  const writeJSON = (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch { /* this tab only */ } };
+  let session = readJSON(sessionKey, null);
+  let store = readJSON(tabsKey, null);
+  if (!store || !Array.isArray(store.tabs) || !store.tabs.length) store = { tabs: [{ title: "Editor 1", sql: "" }], current: 0, next: 2 };
+  store.current = Math.min(Math.max(0, store.current | 0), store.tabs.length - 1);
+  const saveTabs = () => writeJSON(tabsKey, store);
+  let saved = [];
+  let catalog = null;
+  const lastOf = new Map();
+
+  // --- the sign-in dialog -------------------------------------------------
+  const signIn = async () => {
+    let options;
+    try {
+      options = await call("options");
+    } catch (err) {
+      setChildren(panel, el("div", { class: "dbs-signed-out", id: "dbs-signed-out" },
+        el("h2", { text: title }), el("p", { class: "form-error", role: "alert", id: "dbs-options-error", text: err.message })));
+      return;
+    }
+    const { dialog, close } = openModal({ labelledBy: "dbs-signin-title" });
+    const database = el("select", { id: "dbs-database", required: true },
+      el("option", { value: "", text: "Select a database" }),
+      ...(options.databases || []).map((d) => el("option", { value: d, text: d })));
+    if ((options.databases || []).includes(session?.database)) database.value = session.database;
+    const builtIn = (options.users || []).filter((u) => !/IAM/.test(u.type));
+    const user = el("select", { id: "dbs-user" },
+      el("option", { value: "", text: "Select a user" }),
+      ...builtIn.map((u) => el("option", { value: u.name, text: u.name })));
+    const password = el("input", { type: "password", id: "dbs-password", autocomplete: "current-password" });
+    const method = (value, label, checked) => el("label", { class: "check-line" },
+      el("input", { type: "radio", name: "dbs-auth", value, id: `dbs-auth-${value}`, checked: checked || null }), el("span", { text: label }));
+    const builtInBox = el("div", { id: "dbs-builtin" },
+      el("label", { for: "dbs-user", text: "User" }), user,
+      el("label", { for: "dbs-password", text: "Password" }), password);
+    const iamBox = el("div", { id: "dbs-iam", hidden: true },
+      el("p", { class: "form-help", id: "dbs-iam-principal",
+        text: options.iamPrincipal
+          ? `Signs in as ${options.iamPrincipal}, the principal this console uses. It must be an IAM user of the ${product === "alloydb" ? "cluster" : "instance"}.`
+          : "This console has no principal to sign in as." }));
+    const error = el("p", { class: "form-error", role: "alert", id: "dbs-signin-error", hidden: true });
+    const submit = el("button", { type: "submit", class: "primary", id: "dbs-authenticate", text: "Authenticate" });
+    const iam = () => dialog.querySelector("input[name=dbs-auth]:checked")?.value === "iam";
+    const form = el("form", { class: "modal-body", novalidate: true, onsubmit: async (e) => {
+      e.preventDefault();
+      error.hidden = true;
+      const fail = (msg, focus) => { error.textContent = msg; error.hidden = false; focus?.focus(); };
+      if (!database.value) return fail("Select a database.", database);
+      if (!iam() && !user.value) return fail("Select a user.", user);
+      setBusy(submit, true);
+      try {
+        const res = await call("signin", { database: database.value, user: user.value, password: password.value, iam: iam() });
+        // Switch user/database ends the sign-in it replaces.
+        if (session && session.session) call("signout", { session: session.session }).catch(() => {});
+        session = { session: res.session, database: res.database, user: res.user, engine: res.engine };
+        writeJSON(sessionKey, session);
+        close();
+        announce(`Signed in to ${res.database} as ${res.user}`);
+        drawStudio();
+      } catch (err) {
+        setBusy(submit, false);
+        fail(err.message, iam() ? database : password);
+      }
+    } },
+    el("h2", { id: "dbs-signin-title", text: `Sign in to ${title}` }),
+    el("p", { class: "form-help", text: `Sign in to ${title} using the name of your database, username, and password, or IAM database authentication.` }),
+    error,
+    el("label", { for: "dbs-database", text: "Database" }), database,
+    el("fieldset", { class: "dbs-auth", id: "dbs-auth" },
+      el("legend", { text: "Authentication" }),
+      method("builtin", "Built-in database authentication", true),
+      method("iam", "IAM database authentication", false)),
+    builtInBox, iamBox,
+    el("div", { class: "modal-actions" },
+      el("button", { type: "button", class: "secondary", id: "dbs-cancel", text: "Cancel", onclick: () => close() }), submit));
+    form.addEventListener("change", (e) => {
+      if (e.target.name !== "dbs-auth") return;
+      builtInBox.hidden = iam();
+      iamBox.hidden = !iam();
+    });
+    dialog.append(form);
+    database.focus();
+    dialog.addEventListener("cb-closed", () => { if (!session) drawSignedOut(); });
+  };
+  const drawSignedOut = () => setChildren(panel, el("div", { class: "dbs-signed-out", id: "dbs-signed-out" },
+    el("h2", { text: title }),
+    el("p", { text: "Sign in to a database to explore its objects and run queries." }),
+    el("button", { type: "button", class: "primary", id: "dbs-signin", text: "Sign in", onclick: () => signIn() })));
+  const signOut = async () => {
+    const s = session;
+    session = null;
+    try { sessionStorage.removeItem(sessionKey); } catch { /* none */ }
+    if (s) { try { await call("signout", { session: s.session }); } catch { /* gone already */ } }
+  };
+
+  // --- the Studio ---------------------------------------------------------
+  const drawStudio = () => {
+    let state = store.tabs[store.current];
+    const explorer = el("nav", { class: "spanner-explorer dbs-explorer", id: "dbs-explorer", "aria-label": "Explorer" },
+      el("h3", { text: "Explorer" }), loadingState(3, { what: "explorer" }));
+    const strip = el("div", { class: "tab-strip spanner-editor-tabs", id: "dbs-editor-tabs", role: "tablist", "aria-label": "Editor tabs" });
+    const editor = el("textarea", { class: "mono spanner-editor", id: "dbs-editor", rows: "10", spellcheck: "false",
+      "aria-label": "Query editor", placeholder: session.engine === "MYSQL" ? "SELECT * FROM my_table;" : "SELECT * FROM public.my_table;" });
+    const run = el("button", { class: "primary", id: "dbs-run", type: "button", text: "Run", title: "Run all statements (Ctrl+Enter)" });
+    const runSelected = el("button", { class: "secondary", id: "dbs-run-selected", type: "button", text: "Run selected",
+      title: "Run the highlighted statements" });
+    const clear = el("button", { class: "secondary", id: "dbs-clear", type: "button", text: "Clear" });
+    const saveButton = el("button", { class: "secondary", id: "dbs-save", type: "button", text: "Save" });
+    const saveAs = bqMenu("Save as", [{ label: "Save as new query", run: () => saveQuery(true) }]);
+    bqMenuButton(saveAs, "Save as", "Save as a new query");
+    saveAs.querySelector("button").id = "dbs-save-as";
+    const savedNote = el("p", { class: "unavailable", id: "dbs-saved-note", text: DBS_SAVED_NOTE, hidden: true });
+    const results = el("section", { class: "spanner-results dbs-results", id: "dbs-results", "aria-label": "Results" });
+
+    const exportAs = (r, kind) => {
+      const cols = r.columns || [];
+      const cell = (v) => (v === null || v === undefined ? "" : String(v));
+      const csv = [cols, ...(r.rows || [])].map((row) => row.map((v) => `"${cell(v).replaceAll('"', '""')}"`).join(",")).join("\n");
+      if (kind === "clipboard") {
+        navigator.clipboard?.writeText(csv).then(() => announce("Copied to clipboard"), () => announce("Copy failed"));
+        return;
+      }
+      const body = kind === "json" ? JSON.stringify((r.rows || []).map((row) => Object.fromEntries(cols.map((c, i) => [c, row[i]]))), null, 2) : csv;
+      const a = el("a", { href: URL.createObjectURL(new Blob([body], { type: kind === "json" ? "application/json" : "text/csv" })),
+        download: `results.${kind}` });
+      document.body.append(a); a.click(); a.remove();
+    };
+    const drawResults = () => {
+      const last = lastOf.get(state);
+      if (!last) return setChildren(results, el("h3", { text: "Results" }), el("p", { class: "unavailable", text: "Run a statement to see its results." }));
+      if (last.error) {
+        return setChildren(results, el("h3", { text: "Results" }),
+          el("p", { class: "form-error", role: "alert", id: "dbs-error", text: last.error }),
+          last.elapsed ? el("p", { class: "unavailable", text: `(${last.elapsed})` }) : null);
+      }
+      const all = last.results || [];
+      if (!all.length) {
+        return setChildren(results, el("h3", { text: "Results" }),
+          el("p", { class: "spanner-message", id: "dbs-message", text: `${last.message || "Statement executed successfully"} (${last.elapsed})` }));
+      }
+      const pick = Math.min(last.pick || 0, all.length - 1);
+      const r = all[pick];
+      const choose = all.length > 1 ? el("select", { id: "dbs-all-results", "aria-label": "All results",
+        onchange: (e) => { last.pick = Number(e.target.value); drawResults(); } },
+      ...all.map((x, i) => el("option", { value: String(i), text: `Result ${i + 1} (${(x.rows || []).length} rows)`, selected: i === pick || null }))) : null;
+      const exportMenu = bqMenu("Export", [
+        { label: "Export to CSV", run: () => exportAs(r, "csv") },
+        { label: "Export to JSON", run: () => exportAs(r, "json") },
+        { label: "Copy to clipboard", run: () => exportAs(r, "clipboard") },
+      ]);
+      bqMenuButton(exportMenu, "Export", "Export results");
+      exportMenu.querySelector("button").id = "dbs-export";
+      setChildren(results, el("h3", { text: "Results" }),
+        el("div", { class: "action-bar" },
+          choose,
+          el("p", { class: "spanner-message", id: "dbs-message",
+            text: `${(r.rows || []).length} rows (${last.elapsed})${r.partial ? ": partial results" : ""}${last.message ? `. ${last.message}` : ""}` }),
+          exportMenu),
+        el("div", { class: "table-wrap" }, el("table", { id: "dbs-results-table" },
+          el("thead", {}, el("tr", {}, ...(r.columns || []).map((c) => el("th", { scope: "col", text: c })))),
+          el("tbody", {}, ...(r.rows || []).map((row) => el("tr", {}, ...row.map((v) =>
+            el("td", { class: "mono" + (v === null ? " is-null" : ""), text: v === null ? "NULL" : v }))))))));
+    };
+    const execute = async (button, sql) => {
+      if (!sql.trim()) { notify("The editor is empty: write a statement to run.", "error"); editor.focus(); return; }
+      const tab = state;
+      setBusy(button, true);
+      setChildren(results, el("h3", { text: "Results" }), el("p", { class: "unavailable" }, spinner("Running"), " Running…"));
+      let res;
+      try {
+        res = await call("run", { session: session.session, sql });
+        announce(res.error ? `Query failed: ${res.error}` : `Query complete${(res.results || []).length ? `: ${res.results[0].rows.length} rows` : ""}`);
+      } catch (err) {
+        if (/signed out/.test(err.message)) { await signOut(); signIn(); return; }
+        res = { error: err.message };
+      } finally {
+        setBusy(button, false);
+      }
+      lastOf.set(tab, res);
+      if (tab === state) drawResults();
+      if (!res.error && /\b(CREATE|DROP|ALTER|RENAME)\b/i.test(sql)) loadExplorer();
+    };
+    run.addEventListener("click", () => execute(run, editor.value));
+    runSelected.addEventListener("click", () => {
+      const sel = editor.value.slice(editor.selectionStart, editor.selectionEnd);
+      if (!sel.trim()) { notify("Highlight the statements to run.", "error"); editor.focus(); return; }
+      execute(runSelected, sel);
+    });
+    editor.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); execute(run, editor.value); }
+    });
+    editor.addEventListener("input", () => { state.sql = editor.value; saveTabs(); });
+    clear.addEventListener("click", () => { editor.value = ""; state.sql = ""; saveTabs(); editor.focus(); });
+
+    const drawTabs = () => setChildren(strip, ...store.tabs.map((t, i) => el("span", { class: "spanner-editor-tab" },
+      el("button", { class: "tab" + (i === store.current ? " is-selected" : ""), role: "tab", type: "button",
+        "aria-selected": i === store.current ? "true" : "false", text: t.title, onclick: () => selectTab(i) }),
+      store.tabs.length > 1 ? el("button", { class: "icon-button", type: "button", "aria-label": `Close ${t.title}`, text: "×",
+        onclick: () => {
+          lastOf.delete(t);
+          store.tabs.splice(i, 1);
+          selectTab(Math.min(store.current >= i && store.current > 0 ? store.current - 1 : store.current, store.tabs.length - 1));
+        } }) : null)),
+    el("button", { class: "icon-button", id: "dbs-new-tab", type: "button", "aria-label": "New editor tab", title: "New editor tab", text: "+",
+      onclick: () => openTab("") }));
+    const selectTab = (i) => {
+      store.current = i;
+      state = store.tabs[i];
+      saveTabs();
+      editor.value = state.sql || "";
+      savedNote.hidden = !state.savedId;
+      drawTabs();
+      drawResults();
+    };
+    const openTab = (sql, extra = {}) => {
+      store.tabs.push({ title: `Editor ${store.next || store.tabs.length + 1}`, sql, ...extra });
+      store.next = (store.next || store.tabs.length) + 1;
+      selectTab(store.tabs.length - 1);
+      editor.focus();
+    };
+
+    // --- saved queries ---
+    const savedGroup = el("div", { id: "dbs-explorer-saved" });
+    const saveQuery = async (asNew) => {
+      if (!editor.value.trim()) { notify("The editor is empty: write a query to save.", "error"); editor.focus(); return; }
+      if (state.savedId && !asNew) {
+        try {
+          const sq = await call("savequery", { id: state.savedId, name: state.title, sql: editor.value });
+          notify(`Saved query ${sq.name}`);
+          await loadSaved();
+        } catch (err) {
+          notify(`Save query failed: ${err.message}`, "error");
+        }
+        return;
+      }
+      const sq = await btSaveDialog({ title: asNew ? "Save as new query" : "Save query", label: "Query name",
+        value: state.savedId ? `Copy of ${state.title}` : "",
+        submit: (name) => call("savequery", { name, sql: editor.value }) });
+      if (!sq) return;
+      state.savedId = sq.id;
+      state.title = sq.name;
+      saveTabs();
+      drawTabs();
+      savedNote.hidden = false;
+      notify(`Saved query ${sq.name}`);
+      await loadSaved();
+    };
+    const openSaved = (sq) => {
+      const at = store.tabs.findIndex((t) => t.savedId === sq.id);
+      if (at >= 0) { store.tabs[at].sql = sq.query; selectTab(at); return; }
+      openTab(sq.query, { title: sq.name, savedId: sq.id });
+    };
+    const deleteSaved = async (sq) => {
+      await confirmDestructive({ title: "Delete query", detail: sq.name, style: "confirm",
+        consequence: "The saved query is deleted. Editor tabs that hold it keep their text.",
+        onConfirm: () => call("deletequery", { id: sq.id }) });
+      await loadSaved();
+    };
+    const loadSaved = async () => {
+      try {
+        saved = (await call("savedqueries")).queries || [];
+        for (const t of store.tabs) if (t.savedId && !saved.some((x) => x.id === t.savedId)) delete t.savedId;
+        savedNote.hidden = !state.savedId;
+        setChildren(savedGroup, el("details", { class: "spanner-explorer-group", open: true },
+          el("summary", { text: `Saved queries (${saved.length})` }),
+          saved.length ? el("ul", {}, ...saved.map((sq) => el("li", { class: "bigtable-saved-query" },
+            el("button", { class: "link-button", type: "button", text: sq.name, title: `Open query ${sq.name}`, onclick: () => openSaved(sq) }),
+            bqMenu(`View actions for ${sq.name}`, [
+              { label: "Open query", run: () => openSaved(sq) },
+              { label: "Delete query", danger: true, run: () => deleteSaved(sq) },
+            ])))) : el("p", { class: "unavailable", text: "No saved queries" })));
+      } catch (err) {
+        setChildren(savedGroup, el("p", { class: "unavailable", text: `Saved queries: ${err.message}` }));
+      }
+    };
+
+    // --- the Explorer ---
+    const mysql = session.engine === "MYSQL";
+    const quote = (n) => (mysql ? `\`${n.replaceAll("`", "``")}\`` : `"${n.replaceAll('"', '""')}"`);
+    const qualified = (schema, n) => (mysql ? quote(n) : `${quote(schema)}.${quote(n)}`);
+    const group = (label, items, row) => el("details", { class: "spanner-explorer-group" },
+      el("summary", { text: `${label} (${items.length})` }),
+      items.length ? el("ul", {}, ...items.map(row)) : el("p", { class: "unavailable", text: `No ${label.toLowerCase()}` }));
+    const tableRow = (schema, isView) => (t) => {
+      const name = qualified(schema, t.name);
+      const cols = (t.columns || []).map((c) => quote(c[0]));
+      const actions = [{ label: "SELECT", run: () => openTab(`SELECT\n  ${cols.join(",\n  ") || "*"}\nFROM\n  ${name}\nLIMIT\n  1000;`) }];
+      if (!isView) {
+        actions.push(
+          { label: "INSERT", run: () => openTab(`INSERT INTO ${name} (${cols.join(", ")})\nVALUES\n  (${(t.columns || []).map((c) => `/* ${c[1]} */`).join(", ")});`) },
+          { label: "UPDATE", run: () => openTab(`UPDATE ${name}\nSET\n  ${cols.map((c) => `${c} = /* value */`).join(",\n  ")}\nWHERE\n  /* condition */;`) },
+          { label: "DELETE", run: () => openTab(`DELETE FROM ${name}\nWHERE\n  /* condition */;`) });
+      }
+      actions.push({ label: "DROP", danger: true, run: () => openTab(`DROP ${isView ? (t.kind === "materialized view" ? "MATERIALIZED VIEW" : "VIEW") : "TABLE"} ${name};`) });
+      return el("li", { class: "spanner-explorer-table" },
+        el("details", {},
+          el("summary", {}, el("span", { class: "mono", text: t.name }), t.kind ? el("span", { class: "unavailable", text: ` ${t.kind}` }) : null,
+            bqMenu(`View actions for ${t.name}`, actions)),
+          el("ul", { class: "spanner-columns" },
+            el("li", { class: "dbs-explorer-heading", text: "Columns" }),
+            ...(t.columns || []).map((c) => el("li", {}, el("span", { class: "mono", text: c[0] }), el("span", { class: "unavailable", text: ` ${c[1]}` }))),
+            ...((t.indexes || []).length ? [el("li", { class: "dbs-explorer-heading", text: "Indexes and keys" }),
+              ...t.indexes.map((i) => el("li", { class: "mono", text: i }))] : []))));
+    };
+    const routineRow = (schema, kind) => (n) => el("li", {}, el("button", { class: "link-button mono", type: "button", text: n,
+      title: `Call ${n}`, onclick: () => openTab(kind === "procedure" ? `CALL ${qualified(schema, n)}();` : `SELECT ${qualified(schema, n)}();`) }));
+    const loadExplorer = async () => {
+      try {
+        catalog = await call("explorer", { session: session.session });
+      } catch (err) {
+        if (/signed out/.test(err.message)) { await signOut(); signIn(); return; }
+        setChildren(explorer, el("h3", { text: "Explorer" }), el("p", { class: "form-error", role: "alert", text: err.message }));
+        return;
+      }
+      const schemas = catalog.schemas || [];
+      const schemaNode = (g) => el("details", { class: "spanner-explorer-group dbs-schema", open: mysql || g.name === "public" || null },
+        el("summary", {}, el("span", { class: "mono", text: g.name })),
+        group("Tables", g.tables || [], tableRow(g.name, false)),
+        group("Views", g.views || [], tableRow(g.name, true)),
+        mysql ? null : group("Sequences", g.sequences || [], (n) => el("li", { class: "mono", text: n })),
+        group("Functions", g.functions || [], routineRow(g.name, "function")),
+        group(mysql ? "Stored procedures" : "Procedures", g.procedures || [], routineRow(g.name, "procedure")));
+      setChildren(explorer, el("h3", { text: "Explorer" }),
+        el("div", { class: "dbs-signed-in", id: "dbs-signed-in" },
+          el("p", { class: "mono", id: "dbs-current", text: `${catalog.database} · ${catalog.user}` }),
+          el("button", { type: "button", class: "link-button", id: "dbs-switch", text: "Switch user/database",
+            onclick: () => signIn() }),
+          el("button", { type: "button", class: "link-button", id: "dbs-signout", text: "Sign out",
+            onclick: async () => { await signOut(); drawSignedOut(); } })),
+        savedGroup,
+        mysql ? schemaNode(schemas[0] || { name: catalog.database }) :
+          el("details", { class: "spanner-explorer-group", open: true },
+            el("summary", { text: `Schemas (${schemas.length})` }),
+            el("div", {}, ...schemas.map(schemaNode))));
+      loadSaved();
+    };
+
+    editor.value = state.sql || "";
+    savedNote.hidden = !state.savedId;
+    drawTabs();
+    drawResults();
+    setChildren(panel, el("div", { class: "spanner-studio dbs-studio", id: "dbs-studio" },
+      explorer,
+      el("div", { class: "spanner-workspace" },
+        strip, editor,
+        el("div", { class: "action-bar spanner-editor-actions" }, run, runSelected, saveButton, saveAs, clear),
+        savedNote, results)));
+    saveButton.addEventListener("click", () => saveQuery(false));
+    loadExplorer();
+  };
+
+  if (session && session.session) drawStudio(); else { drawSignedOut(); signIn(); }
+}
+
 // Manage resources (#1865), Google's page of that name: the organization,
 // its folders and the projects under each in one tree table (Name, ID,
 // Status, Labels, Tags, Actions), Create project (the New project page)

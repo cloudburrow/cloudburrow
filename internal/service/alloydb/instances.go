@@ -347,7 +347,7 @@ func (s *Server) specOf(in *alloydbpb.Instance) (ServerSpec, error) {
 		return ServerSpec{}, apierror.NotFound("cluster %s", m[1])
 	}
 	spec := ServerSpec{Server: serverName(in.GetName()), Version: c.GetDatabaseVersion().String(),
-		Flags: map[string]string{}, Password: s.passwords[m[1]]}
+		Flags: map[string]string{}, Password: s.passwords[m[1]], Omni: s.omniSpec(m[1])}
 	for k, v := range in.GetDatabaseFlags() {
 		spec.Flags[k] = v
 	}
@@ -364,7 +364,7 @@ func (s *Server) specOf(in *alloydbpb.Instance) (ServerSpec, error) {
 		spec.ReplicaOf = serverName(p.GetName())
 		floorFlags(spec.Flags, p.GetDatabaseFlags())
 	} else {
-		spec.PITR = c.GetContinuousBackupConfig().GetEnabled()
+		spec.PITR = s.pitrOn(c)
 	}
 	spec.Pooler = poolerOf(in)
 	return spec, nil

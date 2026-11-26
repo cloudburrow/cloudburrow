@@ -20,23 +20,109 @@ a cluster's page creates its instances, read pools and secondary clusters, edits
 (machine, flags, Managed Connection Pooling), exports and imports, promotes and switches over a
 secondary, and backs up and restores.
 
-## The engine: PostgreSQL, not AlloyDB Omni
+## The engine: PostgreSQL, or AlloyDB Omni
 
-Google publishes AlloyDB Omni as the `google/alloydbomni` image (15, 16 and 17; amd64, and arm64
-in preview). Its use is governed by Google's AlloyDB Omni licence terms, which an end user accepts;
-CloudBurrow never accepts a licence on anyone's behalf, in code, tests or CI. So each instance is
-the PostgreSQL server Cloud SQL for PostgreSQL uses here, of the cluster's major version
-(`POSTGRES_14` to `POSTGRES_17`; `POSTGRES_16` by default). The differences that follow:
+Google publishes AlloyDB Omni, AlloyDB's own engine, as the
+[`google/alloydbomni`](https://hub.docker.com/r/google/alloydbomni) image. Its use is governed by
+Google's [AlloyDB Omni License Terms](https://cloud.google.com/terms/alloydb-omni-marketplace-terms)
+(free for development, evaluation and non-commercial use), which only you, the end user, may
+accept. CloudBurrow never accepts them on anyone's behalf, in code, tests or CI. So an instance runs
+one of two engines (#2207):
+
+- **PostgreSQL** (the default, and what every cluster ran before #2207): the PostgreSQL server
+  Cloud SQL for PostgreSQL uses here, of the cluster's major version (`POSTGRES_14` to
+  `POSTGRES_17`; `POSTGRES_16` by default). The differences listed below follow.
+- **AlloyDB Omni**, once you accept the terms: Google's image of the cluster's major version,
+  pinned by digest in `dependencies.json` (15.18.0, 16.14.0 and 17.10.0, linux/amd64 and
+  linux/arm64, arm64 in preview as Google marks it; Google publishes no Omni of PostgreSQL 14, and
+  its PostgreSQL 18 images are behind a registration form, so a `POSTGRES_14` cluster runs
+  PostgreSQL 14 whatever you accepted). The server keeps Omni's own `shared_preload_libraries`, so
+  AlloyDB's engine features are there: the columnar engine, the `google_ml_integration` extension
+  and model endpoint management, `alloydb_scann`, the query plan cache and the index advisor. Their
+  flags (`google_columnar_engine.*`, `google_db_advisor.enabled`, `google_ml_integration.*`) take
+  effect as Omni's settings. Its container's shared memory is sized for the columnar engine's store
+  (`google_columnar_engine.memory_size_in_mb`, 1024 MB by default, plus 256 MB), and it asks for the
+  2 GB of memory Google's requirements name. Calling remote models needs network access and
+  credentials this instance does not give the server.
+
+### Accepting the terms
+
+Accept them yourself in one of these ways; each is recorded with the cluster as who accepted (the
+user running CloudBurrow), when (UTC) and how, and `cloudburrow status` shows it (`status --format
+json` as `alloydb_omni_terms`):
+
+- for every new cluster of `POSTGRES_15`, `16` or `17`: `cloudburrow up --accept-alloydb-omni-terms`,
+  `CLOUDBURROW_ACCEPT_ALLOYDB_OMNI_TERMS=Y` (exactly `Y`), or `"alloydb": {"acceptOmniTerms": true}`
+  in a configuration file you name with `--config` or `CLOUDBURROW_CONFIG`. A `./cloudburrow.json`
+  found in the working directory, which a repository can ship, cannot accept them: `up` refuses it;
+- for one cluster: the console's Create cluster checkbox, "I accept the AlloyDB Omni licence terms",
+  which links Google's terms; or the request header `X-CloudBurrow-Accept-AlloyDB-Omni-Terms: Y` on
+  `CreateCluster` or `RestoreCluster` (gRPC metadata `x-cloudburrow-accept-alloydb-omni-terms`),
+  which the checkbox sends.
+
+A cluster's engine is chosen when it is created and kept: a cluster made before you accepted stays
+on PostgreSQL, and one made under an acceptance keeps running Omni after an `up` without one. A
+secondary cluster runs its primary's engine, under its primary's acceptance, as its servers
+replicate the primary's. A backup or point-in-time restore makes a new cluster whose engine is
+chosen as any new cluster's; a dump of an Omni cluster that uses Omni's extensions loads into a
+PostgreSQL cluster only without them. The console shows each cluster's Database engine.
+
+### What an explicit Omni request is
+
+Google's AlloyDB API has no engine field: every Google cluster runs AlloyDB's engine, so nothing in a
+request Google documents asks for Omni rather than PostgreSQL. CloudBurrow therefore takes as
+explicit only its own request headers, on `CreateCluster` and `RestoreCluster`:
+
+| Header (gRPC metadata in lower case) | Without an acceptance | With `up`'s acceptance |
+|---|---|---|
+| none | PostgreSQL | Omni (PostgreSQL for `POSTGRES_14`) |
+| `X-CloudBurrow-AlloyDB-Engine: OMNI` | `FAILED_PRECONDITION`, saying how to accept; no cluster is made | Omni |
+| `X-CloudBurrow-AlloyDB-Engine: POSTGRES` | PostgreSQL | PostgreSQL |
+| `X-CloudBurrow-Accept-AlloyDB-Omni-Terms: Y` | Omni, accepted by this request | Omni, accepted by this request |
+
+An explicit Omni request for `POSTGRES_14`, an engine other than `OMNI` or `POSTGRES`, an acceptance
+other than `Y`, or both `Y` and `POSTGRES`, is `INVALID_ARGUMENT`. AlloyDB's engine flags are not
+taken as a request for Omni: clusters and Terraform configurations made before #2207 carry them, and
+on PostgreSQL they are still accepted and stored, as before. With the Go client, set a header with
+`callctx.SetHeaders(ctx, "x-cloudburrow-alloydb-engine", "OMNI")`
+(`github.com/googleapis/gax-go/v2/callctx`), which sends it over gRPC and REST; the name must be in
+lower case there, as gRPC metadata keys are.
+
+### Running the Omni test yourself
+
+No test of CloudBurrow's, and no CI job, runs Omni, so the Omni engine is Implemented, not
+Verified. `TestAlloyDBOmniEngine` runs it, and skips unless you opt in. Only if you accept Google's
+AlloyDB Omni License Terms, run, from a CloudBurrow checkout (it pulls the Omni images of 16 and 17,
+about 1 GB each):
+
+```sh
+make build
+export CLOUDBURROW_ACCEPT_ALLOYDB_OMNI_TERMS=Y
+bin/cloudburrow up --detach --name omni --services alloydb --accept-alloydb-omni-terms
+eval "$(scripts/compat-env.sh --name omni --services alloydb)"
+go test -tags compat -count=1 -timeout 40m -run '^TestAlloyDBOmniEngine$' ./test/compat/
+bin/cloudburrow stop --name omni && bin/cloudburrow delete --name omni
+```
+
+It creates a `POSTGRES_16` cluster whose primary runs with the columnar engine, index advisor and
+model support flags on, checks the server is Omni 16 with `google_columnar_engine`,
+`google_ml_integration` and `alloydb_scann` (and creates them), that each flag took effect, and
+that a table goes into the column store; then a `POSTGRES_17` cluster asked for by
+`X-CloudBurrow-AlloyDB-Engine: OMNI`, which runs Omni 17, and a `POSTGRES_14` one, which runs
+PostgreSQL. Without the opt-in, `TestAlloyDBOmniRefusedWithoutAcceptance` runs instead.
+
+### Differences on the PostgreSQL engine
 
 - AlloyDB's own engine features are absent: the columnar engine, the `google_ml_integration`
   extension and model endpoint management, `alloydb_scann`, adaptive autovacuum, the AlloyDB
   query plan cache and index advisor. Their flags (`google_columnar_engine.*`, `alloydb.*`,
   `google_db_advisor.enabled`, `google_ml_integration.*`) are accepted, validated and stored, and
   PostgreSQL keeps them as placeholder settings with no effect.
+
+### On both engines
+
 - `alloydbsuperuser` is an ordinary role, made at a primary's creation, which a cluster's users
   can be granted; as on Google, it is not PostgreSQL's superuser.
-- PostgreSQL trusts connections from inside the instance, as Cloud SQL's servers here do, so a
-  built-in user's password is set but a wrong one is not refused.
 - An instance's machine (vCPUs, memory) is recorded; the server takes what the machine gives it.
 
 ## Instances and read pools
@@ -70,6 +156,24 @@ the certificate was asked for with `use_metadata_exchange`, the length-prefixed
 `MetadataExchangeRequest` and its response. `AUTO_IAM` (IAM database authentication) checks the
 OAuth 2.0 token against those this instance minted, and needs an IAM user of the cluster for its
 principal.
+
+Every sign-in is checked by password, as on Google (#2208): a built-in user's wrong password is
+refused with PostgreSQL's own `FATAL 28P01 password authentication failed for user "…"`, through
+the connectors, the Auth Proxy, `ExecuteSql` and a direct connection alike, as Cloud SQL's servers
+here are ([cloudsql.md](cloudsql.md#4-authentication-every-sign-in-is-checked-by-password-2208)).
+An IAM user signs in by its token: with `AUTO_IAM` the proxy checks the token from the metadata
+exchange, and without it the token sent as the password, and then signs the role in with a
+password of the role's that only CloudBurrow knows, so the role is refused without a token.
+CloudBurrow's own connections sign in as `alloydbadmin`, a superuser with a generated password kept
+owner-only in the instance directory, which `ListUsers` leaves out. Verified by
+`TestAlloyDBPasswordAuthentication`.
+
+**AlloyDB Studio** (#2208): a cluster's **AlloyDB Studio** tab signs in to its primary as Google's
+does, with a database and a built-in user's password or IAM database authentication (the
+console's principal, once it is an IAM user of the cluster), and serves Cloud SQL Studio's
+Explorer, editor, saved queries and exportable results through `ExecuteSql`
+([cloudsql.md](cloudsql.md#4-authentication-every-sign-in-is-checked-by-password-2208)).
+Verified by `TestAlloyDBStudioThroughThePage` (browser).
 
 On Google each instance has an IP address of its own, where it serves PostgreSQL on 5432 (and its
 pooler on 6432), and the connectors reach it on 5433; they send no TLS server name for an address,
@@ -144,12 +248,22 @@ primary.
 
 An on-demand or automated backup is a dump of the primary, kept with the cluster's users in the
 instance's state directory; restoring it makes a new cluster whose primary, once created, holds
-the data and the users. Continuous backup keeps the primary's write-ahead log from a base taken at
+the data and the users, the `postgres` user with the password it had when the backup was taken
+(a point-in-time restore: the source cluster's), so it signs in as before (#2208). Continuous backup keeps the primary's write-ahead log from a base taken at
 the primary's creation, so a point-in-time restore recovers to any moment from then on within the
 recovery window. Automated backups follow `automated_backup_policy.weekly_schedule` (each minute,
 `up` takes the ones due) and its time- or quantity-based retention.
 
+## Backup and DR (#1524)
+
+A Backup and DR plan of `resourceType` `alloydb.googleapis.com/Cluster` protects a cluster: its
+own automated and continuous backups are turned off while the plan applies, `backupdrInfo` reports
+the protection windows, and `clusters.restore` with `backupdrBackupSource` or `backupdrPitrSource`
+makes a new cluster from a vault's backup or at a point in time inside a window. Those fields are
+served over JSON (they are in AlloyDB's REST discovery document, not in the published
+`alloydbpb`). See [backupdr.md](backupdr.md#alloydb-clusters-and-filestore-instances-1524).
+
 ## Not served
 
-Backup and DR protection of AlloyDB clusters is #1524. [gaps.md](gaps.md) lists what is open;
+[gaps.md](gaps.md) lists what is open;
 [compatibility.md](compatibility.md) has the per-method evidence.

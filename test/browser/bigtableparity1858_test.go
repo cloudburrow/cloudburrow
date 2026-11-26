@@ -13,6 +13,8 @@ import (
 	"cloud.google.com/go/bigtable"
 	btapb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	"github.com/chromedp/chromedp"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestBigtableConsoleParity1858 (#1858). An instance's page has Google's
@@ -112,7 +114,7 @@ func TestBigtableConsoleParity1858(t *testing.T) {
 	}
 
 	// Bigtable Studio.
-	client, err := bigtable.NewClient(ctx, project, id)
+	client, err := localclient.Bigtable(ctx, project, id)
 	if err != nil {
 		t.Fatal(err)
 	}

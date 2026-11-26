@@ -311,7 +311,7 @@ func TestCloudSQLPSCAutoConnections(t *testing.T) {
 	polA := mkPolicy("ct-sql-a-"+suffix, netA, subA)
 
 	name := "ct-auto-" + suffix
-	op, err := svc.Instances.Insert(p, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", Region: "us-central1",
+	op, err := svc.Instances.Insert(p, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17", RootPassword: "Root-pass1", Region: "us-central1",
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", IpConfiguration: &sqladmin.IpConfiguration{Ipv4Enabled: false, ForceSendFields: []string{"Ipv4Enabled"},
 			PscConfig: &sqladmin.PscConfig{PscEnabled: true, AllowedConsumerProjects: []string{p},
 				PscAutoConnections: []*sqladmin.PscAutoConnectionConfig{{ConsumerNetwork: netA, ConsumerProject: p}, {ConsumerNetwork: netB, ConsumerProject: p}}}}}}).Do()

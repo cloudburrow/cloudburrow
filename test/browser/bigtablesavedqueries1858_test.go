@@ -12,6 +12,8 @@ import (
 
 	"cloud.google.com/go/bigtable"
 	"github.com/chromedp/chromedp"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // TestBigtableStudioSavedQueries1858 (#1858), from
@@ -54,7 +56,7 @@ func TestBigtableStudioSavedQueries1858(t *testing.T) {
 	if err := admin.CreateColumnFamily(ctx, "orders", "cf1"); err != nil {
 		t.Fatal(err)
 	}
-	client, err := bigtable.NewClient(ctx, project, id)
+	client, err := localclient.Bigtable(ctx, project, id)
 	if err != nil {
 		t.Fatal(err)
 	}

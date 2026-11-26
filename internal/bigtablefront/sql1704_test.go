@@ -15,6 +15,8 @@ import (
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // show is a result value as the tests compare it.
@@ -77,7 +79,7 @@ func sqlFixture(t *testing.T) (func(sql string, params map[string]bigtable.SQLTy
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := bigtable.NewClient(ctx, "p", "sql-inst", opt)
+	c, err := localclient.Bigtable(ctx, "p", "sql-inst", opt)
 	if err != nil {
 		t.Fatal(err)
 	}

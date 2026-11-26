@@ -218,7 +218,7 @@ func TestPatchManagerRefusals(t *testing.T) {
 		{"three versions", obj{"versions": []any{tpl("web"), tpl("web2"), tpl("web-md")}}, "one or two versions"},
 		{"two unsized", obj{"versions": []any{tpl("web"), tpl("web2")}}, "exactly one version"},
 		{"missing template", obj{"versions": []any{tpl("nope")}}, "was not found"},
-		{"autohealing", obj{"autoHealingPolicies": []any{map[string]any{"healthCheck": "x"}}}, "autohealing"},
+		{"autohealing health check not found", obj{"autoHealingPolicies": []any{map[string]any{"healthCheck": "x"}}}, "was not found"},
 		{"stale fingerprint", obj{"fingerprint": "AAAA", "targetSize": 3.0}, "fingerprint"},
 	} {
 		if _, err := f.s.Call("PATCH", "p2139", path, nil, c.body); err == nil || !strings.Contains(err.Error(), c.want) {

@@ -73,7 +73,7 @@ func TestConsoleBackupDRGooglePages(t *testing.T) {
 
 	// Create Backup plan, with its form's checks.
 	rules := console.FormatGroup([]map[string]string{
-		{"ruleId": "daily", "recurrence": "DAILY", "start": "1", "end": "5", "retention": "7"},
+		{"ruleId": "daily", "recurrence": "DAILY", "start": "1", "end": "7", "retention": "7"},
 		{"ruleId": "hourly", "recurrence": "HOURLY", "hourly": "6", "start": "0", "end": "24", "retention": "3"}})
 	plan := func(id, vault string, rules string) map[string]string {
 		return map[string]string{"resourceType": backupdr.CloudSQLResourceType, "id": id, "description": "gold", "region": "us-central1",
@@ -97,7 +97,7 @@ func TestConsoleBackupDRGooglePages(t *testing.T) {
 		t.Errorf("Backup plans: %+v", pl.Items)
 	}
 	pd, _ := plans.Detail(ctx, project, []string{"plan-1"})
-	if r := pd.Sections[0].Listing.Items; len(r) != 2 || r[0].Fields["Backup window"] != "01:00 to 05:00" || r[1].Fields["Recurrence"] != "Hourly, every 6 hours" {
+	if r := pd.Sections[0].Listing.Items; len(r) != 2 || r[0].Fields["Backup window"] != "01:00 to 07:00" || r[1].Fields["Recurrence"] != "Hourly, every 6 hours" {
 		t.Errorf("the plan's rules: %+v", r)
 	}
 	// Edit backup plan, a page of its own ending in Save Changes (#1844):
@@ -108,7 +108,7 @@ func TestConsoleBackupDRGooglePages(t *testing.T) {
 		t.Fatalf("Edit backup plan: %+v", pd.Edit)
 	}
 	edited := console.FormatGroup([]map[string]string{
-		{"ruleId": "daily", "recurrence": "DAILY", "start": "1", "end": "5", "retention": "7"},
+		{"ruleId": "daily", "recurrence": "DAILY", "start": "1", "end": "7", "retention": "7"},
 		{"ruleId": "monthly", "recurrence": "MONTHLY", "weekDayOfMonth": "LAST-SUNDAY", "start": "0", "end": "24", "retention": "30"}})
 	if err := plans.Edit(ctx, project, []string{"plan-1"}, map[string]string{"description": "platinum", "rules": edited, "timeZone": "UTC"}); err != nil {
 		t.Fatal(err)
@@ -123,8 +123,8 @@ func TestConsoleBackupDRGooglePages(t *testing.T) {
 	}
 
 	// Schedule backup: an instance and a plan of its region.
-	if f := vaulted.CreateFormFor(ctx, project); len(f[2].Options) != 2 || len(f[5].Options) != 2 {
-		t.Errorf("Schedule backup's resources and plans: %+v %+v", f[2], f[5])
+	if f := vaulted.CreateFormFor(ctx, project); len(f[2].Options) != 2 || len(f[len(f)-1].Options) != 2 {
+		t.Errorf("Schedule backup's resources and plans: %+v %+v", f[2], f[len(f)-1])
 	}
 	if _, err := vaulted.Create(ctx, project, map[string]string{"resourceType": backupdr.CloudSQLResourceType, "region": "us-east1",
 		"instance": "pg", "plan": "projects/" + project + "/locations/us-central1/backupPlans/plan-1"}); err == nil {

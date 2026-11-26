@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/hostmount"
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
@@ -192,6 +193,9 @@ func (d *Docker) Run(ctx context.Context, job Job) (Result, error) {
 	}
 	tail, output := d.follow(job, stdout, nil)
 	waitErr := cmd.Wait()
+	if err := p.jobDir.Collect(context.WithoutCancel(ctx)); err != nil {
+		d.logf("spark: %v", err)
+	}
 	res := Result{Out: map[string]string{}, DriverOutput: output}
 	if b, err := os.ReadFile(filepath.Join(p.dir, "out", "params.json")); err == nil {
 		_ = json.Unmarshal(b, &res.Out)
@@ -217,6 +221,9 @@ type prepared struct {
 	image, version             string
 	run                        []string
 	cleanup                    []func()
+	// jobDir is dir as the Spark container mounts it: with remote compute
+	// (#2209) a volume whose out/ Collect copies back after the run.
+	jobDir *hostmount.Mount
 }
 
 // close removes the container, the relay, the network and the directory.
@@ -330,7 +337,27 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound ...string) (_ *pr
 	}
 	p.cleanup = append(p.cleanup, func() { _, _ = d.docker(context.Background(), "network", "rm", network) })
 
-	relayArgs := []string{"run", "-d", "--name", relay, "--label", label, "-v", dir + ":/cb:ro", "--entrypoint", "python3"}
+	// On a remote compute host the job's directory, the connector and the
+	// runtime's trees are volumes there (internal/hostmount): the job's
+	// own two, read-only for the relay and writable for Spark, go with the
+	// job, and its out/ comes back.
+	relayDir, err := hostmount.Scratch(ctx, dir, "/cb", hostmount.ReadOnly)
+	if err != nil {
+		return nil, nil, &Unavailable{Msg: err.Error()}
+	}
+	p.cleanup = append(p.cleanup, relayDir.Release)
+	jobDir, err := hostmount.Scratch(ctx, dir, "/cb", hostmount.ReadWrite)
+	if err != nil {
+		return nil, nil, &Unavailable{Msg: err.Error()}
+	}
+	p.cleanup = append(p.cleanup, jobDir.Release)
+	p.jobDir = jobDir
+	connector, err := hostmount.Bind(ctx, jar, "/cb-connector/spark-bigquery.jar", hostmount.ReadOnly)
+	if err != nil {
+		return nil, nil, &Unavailable{Msg: err.Error()}
+	}
+	relayArgs := append([]string{"run", "-d", "--name", relay, "--label", label}, relayDir.Args()...)
+	relayArgs = append(relayArgs, "--entrypoint", "python3")
 	if !d.desktop {
 		relayArgs = append(relayArgs, "--add-host", "host.docker.internal:host-gateway")
 	}
@@ -354,9 +381,9 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound ...string) (_ *pr
 		return nil, nil, &Unavailable{Msg: "connect the Spark job's relay: " + out}
 	}
 
-	run := []string{"run", "--name", spark, "--label", label, "--network", network,
-		"-v", dir + ":/cb", "-v", jar + ":/cb-connector/spark-bigquery.jar:ro",
-		"-e", "CB_SPARK_OUT=/cb/out/params.json", "-e", "CB_SPARK_TYPES=/cb/types.json"}
+	run := []string{"run", "--name", spark, "--label", label, "--network", network}
+	run = append(append(run, jobDir.Args()...), connector.Args()...)
+	run = append(run, "-e", "CB_SPARK_OUT=/cb/out/params.json", "-e", "CB_SPARK_TYPES=/cb/types.json")
 	image, conf := rt.Image, map[string]string{}
 	if job.Kind == KindSparkR {
 		if rt.RImage == "" {
@@ -385,7 +412,11 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound ...string) (_ *pr
 		if err != nil {
 			return nil, nil, &Unavailable{Msg: "IPython is not available: " + err.Error()}
 		}
-		run = append(run, "-v", ip+":/cb-ipython:ro")
+		ipTree, err := hostmount.Bind(ctx, ip, "/cb-ipython", hostmount.ReadOnly)
+		if err != nil {
+			return nil, nil, &Unavailable{Msg: err.Error()}
+		}
+		run = append(run, ipTree.Args()...)
 		pythonPath += ":/cb-ipython"
 	}
 	if custom != nil && custom.env["PYTHONPATH"] != "" {
@@ -399,8 +430,17 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound ...string) (_ *pr
 		// PYSPARK_PYTHON wins, and its SPARK_EXTRA_CLASSPATH is on the
 		// driver's and executors' class path.
 		image = custom.ref
-		run = append(run, "--user", "1099:1099", "-v", custom.spark+":/usr/lib/spark:ro", "-v", custom.java+":"+customJavaHome+":ro",
-			"-e", "JAVA_HOME="+customJavaHome, "-e", "SPARK_HOME=/usr/lib/spark", "-e", "SPARK_CONF_DIR=/etc/spark/conf", "-e", "HOME=/tmp")
+		sparkTree, err := hostmount.Bind(ctx, custom.spark, "/usr/lib/spark", hostmount.ReadOnly)
+		if err != nil {
+			return nil, nil, &Unavailable{Msg: err.Error()}
+		}
+		javaTree, err := hostmount.Bind(ctx, custom.java, customJavaHome, hostmount.ReadOnly)
+		if err != nil {
+			return nil, nil, &Unavailable{Msg: err.Error()}
+		}
+		run = append(run, "--user", "1099:1099")
+		run = append(append(run, sparkTree.Args()...), javaTree.Args()...)
+		run = append(run, "-e", "JAVA_HOME="+customJavaHome, "-e", "SPARK_HOME=/usr/lib/spark", "-e", "SPARK_CONF_DIR=/etc/spark/conf", "-e", "HOME=/tmp")
 		if custom.env["PYSPARK_PYTHON"] == "" {
 			run = append(run, "-e", "PYSPARK_PYTHON=python3")
 		}
@@ -427,7 +467,11 @@ func (d *Docker) prepare(ctx context.Context, job Job, inbound ...string) (_ *pr
 			p.close()
 			return nil, nil, &Unavailable{Msg: "the Spark Connect server jar is not available: " + err.Error()}
 		}
-		run = append(run, "-v", server+":/cb-connector/spark-connect.jar:ro")
+		serverJar, err := hostmount.Bind(ctx, server, "/cb-connector/spark-connect.jar", hostmount.ReadOnly)
+		if err != nil {
+			return nil, nil, &Unavailable{Msg: err.Error()}
+		}
+		run = append(run, serverJar.Args()...)
 		args.jars = append(args.jars, "/cb-connector/spark-connect.jar")
 	}
 	run = append(run, "--entrypoint", "/bin/bash", image, "/cb/run.sh")
@@ -514,7 +558,8 @@ func (d *Docker) probeDesktop() error {
 	if err != nil {
 		return &Unavailable{Msg: "ask Docker which daemon it is: " + out}
 	}
-	d.desktop, d.probed = strings.Contains(out, "Docker Desktop"), true
+	// A remote compute host (#2209) is never this machine's Desktop.
+	d.desktop, d.probed = strings.Contains(out, "Docker Desktop") && hostrelay.Remote() == nil, true
 	return nil
 }
 

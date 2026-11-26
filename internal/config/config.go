@@ -10,6 +10,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/remotecompute"
 	"net"
 	"net/url"
 	"os"
@@ -154,6 +155,11 @@ const (
 	// the CLI process on its own port; each instance is an NFS server in
 	// Docker on the network the instance's clusters share.
 	ServiceFilestore Service = "filestore"
+	// ServiceDataflow is Dataflow (dataflow.googleapis.com v1b3, #2215),
+	// served in the CLI process on its own port; its jobs' Apache Beam
+	// pipelines run on Apache Flink's Beam job server in the host's Docker,
+	// reaching the instance's Cloud Storage, Pub/Sub and BigQuery only.
+	ServiceDataflow Service = "dataflow"
 	// ServiceTrace is Cloud Trace (cloudtrace.googleapis.com v1 and v2,
 	// #2118), with the Telemetry API's OTLP trace ingestion
 	// (telemetry.googleapis.com), served in the CLI process on one port.
@@ -175,7 +181,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceDataproc, ServiceAlloyDB, ServiceFilestore}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceDataproc, ServiceAlloyDB, ServiceFilestore, ServiceDataflow}
 }
 
 // KnownServices lists every selectable service.
@@ -236,7 +242,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceDataproc, ServiceAlloyDB, ServiceFilestore:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceDataproc, ServiceAlloyDB, ServiceFilestore, ServiceDataflow:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -441,6 +447,9 @@ type Endpoints struct {
 	// Filestore is the host port of Filestore (file.googleapis.com,
 	// #2192): gRPC and JSON on one port.
 	Filestore int `json:"filestore"`
+	// Dataflow is the host port of Dataflow (dataflow.googleapis.com
+	// v1b3, #2215): gRPC and JSON on one port.
+	Dataflow int `json:"dataflow"`
 	// Trace is the host port of Cloud Trace (cloudtrace.googleapis.com,
 	// #2118), gRPC and JSON on one port, and of OTLP's trace ingestion
 	// (telemetry.googleapis.com): OTLP/gRPC and POST /v1/traces.
@@ -542,6 +551,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"dataproc", &e.Dataproc},
 		{"apphub", &e.AppHub},
 		{"filestore", &e.Filestore},
+		{"dataflow", &e.Dataflow},
 		{"trace", &e.Trace},
 		{"alloydb", &e.AlloyDB},
 		{"onnx", &e.ONNX},
@@ -632,6 +642,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.AppHub
 	case ServiceFilestore:
 		return e.Filestore
+	case ServiceDataflow:
+		return e.Dataflow
 	case ServiceTrace:
 		return e.Trace
 	case ServiceAlloyDB:
@@ -779,6 +791,13 @@ type Config struct {
 	// (docs/cloudsql.md).
 	CloudSQLConnector string `json:"cloudsqlConnector,omitempty"`
 
+	// Compute is where the instance's Docker runs (#2209): empty for this
+	// machine's, or ssh://[user@]host[:port] for a remote Linux host, whose
+	// Docker CloudBurrow reaches over one supervised SSH connection while
+	// the CLI, the console and every endpoint stay here. `up` records it in
+	// the instance directory, so the other commands reach the same host.
+	Compute string `json:"compute,omitempty"`
+
 	Endpoints Endpoints `json:"endpoints"`
 	Cluster   Cluster   `json:"cluster"`
 	LocalAI   LocalAI   `json:"localAI"`
@@ -811,6 +830,9 @@ type Config struct {
 	// a repository can ship and the developer has not necessarily read, so
 	// nobody accepts it on the user's behalf. Source.MSSQLEULA says which.
 	AcceptMSSQLEULA bool `json:"-"`
+
+	// AlloyDB holds AlloyDB for PostgreSQL's settings (#2207).
+	AlloyDB AlloyDBSettings `json:"alloydb,omitempty"`
 
 	// HooksDir holds ready.d and shutdown.d, scripts run on the host when
 	// the instance becomes ready and before it stops (#285). A missing
@@ -906,7 +928,27 @@ type Source struct {
 	// MSSQLEULA is how AcceptMSSQLEULA was set: "flag" or "env", "" when
 	// it was not.
 	MSSQLEULA string
+	// OmniTerms is how AlloyDB.AcceptOmniTerms was set: "flag", "env" or
+	// "file", "" when it was not.
+	OmniTerms string
 }
+
+// AlloyDBSettings are AlloyDB for PostgreSQL's settings.
+type AlloyDBSettings struct {
+	// AcceptOmniTerms is the user's acceptance of Google's AlloyDB Omni
+	// licence terms (OmniTermsURL) for the AlloyDB clusters this instance
+	// creates, whose servers then run Google's AlloyDB Omni image (#2207):
+	// set by `up --accept-alloydb-omni-terms`,
+	// CLOUDBURROW_ACCEPT_ALLOYDB_OMNI_TERMS=Y, or alloydb.acceptOmniTerms in
+	// a configuration file the user named with --config or
+	// CLOUDBURROW_CONFIG; never by default, and never by a ./cloudburrow.json
+	// found in the working directory, which a repository can ship and the
+	// developer has not necessarily read. Source.OmniTerms says which.
+	AcceptOmniTerms bool `json:"acceptOmniTerms,omitempty"`
+}
+
+// OmniTermsURL is Google's AlloyDB Omni licence terms.
+const OmniTermsURL = "https://cloud.google.com/terms/alloydb-omni-marketplace-terms"
 
 // DefaultNodeImage is the pinned Kubernetes node image. It is duplicated from
 // dependencies.json, which remains the source of truth; TestPinsMatchTheInventory
@@ -1032,6 +1074,8 @@ func Default() Config {
 			// Filestore (#2192): 9050 to 9070 are taken or claimed by open
 			// branches, so 9071.
 			Filestore: 9071,
+			// Dataflow (#2215): 9072 and 9073 are left to open branches.
+			Dataflow: 9074,
 			// Cloud Trace (#2118): past the ports open branches took.
 			Trace: 9052,
 			// AlloyDB (#2191): past the ports open branches took.
@@ -1352,6 +1396,12 @@ func (c *Config) Validate() error {
 		add("bindAddress", c.BindAddress,
 			"binds a non-loopback address, which exposes an unauthenticated emulator "+
 				"to the network; pass --allow-remote to confirm")
+	}
+
+	if c.Compute != "" {
+		if _, err := remotecompute.ParseTarget(c.Compute); err != nil {
+			add("compute", c.Compute, "must be empty (this machine's Docker) or ssh://[user@]host[:port] (#2209): "+err.Error())
+		}
 	}
 
 	// The Cloud SQL connector listener (#1364): an IP literal and a port,

@@ -37,7 +37,7 @@ func TestDatabaseHandshakeRefusesATunnelThatOnlyAccepts(t *testing.T) {
 	closes := acceptAndDo(t, func(c net.Conn) { c.Close() })
 	hangs := acceptAndDo(t, func(c net.Conn) { time.Sleep(10 * time.Second); c.Close() })
 	for _, s := range []config.Service{config.ServiceCloudSQLMySQL, config.ServiceCloudSQL} {
-		h := databaseHandshake(s, components.MySQLCredentials{Password: "p", RootPassword: "r"})
+		h := databaseHandshake(s, components.MySQLCredentials{Password: "p", RootPassword: "r"}, components.PostgresCredentials{Password: "q", AdminPassword: "a"})
 		if h == nil {
 			t.Fatalf("%s has no handshake", s)
 		}
@@ -59,7 +59,7 @@ func TestDatabaseHandshakeRefusesATunnelThatOnlyAccepts(t *testing.T) {
 // Only the databases have one: every other tunnel stays a TCP check.
 func TestDatabaseHandshakeIsForTheDatabasesOnly(t *testing.T) {
 	for _, s := range []config.Service{config.ServiceMemorystore, config.ServiceDatastore, config.ServiceStorage, config.ServiceBigQuery} {
-		if databaseHandshake(s, components.MySQLCredentials{}) != nil {
+		if databaseHandshake(s, components.MySQLCredentials{}, components.PostgresCredentials{}) != nil {
 			t.Errorf("%s has a database handshake", s)
 		}
 	}

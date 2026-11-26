@@ -36,14 +36,14 @@ func TestCloudSQLExternalPostgresPrimary(t *testing.T) {
 	n := time.Now().UnixNano() % 1e6
 	srcName, repName := fmt.Sprintf("pgx-src-%d", n), fmt.Sprintf("pgx-rep-%d", n)
 	onlineName, offlineName := repName+"-on", repName+"-off"
-	src := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: srcName, DatabaseVersion: "POSTGRES_16",
+	src := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: srcName, DatabaseVersion: "POSTGRES_16", RootPassword: "Root-pass1",
 		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}})
 	db := e.root(t, h, src.ConnectionName)
 	for _, q := range []string{"CREATE DATABASE shop", "CREATE ROLE migrator LOGIN PASSWORD 'Repl-pass1'"} {
 		q := q
 		eventually(t, q, func() error { _, err := db.Exec(q); return err })
 	}
-	shop := e.open(t, h, src.ConnectionName, "postgres", "x", "shop")
+	shop := e.open(t, h, src.ConnectionName, "postgres", pgRootPassword, "shop")
 	for _, q := range []string{"CREATE TABLE orders (id int PRIMARY KEY, item text)", "INSERT INTO orders VALUES (1, 'before')",
 		"GRANT SELECT ON orders TO migrator"} {
 		if _, err := shop.Exec(q); err != nil {
@@ -71,7 +71,7 @@ func TestCloudSQLExternalPostgresPrimary(t *testing.T) {
 		t.Fatalf("the source representation instance: %+v %v", got, err)
 	}
 
-	rep := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: onlineName, MasterInstanceName: repName,
+	rep := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: onlineName, MasterInstanceName: repName, RootPassword: pgRootPassword,
 		DatabaseVersion: "POSTGRES_17", Region: "us-central1", Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}})
 	if rep.InstanceType != "READ_REPLICA_INSTANCE" || rep.DatabaseVersion != "POSTGRES_17" {
 		t.Errorf("the replica: %s %s", rep.InstanceType, rep.DatabaseVersion)
@@ -130,7 +130,7 @@ func TestCloudSQLExternalPostgresPrimary(t *testing.T) {
 	if op = waitSQLOpDone(t, svc, project, op); op.Error != nil {
 		t.Fatalf("startExternalSync: %+v", op.Error.Errors[0])
 	}
-	rdb := e.open(t, h, rep.ConnectionName, "postgres", "x", "shop")
+	rdb := e.open(t, h, rep.ConnectionName, "postgres", pgRootPassword, "shop")
 	count := func(what string, id, want int) {
 		t.Helper()
 		eventually(t, what, func() error {
@@ -155,7 +155,7 @@ func TestCloudSQLExternalPostgresPrimary(t *testing.T) {
 	}
 
 	// An OFFLINE sync copies the rows once.
-	off := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: offlineName, MasterInstanceName: repName,
+	off := createSQLInstance(t, svc, project, &sqladmin.DatabaseInstance{Name: offlineName, MasterInstanceName: repName, RootPassword: pgRootPassword,
 		Region: "us-central1", Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}})
 	op, err = svc.Projects.Instances.StartExternalSync(project, offlineName,
 		&sqladmin.SqlInstancesStartExternalSyncRequest{SyncMode: "OFFLINE"}).Do()
@@ -165,7 +165,7 @@ func TestCloudSQLExternalPostgresPrimary(t *testing.T) {
 	if op = waitSQLOpDone(t, svc, project, op); op.Error != nil {
 		t.Fatalf("startExternalSync OFFLINE: %+v", op.Error.Errors[0])
 	}
-	odb := e.open(t, h, off.ConnectionName, "postgres", "x", "shop")
+	odb := e.open(t, h, off.ConnectionName, "postgres", pgRootPassword, "shop")
 	var c int
 	if err := odb.QueryRow("SELECT count(*) FROM orders").Scan(&c); err != nil || c != 2 {
 		t.Errorf("the offline copy: %d rows, %v; want 2", c, err)

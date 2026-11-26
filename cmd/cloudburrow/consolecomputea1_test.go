@@ -97,7 +97,7 @@ func TestConsoleComputeA1(t *testing.T) {
 		t.Fatalf("the regional disk's row = %+v", r)
 	}
 	dd, _ := disks.Detail(ctx, project, r.Target)
-	if !strings.Contains(c2139Props(dd), "Replica zones=us-central1: us-central1-a, us-central1-b") {
+	if !strings.Contains(c2139Props(dd), "Replica zones=us-central1 (us-central1-a, us-central1-b)") {
 		t.Fatalf("the regional disk's page = %s", c2139Props(dd))
 	}
 	if err := disks.ActAt(ctx, project, r.Target, "labels", map[string]string{"labels": `{"tier":"ha"}`}); err != nil {
@@ -109,10 +109,10 @@ func TestConsoleComputeA1(t *testing.T) {
 			attach = a.Fields[0].Options
 		}
 	}
-	if !strings.Contains(strings.Join(attach, ","), "us-central1/ha") {
+	if !strings.Contains(strings.Join(attach, ","), "regions/us-central1/disks/ha") {
 		t.Fatalf("attach options = %v", attach)
 	}
-	if err := vms.ActAt(ctx, project, []string{"us-central1-a", "app"}, "attachdisk", map[string]string{"disk": "us-central1/ha"}); err != nil {
+	if err := vms.ActAt(ctx, project, []string{"us-central1-a", "app"}, "attachdisk", map[string]string{"disk": "regions/us-central1/disks/ha"}); err != nil {
 		t.Fatal(err)
 	}
 	settle(t, s, project)

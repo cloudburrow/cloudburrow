@@ -16,17 +16,18 @@ func TestPhysicalSyncJobAndSetup(t *testing.T) {
 	spec := sqladmin.Spec{Name: "rep", DatabaseVersion: "MYSQL_8_0", MasterInstanceName: "src-rep", RootPassword: `it's\x`,
 		ExternalSyncStarted: true,
 		External:            &sqladmin.ExternalSource{Host: "sqlinst-src", Port: 3306, User: "migrator", Password: "pw", Instance: "src", Physical: true}}
-	m := physicalJob("cloudburrow", "w", "sqlxb-rep", spec, true)
+	m := physicalJob("cloudburrow", "w", "sqlxb-rep", spec, true, "adm")
 	for _, want := range []string{"kind: Job", components.XtraBackup80Image, "claimName: sqlinst-rep-data", "claimName: sqlinst-src-data",
 		"readOnly: true", "name: CLOUDSQL_TAKE_BACKUP", "backoffLimit: 0"} {
 		if !strings.Contains(m, want) {
 			t.Errorf("the job manifest has no %q:\n%s", want, m)
 		}
 	}
-	if m := physicalJob("cloudburrow", "w", "sqlxb-rep", spec, false); strings.Contains(m, "sqlinst-src-data") || strings.Contains(m, "name: CLOUDSQL_TAKE_BACKUP") {
+	if m := physicalJob("cloudburrow", "w", "sqlxb-rep", spec, false, "adm"); strings.Contains(m, "sqlinst-src-data") || strings.Contains(m, "name: CLOUDSQL_TAKE_BACKUP") {
 		t.Errorf("a job restoring an uploaded backup mounts the source:\n%s", m)
 	}
-	if sql := physicalInitSQL("MYSQL_8_0", `it's\x`); !strings.Contains(sql, `IDENTIFIED BY 'it''s\\x'`) || !strings.HasPrefix(sql, "SET sql_log_bin = 0;") {
+	if sql := physicalInitSQL("MYSQL_8_0", `it's\x`, "adm-pw"); !strings.Contains(sql, `IDENTIFIED BY 'it''s\\x'`) || !strings.HasPrefix(sql, "SET sql_log_bin = 0;") ||
+		!strings.Contains(sql, `'cloudsqladmin'@'127.0.0.1' IDENTIFIED BY 'adm-pw'`) {
 		t.Errorf("init SQL:\n%s", sql)
 	}
 	if replicaSetup(spec) != mysqlPhysicalSetup {
@@ -74,7 +75,7 @@ func TestPhysicalSyncJobAndSetup(t *testing.T) {
 	if why := p.PhysicalUnsupported(spec); why != "" {
 		t.Errorf("MYSQL_5_7: %q", why)
 	}
-	if m := physicalJob("cloudburrow", "w", "sqlxb-rep", spec, true); !strings.Contains(m, components.XtraBackup24Image) {
+	if m := physicalJob("cloudburrow", "w", "sqlxb-rep", spec, true, "adm"); !strings.Contains(m, components.XtraBackup24Image) {
 		t.Errorf("a MYSQL_5_7 job's image:\n%s", m)
 	}
 	for _, s := range []string{physicalScript, physicalStreamScript} {

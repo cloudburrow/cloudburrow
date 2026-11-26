@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
 // The Bigtable screen's instance picker (#1360).
@@ -177,7 +178,7 @@ func newConsoleBigtableClient(ctx context.Context, endpoint, project, instance s
 	if err != nil {
 		return nil, err
 	}
-	c, err := bigtable.NewClientWithConfig(ctx, project, instance, consoleBigtableConfig,
+	c, err := localclient.BigtableWithConfig(ctx, project, instance, consoleBigtableConfig,
 		option.WithGRPCConn(conn), option.WithoutAuthentication())
 	if err != nil {
 		_ = conn.Close()

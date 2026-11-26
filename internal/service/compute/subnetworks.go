@@ -344,7 +344,7 @@ func (s *Server) checkFingerprint(o obj, b obj) error {
 	if fp == "" {
 		return required("resource.fingerprint")
 	}
-	if fp != str(o, "fingerprint") {
+	if !sameFingerprint(fp, str(o, "fingerprint")) {
 		return errf(http.StatusPreconditionFailed, "conditionNotMet",
 			"Supplied fingerprint does not match current metadata fingerprint.")
 	}

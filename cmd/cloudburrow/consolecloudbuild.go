@@ -217,10 +217,16 @@ func (p buildDashboardProvider) List(_ context.Context, project string) (console
 }
 
 // buildRepositoriesProvider is Repositories: the 2nd gen tab lists the
-// project's Developer Connect connections, each a host connection to one
-// of this instance's Secure Source Manager instances, and the repositories
-// linked through them; 1st gen repositories connect hosted services.
-type buildRepositoriesProvider struct{ ssm sourceManagerProvider }
+// project's Cloud Build host connections and the repositories linked
+// through them (#2197, consolecloudbuildv2.go), and its Developer Connect
+// connections, each to one of this instance's Secure Source Manager
+// instances, with their links; 1st gen repositories connect hosted
+// services. secretsAddr is Secret Manager's, where Create host connection
+// stores the tokens.
+type buildRepositoriesProvider struct {
+	ssm         sourceManagerProvider
+	secretsAddr func() string
+}
 
 func (buildRepositoriesProvider) ID() string    { return "cloud-build-repositories" }
 func (buildRepositoriesProvider) Title() string { return "Cloud Build repositories" }
@@ -231,8 +237,9 @@ func (p buildRepositoriesProvider) List(ctx context.Context, project string) (co
 		NameColumn: "Name", Noun: "connections and repositories", AlwaysStatus: true,
 		Tabs: []console.Section{{ID: "2nd-gen", Label: "2nd gen"}, {ID: "1st-gen", Label: "1st gen",
 			Note: "1st gen repositories connect GitHub, GitHub Enterprise, Bitbucket and GitLab, hosted services no instance reaches. " +
-				"Connect this instance's Secure Source Manager repositories on the 2nd gen tab."}},
+				"Connect this instance's git server, whose repositories are its Secure Source Manager repositories, on the 2nd gen tab."}},
 		ListTab: "2nd-gen"}
+	out.Items = append(out.Items, cb2Items(project)...)
 	for _, c := range runadapter.DeveloperConnectConnections(project) {
 		st := "Installed"
 		if c.GetDisabled() {
@@ -262,10 +269,7 @@ func (p buildRepositoriesProvider) List(ctx context.Context, project string) (co
 // ListActions are Create host connection and Link repository.
 func (p buildRepositoriesProvider) ListActions(ctx context.Context, project string) []console.Action {
 	project = p.ssm.project(project)
-	instances, err := p.ssm.instances(ctx, project)
-	if err != nil {
-		return nil
-	}
+	instances, _ := p.ssm.instances(ctx, project)
 	var ins, repos []string
 	for _, in := range instances {
 		ins = append(ins, in.GetName())
@@ -278,19 +282,31 @@ func (p buildRepositoriesProvider) ListActions(ctx context.Context, project stri
 		}
 	}
 	var conns []string
+	for _, c := range runadapter.CloudBuildConnections(project) {
+		if cb2Status(c) == "Installed" {
+			conns = append(conns, c.GetName())
+		}
+	}
 	for _, c := range runadapter.DeveloperConnectConnections(project) {
 		conns = append(conns, c.GetName())
 	}
 	idPattern := "^[a-z]([\\-a-z0-9]{0,61}[a-z0-9])?$"
 	var acts []console.Action
+	// Create host connection: a Cloud Build connection to a GitLab,
+	// Bitbucket Data Center or GitHub Enterprise host (this instance's git
+	// server) or to GitHub (#2197), or a Developer Connect connection to
+	// one of this instance's Secure Source Manager instances.
+	providers := append([]string{}, cb2Providers...)
+	fields := []console.Field{{Name: "provider", Label: "Provider", Type: "select", Options: providers, Default: providers[0],
+		Help: "GitLab, Bitbucket Data Center and GitHub Enterprise connect to this instance's git server; GitHub (github.com) waits for authorization, which no instance can give."},
+		{Name: "id", Label: "Name", Type: "text", Required: true, Pattern: idPattern}}
+	fields = append(fields, cb2CreateFields()...)
 	if len(ins) > 0 {
-		acts = append(acts, console.Action{ID: "create-connection", Label: "Create host connection", Submit: "Connect", Fields: []console.Field{
-			{Name: "provider", Label: "Provider", Type: "select", Options: []string{"Secure Source Manager"}, Default: "Secure Source Manager",
-				Help: "GitHub, GitLab and Bitbucket are hosted services no instance reaches."},
-			{Name: "instance", Label: "Instance", Type: "select", Options: ins, Default: ins[0], Required: true,
-				Help: "The connection is made in the instance's region."},
-			{Name: "id", Label: "Name", Type: "text", Required: true, Pattern: idPattern}}})
+		fields[0].Options = append(fields[0].Options, "Secure Source Manager")
+		fields = append(fields, console.Field{Name: "instance", Label: "Instance", Type: "select", Options: ins, Default: ins[0],
+			ShowWhen: "provider=Secure Source Manager", Help: "A Developer Connect connection, made in the instance's region."})
 	}
+	acts = append(acts, console.Action{ID: "create-connection", Label: "Create host connection", Submit: "Connect", Fields: fields})
 	if len(conns) > 0 && len(repos) > 0 {
 		acts = append(acts, console.Action{ID: "create-link", Label: "Link repository", Submit: "Link", Fields: []console.Field{
 			{Name: "connection", Label: "Connection", Type: "select", Options: conns, Default: conns[0], Required: true},
@@ -308,6 +324,12 @@ func (p buildRepositoriesProvider) DetailActions(ctx context.Context, project st
 	case len(path) == 2 && path[0] == "connection":
 		return []console.Action{{ID: "delete-connection", Label: "Delete", Destructive: true,
 			Confirm: "the host connection (its linked repositories must be deleted first)"}}
+	case len(path) == 2 && path[0] == "cb2connection":
+		return []console.Action{{ID: "delete-cb2-connection", Label: "Delete", Destructive: true,
+			Confirm: "the host connection and its linked repositories"}}
+	case len(path) == 2 && path[0] == "cb2repository":
+		return []console.Action{{ID: "delete-cb2-repository", Label: "Delete", Destructive: true,
+			Confirm: "the linked repository; triggers on it stop running"}}
 	case len(path) == 2 && path[0] == "link":
 		return []console.Action{{ID: "delete-link", Label: "Delete", Destructive: true,
 			Confirm: "the linked repository; triggers on it stop running"}}
@@ -333,6 +355,9 @@ func (p buildRepositoriesProvider) ActAt(ctx context.Context, project string, pa
 	}
 	switch action {
 	case "create-connection":
+		if v["provider"] != "Secure Source Manager" {
+			return p.createCB2Connection(ctx, project, v)
+		}
 		in, err := instanceOf(v["instance"])
 		if err != nil {
 			return err
@@ -340,6 +365,12 @@ func (p buildRepositoriesProvider) ActAt(ctx context.Context, project string, pa
 		_, err = p.ssm.devConnectAct(ctx, []string{lastSegment(in.GetName())}, action, in, v)
 		return err
 	case "create-link":
+		if found, installed := isCB2Connection(project, v["connection"]); found {
+			if !installed {
+				return fmt.Errorf("connection %s is not installed", v["connection"])
+			}
+			return p.linkCB2Repository(ctx, v)
+		}
 		var conn *string
 		for _, c := range runadapter.DeveloperConnectConnections(project) {
 			if c.GetName() == v["connection"] {
@@ -361,6 +392,11 @@ func (p buildRepositoriesProvider) ActAt(ctx context.Context, project string, pa
 		_, err = p.ssm.devConnectAct(ctx, []string{lastSegment(in.GetName()), lastSegment(repo)}, action, in,
 			map[string]string{"connection": lastSegment(v["connection"]), "id": v["id"]})
 		return err
+	case "delete-cb2-connection", "delete-cb2-repository":
+		if len(path) != 2 {
+			return fmt.Errorf("unknown action %q", action)
+		}
+		return p.deleteCB2(ctx, action, path[1])
 	case "delete-connection", "delete-link":
 		if len(path) != 2 {
 			return fmt.Errorf("unknown action %q", action)

@@ -287,7 +287,7 @@ func (s *Server) lbPatch(lc *lbColl, x lbCtx, b obj, replace bool) (obj, error) 
 	if !ok {
 		return nil, notFound(x.rel)
 	}
-	if fp := str(b, "fingerprint"); lc.fingerprint && fp != "" && fp != str(old, "fingerprint") {
+	if fp := str(b, "fingerprint"); lc.fingerprint && fp != "" && !sameFingerprint(fp, str(old, "fingerprint")) {
 		return nil, errf(http.StatusPreconditionFailed, "conditionNotMet",
 			"Supplied fingerprint does not match current metadata fingerprint.")
 	}
@@ -363,6 +363,11 @@ func (s *Server) lbUsersLocked(rel string) []string {
 	for k, o := range s.res {
 		if strings.Contains(k, "/serviceAttachments/") && str(o, "targetService") == rel {
 			// A service attachment publishing the rule (#2140).
+			out = append(out, k)
+			continue
+		}
+		if strings.Contains(k, "/instanceGroupManagers/") && linksTo(o["autoHealingPolicies"], rel, false) {
+			// A managed instance group's autohealing health check (#2225).
 			out = append(out, k)
 			continue
 		}

@@ -254,6 +254,10 @@ EOT
         name  = "TARGET"
         value = %[5]q
       }
+      env {
+        name  = "PGPASSWORD"
+        value = %[8]q
+      }
       volume_mounts {
         name       = "cloudsql"
         mount_path = "/cloudsql"
@@ -263,7 +267,7 @@ EOT
 }
 `, h.Project(), id, conn, label, value, postgresImage,
 			// HCL interpolates ${ and %{ in a heredoc; $${ and %%{ are literal.
-			strings.NewReplacer("${", "$${", "%{", "%%{").Replace(cloudSQLServeScript))
+			strings.NewReplacer("${", "$${", "%{", "%%{").Replace(cloudSQLServeScript), upPGPassword())
 	}
 	check := func(when, label, value string) *runpb.Service {
 		t.Helper()

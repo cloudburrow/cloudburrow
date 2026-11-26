@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostmount"
 )
 
 // DockerCLI runs engine containers with the docker CLI, in the Docker the
@@ -51,9 +53,16 @@ func (d DockerCLI) Run(ctx context.Context, s RunSpec) error {
 	for _, k := range sortedKeys(s.Env) {
 		args = append(args, "-e", k+"="+s.Env[k])
 	}
-	args = append(args, "-v", s.ModelDir+":/model:ro", "-p", "127.0.0.1::"+strconv.Itoa(s.Port), s.Image)
+	// The model directory is this machine's; on a remote compute host it is
+	// carried into a volume there (internal/hostmount).
+	model, err := hostmount.Bind(ctx, s.ModelDir, "/model", hostmount.ReadOnly)
+	if err != nil {
+		return err
+	}
+	args = append(args, model.Args()...)
+	args = append(args, "-p", "127.0.0.1::"+strconv.Itoa(s.Port), s.Image)
 	args = append(args, s.Args...)
-	_, err := d.out(ctx, args...)
+	_, err = d.out(ctx, args...)
 	return err
 }
 

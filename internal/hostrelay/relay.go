@@ -7,6 +7,11 @@
 // relays each connection to the service's loopback listener. The service
 // itself stays bound to loopback, and nothing listens on any other
 // interface.
+//
+// With the instance's compute on a remote host (#2209), the address a
+// relay listens on is the host's, not this machine's: SetRemote hands the
+// listen to the SSH connection, which binds it on the host as a reverse
+// forward to the same target here.
 package hostrelay
 
 import (
@@ -18,6 +23,32 @@ import (
 	"sync"
 )
 
+// Tunnel binds a listen address on the compute host and carries each
+// connection to a target on this machine: remotecompute.Session.Reverse.
+type Tunnel interface {
+	Reverse(ctx context.Context, listen, target string) (bound string, cancel func() error, err error)
+}
+
+var (
+	remoteMu sync.Mutex
+	remote   Tunnel
+)
+
+// SetRemote makes every Relay started from now on a reverse forward over
+// t; nil returns to listening on this machine.
+func SetRemote(t Tunnel) {
+	remoteMu.Lock()
+	remote = t
+	remoteMu.Unlock()
+}
+
+// Remote is the tunnel set by SetRemote, or nil.
+func Remote() Tunnel {
+	remoteMu.Lock()
+	defer remoteMu.Unlock()
+	return remote
+}
+
 // Relay accepts on Listen and copies each connection to and from Target.
 type Relay struct {
 	Listen string
@@ -27,10 +58,23 @@ type Relay struct {
 	ln    net.Listener
 	conns map[net.Conn]struct{}
 	wg    sync.WaitGroup
+	// bound and cancel are the reverse forward's, with a Tunnel.
+	bound  string
+	cancel func() error
 }
 
 // Start binds Listen and relays until Close. It does not block.
 func (r *Relay) Start(ctx context.Context) error {
+	if t := Remote(); t != nil {
+		bound, cancel, err := t.Reverse(ctx, r.Listen, r.Target)
+		if err != nil {
+			return fmt.Errorf("relay %s -> %s on the compute host: %w", r.Listen, r.Target, err)
+		}
+		r.mu.Lock()
+		r.bound, r.cancel = bound, cancel
+		r.mu.Unlock()
+		return nil
+	}
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", r.Listen)
 	if err != nil {
@@ -106,6 +150,9 @@ func (r *Relay) relay(in net.Conn) {
 func (r *Relay) Addr() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.bound != "" {
+		return r.bound
+	}
 	if r.ln == nil {
 		return ""
 	}
@@ -115,9 +162,12 @@ func (r *Relay) Addr() string {
 // Close stops accepting, ends every relayed connection and waits for them.
 func (r *Relay) Close() error {
 	r.mu.Lock()
-	ln, conns := r.ln, r.conns
-	r.ln, r.conns = nil, nil
+	ln, conns, cancel := r.ln, r.conns, r.cancel
+	r.ln, r.conns, r.cancel, r.bound = nil, nil, nil, ""
 	r.mu.Unlock()
+	if cancel != nil {
+		return cancel()
+	}
 	if ln == nil {
 		return nil
 	}
