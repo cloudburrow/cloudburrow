@@ -16884,7 +16884,7 @@
         "method": "compute.disks.addResourcePolicies",
         "status": "Verified",
         "tests": [
-          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
+          "test/compat/computediskcmek_test.go:161 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
           "test/compat/computediskzonalgroup_test.go:24 TestComputeZonalDiskGroupReplicationThroughTheGoClient"
         ]
       },
@@ -16935,7 +16935,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/computediskciphertext_test.go:51 TestComputeDiskVolumeIsCiphertextWhileTheVMWrites",
-          "test/compat/computediskcmek_test.go:74 TestComputeDiskCMEKThroughTheGoClient",
+          "test/compat/computediskcmek_test.go:77 TestComputeDiskCMEKThroughTheGoClient",
           "test/compat/computevms_test.go:35 TestComputeVMsThroughTheGoClient"
         ]
       },
@@ -16950,7 +16950,7 @@
         "method": "compute.disks.removeResourcePolicies",
         "status": "Verified",
         "tests": [
-          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
+          "test/compat/computediskcmek_test.go:161 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
           "test/compat/computediskzonalgroup_test.go:24 TestComputeZonalDiskGroupReplicationThroughTheGoClient"
         ]
       },
@@ -17001,7 +17001,7 @@
         "method": "compute.disks.update",
         "status": "Verified",
         "tests": [
-          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
+          "test/compat/computediskcmek_test.go:161 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
           "test/compat/computediskupdate_test.go:26 TestComputeHyperdiskBalancedHAThroughTheGoClient"
         ]
       },
@@ -17009,7 +17009,7 @@
         "method": "compute.disks.updateKmsKey",
         "status": "Verified",
         "tests": [
-          "test/compat/computediskcmek_test.go:74 TestComputeDiskCMEKThroughTheGoClient"
+          "test/compat/computediskcmek_test.go:77 TestComputeDiskCMEKThroughTheGoClient"
         ]
       },
       {
@@ -18550,7 +18550,7 @@
         "tests": [
           "test/compat/backupdrregiondisk_test.go:32 TestBackupDRRegionalDiskRoundTrip",
           "test/compat/computea1_test.go:264 TestComputeRegionalDisksThroughTheGoClient",
-          "test/compat/computediskcmek_test.go:74 TestComputeDiskCMEKThroughTheGoClient",
+          "test/compat/computediskcmek_test.go:77 TestComputeDiskCMEKThroughTheGoClient",
           "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient"
         ]
       },
@@ -18624,7 +18624,7 @@
         "method": "compute.regionDisks.update",
         "status": "Verified",
         "tests": [
-          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
+          "test/compat/computediskcmek_test.go:161 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
           "test/compat/computediskupdate_test.go:26 TestComputeHyperdiskBalancedHAThroughTheGoClient"
         ]
       },
@@ -18632,7 +18632,7 @@
         "method": "compute.regionDisks.updateKmsKey",
         "status": "Verified",
         "tests": [
-          "test/compat/computediskcmek_test.go:74 TestComputeDiskCMEKThroughTheGoClient"
+          "test/compat/computediskcmek_test.go:77 TestComputeDiskCMEKThroughTheGoClient"
         ]
       },
       {
@@ -19226,7 +19226,7 @@
         "method": "compute.resourcePolicies.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
+          "test/compat/computediskcmek_test.go:161 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient",
           "test/compat/computediskencryption_test.go:79 TestComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient",
           "test/compat/computeregiondisks_test.go:80 TestComputeRegionalDisksHAThroughTheGoClient",
           "test/compat/computeworkloadpolicies_test.go:31 TestComputeWorkloadPoliciesOnGroupsThroughTheGoClient"
@@ -19243,7 +19243,7 @@
         "method": "compute.resourcePolicies.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/computediskcmek_test.go:158 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient"
+          "test/compat/computediskcmek_test.go:161 TestComputeDiskLicensesAndSnapshotSchedulesThroughTheGoClient"
         ]
       },
       {

@@ -18,6 +18,7 @@ require (
 	cloud.google.com/go/billing v1.28.1
 	cloud.google.com/go/certificatemanager v1.17.1
 	cloud.google.com/go/cloudbuild v1.35.0
+	cloud.google.com/go/clouddms v1.16.1
 	cloud.google.com/go/cloudquotas v1.14.1
 	cloud.google.com/go/cloudsqlconn v1.24.0
 	cloud.google.com/go/cloudtasks v1.20.0
@@ -152,7 +153,6 @@ require (
 
 require (
 	cloud.google.com/go/accesscontextmanager v1.15.0 // indirect
-	cloud.google.com/go/clouddms v1.16.1 // indirect
 	cloud.google.com/go/osconfig v1.22.0 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.13.0 // indirect

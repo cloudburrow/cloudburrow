@@ -13,7 +13,7 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// TestComputeGroupWorkloadPolicyThroughTheBrowser (#2206), in the compute
+// TestComputeGroupWorkloadPolicyThroughTheBrowser (#2206), in the vpcvms
 // shard: a workload policy made through the Compute Engine API; Create
 // instance group's Workload policy field makes a zonal group of no VMs
 // that uses it, as the API reads back, and the group's Details name it.

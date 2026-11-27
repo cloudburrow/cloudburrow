@@ -112,13 +112,17 @@ func (s *Server) createManagedLocked(project, mgr string, m obj, zone, name, tpl
 	if o := s.res[vm]; o != nil {
 		mgrAction(o, action)
 	}
+	// The attempt this goroutine watches: once the member is dropped, or
+	// pending again for another attempt (a recreate of the VM this one
+	// made), its outcome is no longer this member's.
+	e["op"] = opRel
 	go func() {
 		s.waitOp(context.Background(), opRel)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		cur, ok := s.res[mgr]
-		if !ok || pendingEntry(cur, vm) == nil {
-			return // the group, or this member, deleted meanwhile
+		if !ok || str(pendingEntry(cur, vm), "op") != opRel {
+			return // the group or this member deleted, or re-made, meanwhile
 		}
 		if _, made := s.res[vm]; made {
 			dropPendingLocked(cur, vm)

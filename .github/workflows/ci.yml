@@ -573,8 +573,10 @@ jobs:
     # timeout is now 30m (below). The crossservice shard's 105 too: Landing
     # 169's Vertex AI pages took its browser suite to its 30m, and the job
     # past 90 minutes in run 45680873104's re-run (a 60-minute suite); its
-    # browser suite has 40m.
-    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || (matrix.shard == 'storage' || matrix.shard == 'crossservice') && 105 || 90 }}
+    # browser suite has 40m. The run, served and sql shards' 105 too: main
+    # run 45770556272 cancelled all three at 90 minutes in their browser
+    # step (sql: a 73-minute compat suite, then the Cloud SQL pages).
+    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || (matrix.shard == 'storage' || matrix.shard == 'crossservice' || matrix.shard == 'run' || matrix.shard == 'served' || matrix.shard == 'sql') && 105 || 90 }}
     # Same rule as integration: the suite that caught #268 only after it merged.
     needs: [changes, bigquery-emulator]
     if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
@@ -614,12 +616,18 @@ jobs:
           df -h /
           free=$(df -BG --output=avail / | tail -1 | tr -dc 0-9)
           [ "$free" -ge 30 ] || { echo "only $free GiB free: the Kubernetes Engine tests need 20 GiB beside the instance"; exit 1; }
-          # Every node container's systemd, containerd and kubelet take
-          # inotify instances from root's one per-host allowance, 128 on the
-          # runner image: with the clusters' nodes beside the instance's, a
-          # joining node's kubelet never answered its health check (main run
-          # 44645694075, a pool's second and third nodes). kind's known issues give
-          # these values for many nodes on one host.
+      # Every node container's systemd, containerd and kubelet, and every
+      # Compute Engine VM's systemd, take inotify instances from root's one
+      # per-host allowance, 128 on the runner image: with the clusters'
+      # nodes beside the instance's, a joining node's kubelet never answered
+      # its health check (main run 44645694075, a pool's second and third
+      # nodes); in the run shard, which boots VMs since #2153 but was not
+      # given these, a managed instance group's second VM's systemd exited
+      # "Too many open files" in a loop and the load balancer never had two
+      # HEALTHY backends (main runs 45731759763, 45753347963). kind's known
+      # issues give these values for many nodes on one host.
+      - name: Raise the inotify limits for systemd in containers
+        run: |
           sysctl fs.inotify.max_user_instances fs.inotify.max_user_watches
           sudo sysctl -w fs.inotify.max_user_instances=512 fs.inotify.max_user_watches=524288
 

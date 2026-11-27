@@ -84,7 +84,7 @@ section and add its link at the bottom.
 - Agent Platform Pipelines run nested DAGs, `ParallelFor`, conditions, exit handlers, importers and
   caching (#2205), Google Cloud Pipeline Components and `template_uri` (#2210), with the run's
   runtime graph and Pipeline run analysis in the console.
-- Vertex AI hyperparameter tuning jobs, managed datasets and batch predictions, and BigQuery ML
+- Agent Platform hyperparameter tuning jobs, managed datasets and batch predictions, and BigQuery ML
   `EXPORT MODEL` of TRANSFORM models to SavedModels that import back (#2210).
 - Agent Platform Model Monitoring (v1 and v2), Neural Architecture Search and data labeling, with a
   local mail sink for email notifications (the console's Mail page) and console clocks to advance
@@ -100,13 +100,23 @@ section and add its link at the bottom.
 
 ### Fixed
 
+- A VM's internal load balancer and Private Service Connect addresses stay reachable after the
+  guest's VPC agent restarts or one of its relays exits; the agent now restarts relays that are no
+  longer running.
+- A GKE node pool upgrade or rollback no longer fails on a new node with a truncated image
+  archive: the images carried to it are exported and imported directly, checked as a whole tar
+  and compared by checksum before import.
 - Official Spanner, Bigtable and Cloud Storage gRPC clients made by CloudBurrow no longer export
   their built-in metrics to Google; `cloudburrow env` sets `SPANNER_DISABLE_BUILTIN_METRICS=true`.
-- Compute Engine VMs answer SSH as soon as they boot, not after the guest agent's start timeout
-  when the metadata server is slow to answer; `cloudburrow diagnose` includes each VM's serial
-  console (#2250).
-- A GKE node added by cluster creation, a resize or an upgrade serves pods only once the other
-  nodes route its pod range, so Services no longer send traffic to pods nothing can reach yet.
+- An Agent Platform model whose container image is a short Docker Hub name, by tag or by digest
+  (`python@sha256:…`), now deploys to endpoints and runs batch predictions; it was looked for
+  as a locally built image and never started.
+- A Compute Engine VM answers SSH as soon as it boots, even while its guest agent waits for the
+  metadata server, so a managed instance group no longer gives up on a VM that booted slowly (#2250).
+- A managed instance group recreating a VM whose creation fails keeps the VM's name and lists it
+  RECREATING with its last attempt, instead of sometimes dropping it or making one of a new name.
+- A Kubernetes Engine node's pods are reachable as soon as the node joins its pool, so a workload
+  keeps serving while a surge upgrade drains the old node.
 - VM guest images and other locally built images install packages from pinned Debian and Ubuntu
   snapshots, so a mirror's outage or update no longer breaks a build (#2258).
 - Dataflow streaming jobs that are drained write their last windows, `GroupIntoBatches` no longer

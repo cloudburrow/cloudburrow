@@ -200,18 +200,38 @@ apply() {
   relays
 }
 
+# running is whether process $1 is alive (not gone, not a zombie).
+running() {
+  st=$(cut -d' ' -f3 "/proc/$1/stat" 2>/dev/null) && [ -n "$st" ] && [ "$st" != Z ]
+}
+
 # relays keeps one local socat per "relay LOCAL ADDRESS PORT HEADER" line
 # and one udprelay per "relayudp ..." line, restarting them all when the
-# lines or the relay's port change.
+# lines or the relay's port change, and when one of them is no longer
+# running: systemd's restart of this unit kills them with it while
+# $RUN/relays.key, on /run, survives, and a relay that exits (a local
+# port taken when it binds) is otherwise never started again, leaving the
+# ruleset redirecting the address to a port nothing listens on (main run
+# 45770556272: the client never reached its internal load balancer).
 relays() {
   umask 077
   sed -n 's/^relay //p' "$RUN/conf" > "$RUN/relays.new"
   sed -n 's/^relayudp //p' "$RUN/conf" > "$RUN/relays-udp.new"
   rport=$(val relayport)
   key="$(val relayhost) $rport $(cat "$RUN/relays.new" "$RUN/relays-udp.new")"
-  [ "$key" = "$(cat "$RUN/relays.key" 2>/dev/null)" ] && return 0
+  if [ "$key" = "$(cat "$RUN/relays.key" 2>/dev/null)" ]; then
+    up=1
+    while read -r pid; do running "$pid" || up=""; done < "$RUN/relays.pids"
+    [ -n "$up" ] && return 0
+  fi
   if [ -f "$RUN/relays.pids" ]; then
     while read -r pid; do kill "$pid" 2>/dev/null; done < "$RUN/relays.pids"
+    # Each gone before its port is bound again: a new listener started
+    # while the old one still holds the port exits at once.
+    while read -r pid; do
+      n=0
+      while running "$pid" && [ $n -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
+    done < "$RUN/relays.pids"
   fi
   : > "$RUN/relays.pids"
   host=$(val relayhost)
@@ -259,5 +279,7 @@ while true; do
       apply "$pod" && last=$conf
     fi
   fi
+  # The applied configuration's relays, restarted if one has exited.
+  [ -n "$last" ] && relays
   sleep 2
 done

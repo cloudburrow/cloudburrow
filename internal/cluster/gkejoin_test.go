@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 // registeringRunner is a kind node that joins at once but whose kubelet
@@ -17,9 +16,7 @@ type registeringRunner struct {
 	reads    int
 	register int // the read from which the Node exists, Ready
 	removed  bool
-	node     string // the node container docker run made
-	routeAt  int    // the route read from which kindnet has routed its pod range
-	routes   int
+	routes   []string // the `ip route replace` commands, "node cidr via"
 }
 
 func (f *registeringRunner) Run(_ context.Context, name string, args ...string) (string, error) {
@@ -29,24 +26,6 @@ func (f *registeringRunner) Run(_ context.Context, name string, args ...string) 
 	switch {
 	case strings.HasPrefix(cmd, "docker ps"):
 		return "", nil
-	case strings.HasPrefix(cmd, "docker run"):
-		for i, a := range args {
-			if a == "--name" && i+1 < len(args) {
-				f.node = args[i+1]
-			}
-		}
-		return "", nil
-	case strings.HasPrefix(cmd, "kubectl") && strings.Contains(cmd, " get nodes "):
-		return f.node + "|172.18.0.3|10.244.1.0/24\ncp|172.18.0.2|10.244.0.0/24\n", nil
-	case strings.HasPrefix(cmd, "docker exec") && strings.Contains(cmd, "ip -o route"):
-		f.routes++
-		if f.routes < f.routeAt {
-			return "default via 172.18.0.1 dev eth0\n", nil
-		}
-		if args[1] == "cp" {
-			return "default via 172.18.0.1 dev eth0\n10.244.1.0/24 via 172.18.0.3 dev eth0\n", nil
-		}
-		return "default via 172.18.0.1 dev eth0\n10.244.0.0/24 via 172.18.0.2 dev eth0\n", nil
 	case strings.Contains(cmd, "systemctl is-system-running"):
 		return "running\n", nil
 	case strings.Contains(cmd, "kubeadm token create"):
@@ -58,6 +37,12 @@ func (f *registeringRunner) Run(_ context.Context, name string, args ...string) 
 		return "", nil
 	case strings.HasPrefix(cmd, "kubectl") && strings.Contains(cmd, " wait "):
 		return "", errors.New(`Error from server (NotFound): nodes "x" not found`)
+	case strings.HasPrefix(cmd, "kubectl") && strings.Contains(cmd, " get nodes "):
+		k := OwnerPrefix + "-gke-x"
+		return k + "-control-plane 10.244.0.0/24 172.18.0.2\n" + poolNodeName(k, "tfpool", 1) + " 10.244.1.0/24 172.18.0.3\n", nil
+	case strings.HasPrefix(cmd, "docker exec") && strings.Contains(cmd, " ip route replace "):
+		f.routes = append(f.routes, args[1]+" "+args[5]+" "+args[7])
+		return "", nil
 	case strings.HasPrefix(cmd, "kubectl") && strings.Contains(cmd, " get node "):
 		f.reads++
 		if f.reads < f.register {
@@ -83,46 +68,20 @@ func TestJoinWaitsForTheNodeToRegister(t *testing.T) {
 	}
 }
 
-// TestJoinWaitsForThePodNetworkRoutes: a joined node is Ready before
-// kindnet, on its 10-second tick, routes its pod range from the other
-// nodes; a pod made on it then cannot be reached from the control plane
-// (main run 45555303799), so join returns only once every node routes it.
-func TestJoinWaitsForThePodNetworkRoutes(t *testing.T) {
-	r := &registeringRunner{register: 1, routeAt: 5}
+// TestJoinRoutesTheNewNodesPodRange: once a new node is Ready, the
+// cluster's other nodes route its pod range through it, and it theirs,
+// before the node is used: a surge upgrade drained onto a node whose pods
+// the control plane could not reach yet, kindnet's routes coming only on
+// its next pass (main run 45753347963).
+func TestJoinRoutesTheNewNodesPodRange(t *testing.T) {
+	r := &registeringRunner{register: 1}
 	g := &GKE{Dir: t.TempDir(), Runner: r}
-	if err := g.Resize(context.Background(), OwnerPrefix+"-gke-x", "kindest/node:v0", "tfpool", 1); err != nil {
-		t.Fatalf("Resize to one node, routed on the fifth route read: %v", err)
+	k := OwnerPrefix + "-gke-x"
+	if err := g.Resize(context.Background(), k, "kindest/node:v0", "tfpool", 1); err != nil {
+		t.Fatalf("Resize to one node: %v", err)
 	}
-	if r.routes < 6 {
-		t.Errorf("read the routes %d times, want until both nodes route the other's pod range", r.routes)
-	}
-}
-
-// TestJoinFailsWhenThePodNetworkIsNeverRouted: a node whose pod range is
-// never routed is not a node pods can serve from.
-func TestJoinFailsWhenThePodNetworkIsNeverRouted(t *testing.T) {
-	old := podRoutesWait
-	podRoutesWait = 2 * time.Second
-	t.Cleanup(func() { podRoutesWait = old })
-	r := &registeringRunner{register: 1, routeAt: 1 << 30}
-	g := &GKE{Dir: t.TempDir(), Runner: r}
-	err := g.Resize(context.Background(), OwnerPrefix+"-gke-x", "kindest/node:v0", "tfpool", 1)
-	if err == nil || !strings.Contains(err.Error(), "no route to 10.244.1.0/24 via 172.18.0.3") {
-		t.Fatalf("Resize with a pod range never routed: %v", err)
-	}
-}
-
-func TestRoutedVia(t *testing.T) {
-	table := "default via 172.18.0.1 dev eth0 \n10.244.1.0/24 via 172.18.0.3 dev eth0 \n10.244.0.2 dev veth1 scope host \n"
-	for _, c := range []struct {
-		cidr, gw string
-		want     bool
-	}{{"10.244.1.0/24", "172.18.0.3", true}, {"10.244.1.0/24", "172.18.0.4", false}, {"10.244.2.0/24", "172.18.0.3", false}} {
-		if got := routedVia(table, c.cidr, c.gw); got != c.want {
-			t.Errorf("routedVia(%s via %s) = %v", c.cidr, c.gw, got)
-		}
-	}
-	if sameFamily([]string{"172.18.0.3", "fc00:f853::3"}, "fd00:10:244:1::/64") != "fc00:f853::3" || sameFamily([]string{"172.18.0.3"}, "fd00::/64") != "" {
-		t.Error("sameFamily")
+	want := []string{k + "-control-plane 10.244.1.0/24 172.18.0.3", poolNodeName(k, "tfpool", 1) + " 10.244.0.0/24 172.18.0.2"}
+	if strings.Join(r.routes, ",") != strings.Join(want, ",") {
+		t.Errorf("routes = %q, want %q", r.routes, want)
 	}
 }

@@ -123,26 +123,50 @@ func (g *GKE) carryImages(ctx context.Context, kind, from, to string) error {
 	}
 	defer os.RemoveAll(stage)
 	tar := filepath.Join(stage, "images.tar")
+	// The archive is named for the node it is for, so two carries from one
+	// node never share it, and is exported and imported with --local:
+	// containerd 2's ctr otherwise streams it through the transfer API,
+	// whose streams end as a clean EOF when they break (transfer/streaming
+	// SendStream and ReceiveStream), so an export could write a short archive
+	// and exit 0, or an import be handed a short one (main run 45770556272,
+	// TestGKERollbackNodePoolUpgrade: "short read: expected 5541044 bytes but
+	// got 5490688"). The export is written to a .part name, read back in
+	// full and renamed; the copy on to must have its checksum before it is
+	// imported.
+	path := "/kind/carry-" + to + ".tar"
 	export := `set -e
+out=$1; shift
 case "$(uname -m)" in aarch64|arm64) a=arm64;; x86_64|amd64) a=amd64;; *) a=$(uname -m);; esac
-ctr -n k8s.io images export --platform linux/$a /kind/carry.tar "$@"
-echo $a`
-	arch, err := r.Run(ctx, "docker", append([]string{"exec", from, "sh", "-c", export, "sh"}, refs...)...)
+rm -f "$out.part"
+ctr -n k8s.io images export --local --platform linux/$a "$out.part" "$@"
+tar -tf "$out.part" >/dev/null
+mv "$out.part" "$out"
+echo $a $(sha256sum "$out" | cut -d' ' -f1)`
+	out, err := r.Run(ctx, "docker", append([]string{"exec", from, "sh", "-c", export, "sh", path}, refs...)...)
 	defer func() {
-		_, _ = r.Run(context.WithoutCancel(ctx), "docker", "exec", from, "rm", "-f", "/kind/carry.tar")
+		_, _ = r.Run(context.WithoutCancel(ctx), "docker", "exec", from, "rm", "-f", path, path+".part")
 	}()
 	if err != nil {
 		return fmt.Errorf("export node %s's loaded images: %w", from, err)
 	}
-	if _, err := r.Run(ctx, "docker", "cp", from+":/kind/carry.tar", tar); err != nil {
+	f := strings.Fields(out)
+	if len(f) != 2 || len(f[1]) != 64 {
+		return fmt.Errorf("export node %s's loaded images: unexpected output %q", from, strings.TrimSpace(out))
+	}
+	arch, sum := f[0], f[1]
+	if _, err := r.Run(ctx, "docker", "cp", from+":"+path, tar); err != nil {
 		return err
 	}
-	if _, err := r.Run(ctx, "docker", "cp", tar, to+":/kind/carry.tar"); err != nil {
+	if _, err := r.Run(ctx, "docker", "cp", tar, to+":"+path); err != nil {
 		return err
 	}
-	_, err = r.Run(ctx, "docker", "exec", to, "ctr", "-n", "k8s.io", "images", "import", "--platform", "linux/"+strings.TrimSpace(arch), "/kind/carry.tar")
-	_, _ = r.Run(context.WithoutCancel(ctx), "docker", "exec", to, "rm", "-f", "/kind/carry.tar")
-	if err != nil {
+	defer func() { _, _ = r.Run(context.WithoutCancel(ctx), "docker", "exec", to, "rm", "-f", path) }()
+	import_ := `set -e
+if ! echo "$2  $1" | sha256sum -c - >/dev/null 2>&1; then
+  echo "the copied archive $1 ($(stat -c %s "$1") bytes) is not the exported one" >&2; exit 1
+fi
+ctr -n k8s.io images import --local --platform "linux/$3" "$1"`
+	if _, err := r.Run(ctx, "docker", "exec", to, "sh", "-c", import_, "sh", path, sum, arch); err != nil {
 		return fmt.Errorf("import the loaded images into node %s: %w", to, err)
 	}
 	return nil

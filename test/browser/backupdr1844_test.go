@@ -159,7 +159,8 @@ func TestBackupDRConsoleRound2ThroughThePages(t *testing.T) {
 	p.waitFor(rowReady(inst) + ` && document.querySelector("#scope-type") !== null`)
 	var types string
 	p.eval(`[...document.querySelectorAll("#scope-type option")].map((o) => o.textContent).join(",")`, &types)
-	if types != "All resource types,Cloud SQL,Compute Engine,Disk,AlloyDB,Filestore" {
+	// Regional disks (compute.googleapis.com/RegionDisk) since #2206.
+	if types != "All resource types,Cloud SQL,Compute Engine,Disk,Regional disk,AlloyDB,Filestore" {
 		t.Errorf("Filter table > Resource type offers %q", types)
 	}
 	p.eval(`(() => { const s = document.querySelector("#scope-type"); s.value = "compute.googleapis.com/Instance";

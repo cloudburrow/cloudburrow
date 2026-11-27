@@ -92,6 +92,25 @@ func Localise(ref string) string {
 	return LocalPrefix + ref
 }
 
+// Qualify returns ref as Docker reads it: a reference that names no
+// registry host is Docker Hub's, and a one-segment name is under its
+// library/ namespace ("python@sha256:..." is
+// docker.io/library/python@sha256:...). A reference with a registry host,
+// or with a prefix IsLocal accepts, is returned unchanged.
+//
+// It is for an image a Google API pulls from its registry (a Vertex AI
+// model's containerSpec.imageUri), where Localise would read a short name
+// as a locally loaded image that nothing loaded.
+func Qualify(ref string) string {
+	if ref == "" || IsLocal(ref) || isRemoteRef(ref) {
+		return ref
+	}
+	if !strings.Contains(ref, "/") {
+		return "docker.io/library/" + ref
+	}
+	return "docker.io/" + ref
+}
+
 // isRemoteRef reports whether a reference names a registry host. The heuristic
 // is the standard one: the first path segment is a registry if it contains a
 // dot or a colon, or is exactly "localhost".
