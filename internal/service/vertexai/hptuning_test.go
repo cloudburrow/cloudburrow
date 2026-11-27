@@ -234,18 +234,11 @@ func TestHyperparameterTuningJobs(t *testing.T) {
 				}
 			}
 			if algo == aiplatformpb.StudySpec_ALGORITHM_UNSPECIFIED {
-				// Run three at a time, a trial is suggested before the
-				// results of the two still running, and Google warns that
-				// parallel trials make the tuning less effective: that run
-				// came near lr=0.3 for all but 1.5% of the job names that
-				// seed it (Landing 170 run 46073901317, job 140758907590,
-				// was one). One at a time, each trial sees every result
-				// before it, as the default search is meant to.
 				if best > 0.01 {
-					t.Logf("three at a time, the default search's best loss was %v", best)
+					t.Errorf("the default search's best loss %v three at a time: it did not approach lr=0.3", best)
 				}
 				if seq := defaultSearchBest(t, j, parent); seq > 0.01 {
-					t.Errorf("the default search's best loss %v: it did not approach lr=0.3", seq)
+					t.Errorf("the default search's best loss %v one at a time: it did not approach lr=0.3", seq)
 				}
 			}
 			r.mu.Lock()
