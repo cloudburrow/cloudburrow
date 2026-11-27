@@ -281,7 +281,7 @@ COMPAT_DATAFLOW_TESTS='^Test(PythonDataflow|JavaDataflow|GoDataflow|DataflowJobs
 COMPAT_NIGHTLY_TESTS="$COMPAT_SPARK_TESTS|$COMPAT_DATAFLOW_TESTS"
 
 # The shards, in the order ci.yml's matrix lists them.
-COMPAT_SHARDS="storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb acceptance iam localai localaispeech"
+COMPAT_SHARDS="storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb acceptance iam localai localaispeech remotehosts"
 
 # The crossservice shard's tests (COMPAT_CROSSSERVICE_TESTS), which the run shard skips:
 # Eventarc's, whose triggers route events from Cloud Storage, Pub/Sub,
@@ -436,7 +436,7 @@ COMPAT_SQL_ALLOYDB_TESTS='^Test(AlloyDB|GcloudAlloyDB|TerraformAlloyDB|BackupDRA
 # already takes 18 of its 20 minutes with the Kubernetes Engine pages, and
 # computevms's compat suite most of its job, so they run in vpcvms, the
 # served shard's instance again (COMPAT_BROWSER_VPCVMS_TEST_NAMES).
-COMPAT_BROWSER_SHARDS="storage served vpcvms run crossservice emulators memorystore sql localai"
+COMPAT_BROWSER_SHARDS="storage served vpcvms run crossservice emulators memorystore sql localai remotehosts"
 COMPAT_BROWSER_VPCVMS_TEST_NAMES="ComputeA1Screens ComputeA1ScreensMeetWCAG
   ComputeGroupWorkloadPolicyThroughTheBrowser
   ShieldedVMConsole2181 ShieldedVMConsole2181MeetsWCAG
@@ -520,6 +520,15 @@ COMPAT_BROWSER_LOCALAI_SHARD_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbedd
 # JupyterLab through the Component Gateway (#2198), on a Dataproc cluster.
 COMPAT_BROWSER_NIGHTLY_SHARDS="spark"
 COMPAT_BROWSER_SPARK_SHARD_TESTS='^Test(BigQueryStudioNotebookRuntimeThroughThePage|BigQueryStudioConnectToARuntimeThroughThePage|BigQuerySparkNotebookManageSessionsThroughThePage|BigQuerySparkNotebookThroughThePage|Dataproc[A-Za-z0-9]*ThroughThePage|DataprocJupyterLabThroughComponentGateway|Dataflow[A-Za-z0-9]*Page)$'
+# The remotehosts shard's (#2209, #2259): TestRemoteComputeConsole on
+# its instance, whose compute is a stand-in remote host (up --compute), and
+# TestByocFirstRunWalkThrough, which needs an instance of its own on this
+# machine's Docker, started with CLOUDBURROW_BYOC_FAKES, and two more
+# stand-ins as the AWS and Azure VMs: compat_browser_select names it in
+# BROWSER_OWN_INSTANCE, which the browser step leaves to
+# scripts/remote-compute-shard.sh walkthrough after the suite.
+COMPAT_BROWSER_REMOTEHOSTS_SHARD_TESTS='^Test(RemoteComputeConsole|ByocFirstRunWalkThrough)$'
+COMPAT_BROWSER_REMOTEHOSTS_OWN_INSTANCE_TESTS='^TestByocFirstRunWalkThrough$'
 # Browser tests no shard runs: Functions' Edit, Download and Permissions
 # builds a function from source with Google's builder, as the compat
 # suite's Functions tests do, so it runs only when asked for
@@ -532,14 +541,19 @@ COMPAT_BROWSER_NEVER_TESTS='^(TestCloudRunFunctionsEditDownloadAndPermissionsThr
 # compat_browser_select <shard>: sets, for that shard's browser step,
 #   BROWSER_RUN   its go test -run pattern (every test when empty)
 #   BROWSER_SKIP  its go test -skip pattern
+#   BROWSER_OWN_INSTANCE  the selected tests that run against an instance
+#                 of their own (scripts/remote-compute-shard.sh walkthrough),
+#                 not the shard's: the suite skips them too ("" for none)
 # and returns 1 for a shard that runs no browser test. Every test the two
 # select must pass: ci.yml, verify-local.sh and nightly-sql-ephemeral.yml's
 # spark job read both, and
 # cmd/cloudburrow's TestBrowserTestsRunWhereTheirScreensAreServed holds
 # each test to one shard whose instance draws every screen it needs.
 compat_browser_select() {
-  BROWSER_RUN=""
+  BROWSER_RUN="" BROWSER_OWN_INSTANCE=""
   BROWSER_SKIP=$COMPAT_BROWSER_NEVER_TESTS
+  # And the remotehosts shard's, which need its stand-in hosts.
+  [ "$1" = remotehosts ] || BROWSER_SKIP="$COMPAT_BROWSER_REMOTEHOSTS_SHARD_TESTS|$BROWSER_SKIP"
   # The localai shard's tests are kept out of every other shard: the run
   # shard's pattern (TestSpeech*) names one, whose transcription needs that
   # shard's local models.
@@ -557,6 +571,7 @@ compat_browser_select() {
     served) BROWSER_RUN=$COMPAT_BROWSER_SERVED_SHARD_TESTS ;;
     vpcvms) BROWSER_RUN=$COMPAT_BROWSER_VPCVMS_SHARD_TESTS ;;
     localai) BROWSER_RUN=$COMPAT_BROWSER_LOCALAI_SHARD_TESTS ;;
+    remotehosts) BROWSER_RUN=$COMPAT_BROWSER_REMOTEHOSTS_SHARD_TESTS BROWSER_OWN_INSTANCE=$COMPAT_BROWSER_REMOTEHOSTS_OWN_INSTANCE_TESTS ;;
     # Nightly (COMPAT_BROWSER_NIGHTLY_SHARDS).
     spark) BROWSER_RUN=$COMPAT_BROWSER_SPARK_SHARD_TESTS ;;
     # The rest of the suite.
@@ -810,6 +825,18 @@ compat_shard() {
       # the storage suite does not run here.
       SERVICES=run,secretmanager,storage
       TEST_VARS+=,SCALE_RUN,SCALE_SECRETS,PREDICTION,RUN_STORAGE,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE ;;
+    remotehosts)
+      # Remote compute (#2209, #2259): the instance's Docker is a stand-in
+      # remote host (scripts/remote-compute-shard.sh hosts starts it and
+      # exports CLOUDBURROW_TEST_REMOTE_HOST, after the stand-in tests of
+      # internal/remotecompute and cmd/cloudburrow), with the default
+      # services, which TestRemoteComputeServesTheDefaultServices drives
+      # with Google's Go clients; only the TestRemoteCompute* tests run
+      # here, as the other suites ran on local compute in their shards.
+      SERVICES=storage,pubsub,tasks,run,secretmanager
+      UP_FLAGS=(--compute "${CLOUDBURROW_TEST_REMOTE_HOST:-}")
+      COMPAT_RUN='^TestRemoteCompute'
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,RUN,SECRETS ;;
     acceptance)
       # The acceptance workflow uploads, publishes and runs a Cloud Run
       # worker; test/k8s needs the cluster and Knative.
@@ -1073,6 +1100,20 @@ EOF2
       )
       [ "$code" = 200 ] || { echo "loading embeddinggemma-2-onnx-community answered $code" >&2; return 1; } ;;
   esac
+}
+
+# compat_remote_exports <shard> <env.json>: what the remotehosts shard's
+# compat tests read beside compat-env.sh's variables: the DOCKER_HOST
+# `cloudburrow env` names for the instance, so docker and kind reach the
+# host, and the instance's ingress, which the host publishes and the
+# instance forwards here (test/compat/README.md).
+compat_remote_exports() {
+  [ "$1" = remotehosts ] || return 0
+  local docker ingress
+  docker=$(jq -r '.DOCKER_HOST // empty' "$2")
+  ingress=$(jq -r '.CLOUDBURROW_INGRESS // empty | sub("^.*:"; "")' "$2")
+  [ -n "$docker" ] && [ -n "$ingress" ] || { echo "the remotehosts instance's env names no DOCKER_HOST or ingress: is it on its host?" >&2; return 1; }
+  export DOCKER_HOST="$docker" CLOUDBURROW_TEST_REMOTE_INGRESS="127.0.0.1:$ingress"
 }
 
 # compat_setup_exports <shard> <dir>: exports what the shard's restart

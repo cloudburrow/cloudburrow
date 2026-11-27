@@ -149,6 +149,8 @@ cleanup() {
       kind delete cluster --name "$cluster" >/dev/null 2>&1 || log "could not delete kind cluster $cluster"
     fi
   done
+  # The remotehosts shard's stand-in hosts and fakes, by ID and PID.
+  [ ! -d "$WORK/remotecompute" ] || scripts/remote-compute-shard.sh cleanup "$WORK/remotecompute" >/dev/null 2>&1
   if [ -z "$keep_images" ]; then
     docker images -q --no-trunc | sort -u | comm -13 "$IMAGES_BEFORE" - | while read -r id; do
       docker rmi "$id" >/dev/null 2>&1 || log "kept image $id (in use, or shared with a tag present before)"
@@ -231,6 +233,21 @@ run_shard() {
   SUITES="$WORK/$shard.suites" CHECKS="$WORK/$shard.checks"
   : > "$SUITES"; : > "$CHECKS"
   compat_shard "$shard"
+  if [ "$shard" = remotehosts ]; then
+    # As in CI: the stand-in tests, then the stand-in host this shard's
+    # instance runs on, whose target compat_shard reads (#2259).
+    log "$shard: the stand-in remote hosts and their tests"
+    local HOSTS_ENV
+    if ! HOSTS_ENV=$(scripts/remote-compute-shard.sh hosts "$WORK/remotecompute" "$STATE" "$name" "$dir/standin.log" 2> "$dir/standin.err"); then
+      go_suite "stand-in tests" "$dir/standin.log" "" strict
+      check "the stand-in remote hosts" fail "$(tail -n 3 "$dir/standin.err" | tr '\n' ' ')"
+      shard_done "$shard" "$name" "$t0"
+      return
+    fi
+    go_suite "stand-in tests" "$dir/standin.log" "" strict
+    eval "$HOSTS_ENV"
+    compat_shard "$shard"
+  fi
   # The localai shard's instance is the onnx build (#1985), as in CI; the
   # functions this calls see this CLI too.
   local CLI=$CLI
@@ -294,6 +311,8 @@ run_shard() {
   local COMPAT_ENV
   COMPAT_ENV=$(scripts/compat-env.sh --only "$TEST_VARS" --env-json "$WORK/env.json" --cli "$CLI" -- "${CB[@]}" 2> "$dir/compat-env.err" || true)
   eval "$COMPAT_ENV"
+  # As in CI: the remotehosts shard's DOCKER_HOST and ingress.
+  compat_remote_exports "$shard" "$WORK/env.json" 2>> "$dir/compat-env.err" || check "the remote instance's DOCKER_HOST and ingress" fail
   local unset_vars
   unset_vars=$(sed -n 's/^compat-env: not set, so the tests that need them skip: //p' "$dir/compat-env.err")
   [ -z "$unset_vars" ] || check "compat-env.sh sets every shard variable" skip "unset: $unset_vars"
@@ -340,6 +359,9 @@ run_shard() {
     fi
     go_suite compat "$dir/compat.log"
   fi
+  # The remotehosts shard's DOCKER_HOST is the running up's socket, gone
+  # after the stop below: the rest of the shard uses this machine's Docker.
+  unset DOCKER_HOST
 
   if [ -n "$sdk" ] && { [ "$shard" = storage ] || [ "$shard" = emulators ]; }; then
     node_suite "$shard" "$dir" "${CB[*]}"
@@ -434,6 +456,8 @@ run_shard() {
   fi
   cp "$UPLOG" "$dir/up.log" 2>/dev/null || true
   shard_done "$shard" "$name" "$t0"
+  unset DOCKER_HOST
+  [ "$shard" != remotehosts ] || scripts/remote-compute-shard.sh cleanup "$WORK/remotecompute" >/dev/null 2>&1 || true
 }
 
 node_suite() {  # <shard> <dir> <flags>
@@ -462,7 +486,8 @@ browser_suite() {  # <shard> <dir> <flags...>
   # As in CI: each shard's -run and -skip patterns, from
   # compat_browser_select (scripts/compat-shards.sh).
   compat_browser_select "$shard"
-  select=(-skip "$BROWSER_SKIP"); [ -z "$BROWSER_RUN" ] || select+=(-run "$BROWSER_RUN")
+  # BROWSER_OWN_INSTANCE's tests start an instance of their own, after.
+  select=(-skip "$BROWSER_SKIP${BROWSER_OWN_INSTANCE:+|$BROWSER_OWN_INSTANCE}"); [ -z "$BROWSER_RUN" ] || select+=(-run "$BROWSER_RUN")
   for c in "${CLOUDBURROW_TEST_CHROME:-}" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
     "$(command -v google-chrome || true)" "$(command -v google-chrome-stable || true)" "$(command -v chromium || true)"; do
     if [ -n "$c" ] && [ -x "$c" ]; then chrome=$c; break; fi
@@ -517,6 +542,12 @@ browser_suite() {  # <shard> <dir> <flags...>
     compat_browser_prepare "$shard" 2>> "$dir/browser-prepare.err" || true
     export CLOUDBURROW_TEST_CHROME="$chrome" CLOUDBURROW_TEST_SCREENSHOTS="$dir/browser-screenshots"
     go test -tags=browser -count=1 -timeout "$timeout" -v "${select[@]}" ./test/browser/ > "$dir/browser.log" 2>&1 || true
+    # As in CI: the remotehosts shard's walk-through, on its own
+    # instance and stand-ins (#2259), its results with the suite's.
+    if [ "$shard" = remotehosts ] && [ -n "$BROWSER_OWN_INSTANCE" ]; then
+      scripts/remote-compute-shard.sh walkthrough "$WORK/remotecompute" "$CLI" "$dir/walk.log" 2>> "$dir/browser-prepare.err" || true
+      cat "$dir/walk.log" >> "$dir/browser.log" 2>/dev/null || true
+    fi
   )
   go_suite browser "$dir/browser.log" "$("$chrome" --version 2>/dev/null || echo chrome)" strict
   # As in CI: every test of this shard's selection must have passed, so one
@@ -570,7 +601,7 @@ done
 # from ci.yml so the two cannot drift, and the nightly spark shard's.
 compat_coverage() {
   local s never none
-  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb iam localai localaispeech; do
+  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb iam localai localaispeech remotehosts; do
     case " ${SHARD_LIST[*]} " in *" $s "*) ;; *) return 0 ;; esac
   done
   SUITES="$WORK/coverage.suites" CHECKS="$WORK/coverage.checks"
@@ -579,7 +610,7 @@ compat_coverage() {
   go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > "$WORK/all.txt"
   # A shard without restart probes has no probe-*.log, and cat's exit 1
   # for the unmatched glob would end the script under set -e.
-  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb iam localai localaispeech; do
+  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb iam localai localaispeech remotehosts; do
     cat "$LOGS/$s"/compat.log "$LOGS/$s"/probe-*.log 2>/dev/null || true
   done | grep -oE -- '^--- (PASS|FAIL): Test[A-Za-z0-9_]+' | awk '{print $3}' | sort -u > "$WORK/ran.txt"
   # And the nightly spark and dataflow shards' (COMPAT_NIGHTLY_TESTS), which

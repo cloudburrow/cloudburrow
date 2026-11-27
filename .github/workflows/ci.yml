@@ -402,16 +402,18 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           # scripts/compat-env.sh, compat-shards.sh, verify-local.sh, localai-models.sh,
-          # oci-tools.sh, bigquery-engine-soak.sh, remote-compute-standin.sh and
-          # spanner-emulator-binaries.sh are bash, and checked as bash below.
-          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh ! -name compat-shards.sh ! -name verify-local.sh ! -name bigquery-engine-soak.sh ! -name endpoint-inventory.sh ! -name localai-models.sh ! -name oci-tools.sh ! -name remote-compute-standin.sh ! -name spanner-emulator-binaries.sh -exec shellcheck -s sh {} +
+          # oci-tools.sh, bigquery-engine-soak.sh, remote-compute-standin.sh,
+          # remote-compute-shard.sh and spanner-emulator-binaries.sh are bash,
+          # and checked as bash below.
+          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh ! -name compat-shards.sh ! -name verify-local.sh ! -name bigquery-engine-soak.sh ! -name endpoint-inventory.sh ! -name localai-models.sh ! -name oci-tools.sh ! -name remote-compute-standin.sh ! -name remote-compute-shard.sh ! -name spanner-emulator-binaries.sh -exec shellcheck -s sh {} +
           # Bash helpers the workflows source (#675), and the compat
           # environment generator (#711), checked as bash.
           shellcheck -s bash .github/scripts/*.sh scripts/compat-env.sh
           # The BigQuery engine soak that reproduces #989, the localai shard's model fetch (#1985) and
           # the iam shard's registry clients (#2111) and the stand-in remote
-          # compute host (#2209) and the patched Spanner emulator's build (#2029), as bash.
-          shellcheck -s bash scripts/bigquery-engine-soak.sh scripts/localai-models.sh scripts/oci-tools.sh scripts/remote-compute-standin.sh scripts/spanner-emulator-binaries.sh
+          # compute host (#2209), the remotehosts shard's hosts and tests
+          # (#2259) and the patched Spanner emulator's build (#2029), as bash.
+          shellcheck -s bash scripts/bigquery-engine-soak.sh scripts/localai-models.sh scripts/oci-tools.sh scripts/remote-compute-standin.sh scripts/remote-compute-shard.sh scripts/spanner-emulator-binaries.sh
           # The endpoint inventory of the pinned tools (#1975), as bash.
           shellcheck -s bash scripts/endpoint-inventory.sh
           # The compat job's shards and their local run (#705), as bash.
@@ -577,14 +579,18 @@ jobs:
     # browser suite has 40m. The run, served and sql shards' 105 too: main
     # run 45770556272 cancelled all three at 90 minutes in their browser
     # step (sql: a 73-minute compat suite, then the Cloud SQL pages).
-    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || (matrix.shard == 'storage' || matrix.shard == 'crossservice' || matrix.shard == 'run' || matrix.shard == 'served' || matrix.shard == 'sql') && 105 || 90 }}
+    # The remotehosts shard's 120 (#2259): the stand-in tests (about 6
+    # minutes on a laptop), its instance on a stand-in host, and the BYOC
+    # walk-through, which moves an instance's kind node onto one stand-in,
+    # on to another and back (10.5 minutes on a laptop).
+    timeout-minutes: ${{ (matrix.shard == 'localai' || matrix.shard == 'localaispeech') && 180 || matrix.shard == 'remotehosts' && 120 || (matrix.shard == 'storage' || matrix.shard == 'crossservice' || matrix.shard == 'run' || matrix.shard == 'served' || matrix.shard == 'sql') && 105 || 90 }}
     # Same rule as integration: the suite that caught #268 only after it merged.
     needs: [changes, bigquery-emulator]
     if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
     strategy:
       fail-fast: false
       matrix:
-        shard: [storage, served, gke, gkeupgrade, computevms, vpcvms, run, crossservice, scale, emulators, memorystore, sql, sqlreplicas, alloydb, acceptance, iam, localai, localaispeech]
+        shard: [storage, served, gke, gkeupgrade, computevms, vpcvms, run, crossservice, scale, emulators, memorystore, sql, sqlreplicas, alloydb, acceptance, iam, localai, localaispeech, remotehosts]
     env:
       SHARD: ${{ matrix.shard }}
       # Every make build here uses the emulator binaries the
@@ -608,9 +614,11 @@ jobs:
       # The localai shard (#1985) needs the room too: the LiteRT-LM image
       # and its build, the 2.6 GB generation model and the instance's 1.3 GB
       # of embedding, speech, OCR and vision models, each held twice while
-      # its cache is packed or unpacked.
+      # its cache is packed or unpacked. The remotehosts shard (#2259)
+      # holds its instance's node image in a stand-in host's Docker, and the
+      # walk-through's twice more, in the AWS and the Azure VM's stand-ins.
       - name: Free disk for the Kubernetes Engine API's clusters
-        if: matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'gkeupgrade' || matrix.shard == 'computevms' || matrix.shard == 'vpcvms' || matrix.shard == 'localai' || matrix.shard == 'localaispeech'
+        if: matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'gkeupgrade' || matrix.shard == 'computevms' || matrix.shard == 'vpcvms' || matrix.shard == 'localai' || matrix.shard == 'localaispeech' || matrix.shard == 'remotehosts'
         run: |
           df -h /
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift
@@ -881,6 +889,23 @@ jobs:
           path: ${{ runner.temp }}/cb/models
           key: localai-instance-models-${{ hashFiles('internal/localai/*.go', '!internal/localai/*_test.go') }}
 
+      # The remotehosts shard's stand-in remote hosts (#2209, #2259):
+      # scripts/remote-compute-shard.sh runs the stand-in tests of
+      # internal/remotecompute and cmd/cloudburrow (Connect, the mirror,
+      # carries and their resume between two hosts, host mounts, a
+      # provisioned VM, Session Manager's tunnel) against two
+      # Docker-in-Docker sshd stand-ins, every one of which must pass, then
+      # starts the stand-in this shard's instance runs on (up --compute),
+      # whose target compat_shard reads from CLOUDBURROW_TEST_REMOTE_HOST.
+      # Every host is on 127.0.0.1; nothing signs in to a cloud.
+      - name: Start the stand-in remote hosts and run their tests
+        if: matrix.shard == 'remotehosts'
+        run: |
+          scripts/remote-compute-shard.sh hosts "$RUNNER_TEMP/remotecompute" "$RUNNER_TEMP/cb" ci standin.log > "$RUNNER_TEMP/remote-hosts.env" ||
+            { grep -E -- '^(--- FAIL|    .*_test.go)' standin.log | head -40; exit 1; }
+          grep -E -- '^--- (PASS|FAIL|SKIP)' standin.log
+          sed -n "s/^export \([A-Z0-9_]*\)='\(.*\)'\$/\1=\2/p" "$RUNNER_TEMP/remote-hosts.env" >> "$GITHUB_ENV"
+
       - name: Start an instance and run the compatibility suite
         run: |
           # make build, not go build: the CLI embeds the Linux storage server
@@ -953,6 +978,9 @@ jobs:
           COMPAT_ENV=$(scripts/compat-env.sh --strict --only "$TEST_VARS" --env-json env.json \
             --cli "$PWD/bin/cloudburrow" --gcloud "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" -- "${CB[@]}")
           eval "$COMPAT_ENV"
+          # The remotehosts shard's DOCKER_HOST, so docker and kind reach
+          # the instance's host, and its ingress (#2259).
+          compat_remote_exports "$SHARD" env.json
           if ! { [ -s "$CLOUDBURROW_TEST_KUBECONFIG" ] && kind get clusters | grep -qx "$CLOUDBURROW_TEST_CLUSTER"; }; then
             echo "the instance's kubeconfig or kind cluster is not where the compat tests expect"; kind get clusters; exit 1
           fi
@@ -1074,7 +1102,7 @@ jobs:
           # serve (#700, #854, #1472, #1568), and in served and vpcvms for
           # Compute Engine's and Kubernetes Engine's.
           case "$SHARD" in
-            storage|served|vpcvms|run|crossservice|emulators|memorystore|sql|localai) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
+            storage|served|vpcvms|run|crossservice|emulators|memorystore|sql|localai|remotehosts) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
           esac
           if [ "$SHARD" = storage ]; then
             # The official Python clients against the same instance (#287),
@@ -1222,7 +1250,7 @@ jobs:
       # Every test selected for the shard must pass: go test
       # exits 0 on a skip, and each skips without its variables or its screen.
       - name: Console in a headless browser
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai' || matrix.shard == 'remotehosts'
         run: |
           set -o pipefail
           # ubuntu-latest ships Google Chrome: it is in the runner image's
@@ -1316,7 +1344,8 @@ jobs:
           # Each shard's -run and -skip patterns (#2229's vpcvms among them),
           # from compat_browser_select, which verify-local.sh calls too.
           compat_browser_select "$SHARD"
-          SELECT=(-skip "$BROWSER_SKIP"); [ -z "$BROWSER_RUN" ] || SELECT+=(-run "$BROWSER_RUN")
+          # BROWSER_OWN_INSTANCE's tests start an instance of their own, below.
+          SELECT=(-skip "$BROWSER_SKIP${BROWSER_OWN_INSTANCE:+|$BROWSER_OWN_INSTANCE}"); [ -z "$BROWSER_RUN" ] || SELECT+=(-run "$BROWSER_RUN")
           rc=0
           # 10m, and 20m in served, whose test makes a Kubernetes Engine
           # cluster and node pool, real kind nodes, through the pages (#1913,
@@ -1352,16 +1381,26 @@ jobs:
           # suite reached 20m (main run 45477746718), so it gets 30m too.
           BROWSER_TIMEOUT=10m; case "$SHARD" in served|run|storage|sql|vpcvms) BROWSER_TIMEOUT=30m ;; crossservice) BROWSER_TIMEOUT=40m ;; esac
           go test -tags=browser -count=1 -timeout "$BROWSER_TIMEOUT" -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
+          ./bin/cloudburrow stop "${CB[@]}"
+          # The remotehosts shard's TestByocFirstRunWalkThrough (#2259),
+          # on an instance of its own on this machine's Docker started with
+          # the local fakes of AWS and Azure (test/tools/byocfakes), whose
+          # VMs boot as two more stand-ins; its log joins the suite's, so
+          # the check below holds it to a pass too.
+          if [ -n "$BROWSER_OWN_INSTANCE" ]; then
+            scripts/remote-compute-shard.sh walkthrough "$RUNNER_TEMP/remotecompute" "$PWD/bin/cloudburrow" walk.log || rc=1
+            grep -E -- '^ *--- (PASS|FAIL|SKIP)' walk.log || true
+            cat walk.log >> browser.log
+          fi
           for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | grep -E "${BROWSER_RUN:-^Test}" | grep -vE "$BROWSER_SKIP"); do
             grep -q -- "^--- PASS: $t (" browser.log ||
               { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" browser.log || echo 'no result')"; rc=1; }
           done
-          ./bin/cloudburrow stop "${CB[@]}"
           [ "$rc" = 0 ] || { echo "the console browser suite did not pass"; exit 1; }
           echo "== browser ($SHARD): $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai')
+        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'localai' || matrix.shard == 'remotehosts')
         with:
           name: browser-screenshots-${{ matrix.shard }}
           path: |
@@ -1382,6 +1421,8 @@ jobs:
             e2e.log
             k8s.log
             node.log
+            standin.log
+            walk.log
           retention-days: 7
           if-no-files-found: ignore
 
@@ -1412,6 +1453,8 @@ jobs:
           PID=$(jq -r .pid "$RUNNER_TEMP/cb/ci/up.json" 2>/dev/null || true)
           [ -n "$PID" ] && kill "$PID" 2>/dev/null || true
           for c in $(kind get clusters 2>/dev/null); do kind delete cluster --name "$c" || true; done
+          # The remotehosts shard's stand-ins and fakes, by ID and PID.
+          [ ! -d "$RUNNER_TEMP/remotecompute" ] || scripts/remote-compute-shard.sh cleanup "$RUNNER_TEMP/remotecompute" || true
 
   # Every compat test ran in some shard. A test whose service is in no shard
   # would skip everywhere and never be missed: the shards are gated by
@@ -1436,7 +1479,7 @@ jobs:
         run: |
           go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > all.txt
           missing=
-          for shard in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb iam localai localaispeech; do
+          for shard in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb iam localai localaispeech remotehosts; do
             d=logs/compat-log-$shard
             [ -d "$d" ] || { echo "no logs from the $shard shard"; missing=1; continue; }
             # Top-level results only; a subtest's line is indented.
@@ -1492,15 +1535,14 @@ jobs:
           # those jobs by their patterns, COMPAT_SPARK_TESTS and
           # COMPAT_DATAFLOW_TESTS (COMPAT_NIGHTLY_TESTS), not listed here:
           # each job fails unless every test its pattern matches passed
-          # (#2245). The remote compute tests (#2209) need the stand-in
-          # remote host, a privileged Docker-in-Docker container with sshd
-          # (scripts/remote-compute-standin.sh) that the instance is started
-          # on; they run locally, until a shard starts one.
+          # (#2245). The remote compute tests (#2209) run in the remotehosts
+          # shard, on an instance whose compute is a stand-in remote host
+          # (#2259), so none is here.
           # TestSpannerGraphOnThePatchedEmulator (#2029) needs CloudBurrow's
           # patched Spanner emulator, which only release.yml builds (hours of
           # Bazel): a CLI built here embeds none, so it skips, until CI
           # builds and caches it (#2263).
-          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|ModelGardenDeploysHuggingFaceModels|ModelGardenDeploysOnHuggingFacePyTorchInference|ModelGardenDeploysAnONNXModel|ModelGardenDeploysAnMLXModel|ModelGardenDeploysAGGUFModelOnTheAppleGPU|ModelGardenDeploysAnMLXModelOnTheAppleGPU|GenerateContentOnTheAppleGPU|CloudSQLServerInstance|AlloyDBOmniEngine|RemoteCompute[A-Za-z0-9_]*|SpannerGraphOnThePatchedEmulator)$'
+          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction|FunctionsSecretsBuildsAndMounts|ModelGardenDeploysHuggingFaceModels|ModelGardenDeploysOnHuggingFacePyTorchInference|ModelGardenDeploysAnONNXModel|ModelGardenDeploysAnMLXModel|ModelGardenDeploysAGGUFModelOnTheAppleGPU|ModelGardenDeploysAnMLXModelOnTheAppleGPU|GenerateContentOnTheAppleGPU|CloudSQLServerInstance|AlloyDBOmniEngine|SpannerGraphOnThePatchedEmulator)$'
           # shellcheck source=scripts/compat-shards.sh
           . scripts/compat-shards.sh
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" | grep -vE "$COMPAT_NIGHTLY_TESTS" || true)

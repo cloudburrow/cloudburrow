@@ -8559,15 +8559,19 @@ function buildCreateForm(spec) {
     if (!cond) continue;
     // "name=a|b" holds for either choice: Create table's File format is
     // shown for Google Cloud Storage and for Upload (#1861).
+    // "!name" holds while a checkbox is unchecked (or a field empty):
+    // Create a schedule's Start time and Frequency show until Use CRON
+    // expression is turned on (#2260).
     const terms = cond.split("&").map((t) => {
-      const [name, choice] = t.split("=");
-      return { other: byName.get(name), choice };
+      const not = t.startsWith("!");
+      const [name, choice] = (not ? t.slice(1) : t).split("=");
+      return { other: byName.get(name), choice, not };
     }).filter((t) => t.other);
     if (!terms.length) continue;
     const show = () => {
-      const on = terms.every(({ other, choice }) => choice === undefined
+      const on = terms.every(({ other, choice, not }) => (choice === undefined
         ? (other.isCheck ? other.control.checked : !!other.control.value)
-        : choice.split("|").includes(radioValue(other)));
+        : choice.split("|").includes(radioValue(other))) !== not);
       entry.node.hidden = !on;
       if (!on) markValid(entry);
     };
@@ -8737,7 +8741,7 @@ function buildCreateForm(spec) {
       m.slot = null;
       m.openPanel = () => openPanel(m);
       for (const n of [...Object.keys(m.field.visibleWhen || {}),
-        ...(m.field.showWhen || "").split("&").map((t) => t.split("=")[0])]) {
+        ...(m.field.showWhen || "").split("&").map((t) => t.replace(/^!/, "").split("=")[0])]) {
         const other = byName.get(n);
         if (other) other.control.addEventListener("change", refresh);
       }
