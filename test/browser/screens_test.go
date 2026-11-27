@@ -3,7 +3,9 @@
 package browser
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -241,6 +243,14 @@ func TestCloudRunEditFormIsPrefilledAndGivesFocusBack(t *testing.T) {
 // main run 45126544176, TestIAMPolicyAnalyzerThroughThePage's Run in
 // Saved queries. The element is then looked up again, a few times; any
 // other failure, or one that persists, fails the test as before.
+//
+// A redraw that lands before chromedp has even resolved the marked node
+// removes the mark with the node, and the click's query would wait for a
+// [data-cb-click] that is never drawn again until the test's own deadline
+// (Landing 170 run 46044441643, the same test's Delete: 180 s, then the
+// failure screenshot found the context spent too). So each click has its
+// own bound, and one that times out with the mark gone from the document
+// is a redraw too, looked up again like the detached node.
 func (p *tab) clickText(sel, text string) {
 	p.t.Helper()
 	find := fmt.Sprintf(`[...document.querySelectorAll(%q)].find((n) => n.textContent.trim() === %q && n.getClientRects().length)`, sel, text)
@@ -250,11 +260,19 @@ func (p *tab) clickText(sel, text string) {
 		const n = %s; n.setAttribute("data-cb-click", "");
 		// Centred, so a fixed header never covers the point clicked.
 		n.scrollIntoView({ block: "center", inline: "nearest" }); return true; })()`, find), nil)
-		err := chromedp.Do(p.ctx, chromedp.Click(chromedp.CSS(`[data-cb-click]`)))
+		cctx, cancel := context.WithTimeout(p.ctx, 10*time.Second)
+		err := chromedp.Do(cctx, chromedp.Click(chromedp.CSS(`[data-cb-click]`)))
+		cancel()
 		if err == nil {
 			return
 		}
-		if attempt >= 3 || !strings.Contains(err.Error(), "Could not find node with given id") {
+		redrawn := strings.Contains(err.Error(), "Could not find node with given id")
+		if errors.Is(err, context.DeadlineExceeded) && p.ctx.Err() == nil {
+			var marked bool
+			p.eval(`document.querySelector("[data-cb-click]") !== null`, &marked)
+			redrawn = !marked
+		}
+		if attempt >= 3 || !redrawn {
 			p.t.Fatalf("browser: click %q in %s: %v", text, sel, err)
 		}
 	}

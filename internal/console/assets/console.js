@@ -29311,9 +29311,19 @@ function renderIAMAnalyzer(view) {
     el("form", { class: "card", novalidate: true, onsubmit: submit }, error, ...fields.nodes, el("div", { class: "modal-actions" }, run, save, exp)),
     results);
   const savedPanel = el("div", { id: "analyzer-saved", role: "tabpanel", "aria-labelledby": "analyzer-tab-saved", hidden: true });
+  // Each visit to the tab lists the scope's saved queries afresh. Until the
+  // list answers, the panel is the loading skeleton, as Google's tables are
+  // while they load: never the rows of the last visit, whose Run and Delete
+  // would act on a list about to be replaced (a Delete clicked in the stale
+  // table was lost when the fresh one replaced it). Only the latest listing
+  // draws, so a slow earlier one never overwrites it.
+  let savedSeq = 0;
   const loadSaved = async () => {
+    const seq = ++savedSeq;
+    setChildren(savedPanel, loadingState(3, { what: "saved queries" }));
     try {
       const r = await iamCall("saved-list", { scope: fields.values().scope });
+      if (seq !== savedSeq) return;
       const qs = r.savedQueries || [];
       setChildren(savedPanel, qs.length ? el("table", { class: "table", id: "saved-queries-table" },
         el("caption", { class: "visually-hidden", text: "Saved queries" }),
@@ -29331,11 +29341,18 @@ function renderIAMAnalyzer(view) {
                 setChildren(results, el("h2", { text: "Query results" }), table("analyze-table", r.mainAnalysis));
               } catch (err) { fail(err); }
             } }),
-            el("button", { type: "button", class: "link", text: "Delete", "aria-label": `Delete ${q.name.split("/").pop()}`, onclick: async () => {
-              await iamCall("saved-delete", { name: q.name });
+            el("button", { type: "button", class: "link", text: "Delete", "aria-label": `Delete ${q.name.split("/").pop()}`, onclick: async (ev) => {
+              ev.currentTarget.disabled = true;
+              try {
+                await iamCall("saved-delete", { name: q.name });
+                notify(`Deleted saved query ${q.name.split("/").pop()}`);
+              } catch (err) {
+                notify(`Saved query ${q.name.split("/").pop()} not deleted: ${err.message}`, "error");
+              }
               loadSaved();
             } })))))) : el("p", { class: "unavailable", id: "saved-queries-empty", text: "No saved queries in this scope." }));
     } catch (err) {
+      if (seq !== savedSeq) return;
       setChildren(savedPanel, el("p", { class: "form-error", role: "alert", text: err.message }));
     }
   };
