@@ -193,13 +193,14 @@ func TestCloudNATTranslatesVMTraffic2140(t *testing.T) {
 	}
 
 	// The node's conntrack: the connection from the NAT IP, a port of the
-	// VM's range, to the target.
+	// VM's range, to the target. Listed over netlink: Ubuntu's kernels (the
+	// CI runners') have no /proc/net/nf_conntrack.
 	nodes, _ := exec.CommandContext(ctx, "docker", "ps", "--filter", "label=io.x-k8s.kind.cluster="+cluster, "--format", "{{.Names}}").Output()
 	found := ""
 	for try := 0; try < 3 && found == ""; try++ {
 		v.run(vm, probe)
 		for _, node := range strings.Fields(string(nodes)) {
-			ct, _ := exec.CommandContext(ctx, "docker", "exec", node, "cat", "/proc/net/nf_conntrack").Output()
+			ct, _ := exec.CommandContext(ctx, "docker", "exec", node, "conntrack", "-L", "-o", "extended").Output()
 			for _, l := range strings.Split(string(ct), "\n") {
 				if !strings.Contains(l, " src="+natIP+" dst="+tg.ip+" ") || !strings.Contains(l, "dport=8080") {
 					continue

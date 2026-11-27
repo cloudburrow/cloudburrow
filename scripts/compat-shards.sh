@@ -87,6 +87,14 @@
 # sql shard took 3,185 s of its 60m in main run 44617241748 and passed 60m
 # in 44645694075 (no test hung; TestTerraformSQLProvisionScript had run
 # 16 s), and these 28 tests are 1,666 s of its 3,260.
+#
+# And alloydb, the sql shard's instance a third time, for the AlloyDB and
+# Database Migration Service tests (COMPAT_SQL_ALLOYDB_TESTS), which the sql
+# shard skips too: Landing 170's Database Migration Service tests (#2252,
+# #2257), about 490 s, took the sql shard past its 60m in run 45935899624
+# (128 of its tests run, TestGcloudSQLConnectInContainer cut off at 47 s),
+# and sqlreplicas had about 15 minutes to spare. The AlloyDB tests are
+# about 600 s more.
 
 # An eleventh, localai, is an instance of a -tags onnx build (make
 # build-onnx, run with ONNXRUNTIME_LIB) started with the pinned Gemma 4 E2B
@@ -273,7 +281,7 @@ COMPAT_DATAFLOW_TESTS='^Test(PythonDataflow|JavaDataflow|GoDataflow|DataflowJobs
 COMPAT_NIGHTLY_TESTS="$COMPAT_SPARK_TESTS|$COMPAT_DATAFLOW_TESTS"
 
 # The shards, in the order ci.yml's matrix lists them.
-COMPAT_SHARDS="storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas acceptance iam localai localaispeech"
+COMPAT_SHARDS="storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb acceptance iam localai localaispeech"
 
 # The crossservice shard's tests (COMPAT_CROSSSERVICE_TESTS), which the run shard skips:
 # Eventarc's, whose triggers route events from Cloud Storage, Pub/Sub,
@@ -336,6 +344,10 @@ COMPAT_SQL_NETWORK_TESTS='^Test(CloudSQLZonesPrivateIPAndPSCEndpoints|CloudSQLPr
 # (#2208), and Backup and DR's Compute Engine round trips (#1433, #2206).
 COMPAT_SQL_HEAVY_TESTS='^Test(CloudSQLPasswordAuthentication|BackupDRComputeVMAndDiskRoundTrip|BackupDRRegionalDiskRoundTrip)$'
 COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica|BlueGreen|External|Switchover|Demote|Failover|Promote)|'"$COMPAT_SQL_NETWORK_TESTS"'|'"$COMPAT_SQL_HEAVY_TESTS"
+# The alloydb shard's tests: AlloyDB's own, gcloud's and Terraform's, Backup
+# and DR's of AlloyDB, and Database Migration Service's, whose destinations
+# are this instance's Cloud SQL instances and AlloyDB clusters.
+COMPAT_SQL_ALLOYDB_TESTS='^Test(AlloyDB|GcloudAlloyDB|TerraformAlloyDB|BackupDRAlloyDB|DataMigration|GcloudDatabaseMigration)[A-Za-z0-9_]*$'
 
 # The console's headless-browser suite (#594) runs in the storage, run,
 # emulators, memorystore and sql shards: the Cloud KMS and Cloud Run
@@ -974,7 +986,7 @@ compat_shard() {
       # with and without persistence_config (#1557).
       PROBE_TESTS="TestMemorystoreAcrossRestart TestMemorystoreCreatedAcrossRestart TestMemorystoreRDBAcrossRestart TestMemorystoreClustersAcrossRestart"
       PROBE_VARS=MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT ;;
-    sql|sqlreplicas)
+    sql|sqlreplicas|alloydb)
       # Cloud SQL for PostgreSQL (#311, #584) and for MySQL with its
       # generated password (#297), the Cloud SQL Admin API over both
       # servers (#1301), and the Backup and DR Service over their backups
@@ -1015,12 +1027,15 @@ compat_shard() {
       # shard's Cloud SQL instances and AlloyDB clusters.
       SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging,compute,monitoring,alloydb,datamigration
       TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,CLOUDSQL_PASSWORD,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING,SQL_COMPUTE,SQL_MONITORING,ALLOYDB,ALLOYDB_CONNECTOR,ALLOYDB_TLS,ALLOYDB_CA,DATAMIGRATION
-      # The replica tests run in sqlreplicas, against the same instance,
-      # and the restart probes in sql.
+      # The replica tests run in sqlreplicas and the AlloyDB and Database
+      # Migration Service tests in alloydb, against the same instance, and
+      # the restart probes in sql.
       if [ "$1" = sqlreplicas ]; then
         COMPAT_RUN=$COMPAT_SQL_REPLICA_TESTS
+      elif [ "$1" = alloydb ]; then
+        COMPAT_RUN=$COMPAT_SQL_ALLOYDB_TESTS
       else
-        COMPAT_SKIP=$COMPAT_SQL_REPLICA_TESTS
+        COMPAT_SKIP="$COMPAT_SQL_REPLICA_TESTS|$COMPAT_SQL_ALLOYDB_TESTS"
         # Cloud SQL for PostgreSQL (#701): a table with a row.
         SETUP_TESTS="TestCloudSQLRestartSetup"
         PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"
@@ -1032,7 +1047,7 @@ compat_shard() {
   # bq's (#696) run in the emulators shard, with BigQuery, and gcloud sql's
   # in the sql shard.
   case "$1" in
-    storage|served|gke|gkeupgrade|computevms|vpcvms|run|crossservice|scale|emulators|memorystore|sql|sqlreplicas) TEST_VARS+=,GCLOUD ;;
+    storage|served|gke|gkeupgrade|computevms|vpcvms|run|crossservice|scale|emulators|memorystore|sql|sqlreplicas|alloydb) TEST_VARS+=,GCLOUD ;;
   esac
 }
 

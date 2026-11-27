@@ -100,6 +100,9 @@ section and add its link at the bottom.
 
 ### Fixed
 
+- Cloud NAT flow logs (`compute.googleapis.com/nat_flows`) and dynamic port allocation's port usage
+  work on Linux hosts whose kernel has no `/proc/net/nf_conntrack`, Ubuntu's among them: the NAT
+  gateway now lists its connections over netlink with `conntrack`, which VM images now carry.
 - A Basic tier Memorystore for Redis instance with RDB persistence keeps data written just before a
   maintenance restart: the old server now stops and writes its last snapshot before the next one
   starts, instead of the next one sometimes loading the previous snapshot.

@@ -52,7 +52,7 @@ func TestNightlySQLEphemeralRunsNightlyAndByHandOnly(t *testing.T) {
 	}
 }
 
-// It runs the sql and sqlreplicas shards as scripts/compat-shards.sh
+// It runs the sql, sqlreplicas and alloydb shards as scripts/compat-shards.sh
 // defines them, with their -run/-skip patterns and go test -timeout, each
 // on an ephemeral instance, and the tests #1740 fixed must pass, not skip.
 // Without sql's COMPAT_SKIP the replica tests ran in it too and the suite
@@ -64,7 +64,7 @@ func TestNightlySQLEphemeralRunsTheSQLShardEphemeral(t *testing.T) {
 		all += j
 	}
 	for _, want := range []string{
-		"shard: [sql, sqlreplicas]",
+		"shard: [sql, sqlreplicas, alloydb]",
 		"SHARD: ${{ matrix.shard }}",
 		". scripts/compat-shards.sh",
 		`compat_shard "$SHARD"`,

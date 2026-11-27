@@ -557,6 +557,43 @@ func TestUnknownKeysAreNotFound(t *testing.T) {
 	}
 }
 
+// TestDirectoriesListAndRedirect: a directory of the tree lists its entries,
+// and its name without the slash is redirected to it, as Compute Engine
+// answers; Node's gcp-metadata decides it is on GCE by reading
+// computeMetadata/v1/instance (isAvailable), so a 404 there leaves a Node
+// client with no credentials. Entries a directory lacks stay 404s.
+func TestDirectoriesListAndRedirect(t *testing.T) {
+	t.Parallel()
+	c, _ := testCreds(t)
+	srv := serve(t, c)
+	for path, want := range map[string]string{
+		"/computeMetadata/v1/instance":  "service-accounts/",
+		"/computeMetadata/v1/instance/": "service-accounts/",
+		"/computeMetadata/v1/project":   "project-id",
+		"/computeMetadata/v1/universe/": "universe-domain",
+	} {
+		code, body, h := getMeta(t, srv, path)
+		if code != http.StatusOK || !strings.Contains(body, want+"\n") || h.Get(FlavorHeader) != FlavorValue {
+			t.Errorf("GET %s = %d %q, want 200 listing %s", path, code, body, want)
+		}
+	}
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/computeMetadata/v1/instance", nil)
+	req.Header.Set(FlavorHeader, FlavorValue)
+	resp, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusMovedPermanently || resp.Header.Get("Location") != "/computeMetadata/v1/instance/" {
+		t.Errorf("GET instance = %d to %q, want a 301 to instance/", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	for _, path := range []string{"/computeMetadata/v1/instance/nosuchkey", "/computeMetadata/v1/project/nosuchkey", "/computeMetadata/v1/nosuchdir"} {
+		if code, _, _ := getMeta(t, srv, path); code != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", path, code)
+		}
+	}
+}
+
 // TestProjectNumberIsTheOneEveryServiceReports (#1211): numeric-project-id,
 // and the project the zone and machine type are under, are
 // resource.ProjectNumber of the served project, the number Resource Manager

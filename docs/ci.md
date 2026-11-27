@@ -182,7 +182,7 @@ check in shape.
 ### The Cloud SQL ephemeral nightly
 
 `.github/workflows/nightly-sql-ephemeral.yml` ("Cloud SQL ephemeral nightly", #1752) runs the
-compat job's `sql` and `sqlreplicas` shards, as `scripts/compat-shards.sh` defines them (services,
+compat job's `sql`, `sqlreplicas` and `alloydb` shards, as `scripts/compat-shards.sh` defines them (services,
 `-run`/`-skip` patterns and `go test -timeout`), each on an instance brought up with
 `--mode ephemeral`, nightly at 06:47 UTC and by hand (`gh workflow run nightly-sql-ephemeral.yml`).
 The compat job runs the shard on a persistent instance only, and a created Cloud SQL server keeps

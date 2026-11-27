@@ -16,6 +16,10 @@
 # so apt is given distroless's bundle (the image dependencies.json pins
 # for internal/storageimage) for that one host.
 # Move APT_SNAPSHOT with the bases' digests.
+#
+# conntrack (conntrack-tools) lists a Cloud NAT gateway pod's connections
+# over netlink: Ubuntu's and many distributions' kernels are built without
+# CONFIG_NF_CONNTRACK_PROCFS, so /proc/net/nf_conntrack is absent on them.
 ARG BASE
 FROM gcr.io/distroless/static-debian12@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2 AS ca
 FROM ${BASE}
@@ -44,7 +48,7 @@ RUN . /etc/os-release \
     esac \
  && rm -f /etc/apt/sources.list \
  && apt-get update \
- && apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server sudo curl ca-certificates iproute2 procps less nftables netcat-openbsd socat e2fsprogs \
+ && apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server sudo curl ca-certificates iproute2 procps less nftables conntrack netcat-openbsd socat e2fsprogs \
  && apt-get clean && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/ssh/ssh_host_* \
  && (userdel -r ubuntu 2>/dev/null || true)
