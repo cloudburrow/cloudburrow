@@ -19,7 +19,9 @@ import (
 // a GQL RETURN ... ORDER BY comes back in its order (the emulator had
 // swapped its first two rows), as plain SQL's ORDER BY always did;
 // PROPERTY_EXISTS, SAME, ALL_DIFFERENT and IS SOURCE OF; COUNT of a group
-// variable; and ANY CHEAPEST with an edge COST. Each returns the rows Google's graph patterns and graph operators
+// variable; TO_JSON of an element (Google's emulator refuses a graph
+// element for TO_JSON's templated argument; the GoogleSQL patch takes it in
+// a graph query, as Spanner does); and ANY CHEAPEST with an edge COST. Each returns the rows Google's graph patterns and graph operators
 // pages show. An instance that runs Google's emulator image (the patched
 // CLI embeds no build: make spanner-binaries) skips, naming why.
 //
@@ -89,6 +91,7 @@ func TestSpannerGraphOnThePatchedEmulator(t *testing.T) {
 		{name: "COUNT of a group variable", sql: `GRAPH FinGraph MATCH ANY SHORTEST (a:Account {is_blocked:true})-[t:Transfers]->{1, 4} (b:Account) LET path_length = COUNT(t) RETURN a.id AS a_id, path_length, b.id AS b_id`, rows: 3, check: has("Anti Semi Apply", "Recursive Union")},
 		{name: "SAME", sql: `GRAPH FinGraph MATCH (src:Account)<-[transfer:Transfers]-(dest:Account) WHERE NOT SAME(src, dest) RETURN src.id AS source_id, dest.id AS destination_id`, rows: 5, check: has("Scan")},
 		{name: "IS SOURCE OF", sql: `GRAPH FinGraph MATCH (a:Account)-[transfer:Transfers]-(b:Account) WHERE a IS SOURCE of transfer RETURN a.id AS a_id, b.id AS b_id`, rows: 5, check: has("Union All")},
+		{name: "TO_JSON of an element", sql: `GRAPH FinGraph MATCH (a:Account)-[t:Transfers]->(b) RETURN ELEMENT_ID(a) AS e, TO_JSON(t) AS j`, rows: 5, check: has("Cross Apply")},
 		{name: "ALL_DIFFERENT", sql: `GRAPH FinGraph MATCH (a1:Account)-[t1:Transfers]->(a2:Account)-[t2:Transfers]->(a3:Account)-[t3:Transfers]->(a4:Account) WHERE a1.id < a4.id RETURN ALL_DIFFERENT(t1, t2, t3) AS results`, rows: 3, check: has("Cross Apply")},
 		{name: "ANY CHEAPEST", sql: `GRAPH FinGraph MATCH ANY CHEAPEST (a:Account)-[t:Transfers COST t.amount]->{1,3}(b:Account) LET total_cost = sum(t.amount) RETURN a.id AS a_id, b.id AS b_id, total_cost`, rows: 9, check: has("Anti Semi Apply", "Recursive Union")},
 	} {

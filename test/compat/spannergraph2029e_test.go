@@ -19,8 +19,8 @@ import (
 // variables read as group variables (a Recursive Union of the subpath's
 // rows); a path mode on a part of a path; SIMPLE; IS_ACYCLIC, IS_TRAIL,
 // IS_SIMPLE, NODES, EDGES, PATH_FIRST and PATH_LAST of a path; ELEMENT_ID,
-// SOURCE_NODE_ID, DESTINATION_NODE_ID, PROPERTY_NAMES and TO_JSON of an
-// element; IS LABELED; juxtaposed node patterns; a MATCH no element table
+// SOURCE_NODE_ID, DESTINATION_NODE_ID and PROPERTY_NAMES of an element
+// (TO_JSON of one is TestSpannerGraphOnThePatchedEmulator's); IS LABELED; juxtaposed node patterns; a MATCH no element table
 // matches (an Empty Relation); a search prefix with several path patterns;
 // ALL PATHS; GROUP BY a RETURN's alias; properties a graph defines by an
 // expression; and SQL's lambdas, array subscripts, namespaced functions,
@@ -115,7 +115,9 @@ func TestSpannerGraphQueryPlansOfEveryPattern(t *testing.T) {
 		{name: "IS_ACYCLIC, IS_TRAIL, IS_SIMPLE grouped", sql: `GRAPH FinGraph MATCH p=(a:Account)-[t:Transfers]->{1,3}(b) RETURN IS_ACYCLIC(p) AS ac, IS_TRAIL(p) AS tr, IS_SIMPLE(p) AS si, COUNT(*) AS n GROUP BY ac, tr, si`, rows: 4, check: has("Aggregate", "Recursive Union")},
 		{name: "NODES, EDGES, PATH_FIRST, PATH_LAST", sql: `GRAPH FinGraph MATCH p=(a:Account {id:7})-[t:Transfers]->{2}(b) RETURN ARRAY_LENGTH(NODES(p)) AS n, ARRAY_LENGTH(EDGES(p)) AS e, PATH_FIRST(p).id AS f, PATH_LAST(p).id AS l`, rows: 2, check: has("Recursive Union")},
 		// element functions and predicates
-		{name: "ELEMENT_ID and TO_JSON", sql: `GRAPH FinGraph MATCH (a:Account)-[t:Transfers]->(b) RETURN SOURCE_NODE_ID(t) AS s, DESTINATION_NODE_ID(t) AS d, ELEMENT_ID(a) AS e, TO_JSON(t) AS j`, rows: 5, check: has("Cross Apply")},
+		// (TO_JSON of an element: TestSpannerGraphOnThePatchedEmulator, as
+		// Google's emulator refuses a graph element for TO_JSON's argument)
+		{name: "ELEMENT_ID", sql: `GRAPH FinGraph MATCH (a:Account)-[t:Transfers]->(b) RETURN SOURCE_NODE_ID(t) AS s, DESTINATION_NODE_ID(t) AS d, ELEMENT_ID(a) AS e`, rows: 5, check: has("Cross Apply")},
 		{name: "PROPERTY_NAMES", sql: `GRAPH FinGraph MATCH (a:Account) RETURN PROPERTY_NAMES(a) AS n`, rows: 3, check: has("Scan")},
 		{name: "IS NOT LABELED", sql: `GRAPH FinGraph MATCH (a) WHERE a IS NOT LABELED Account RETURN a.id AS i`, rows: 3, check: has("Union All", "Filter")},
 		{name: "juxtaposed node patterns", sql: `GRAPH FinGraph MATCH (a:Account)(b:Account {id: 7}) RETURN a.id AS ai, b.id AS bi`, rows: 1, check: has("Scan")},
