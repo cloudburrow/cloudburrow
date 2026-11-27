@@ -124,6 +124,9 @@ section and add its link at the bottom.
   snapshots, so a mirror's outage or update no longer breaks a build (#2258).
 - Dataflow streaming jobs that are drained write their last windows, `GroupIntoBatches` no longer
   drops its last batch, and `cloudburrow stop` stops running Dataflow jobs at once (part of #2215).
+- A console resource page, such as a Backup and DR data source's, shows its heading only once the
+  resource has loaded, as Google's console does; while it loads the page shows the breadcrumb and
+  a loading indicator, so a page still loading no longer looks like the loaded one.
 
 ## [0.7.0] - 2026-11-25
 
