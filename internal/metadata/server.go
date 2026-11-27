@@ -177,6 +177,28 @@ func (s *Server) Handler() http.Handler {
 		}
 		s.text(w, "instance/\nproject/\nuniverse/\n")
 	})
+	// The directories, listed as Compute Engine lists them; a directory's
+	// name without its slash is a 301 to it, as Compute Engine answers,
+	// which is how Node's gcp-metadata decides it is on GCE (isAvailable
+	// reads computeMetadata/v1/instance and follows it). Entries a
+	// directory does not have are 404s.
+	dir := func(path, listing string) {
+		mux.HandleFunc(strings.TrimSuffix(path, "/"), func(w http.ResponseWriter, r *http.Request) {
+			u := *r.URL
+			u.Path = path
+			http.Redirect(w, r, u.RequestURI(), http.StatusMovedPermanently)
+		})
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != path {
+				http.NotFound(w, r)
+				return
+			}
+			s.text(w, listing)
+		})
+	}
+	dir("/computeMetadata/v1/instance/", "id\nmachine-type\nname\nservice-accounts/\nzone\n")
+	dir("/computeMetadata/v1/project/", "numeric-project-id\nproject-id\n")
+	dir("/computeMetadata/v1/universe/", "universe-domain\n")
 	// The universe the instance's credentials are of: Google's, as on any
 	// Compute Engine VM outside a sovereign universe. The Java and Go auth
 	// libraries read it (ComputeEngineCredentials.getUniverseDomain) and
