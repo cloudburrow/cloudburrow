@@ -149,13 +149,17 @@ func TestAlloyDBReplicationAndTransfersThroughThePage(t *testing.T) {
 	ready := func(name string) {
 		t.Helper()
 		deadline := time.Now().Add(8 * time.Minute)
+		// A state is a status field's value, the cluster's in the summary
+		// and each instance's in its row: the page also has a section
+		// headed "Maintenance" (#2251), which is not a state.
 		busy := func(d string) bool {
 			for _, s := range []string{"CREATING", "BOOTSTRAPPING", "MAINTENANCE", "PROMOTING", "UPDATING", "Creating", "Maintenance"} {
-				if strings.Contains(d, `"`+s+`"`) {
+				if strings.Contains(d, `"status":"`+s+`"`) || strings.Contains(d, `"Status":"`+s+`"`) ||
+					strings.Contains(d, `{"label":"Status","value":"`+s+`"}`) {
 					return true
 				}
 			}
-			return !strings.Contains(d, `"Ready"`)
+			return !strings.Contains(d, `{"label":"Status","value":"Ready"}`)
 		}
 		for d := detail(name); busy(d); d = detail(name) {
 			if time.Now().After(deadline) {
