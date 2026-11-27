@@ -199,8 +199,32 @@ func TestAlloyDBParityThroughThePage2251(t *testing.T) {
 	p.clickText(".overflow-item", "Delete")
 	p.confirmByName("par-user")
 	p.waitFor(`document.querySelector(".modal.is-open") === null`)
-	if got := detail(cluster); strings.Contains(got, "par-user") {
-		t.Errorf("the deleted user is still listed: %s", got)
+	// The Users tab's rows: the page's Events timeline (#2253) rightly
+	// still records the USER_DELETE on par-user.
+	got := detail(cluster)
+	var page struct {
+		Sections []struct {
+			ID      string
+			Listing *struct{ Items []struct{ Name string } }
+		}
+	}
+	if err := json.Unmarshal([]byte(got), &page); err != nil {
+		t.Fatalf("the cluster's page: %v: %s", err, got)
+	}
+	usersTab := false
+	for _, s := range page.Sections {
+		if s.ID != "users" || s.Listing == nil {
+			continue
+		}
+		usersTab = true
+		for _, u := range s.Listing.Items {
+			if u.Name == "par-user" {
+				t.Errorf("the deleted user is still listed: %s", got)
+			}
+		}
+	}
+	if !usersTab {
+		t.Errorf("the cluster's page has no Users tab: %s", got)
 	}
 
 	// Upgrade: two steps, the cluster's ID typed back, Start upgrade.
