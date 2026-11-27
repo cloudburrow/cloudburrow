@@ -4994,7 +4994,15 @@ async function renderDetail(view, route, resourcePath) {
   // filter already applied — so a reader who wants the live stream and the full
   // control set gets there without rebuilding the query.
   const drawLogsSection = (into, section, note) => {
-    setChildren(into, note, loadingState(4));
+    // The tab's own bar and note (Cloud Tasks' Enable logs) stay where they
+    // are while the entries load; only what is under them is redrawn. Put
+    // back into the panel with the entries, they left the document for a
+    // moment, and a press on Enable logs made just before the entries
+    // arrived was a click Chrome dispatched to nothing: no prompt opened
+    // (Landing 171 run 46064522048, TestTasksPromptsAndCheckedTasksAsGoogles).
+    const body = el("div", { class: "logs-section-body" });
+    setChildren(into, note, body);
+    setChildren(body, loadingState(4));
     const query = new URLSearchParams({ resource: section.resource, limit: "200" });
     if (project) query.set("project", project);
     const explorer = new URLSearchParams({ resource: section.resource });
@@ -5004,10 +5012,10 @@ async function renderDetail(view, route, resourcePath) {
       const entries = data.entries || [];
       // Which store the lines are from: with Cloud Logging served, what
       // clients write through its API is here beside the pods' output.
-      if (data.cloudLogging === false && !note) {
-        note = el("p", { class: "unavailable",
-          text: "Cloud Logging is not served by this instance, so these are the containers' own lines only." });
-      }
+      const notice = data.cloudLogging === false && !note
+        ? el("p", { class: "unavailable",
+            text: "Cloud Logging is not served by this instance, so these are the containers' own lines only." })
+        : null;
       const link = el("a", { class: "button-link secondary",
         href: `/logs?${explorer}`,
         text: "Open in Logs Explorer" });
@@ -5015,7 +5023,7 @@ async function renderDetail(view, route, resourcePath) {
         // Which kind of empty. A pod's log line often carries no project, so a
         // project-scoped read of a noisy resource can come back empty while the
         // instance holds hundreds of its lines.
-        return setChildren(into, note,
+        return setChildren(body, notice,
           emptyState(`No entries for ${name}`,
             `This instance holds ${data.held || 0} entries, ${data.unattributed || 0} of ` +
             "which carry no project. A pod's line usually cannot be attributed to one, " +
@@ -5036,11 +5044,10 @@ async function renderDetail(view, route, resourcePath) {
           fields: { Severity: e.severity, Source: e.source || "—", Message: e.message },
         })),
       };
-      setChildren(into);
-      renderTableInto(into, [note, el("div", { class: "card-actions" }, link)].filter(Boolean),
+      renderTableInto(body, [notice, el("div", { class: "card-actions" }, link)].filter(Boolean),
                       listing, "entries", () => drawPanel(), route, {});
     }).catch((err) => {
-      setChildren(into, note,
+      setChildren(body,
         errorState("Logs unavailable", String(err.message), () => drawPanel()));
     });
   };

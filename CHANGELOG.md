@@ -100,6 +100,9 @@ section and add its link at the bottom.
 
 ### Fixed
 
+- A resource page's Logs tab no longer drops a click on its own buttons (Cloud Tasks' Enable logs)
+  made just as its entries finish loading: the button stays in place while the entries are drawn
+  under it, so the prompt opens.
 - Cloud NAT flow logs (`compute.googleapis.com/nat_flows`) and dynamic port allocation's port usage
   work on Linux hosts whose kernel has no `/proc/net/nf_conntrack`, Ubuntu's among them: the NAT
   gateway now lists its connections over netlink with `conntrack`, which VM images now carry.
