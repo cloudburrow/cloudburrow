@@ -459,6 +459,15 @@ func (s *Server) LaunchFlexTemplate(ctx context.Context, req *dataflowpb.LaunchF
 	for _, k := range keys {
 		args = append(args, "--"+k+"="+lp.GetParameters()[k])
 	}
+	// The environment's additional pipeline options (option=value, as
+	// gcloud's --additional-pipeline-options sends them) and experiments
+	// reach the program as its own options.
+	for _, o := range env.GetAdditionalPipelineOptions() {
+		args = append(args, "--"+strings.TrimPrefix(o, "--"))
+	}
+	for _, e := range env.GetAdditionalExperiments() {
+		args = append(args, "--experiments="+e)
+	}
 	fl := FlexLaunch{Project: job.ProjectId, Location: loc, JobName: job.Name, Image: image, Args: args,
 		TempLocation: env.GetTempLocation(), StagingLocation: env.GetStagingLocation(), MaxWorkers: env.GetMaxWorkers(),
 		Network: env.GetNetwork(), Subnetwork: env.GetSubnetwork(), Update: lp.GetUpdate()}

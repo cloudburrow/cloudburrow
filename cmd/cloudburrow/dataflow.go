@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/dataflow/apiv1beta3/dataflowpb"
@@ -137,6 +138,7 @@ func (s *dataflowService) Start(ctx context.Context) error {
 			project: func() string { return s.cfg.DefaultProject() }, runAddr: func() string { return s.liveAddrs()["run"] }}
 		opts.Provided = pt
 		launcher.seedYAML = pt.seedYAML
+		launcher.read = st.Read
 	}
 	opts.Launcher = launcher
 	if s.live != nil {
@@ -214,6 +216,26 @@ type flexLauncher struct {
 	// seedYAML readies Google's YAML template's packages
 	// (providedTemplates.seedYAML).
 	seedYAML func(context.Context) error
+	// read reads a Cloud Storage object (gs://BUCKET/OBJECT) of the
+	// instance's: a YAML template's pipeline file.
+	read func(context.Context, string) ([]byte, error)
+}
+
+// yamlPipelineText is the Beam YAML pipeline a Yaml_Template launch
+// runs: its yaml_pipeline, or its yaml_pipeline_file's content.
+func (l flexLauncher) yamlPipelineText(ctx context.Context, args []string) string {
+	var text []string
+	for _, a := range args {
+		if v, ok := strings.CutPrefix(a, "--yaml_pipeline="); ok {
+			text = append(text, v)
+		}
+		if v, ok := strings.CutPrefix(a, "--yaml_pipeline_file="); ok && strings.HasPrefix(v, "gs://") && l.read != nil {
+			if b, err := l.read(ctx, v); err == nil {
+				text = append(text, string(b))
+			}
+		}
+	}
+	return strings.Join(text, "\n")
 }
 
 func (l flexLauncher) Launch(ctx context.Context, f dataflow.FlexLaunch) error {
@@ -240,6 +262,11 @@ func (l flexLauncher) Launch(ctx context.Context, f dataflow.FlexLaunch) error {
 				return err
 			}
 			fl.ProvidedImage = y.Image
+			// The Java expansion services its Java providers' transforms
+			// need, which Beam would download from Maven Central.
+			if fl.ProvidedJars, err = l.provided.YAMLJars(ctx, l.yamlPipelineText(ctx, f.Args)); err != nil {
+				return err
+			}
 		}
 	}
 	return l.d.LaunchFlex(ctx, fl)

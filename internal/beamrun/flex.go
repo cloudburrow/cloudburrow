@@ -67,6 +67,10 @@ type Flex struct {
 	// ProvidedImage is the launcher image of a provided template whose
 	// program is Python (Google's YAML template: BuildYAMLLauncher).
 	ProvidedImage string
+	// ProvidedJars are the Java expansion services Google's YAML
+	// template's pipeline uses (Provided.YAMLJars), mounted at Beam's
+	// jar cache in its launcher.
+	ProvidedJars []string
 }
 
 // flexTimeout bounds a launcher's run: its program submits the job and,
@@ -231,6 +235,9 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 		env = map[string]string{"FLEX_TEMPLATE_PYTHON_PY_FILE": "main.py", "PIP_INDEX_URL": ProvidedPythonIndex}
 		for _, l := range providedLabels(f.Provided.Name) {
 			extra = append(extra, "--labels="+l)
+		}
+		for _, j := range f.ProvidedJars {
+			mounts = append(mounts, "-v", j+":/root/.apache_beam/cache/jars/"+filepath.Base(j)+":ro")
 		}
 	} else if f.Provided != nil {
 		// Google's Java launcher image, built by its templates-maven-plugin

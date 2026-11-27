@@ -43,6 +43,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -100,6 +101,12 @@ var yamlPackages = []PyPackage{
 	{"msal-extensions", "1.3.1", "msal_extensions-1.3.1-py3-none-any.whl",
 		"https://files.pythonhosted.org/packages/5e/75/bd9b7bb966668920f06b200e84454c8f3566b102183bc55c5473d96cb2b9/msal_extensions-1.3.1-py3-none-any.whl",
 		"96d3de4d034504e969ac5e85bae8106c8373b5c6568e4c8fa7af2eca9dbe6bca", "MIT"},
+	// Beam YAML's Python providers with packages (a provider's
+	// packages, a transform's config.dependencies) clone a virtual
+	// environment with it (PypiExpansionService._create_venv_from_clone).
+	{"virtualenv-clone", "0.5.7", "virtualenv_clone-0.5.7-py3-none-any.whl",
+		"https://files.pythonhosted.org/packages/21/ac/e07058dc5a6c1b97f751d24f20d4b0ec14d735d77f4a1f78c471d6d13a43/virtualenv_clone-0.5.7-py3-none-any.whl",
+		"44d5263bceed0bac3e1424d64f798095233b64def1c5689afa43dc3223caf5b0", "MIT"},
 	poetryCore,
 }
 
@@ -187,6 +194,12 @@ func (p *Provided) BuildYAMLLauncher(ctx context.Context) (YAMLLauncher, error) 
 		}
 		out.Packages = append(out.Packages, path)
 	}
+	// The image's JDK is the Java SDK container's (yamlDockerfile).
+	if _, err := p.D.docker(ctx, "image", "inspect", JavaImages[providedJava]); err != nil {
+		if out, err := p.D.docker(ctx, "pull", "-q", JavaImages[providedJava]); err != nil {
+			return YAMLLauncher{}, fmt.Errorf("pull %s: %s", JavaImages[providedJava], out)
+		}
+	}
 	classes := filepath.Join(p.Dir(t.Module), "classes")
 	sdist, wheel, err := p.buildJobBuilder(ctx, classes, dir)
 	if err != nil {
@@ -205,13 +218,15 @@ func (p *Provided) BuildYAMLLauncher(ctx context.Context) (YAMLLauncher, error) 
 // fetchPinned writes pk's file to path, from its URL, unless a file of
 // its SHA-256 is there; a download of another hash is refused.
 func fetchPinned(ctx context.Context, pk PyPackage, path string) error {
-	if b, err := os.ReadFile(path); err == nil {
-		s := sha256.Sum256(b)
-		if hex.EncodeToString(s[:]) == pk.SHA256 {
+	if f, err := os.Open(path); err == nil {
+		h := sha256.New()
+		_, err := io.Copy(h, f)
+		_ = f.Close()
+		if err == nil && hex.EncodeToString(h.Sum(nil)) == pk.SHA256 {
 			return nil
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pk.URL, nil)
 	if err != nil {
@@ -307,15 +322,49 @@ func globOne(dir, pattern string) string {
 // is the Python SDK container the workers run, which has Apache Beam
 // 2.78.0 and its gcp, yaml and dataframe extras' packages; the build has
 // no network.
-const yamlDockerfile = `FROM %s
+//
+// Beam YAML's Java providers' transforms (ReadFromBigQuery,
+// ReadFromKafka, ...) are expanded on the launcher by Beam's Java
+// expansion services, which Beam runs with the java on its PATH: the JDK
+// of Beam's Java 17 SDK container is copied in (JAVA_HOME). Their jars
+// are mounted at the jar cache Beam reads before it downloads one
+// (YAMLJars).
+//
+// A Python provider with packages runs its transforms' expansion service
+// in a virtual environment cloned from one Beam makes first by
+// installing apache_beam[dataframe,gcp,test,yaml] and virtualenv-clone
+// from PyPI (PypiExpansionService._create_venv_to_clone), at the path
+// Beam keys by the interpreter and those requirements. It is made here,
+// with the image's own Beam and packages (--system-site-packages), so
+// that only the provider's own packages are installed at launch, from
+// the instance's Python index. Google's launcher image caches both kinds
+// of artifact ahead of time too (Beam's
+// apache_beam.yaml.cache_provider_artifacts).
+const yamlDockerfile = `FROM %[2]s AS jdk
+FROM %[1]s
+COPY --from=jdk /opt/java/openjdk /opt/java/openjdk
+ENV JAVA_HOME=/opt/java/openjdk
+ENV PATH=/opt/java/openjdk/bin:$PATH
 COPY template/ /template/
 COPY packages/ /tmp/cb-packages/
 RUN python -m pip install --no-index --no-deps --require-hashes --disable-pip-version-check --no-cache-dir --root-user-action=ignore -r /tmp/cb-packages/requirements.txt \
  && mkdir -p /tmp/dataflow-requirements-cache && cp /tmp/cb-packages/*.whl /tmp/dataflow-requirements-cache/ \
- && rm -f /tmp/dataflow-requirements-cache/job_builder_util_transforms-*.whl && rm -rf /tmp/cb-packages
+ && rm -f /tmp/dataflow-requirements-cache/job_builder_util_transforms-*.whl /tmp/dataflow-requirements-cache/virtualenv_clone-*.whl && rm -rf /tmp/cb-packages
+RUN python -c "` + cloneVenvScript + `"
 ENV FLEX_TEMPLATE_PYTHON_PY_FILE=main.py
 WORKDIR /template
 `
+
+// cloneVenvScript makes the virtual environment Beam YAML's Python
+// providers clone (yamlDockerfile), with the interpreter main.py runs
+// under (python, /usr/local/bin/python in the SDK container).
+const cloneVenvScript = `import subprocess, sys; ` +
+	`from apache_beam.version import __version__ as v; ` +
+	`from apache_beam.yaml.yaml_provider import PypiExpansionService as P; ` +
+	`pk = ['apache_beam[dataframe,gcp,test,yaml]==' + v, 'virtualenv-clone']; ` +
+	`p = P._path(sys.executable, pk); ` +
+	`subprocess.run([sys.executable, '-m', 'venv', '--system-site-packages', p], check=True); ` +
+	`open(p + '-requirements.txt', 'w').write(chr(10).join(pk))`
 
 // buildYAMLImage builds the launcher image (yamlDockerfile) from the
 // module's yaml-template files and the packages, and answers its tag,
@@ -336,7 +385,7 @@ func (p *Provided) buildYAMLImage(ctx context.Context, classes, dir string, pack
 		h.Write(b)
 		return os.WriteFile(p, b, 0o644)
 	}
-	if err := write("Dockerfile", fmt.Appendf(nil, yamlDockerfile, PythonImages[LauncherImage])); err != nil {
+	if err := write("Dockerfile", fmt.Appendf(nil, yamlDockerfile, PythonImages[LauncherImage], JavaImages[providedJava])); err != nil {
 		return "", err
 	}
 	for _, f := range []string{"main.py", "ml_dependencies.py", "requirements.txt"} {
@@ -385,4 +434,95 @@ func (p *Provided) buildYAMLImage(ctx context.Context, classes, dir string, pack
 		return "", fmt.Errorf("build the %s launcher image: %v: %s", YAMLTemplateName, err, lastLines(string(b), 5))
 	}
 	return tag, nil
+}
+
+// JavaJar is one of Beam's Java expansion services: a shaded jar on
+// Maven Central, checked against its SHA-256, which Beam YAML's beamJar
+// providers name by its gradle target.
+type JavaJar struct {
+	// Target is the gradle target Beam YAML's standard_io.yaml names.
+	Target string
+	// File is the jar's file name (the name Beam caches it under:
+	// ~/.apache_beam/cache/jars/FILE), URL its Maven Central URL (the
+	// one Beam's JavaJarServer.path_to_beam_jar makes), SHA256 its
+	// digest and License the licence its POM names.
+	File, URL, SHA256, License string
+	// Transforms are the Beam YAML transform types standard_io.yaml
+	// serves with it.
+	Transforms []string
+}
+
+// mavenBeamJar is Beam's Maven Central URL of artifact's jar.
+func mavenBeamJar(artifact string) string {
+	return "https://repo.maven.apache.org/maven2/org/apache/beam/" + artifact + "/" + BeamVersion + "/" + artifact + "-" + BeamVersion + ".jar"
+}
+
+// yamlJars are the expansion services whose transforms Yaml_Template's
+// launcher expands (Apache Beam 2.78.0's standard_io.yaml), pinned. A
+// Java transform of another (JMS, Debezium, Kinesis, Snowflake) has no
+// jar staged: Beam's own error names the cache path to stage it at.
+var yamlJars = []JavaJar{
+	{"sdks:java:io:google-cloud-platform:expansion-service:shadowJar", "beam-sdks-java-io-google-cloud-platform-expansion-service-2.78.0.jar",
+		mavenBeamJar("beam-sdks-java-io-google-cloud-platform-expansion-service"),
+		"c423385181d212890a3d0e40e7d5a42d968251e47bccca54071e757e8136da87", "Apache-2.0",
+		[]string{"ReadFromBigQuery", "ReadFromBigTable", "ReadFromFirestore", "ReadFromSpanner", "ReadFromSpannerCDC",
+			"WriteToBigQuery", "WriteToBigQueryCDC", "WriteToBigTable", "WriteToFirestore", "WriteToSpanner"}},
+	{"sdks:java:io:expansion-service:shadowJar", "beam-sdks-java-io-expansion-service-2.78.0.jar",
+		mavenBeamJar("beam-sdks-java-io-expansion-service"),
+		"fd84e9f3c4107044b8f8df44426b8e22fd3c96b849e55b217484dbb15e221ccb", "Apache-2.0",
+		[]string{"IcebergAddFiles", "ReadFromIcebergCDC", "ReadFromKafka", "ReadFromMongoDB", "ReadFromTFRecord",
+			"WriteToDatadog", "WriteToKafka", "WriteToMongoDB", "WriteToSplunk", "WriteToTFRecord"}},
+	{"sdks:java:extensions:schemaio-expansion-service:shadowJar", "beam-sdks-java-extensions-schemaio-expansion-service-2.78.0.jar",
+		mavenBeamJar("beam-sdks-java-extensions-schemaio-expansion-service"),
+		"65712d8a2e5522f93074fd2087b82adc1f1f74f1c794b4fc6fddc770b2aa2539", "Apache-2.0",
+		[]string{"ReadFromJdbc", "ReadFromMySql", "ReadFromOracle", "ReadFromPostgres", "ReadFromSqlServer",
+			"WriteToCsv", "WriteToJdbc", "WriteToJson", "WriteToMySql", "WriteToOracle", "WriteToPostgres", "WriteToSqlServer"}},
+}
+
+// YAMLJavaJars are the pinned expansion services.
+func YAMLJavaJars() []JavaJar { return append([]JavaJar(nil), yamlJars...) }
+
+// yamlTypeRE is a Beam YAML transform's type (`type: ReadFromKafka`).
+var yamlTypeRE = regexp.MustCompile(`(?m)\btype:\s*['"]?([A-Za-z][A-Za-z0-9_]*)`)
+
+// YAMLJarsFor are the pinned expansion services whose transforms
+// pipeline (a Beam YAML pipeline's text) names, by yamlJars' order.
+func YAMLJarsFor(pipeline string) []JavaJar {
+	types := map[string]bool{}
+	for _, m := range yamlTypeRE.FindAllStringSubmatch(pipeline, -1) {
+		types[m[1]] = true
+	}
+	var out []JavaJar
+	for _, j := range yamlJars {
+		for _, t := range j.Transforms {
+			if types[t] {
+				out = append(out, j)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// YAMLJars fetches the expansion services pipeline needs (YAMLJarsFor),
+// once each, from Maven Central, checked against their SHA-256, and
+// answers their paths: the launcher mounts each at Beam's jar cache
+// (~/.apache_beam/cache/jars), where Beam reads a jar before it
+// downloads one, as Beam's own error advises a launcher without internet
+// access ("stage the jar at ...").
+func (p *Provided) YAMLJars(ctx context.Context, pipeline string) ([]string, error) {
+	dir := filepath.Join(p.Cache, "dataflow-templates", "beam-"+BeamVersion+"-jars")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, j := range YAMLJarsFor(pipeline) {
+		path := filepath.Join(dir, j.File)
+		p.D.logf("dataflow: staging Beam's expansion service %s for Yaml_Template", j.File)
+		if err := fetchPinned(ctx, PyPackage{Name: j.Target, Version: BeamVersion, File: j.File, URL: j.URL, SHA256: j.SHA256}, path); err != nil {
+			return nil, err
+		}
+		out = append(out, path)
+	}
+	return out, nil
 }
