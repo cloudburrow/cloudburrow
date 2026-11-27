@@ -402,15 +402,16 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           # scripts/compat-env.sh, compat-shards.sh, verify-local.sh, localai-models.sh,
-          # oci-tools.sh, bigquery-engine-soak.sh and remote-compute-standin.sh are bash, and checked as bash below.
-          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh ! -name compat-shards.sh ! -name verify-local.sh ! -name bigquery-engine-soak.sh ! -name endpoint-inventory.sh ! -name localai-models.sh ! -name oci-tools.sh ! -name remote-compute-standin.sh -exec shellcheck -s sh {} +
+          # oci-tools.sh, bigquery-engine-soak.sh, remote-compute-standin.sh and
+          # spanner-emulator-binaries.sh are bash, and checked as bash below.
+          find scripts -maxdepth 1 -name '*.sh' ! -name compat-env.sh ! -name compat-shards.sh ! -name verify-local.sh ! -name bigquery-engine-soak.sh ! -name endpoint-inventory.sh ! -name localai-models.sh ! -name oci-tools.sh ! -name remote-compute-standin.sh ! -name spanner-emulator-binaries.sh -exec shellcheck -s sh {} +
           # Bash helpers the workflows source (#675), and the compat
           # environment generator (#711), checked as bash.
           shellcheck -s bash .github/scripts/*.sh scripts/compat-env.sh
           # The BigQuery engine soak that reproduces #989, the localai shard's model fetch (#1985) and
           # the iam shard's registry clients (#2111) and the stand-in remote
-          # compute host (#2209), as bash.
-          shellcheck -s bash scripts/bigquery-engine-soak.sh scripts/localai-models.sh scripts/oci-tools.sh scripts/remote-compute-standin.sh
+          # compute host (#2209) and the patched Spanner emulator's build (#2029), as bash.
+          shellcheck -s bash scripts/bigquery-engine-soak.sh scripts/localai-models.sh scripts/oci-tools.sh scripts/remote-compute-standin.sh scripts/spanner-emulator-binaries.sh
           # The endpoint inventory of the pinned tools (#1975), as bash.
           shellcheck -s bash scripts/endpoint-inventory.sh
           # The compat job's shards and their local run (#705), as bash.
