@@ -19,7 +19,7 @@
 #   --shards A,B,...  the shards to run, in order; default every one:
 #                     storage,served,gke,gkeupgrade,computevms,vpcvms,run,crossservice,scale,emulators,
 #                     memorystore,sql,
-#                     sqlreplicas,acceptance,iam,localai,localaispeech
+#                     sqlreplicas,alloydb,acceptance,iam,localai,localaispeech
 #                     (localai and localaispeech, #1985, need make build-onnx's CLI, which it builds
 #                     unless --no-build, ONNXRUNTIME_LIB, and the pinned
 #                     generation model at CLOUDBURROW_LOCALAI_MODEL:
@@ -330,7 +330,8 @@ run_shard() {
     # The iam shard runs only the enforcement tests (COMPAT_RUN, #1879).
     local select_run=()
     [ -n "$COMPAT_RUN" ] && select_run=(-run "$COMPAT_RUN")
-    # The sql shard skips the replica tests, which sqlreplicas runs.
+    # The sql shard skips the replica tests, which sqlreplicas runs, and
+    # the AlloyDB and Database Migration Service tests, which alloydb runs.
     [ -n "$COMPAT_SKIP" ] && select_run+=(-skip "$COMPAT_SKIP")
     go test -tags=compat -count=1 -timeout "$COMPAT_TIMEOUT" -v ${select_run[@]+"${select_run[@]}"} ./test/compat/... > "$dir/compat.log" 2>&1 || rc=$?
     if [ "$rc" -ne 0 ]; then
@@ -569,7 +570,7 @@ done
 # from ci.yml so the two cannot drift, and the nightly spark shard's.
 compat_coverage() {
   local s never none
-  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
+  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb iam localai localaispeech; do
     case " ${SHARD_LIST[*]} " in *" $s "*) ;; *) return 0 ;; esac
   done
   SUITES="$WORK/coverage.suites" CHECKS="$WORK/coverage.checks"
@@ -578,7 +579,7 @@ compat_coverage() {
   go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > "$WORK/all.txt"
   # A shard without restart probes has no probe-*.log, and cat's exit 1
   # for the unmatched glob would end the script under set -e.
-  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
+  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb iam localai localaispeech; do
     cat "$LOGS/$s"/compat.log "$LOGS/$s"/probe-*.log 2>/dev/null || true
   done | grep -oE -- '^--- (PASS|FAIL): Test[A-Za-z0-9_]+' | awk '{print $3}' | sort -u > "$WORK/ran.txt"
   # And the nightly spark and dataflow shards' (COMPAT_NIGHTLY_TESTS), which

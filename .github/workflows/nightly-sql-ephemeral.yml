@@ -12,7 +12,7 @@ name: Cloud SQL ephemeral nightly
 # report-red-runs.yml.
 #
 # The shards are the ones scripts/compat-shards.sh defines (compat_shard
-# sql and sqlreplicas), each on an instance of its own, with the same setup
+# sql, sqlreplicas and alloydb), each on an instance of its own, with the same setup
 # steps, -run/-skip patterns and go test -timeout as ci.yml's compat job
 # (#1813: the nightly ran sql's services without its COMPAT_SKIP, so the
 # replica tests sqlreplicas holds, about 28 minutes, ran too, and the suite
@@ -64,7 +64,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [sql, sqlreplicas]
+        shard: [sql, sqlreplicas, alloydb]
     # ci.yml's compat job's 90, plus a cold emulator build when its cache
     # misses; go test's own 60m deadline fires first.
     timeout-minutes: 105
@@ -160,7 +160,8 @@ jobs:
           . .github/scripts/retry-flaky.sh
           set +e
           # COMPAT_RUN and COMPAT_SKIP, from compat_shard: sql skips the
-          # replica tests, which sqlreplicas runs alone, as in ci.yml.
+          # replica tests, which sqlreplicas runs alone, and the AlloyDB and
+          # Database Migration Service tests, which alloydb runs, as in ci.yml.
           SELECT_RUN=(); [ -n "$COMPAT_RUN" ] && SELECT_RUN=(-run "$COMPAT_RUN")
           [ -n "$COMPAT_SKIP" ] && SELECT_RUN+=(-skip "$COMPAT_SKIP")
           go test -tags=compat -timeout "$COMPAT_TIMEOUT" -v ${SELECT_RUN[@]+"${SELECT_RUN[@]}"} ./test/compat/... | tee compat.log
@@ -174,11 +175,11 @@ jobs:
           grep -- '--- SKIP' compat.log || true
           # The tests #1740 found failing only in this mode must have run and
           # passed, not skipped, each in the shard that runs it.
-          if [ "$SHARD" = sqlreplicas ]; then
-            MUST_PASS="TestCloudSQLDemoteSkipReplicationSetup TestCloudSQLDemotePostgres TestCloudSQLExternalPostgresPrimary TestCloudSQLExternalMySQLPhysical"
-          else
-            MUST_PASS="TestCloudSQLInstanceWrites"
-          fi
+          case "$SHARD" in
+            sqlreplicas) MUST_PASS="TestCloudSQLDemoteSkipReplicationSetup TestCloudSQLDemotePostgres TestCloudSQLExternalPostgresPrimary TestCloudSQLExternalMySQLPhysical" ;;
+            sql) MUST_PASS="TestCloudSQLInstanceWrites" ;;
+            *) MUST_PASS="" ;;
+          esac
           for t in $MUST_PASS; do
             grep -q -- "^--- PASS: $t (" compat.log ||
               { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" compat.log || echo 'no result')"; exit 1; }

@@ -584,7 +584,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [storage, served, gke, gkeupgrade, computevms, vpcvms, run, crossservice, scale, emulators, memorystore, sql, sqlreplicas, acceptance, iam, localai, localaispeech]
+        shard: [storage, served, gke, gkeupgrade, computevms, vpcvms, run, crossservice, scale, emulators, memorystore, sql, sqlreplicas, alloydb, acceptance, iam, localai, localaispeech]
     env:
       SHARD: ${{ matrix.shard }}
       # Every make build here uses the emulator binaries the
@@ -651,7 +651,7 @@ jobs:
       # since 586.0.0 had no `gcloud alpha source-manager hooks`, which
       # TestGcloudSourceManagerHooks drives (#1927; main run 44645694075).
       - name: Install the Google Cloud CLI
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'gkeupgrade' || matrix.shard == 'computevms' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'sqlreplicas' || matrix.shard == 'iam'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'gke' || matrix.shard == 'gkeupgrade' || matrix.shard == 'computevms' || matrix.shard == 'vpcvms' || matrix.shard == 'run' || matrix.shard == 'crossservice' || matrix.shard == 'scale' || matrix.shard == 'emulators' || matrix.shard == 'memorystore' || matrix.shard == 'sql' || matrix.shard == 'sqlreplicas' || matrix.shard == 'alloydb' || matrix.shard == 'iam'
         run: |
           curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-593.0.0-linux-x86_64.tar.gz
           echo "42c32b7553c712f71fcf6f124546c0519437f53755f47f9bd0c957998cd6b826  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
@@ -1023,10 +1023,14 @@ jobs:
             # The sql shard passed 60m in 44645694075 with no test hung
             # (3,185 s in 44617241748): its replica tests moved to the
             # sqlreplicas shard, about 28 minutes of tests, leaving sql
-            # about 27.
+            # about 27. It passed 60m again in Landing 170's run
+            # 45935899624 (the Database Migration Service tests): the AlloyDB
+            # and Database Migration Service tests moved to the alloydb
+            # shard, the sql instance a third time (about 1,100 s).
             # COMPAT_RUN, from compat_shard: the iam shard runs only the
-            # enforcement tests (#1879), and sqlreplicas only the Cloud SQL
-            # replica tests, which COMPAT_SKIP keeps out of sql.
+            # enforcement tests (#1879), sqlreplicas only the Cloud SQL
+            # replica tests and alloydb only the AlloyDB and Database
+            # Migration Service tests, which COMPAT_SKIP keeps out of sql.
             SELECT_RUN=(); [ -n "$COMPAT_RUN" ] && SELECT_RUN=(-run "$COMPAT_RUN")
             [ -n "$COMPAT_SKIP" ] && SELECT_RUN+=(-skip "$COMPAT_SKIP")
             go test -tags=compat -timeout "$COMPAT_TIMEOUT" -v ${SELECT_RUN[@]+"${SELECT_RUN[@]}"} ./test/compat/... | tee compat.log
@@ -1432,7 +1436,7 @@ jobs:
         run: |
           go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > all.txt
           missing=
-          for shard in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
+          for shard in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb iam localai localaispeech; do
             d=logs/compat-log-$shard
             [ -d "$d" ] || { echo "no logs from the $shard shard"; missing=1; continue; }
             # Top-level results only; a subtest's line is indented.
