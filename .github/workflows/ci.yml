@@ -238,7 +238,9 @@ jobs:
     # 75 since main's run 44891736706: macOS took 49 of its 60 minutes in
     # 44875166859, and WASM_TEST_TIMEOUT went from 10m to 20m when the
     # vertexai package outran 10m on a runner 18-27% slower (Makefile).
-    timeout-minutes: 75
+    # macOS 105 since run 46044441643 (Landing 170): its job was cancelled
+    # at 75 minutes while still in make build; earlier runs took 40 and 73.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 105 || 75 }}
     # The emulator binaries, from the job above (#1087).
     needs: bigquery-emulator
     env:
