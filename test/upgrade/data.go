@@ -39,9 +39,11 @@ import (
 	"cloud.google.com/go/storage"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/api/iterator"
 
+	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/localclient"
 )
 
@@ -325,7 +327,7 @@ func seed(ctx context.Context, t *testing.T, in instance) map[string]error {
 		if in.pgAddr == "" {
 			return errors.New("no PostgreSQL address in the instance's log")
 		}
-		conn, err := pgx.Connect(ctx, "postgres://cloudburrow@"+in.pgAddr+"/cloudburrow?sslmode=disable")
+		conn, err := in.pgConnect(ctx, in.env["PGPASSWORD"])
 		if err != nil {
 			return err
 		}
@@ -711,7 +713,10 @@ func verify(ctx context.Context, t *testing.T, in instance, want map[string]bool
 		if in.pgAddr == "" {
 			return errors.New("no PostgreSQL address in the instance's log")
 		}
-		conn, err := pgx.Connect(ctx, "postgres://cloudburrow@"+in.pgAddr+"/cloudburrow?sslmode=disable")
+		if err := in.pgRefusesWrongPasswords(ctx); err != nil {
+			return err
+		}
+		conn, err := in.pgConnect(ctx, in.env["PGPASSWORD"])
 		if err != nil {
 			return err
 		}
@@ -773,6 +778,46 @@ func verify(ctx context.Context, t *testing.T, in instance, want map[string]bool
 		out[r.service] = r.err
 	}
 	return out
+}
+
+// pgConnect signs in to the Cloud SQL for PostgreSQL server `up` runs as
+// its application user, with password: the one `cloudburrow env` exports
+// (PGPASSWORD), which the server checks from v0.8.0 on (#2208, #2271). An
+// older release exports none, its server trusting every sign-in; its
+// passwordless user takes the instance's generated password on the first
+// `up` of a release that checks it. The password is set here, not read
+// from the process's PGPASSWORD, so the test sends exactly this one.
+func (in instance) pgConnect(ctx context.Context, password string) (*pgx.Conn, error) {
+	cfg, err := pgx.ParseConfig("postgres://" + components.CloudSQLUser + "@" + in.pgAddr + "/" + components.CloudSQLDatabase + "?sslmode=disable")
+	if err != nil {
+		return nil, err
+	}
+	cfg.Password = password
+	return pgx.ConnectConfig(ctx, cfg)
+}
+
+// pgRefusesWrongPasswords checks, on a release that exports PGPASSWORD,
+// that the upgraded server refuses its user's sign-in with no password and
+// with a wrong one (SQLSTATE 28P01), as Cloud SQL does (#2208): the data
+// directory the older release trusted every sign-in to is held to the
+// password too.
+func (in instance) pgRefusesWrongPasswords(ctx context.Context) error {
+	pw := in.env["PGPASSWORD"]
+	if pw == "" {
+		return nil
+	}
+	for _, wrong := range []string{"", pw + "-wrong"} {
+		conn, err := in.pgConnect(ctx, wrong)
+		if err == nil {
+			conn.Close(ctx)
+			return fmt.Errorf("signed in with a wrong password (%d characters)", len(wrong))
+		}
+		var pe *pgconn.PgError
+		if !errors.As(err, &pe) || pe.Code != "28P01" {
+			return fmt.Errorf("a wrong password: %v, want SQLSTATE 28P01", err)
+		}
+	}
+	return nil
 }
 
 type sqlScan struct{ vs []string }

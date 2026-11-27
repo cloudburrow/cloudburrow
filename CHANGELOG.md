@@ -106,6 +106,12 @@ section and add its link at the bottom.
 - A Basic tier Memorystore for Redis instance with RDB persistence keeps data written just before a
   maintenance restart: the old server now stops and writes its last snapshot before the next one
   starts, instead of the next one sometimes loading the previous snapshot.
+- Upgrading from an earlier release: a client that signed in to Cloud SQL for PostgreSQL's
+  `cloudburrow` user without a password is now refused, because the server checks passwords from
+  v0.8.0 on (#2208). Your data is kept, and so is any password a user already had; the
+  passwordless user takes the instance's `PGPASSWORD`, so run `eval "$(cloudburrow env)"` again.
+  The nightly upgrade test signs in with that password and checks that a wrong or missing one is
+  refused (#2271). See [docs/install.md](docs/install.md#upgrading).
 - A VM's internal load balancer and Private Service Connect addresses stay reachable after the
   guest's VPC agent restarts or one of its relays exits; the agent now restarts relays that are no
   longer running.

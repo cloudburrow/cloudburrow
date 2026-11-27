@@ -714,6 +714,14 @@ exceptions:
   `v0.1.0` alone), and never kept bucket labels, so after a `stop` there are none to migrate. A
   `state save` archive taken while the older instance still runs keeps the objects' metadata.
   `v0.2.0` runs the builtin server, whose volume this release reads as it is, metadata included.
+- **Cloud SQL for PostgreSQL's password (#2208, #2271).** Before `v0.8.0` the server `up` runs
+  trusted every sign-in, and its `cloudburrow` user had no password. From `v0.8.0` the server
+  checks every TCP sign-in by password, as Cloud SQL does, so on the first `up` of the new release
+  a user with no password takes the password generated for the instance, which `cloudburrow env`
+  exports as `PGPASSWORD`. Your databases, tables and rows are kept, and so is any password a user
+  already had, such as one `users.insert` or `users.update` set. Only a client that signs in
+  without a password stops working. Run `eval "$(cloudburrow env)"` again, or pass `PGPASSWORD`,
+  and it signs in again.
 - **What an archive never held.** The archive captures what the older release's `state save`
   listed as captured (`v0.2.0`: Cloud Storage, Cloud Tasks, Cloud Scheduler, Secret Manager,
   projects, Pub/Sub's resources without their messages, and Cloud SQL for PostgreSQL; `v0.1.0`:
