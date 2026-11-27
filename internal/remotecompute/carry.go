@@ -21,6 +21,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/cloudburrow/cloudburrow/internal/dockergc"
 )
 
 // Carrying an instance's Docker state from one Docker to another (#2209):
@@ -253,7 +255,13 @@ type portBinding struct {
 }
 
 type networkInfo struct {
-	Name       string            `json:"Name"`
+	Name string `json:"Name"`
+	// Containers are the network's running endpoints, by container ID.
+	Containers map[string]struct {
+		Name        string `json:"Name"`
+		IPv4Address string `json:"IPv4Address"`
+		IPv6Address string `json:"IPv6Address"`
+	} `json:"Containers"`
 	Driver     string            `json:"Driver"`
 	Internal   bool              `json:"Internal"`
 	EnableIPv6 bool              `json:"EnableIPv6"`
@@ -480,6 +488,18 @@ func (c *Carry) carry(ctx context.Context) error {
 				return fmt.Errorf("the target already has a container named %s; it would be replaced, so nothing was moved", strings.TrimPrefix(ct.Name, "/"))
 			}
 		}
+		// A container that keeps its address needs it free on the target.
+		for _, ct := range c.containers {
+			if ct.kindNode() {
+				continue // a kind node takes another (create)
+			}
+			for _, n := range sortedKeys(ct.NetworkSettings.Networks) {
+				if holder, ip := c.addressHolder(ctx, ct, n); holder != "" {
+					return fmt.Errorf("the target's network %s gives %s to %s, the address %s keeps: stop or remove that container there, then move again; nothing was moved",
+						n, ip, holder, strings.TrimPrefix(ct.Name, "/"))
+				}
+			}
+		}
 		for _, ct := range c.containers {
 			if ct.State.Running {
 				c.wasRunning = append(c.wasRunning, ct.ID)
@@ -522,7 +542,9 @@ func (c *Carry) carry(ctx context.Context) error {
 		}
 		ref := "cloudburrow.local/move-" + sanitize(c.o.Instance) + "-" + sanitize(name) + ":" + stamp
 		c.progress("image", "Saving %s's filesystem", name)
-		if _, err := c.run(ctx, c.o.From, "commit", "--pause=false", ct.ID, ref); err != nil {
+		// The label is how stop, delete and the end of this move or the
+		// next find the image again once nothing runs from it (#2259).
+		if _, err := c.run(ctx, c.o.From, moveCommitArgs(c.o.Instance, ct.ID, ref)...); err != nil {
 			return err
 		}
 		c.committed = append(c.committed, ref)
@@ -562,6 +584,12 @@ func (c *Carry) carry(ctx context.Context) error {
 	}
 	c.progress("carried", "Carried %d containers and %d volumes (%s)", len(c.containers), len(c.volumes), humanBytes(c.bytes.Load()))
 	return nil
+}
+
+// moveCommitArgs commits container id into the move's image ref, labelled
+// for the instance (dockergc.MoveLabel).
+func moveCommitArgs(instance, id, ref string) []string {
+	return []string{"commit", "--pause=false", "--change", "LABEL " + dockergc.MoveLabel + "=" + strconv.Quote(instance), id, ref}
 }
 
 func sanitize(s string) string {
@@ -980,16 +1008,18 @@ func (c *Carry) create(ctx context.Context, ct containerInfo, image string) erro
 		nets = nil
 	}
 	netArgs := func(n string) []string {
-		e := ct.NetworkSettings.Networks[n]
 		var a []string
-		ip4, ip6 := e.IPAddress, e.GlobalIPv6Address
-		if e.IPAMConfig != nil {
-			if e.IPAMConfig.IPv4Address != "" {
-				ip4 = e.IPAMConfig.IPv4Address
-			}
-			if e.IPAMConfig.IPv6Address != "" {
-				ip6 = e.IPAMConfig.IPv6Address
-			}
+		ip4, ip6 := ct.addresses(n)
+		if holder, ip := c.addressHolder(ctx, ct, n); holder != "" {
+			// Another container came to hold the address while the
+			// instance was away (another kind cluster made on that Docker
+			// is given the lowest free one, #2259). A kind node starts with
+			// a new one: its entrypoint finds the change and renews its
+			// certificates and configuration for it. (Any other container
+			// was refused before the carry began.)
+			c.progress("container", "%s's address %s on %s is %s's on the target now: %s gets a new one, and kind renews its certificates for it as it starts",
+				name, ip, n, holder, name)
+			ip4, ip6 = "", ""
 		}
 		if n != "bridge" {
 			if ip4 != "" {
@@ -998,7 +1028,7 @@ func (c *Carry) create(ctx context.Context, ct containerInfo, image string) erro
 			if ip6 != "" {
 				a = append(a, "--ip6", ip6)
 			}
-			for _, al := range e.Aliases {
+			for _, al := range ct.NetworkSettings.Networks[n].Aliases {
 				if al != name && al != ct.ID[:12] {
 					a = append(a, "--alias", al)
 				}
@@ -1037,6 +1067,62 @@ func (c *Carry) create(ctx context.Context, ct containerInfo, image string) erro
 	}
 	c.progress("container", "Made %s on the target", name)
 	return nil
+}
+
+// addresses is the container's IPv4 and IPv6 address on network n, its
+// configured ones first.
+func (ct containerInfo) addresses(n string) (ip4, ip6 string) {
+	e := ct.NetworkSettings.Networks[n]
+	ip4, ip6 = e.IPAddress, e.GlobalIPv6Address
+	if e.IPAMConfig != nil {
+		if e.IPAMConfig.IPv4Address != "" {
+			ip4 = e.IPAMConfig.IPv4Address
+		}
+		if e.IPAMConfig.IPv6Address != "" {
+			ip6 = e.IPAMConfig.IPv6Address
+		}
+	}
+	return ip4, ip6
+}
+
+// kindNode reports whether the container is a kind cluster's node.
+func (ct containerInfo) kindNode() bool {
+	return ct.Config.Labels["io.x-k8s.kind.cluster"] != ""
+}
+
+// addressHolder is the container on the target's network n, other than
+// the ones this carry made, that runs with an address ct keeps there, and
+// that address; "" when the network is not there or the address is free.
+func (c *Carry) addressHolder(ctx context.Context, ct containerInfo, n string) (holder, ip string) {
+	if n == "bridge" || n == "host" || n == "none" {
+		return "", ""
+	}
+	ip4, ip6 := ct.addresses(n)
+	if ip4 == "" && ip6 == "" {
+		return "", ""
+	}
+	out, err := c.run(ctx, c.o.To, "network", "inspect", n)
+	if err != nil {
+		return "", ""
+	}
+	var have []networkInfo
+	if json.Unmarshal([]byte(out), &have) != nil || len(have) != 1 {
+		return "", ""
+	}
+	for id, e := range have[0].Containers {
+		if contains(c.madeContainers, id) {
+			continue
+		}
+		a4, _, _ := strings.Cut(e.IPv4Address, "/")
+		a6, _, _ := strings.Cut(e.IPv6Address, "/")
+		switch {
+		case ip4 != "" && a4 == ip4:
+			return strings.TrimPrefix(e.Name, "/"), ip4
+		case ip6 != "" && a6 == ip6:
+			return strings.TrimPrefix(e.Name, "/"), ip6
+		}
+	}
+	return "", ""
 }
 
 func (ct containerInfo) hasNetwork(n string) bool {
@@ -1216,8 +1302,37 @@ func (c *Carry) Rollback(ctx context.Context) {
 	for _, id := range c.wasRunning {
 		_, _ = c.run(ctx, c.o.From, "start", id)
 	}
+	c.cleanMoveImages(ctx, c.o.To)
+	c.cleanMoveImages(ctx, c.o.From)
 	c.RemoveJournal()
 	c.progress("rollback", "Rolled back: the instance's containers are on the source again")
+}
+
+// endpointRunner is dockergc's Runner on one end of the carry.
+type endpointRunner struct {
+	c    *Carry
+	side DockerEndpoint
+}
+
+func (r endpointRunner) Run(ctx context.Context, _ string, args ...string) (string, error) {
+	return r.c.run(ctx, r.side, args...)
+}
+
+// cleanMoveImages removes, on side, every image a move committed for the
+// instance that no container there runs from: what this move or an
+// earlier one left (a move back to this machine left a 1.3 GB
+// cloudburrow.local/move-* image per move, #2259). The image the
+// instance's own containers run from stays until they go: the next move
+// away or `cloudburrow delete` removes it.
+func (c *Carry) cleanMoveImages(ctx context.Context, side DockerEndpoint) {
+	res, err := dockergc.CleanMoveImages(ctx, endpointRunner{c, side}, c.o.Instance)
+	if err != nil {
+		c.progress("cleanup", "The move's images could not be listed: %v", err)
+		return
+	}
+	for _, e := range res.Errors {
+		c.progress("cleanup", "A move image was not removed: %v", e)
+	}
 }
 
 // RemoveSource removes the carried containers and volumes from From, and
@@ -1248,6 +1363,9 @@ func (c *Carry) RemoveSource(ctx context.Context) error {
 			_, _ = c.run(ctx, c.o.From, "rmi", ct.Config.Image)
 		}
 	}
+	// And whatever else a move left on either end that nothing runs from.
+	c.cleanMoveImages(ctx, c.o.From)
+	c.cleanMoveImages(ctx, c.o.To)
 	if len(errs) == 0 {
 		c.RemoveJournal()
 	}

@@ -13045,6 +13045,7 @@ async function renderComputeCreate(view) {
   const priceHourly = el("p", { class: "muted", id: "compute-price-hourly" });
   const priceDetail = el("p", { class: "form-help", id: "compute-price-detail" });
   let sizeList = [];
+  let chosenPreset = null;
 
   const chosenSize = () => {
     const r = sizes.querySelector("input[name=compute-size]:checked");
@@ -13074,10 +13075,25 @@ async function renderComputeCreate(view) {
       `. Billed by ${CLOUD_TITLES[conn().cloud]} to ${conn().account_id}; ${s.price_source || "on-demand Linux price"}. ` +
       (stop ? "Auto-stop ends the hourly VM charge while it is idle." : "Without auto-stop it is billed until you stop it.");
   };
-  const loadPermissions = async () => {
+  // Each change of the account or the region starts a load of its regions,
+  // sizes and permissions; a response that arrives after a newer load
+  // began is dropped, and Create stays disabled until the newest load's
+  // sizes are on the page. A load that finished late replaced the sizes
+  // (and disabled Create) just as Create was clicked, and the click did
+  // nothing (#2259).
+  let load = 0;
+  const current = (n) => n === load && location.pathname === path;
+  const startLoad = () => {
+    load++;
+    create.disabled = true;
+    setChildren(permissions, el("p", { class: "muted", text: "Checking permissions…" }));
+    return load;
+  };
+  const loadPermissions = async (n) => {
     setChildren(permissions, el("p", { class: "muted", text: "Checking permissions…" }));
     try {
       const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(connection.value)}/permissions?region=${encodeURIComponent(region.value)}`);
+      if (!current(n)) return;
       const missing = res.report.missing || [];
       setChildren(permissions, missing.length
         ? el("div", { class: "form-error", id: "compute-permissions-missing" },
@@ -13085,47 +13101,60 @@ async function renderComputeCreate(view) {
             el("ul", {}, ...missing.map((m) => el("li", {}, el("code", { text: m.action }), el("span", { text: `: ${m.why}` })))))
         : el("p", { class: "muted", id: "compute-permissions-ok", text: res.summary }));
     } catch (err) {
+      if (!current(n)) return;
       setChildren(permissions, el("p", { class: "form-error", text: `The permissions could not be checked: ${err.message}` }));
     }
   };
-  const loadSizes = async () => {
+  const loadSizes = async (n) => {
     create.disabled = true;
     setChildren(sizes, el("p", { class: "muted", text: "Reading sizes and prices…" }));
+    let list;
     try {
       const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(connection.value)}/sizes?region=${encodeURIComponent(region.value)}`);
-      sizeList = res.sizes || [];
+      list = res.sizes || [];
     } catch (err) {
+      if (!current(n)) return;
       setChildren(sizes, el("p", { class: "form-error", text: `The sizes could not be read: ${err.message}` }));
       return;
     }
+    if (!current(n)) return;
+    sizeList = list;
+    // The size chosen stays chosen when the new list has it.
+    const keep = sizeList.some((s) => s.preset === chosenPreset);
     setChildren(sizes, ...sizeList.map((s, i) => el("label", { class: "check-line compute-size", "data-preset": s.preset },
-      el("input", { type: "radio", name: "compute-size", value: s.preset, checked: i === 0, onchange: drawPrice }),
+      el("input", { type: "radio", name: "compute-size", value: s.preset, checked: keep ? s.preset === chosenPreset : i === 0,
+        onchange: () => { chosenPreset = s.preset; drawPrice(); } }),
       el("span", {},
         el("strong", { text: PRESET_TITLES[s.preset] || s.preset }),
         el("span", { text: ` · ${s.name} · ${sizeSummary(s)} · ` }),
         el("span", { class: "compute-size-price", text: hourly(s) }),
         s.note ? el("span", { class: "form-help compute-size-note", text: ` ${s.note}` }) : null))));
+    chosenPreset = (chosenSize() || {}).preset;
     drawPrice();
     create.disabled = false;
   };
   const loadRegions = async () => {
+    const n = startLoad();
     region.disabled = true;
     setChildren(region, el("option", { text: "Reading regions…" }));
     try {
       const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(connection.value)}/regions`);
+      if (!current(n)) return;
       setChildren(region, ...res.regions.map((r) => el("option", { value: r.name, selected: r.name === res.default,
         text: r.display_name ? `${r.name} (${r.display_name})` : r.name })));
       region.disabled = false;
+      error.hidden = true;
     } catch (err) {
+      if (!current(n)) return;
       setChildren(region, el("option", { text: "No regions" }));
       error.textContent = `The regions could not be read: ${err.message}`;
       error.hidden = false;
       return;
     }
-    await Promise.all([loadSizes(), loadPermissions()]);
+    await Promise.all([loadSizes(n), loadPermissions(n)]);
   };
   connection.addEventListener("change", loadRegions);
-  region.addEventListener("change", () => Promise.all([loadSizes(), loadPermissions()]));
+  region.addEventListener("change", () => { const n = startLoad(); return Promise.all([loadSizes(n), loadPermissions(n)]); });
   autoStop.addEventListener("change", drawPrice);
 
   const submit = async (e) => {
@@ -13139,7 +13168,11 @@ async function renderComputeCreate(view) {
       return;
     }
     const s = chosenSize();
-    if (!s) return;
+    if (!s) {
+      error.textContent = "Choose a machine configuration.";
+      error.hidden = false;
+      return;
+    }
     setBusy(create, true);
     const op = recordOperation(`Create VM ${name}`);
     try {

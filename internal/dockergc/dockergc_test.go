@@ -59,9 +59,10 @@ func (f *fakeDocker) Run(_ context.Context, name string, args ...string) (string
 		if i := strings.Index(j, "label="); i >= 0 {
 			filter = j[i+len("label="):]
 		}
+		key, val, byValue := strings.Cut(filter, "=")
 		for id, img := range f.images {
 			if filter != "" {
-				if _, ok := img.labels[filter]; !ok {
+				if v, ok := img.labels[key]; !ok || byValue && v != val {
 					continue
 				}
 			}
@@ -400,5 +401,79 @@ func TestRemoveImageUntagsEachTag(t *testing.T) {
 	f.containers = append(f.containers, fakeContainer{id: "c", image: "sha256:y"})
 	if err := RemoveImage(context.Background(), f, Image{ID: "sha256:y"}); err == nil || !f.has("y") {
 		t.Errorf("RemoveImage of a used image = %v", err)
+	}
+}
+
+func moveOf(name string) map[string]string { return map[string]string{MoveLabel: name} }
+
+// A move's image (#2259) is the instance's: delete removes it once the
+// node that ran from it is gone, stop keeps it while the node exists, and
+// it is never another instance's to remove.
+func TestCleanInstanceRemovesMoveImages(t *testing.T) {
+	f := newFake()
+	f.image("moved", moveOf("w1"), "cloudburrow.local/move-w1-cloudburrow-w1-control-plane:1764000000")
+	f.image("theirs", moveOf("w2"), "cloudburrow.local/move-w2-cloudburrow-w2-control-plane:1764000000")
+	f.containers = append(f.containers, fakeContainer{id: "w2-node", image: "sha256:theirs",
+		ref: "cloudburrow.local/move-w2-cloudburrow-w2-control-plane:1764000000", cluster: "cloudburrow-w2"})
+	// Stop: the stopped node runs from the move's image still.
+	f.containers = append(f.containers, fakeContainer{id: "w1-node", image: "sha256:moved",
+		ref: "cloudburrow.local/move-w1-cloudburrow-w1-control-plane:1764000000", cluster: "cloudburrow-w1"})
+	res, err := CleanInstance(context.Background(), f, "w1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.has("moved") || len(res.Kept) != 1 || res.Kept[0].Image.ID != "sha256:moved" {
+		t.Fatalf("stop: removed %v, kept %v", res.Removed, res.Kept)
+	}
+	// Delete: the node is gone, and its image with it.
+	f.containers = f.containers[:1]
+	res, err = CleanInstance(context.Background(), f, "w1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.has("moved") || len(res.Removed) != 1 || res.Removed[0].Instance() != "w1" {
+		t.Errorf("delete: removed %v, kept %v; the move's image is there still: %v", res.Removed, res.Kept, f.has("moved"))
+	}
+	if !f.has("theirs") {
+		t.Error("w1's delete removed w2's move image")
+	}
+}
+
+// The end of a move removes the instance's move images nothing runs from,
+// on each end, and only those: not the one its containers run from, not
+// another instance's, not the instance's other images.
+func TestCleanMoveImages(t *testing.T) {
+	f := newFake()
+	f.image("stale", moveOf("w1"), "cloudburrow.local/move-w1-cloudburrow-w1-control-plane:1764000000")
+	f.image("stale2", moveOf("w1"), "cloudburrow.local/move-w1-cloudburrow-w1-worker:1764000000")
+	f.image("current", moveOf("w1"), "cloudburrow.local/move-w1-cloudburrow-w1-control-plane:1764000999")
+	f.image("theirs", moveOf("w1x"), "cloudburrow.local/move-w1x-cloudburrow-w1x-control-plane:1764000000")
+	f.image("built", inst("w1"), "dev.local/cloudburrow-storage:aaaa")
+	f.containers = append(f.containers, fakeContainer{id: "node", image: "sha256:current",
+		ref: "cloudburrow.local/move-w1-cloudburrow-w1-control-plane:1764000999", cluster: "cloudburrow-w1", running: true})
+	res, err := CleanMoveImages(context.Background(), f, "w1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"stale", "stale2"} {
+		if f.has(id) {
+			t.Errorf("move image %s was not removed", id)
+		}
+	}
+	for _, id := range []string{"current", "theirs", "built"} {
+		if !f.has(id) {
+			t.Errorf("image %s was removed", id)
+		}
+	}
+	if len(res.Removed) != 2 || len(res.Kept) != 1 || len(res.Errors) != 0 {
+		t.Errorf("removed %v, kept %v, errors %v", res.Removed, res.Kept, res.Errors)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "image rm") && strings.Contains(c, " -f") {
+			t.Errorf("forced removal: %s", c)
+		}
+	}
+	if _, err := CleanMoveImages(context.Background(), f, ""); err == nil {
+		t.Error("CleanMoveImages of no instance ran")
 	}
 }

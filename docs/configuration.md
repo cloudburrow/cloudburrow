@@ -611,7 +611,9 @@ and every `up` built a new 113 MB storage image.
   `io.cloudburrow.instance=<name>`, as does every volume it creates, the anonymous volume of a
   buildpacks build's throwaway registry included (Cloud Build's workspace volumes keep their
   `cloudburrow.instance=<name>`). `docker image ls --filter label=io.cloudburrow.instance=<name>`
-  lists an instance's images.
+  lists an instance's images. A `cloud move`'s images carry `io.cloudburrow.move-instance=<name>`
+  instead (the containers made from them must not read as the instance's workloads), and stop,
+  delete and gc treat them as the instance's too.
 - **Removed on `stop` and `delete`.** Once the cluster is stopped or deleted, the instance's
   labelled images and volumes are removed: the cluster's nodes keep what was loaded into them,
   and the next `up` rebuilds the rest. An image stays while any container uses it, or while
