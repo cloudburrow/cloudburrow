@@ -414,3 +414,16 @@ func TestYarnHAConf(t *testing.T) {
 		t.Errorf("a standard cluster's yarn-site.xml = %v", y)
 	}
 }
+
+// TestUsernsProfileFor (#2248): the DOCKER component's daemons run under
+// the distribution's rootlesskit AppArmor profile only where the kernel
+// restricts unprivileged user namespaces (Ubuntu 24.04 and later, as the
+// GitHub runners), unconfined elsewhere (Docker Desktop, kernels without
+// the sysctl, or with it off).
+func TestUsernsProfileFor(t *testing.T) {
+	for probe, want := range map[string]string{"1\n": "rootlesskit", "1": "rootlesskit", "0\n": "unconfined", "absent\n": "unconfined", "": "unconfined"} {
+		if got := usernsProfileFor(probe); got != want {
+			t.Errorf("usernsProfileFor(%q) = %q; want %q", probe, got, want)
+		}
+	}
+}

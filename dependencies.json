@@ -706,13 +706,13 @@
       "dataprocPig": {
         "$comment": "Apache Pig (#2162) for Dataproc Pig jobs: the release tarball, checked against this SHA-256, of which bin/, conf/, lib/ and the core jar are kept in <state-dir>/models/spark/dataproc.",
         "version": "0.18.0",
-        "source": "https://downloads.apache.org/pig/pig-0.18.0/pig-0.18.0.tar.gz",
+        "source": "https://dlcdn.apache.org/pig/pig-0.18.0/pig-0.18.0.tar.gz",
         "sha256": "6845adb936a3c3bcc71451765953cae4103e410ba2f6c5a47cc9becade0a434a",
         "license": "Apache-2.0",
         "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
         "updateFeed": "apache-dist",
         "verification": "sha256",
-        "skipDiscovery": "downloads.apache.org; depcheck only discovers GitHub-sourced components."
+        "skipDiscovery": "dlcdn.apache.org (then downloads.apache.org and archive.apache.org); depcheck only discovers GitHub-sourced components."
       },
       "dataprocJupyterPackages": {
         "$comment": "The JUPYTER optional component (#2162): an image built locally FROM the cluster's Spark image (internal/sparkproc/jupyter/Dockerfile) with JupyterLab 3.6.8 and ipykernel 6.29.5 and every package they need, installed by pip --require-hashes --no-deps --only-binary :all: from internal/sparkproc/jupyter/requirements.txt (uv pip compile --universal --generate-hashes of requirements.in, for Python 3.8 and later), labelled with the instance and removed with it.",

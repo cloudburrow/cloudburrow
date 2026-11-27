@@ -138,7 +138,11 @@ type Docker struct {
 	probeMu sync.Mutex
 	probed  bool
 	desktop bool
-	treeMu  sync.Mutex
+	// usernsProfile is the DOCKER component's daemons' AppArmor profile,
+	// once probed (dockerdAppArmor).
+	usernsMu      sync.Mutex
+	usernsProfile string
+	treeMu        sync.Mutex
 }
 
 func (d *Docker) logf(format string, args ...any) {

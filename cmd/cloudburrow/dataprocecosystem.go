@@ -65,10 +65,20 @@ const (
 	gcsConnectorURL  = "https://repo1.maven.org/maven2/com/google/cloud/bigdataoss/gcs-connector/hadoop3-2.2.30/gcs-connector-hadoop3-2.2.30-shaded.jar"
 	gcsConnectorSHA  = "dd7959e4d59a74023781c9e0666e8c2207528a0e7871eaf5f9b42eea0430a079"
 	gcsConnectorFile = "gcs-connector-hadoop3-2.2.30-shaded.jar"
-	pigURL           = "https://downloads.apache.org/pig/pig-0.18.0/pig-0.18.0.tar.gz"
 	pigSHA           = "6845adb936a3c3bcc71451765953cae4103e410ba2f6c5a47cc9becade0a434a"
 	pigDir           = "pig-0.18.0"
 )
+
+// pigURLs are where the Apache Pig 0.18.0 release tarball (491 MB) is
+// fetched from, in order: Apache's CDN, then its main download site and
+// its archive, both of which throttle (a nightly run's fetch from the main
+// site did not finish in 20 minutes, #2248). pigSHA checks whichever
+// answers.
+var pigURLs = []string{
+	"https://dlcdn.apache.org/pig/pig-0.18.0/pig-0.18.0.tar.gz",
+	"https://downloads.apache.org/pig/pig-0.18.0/pig-0.18.0.tar.gz",
+	"https://archive.apache.org/dist/pig/pig-0.18.0/pig-0.18.0.tar.gz",
+}
 
 // dataprocEcosystem is the runner's Ecosystem, its downloads cached in
 // cache. The DOCKER component's daemons run unconfined, so they are
@@ -202,6 +212,24 @@ func fetchPinned(ctx context.Context, p, url, sum, what string, out io.Writer) (
 	return p, os.Rename(tmp, p)
 }
 
+// fetchPinnedFrom is fetchPinned from the first of urls that serves the
+// pinned file, each failure noted on out and the next tried.
+func fetchPinnedFrom(ctx context.Context, p string, urls []string, sum, what string, out io.Writer) (string, error) {
+	var errs []string
+	for _, u := range urls {
+		got, err := fetchPinned(ctx, p, u, sum, what, out)
+		if err == nil {
+			return got, nil
+		}
+		if ctx.Err() != nil {
+			return "", err
+		}
+		fmt.Fprintf(out, "cloudburrow: %s from %s: %v\n", what, u, err)
+		errs = append(errs, err.Error())
+	}
+	return "", errors.New(strings.Join(errs, "; "))
+}
+
 func fileHas(p, sum string) (bool, string) {
 	f, err := os.Open(p)
 	if err != nil {
@@ -250,7 +278,7 @@ func fetchPig(ctx context.Context, cache string, out io.Writer) (string, error) 
 		return home, nil
 	}
 	tgz := filepath.Join(cache, pigDir+".tar.gz")
-	if _, err := fetchPinned(ctx, tgz, pigURL, pigSHA, "Apache Pig 0.18.0", out); err != nil {
+	if _, err := fetchPinnedFrom(ctx, tgz, pigURLs, pigSHA, "Apache Pig 0.18.0", out); err != nil {
 		return "", err
 	}
 	defer os.Remove(tgz)
