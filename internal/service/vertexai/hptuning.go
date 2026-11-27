@@ -1022,7 +1022,7 @@ func (s *Server) runHPJob(ctx context.Context, e *hpJobEntry, parent string, onE
 	maxTrials, parallel, maxFailed := int(spec.GetMaxTrialCount()), int(spec.GetParallelTrialCount()), int(spec.GetMaxFailedTrialCount())
 	sug := newSuggester(spec.GetName(), ss, maxTrials)
 	results := make(chan trialDone, parallel)
-	running := map[string]string{} // trial id -> custom job
+	running := map[string]string{}     // trial id -> custom job
 	pendingU := map[string][]float64{} // a running trial's point
 	var obs []hpObservation
 	started, failed, succeeded := 0, 0, 0
