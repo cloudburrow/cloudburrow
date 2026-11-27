@@ -100,6 +100,9 @@ section and add its link at the bottom.
 
 ### Fixed
 
+- A Basic tier Memorystore for Redis instance with RDB persistence keeps data written just before a
+  maintenance restart: the old server now stops and writes its last snapshot before the next one
+  starts, instead of the next one sometimes loading the previous snapshot.
 - A VM's internal load balancer and Private Service Connect addresses stay reachable after the
   guest's VPC agent restarts or one of its relays exits; the agent now restarts relays that are no
   longer running.
