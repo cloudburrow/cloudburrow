@@ -796,18 +796,20 @@ jobs:
           git fetch --force --no-tags --quiet origin "+refs/tags/${VERSION}:refs/tags/${VERSION}"
           RELEASE_NOTES_LINK_BASE="https://github.com/${GITHUB_REPOSITORY}/blob/${VERSION}" \
             sh scripts/release-notes.sh "${VERSION}" > section.md
+          # One line per paragraph and list item: a release body shows every
+          # newline as a line break, and CHANGELOG.md is hard-wrapped, so
+          # v0.8.0's notes broke mid-sentence.
+          sh scripts/unwrap-markdown.sh < section.md > section.unwrapped.md
           {
             echo "## CloudBurrow ${VERSION}"
             echo
-            cat section.md
+            cat section.unwrapped.md
             echo
-            echo "See [what actually works](https://github.com/${GITHUB_REPOSITORY}/blob/${VERSION}/docs/status.md)"
-            echo "before installing — it is explicit about what does not."
+            echo "See [what actually works](https://github.com/${GITHUB_REPOSITORY}/blob/${VERSION}/docs/status.md) before installing — it is explicit about what does not."
             echo
             echo "### Component versions"
             echo
-            echo "This build was tested against the versions in \`dependencies.json\`,"
-            echo "included in every archive."
+            echo "This build was tested against the versions in \`dependencies.json\`, included in every archive."
             echo
             echo "### Install"
             echo
@@ -819,9 +821,7 @@ jobs:
             echo
             echo "### Local AI runtime image"
             echo
-            echo "\`${LOCAL_AI_IMAGE}:${VERSION}\` (linux/amd64, linux/arm64), index digest"
-            echo "\`${LOCAL_AI_DIGEST}\`. This release's CLI defaults \`--local-ai-image\` to"
-            echo "exactly that digest and pulls it once, on the first \`up --local-ai-model\`."
+            echo "\`${LOCAL_AI_IMAGE}:${VERSION}\` (linux/amd64, linux/arm64), index digest \`${LOCAL_AI_DIGEST}\`. This release's CLI defaults \`--local-ai-image\` to exactly that digest and pulls it once, on the first \`up --local-ai-model\`."
             echo
             echo '```sh'
             echo "gh attestation verify oci://${LOCAL_AI_IMAGE}@${LOCAL_AI_DIGEST} --repo ${GITHUB_REPOSITORY}"
@@ -836,20 +836,16 @@ jobs:
             echo
             echo "### Vulnerability scanning downloads"
             echo
-            echo "The \`osv-*\` assets (added by the osv-mirror job just after this release is created)"
-            echo "are unmodified copies of OSV-Scanner and of the OSV database snapshots this release pins,"
-            echo "which \`cloudburrow prefetch --vulnerability-scanning\` downloads first and checks against"
-            echo "its pinned SHA-256s. See \`osv-mirror-NOTICE.txt\` for their sources and licences."
+            echo "The \`osv-*\` assets (added by the osv-mirror job just after this release is created) are unmodified copies of OSV-Scanner and of the OSV database snapshots this release pins, which \`cloudburrow prefetch --vulnerability-scanning\` downloads first and checks against its pinned SHA-256s. See \`osv-mirror-NOTICE.txt\` for their sources and licences."
             echo
             echo "### macOS Gatekeeper"
             echo
             if [ "${MACOS_SIGNED}" = true ]; then
-              echo "The darwin binaries are signed with a Developer ID certificate and notarized by Apple."
+              gatekeeper="The darwin binaries are signed with a Developer ID certificate and notarized by Apple."
             else
-              echo "The darwin binaries in this release are **not** signed or notarized."
+              gatekeeper="The darwin binaries in this release are **not** signed or notarized."
             fi
-            echo "See [Gatekeeper](https://github.com/${GITHUB_REPOSITORY}/blob/${VERSION}/docs/install.md#gatekeeper)"
-            echo "for how to check, and what to do with an unsigned binary."
+            echo "${gatekeeper} See [Gatekeeper](https://github.com/${GITHUB_REPOSITORY}/blob/${VERSION}/docs/install.md#gatekeeper) for how to check, and what to do with an unsigned binary."
           } > notes.md
 
           # A prerelease, so it is not "latest" (what install.sh and the
