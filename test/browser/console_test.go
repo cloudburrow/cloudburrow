@@ -631,8 +631,10 @@ func (p *tab) waitFor(expr string) {
 func (p *tab) waitForWithin(expr string, limit time.Duration) {
 	p.t.Helper()
 	deadline := time.Now().Add(limit)
-	quoted, _ := json.Marshal(expr)
-	pending := fmt.Sprintf(`(() => { try { const v = eval(%s); window.__waitForThrew = ""; return v; } catch (e) { if (e instanceof TypeError) { window.__waitForThrew = String(e); return false; } throw e; } })()`, quoted)
+	// The expression goes in as written, as chromedp's own "return (%s);"
+	// takes it: not through eval, which the console's Content-Security-
+	// Policy (no 'unsafe-eval') refuses.
+	pending := fmt.Sprintf("(() => { try { const v = (%s\n); window.__waitForThrew = \"\"; return v; } catch (e) { if (e instanceof TypeError) { window.__waitForThrew = String(e); return false; } throw e; } })()", expr)
 	for {
 		ok, err := chromedp.Run(p.ctx, chromedp.Poll[bool](pending, chromedp.WithPollingTimeout(time.Until(deadline))))
 		if err == nil && ok {
