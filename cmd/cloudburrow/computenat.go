@@ -183,9 +183,11 @@ func (c natConn) key() string {
 	return fmt.Sprintf("%t/%d/%s:%d/%s:%d", c.dropped, c.proto, c.srcIP, c.srcPort, c.destIP, c.dstPrt)
 }
 
-// natConntrack are the TCP and UDP connections of a /proc/net/nf_conntrack
-// listing whose original source is one of vms and whose reply goes to one
-// of natIPs: those the gateway translated.
+// natConntrack are the TCP and UDP connections of a conntrack -L -o
+// extended listing (the layout of /proc/net/nf_conntrack, which kernels
+// built without CONFIG_NF_CONNTRACK_PROCFS, Ubuntu's among them, lack)
+// whose original source is one of vms and whose reply goes to one of
+// natIPs: those the gateway translated.
 func natConntrack(listing string, vms, natIPs map[string]bool) []natConn {
 	var out []natConn
 	for _, line := range strings.Split(listing, "\n") {
@@ -332,7 +334,7 @@ func (n *natTranslation) logFlows(ctx context.Context, gws []compute.NATGateway)
 			continue
 		}
 		out, err := n.svc.vms.kubectl(ctx, "exec", natPodName(g), "--", "sh", "-c",
-			"cat /proc/net/nf_conntrack; echo '#dropped'; nft -j list set inet cloudburrow "+compute.NATDroppedSet)
+			"conntrack -L -o extended 2>/dev/null || cat /proc/net/nf_conntrack; echo '#dropped'; nft -j list set inet cloudburrow "+compute.NATDroppedSet)
 		if err != nil {
 			continue
 		}
