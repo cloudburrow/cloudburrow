@@ -245,7 +245,7 @@ func TestComputeBackupAndRestore(t *testing.T) {
 		}
 	}
 	// Deleting the backup (past its enforced retention) deletes its snapshots.
-	s.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	s.setNow(func() time.Time { return time.Now().Add(48 * time.Hour) })
 	if code, out := call(t, s, "DELETE", "/v1/"+db["name"].(string), ""); code != 200 {
 		t.Fatalf("delete: %d %v", code, out)
 	}

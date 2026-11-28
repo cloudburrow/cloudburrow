@@ -206,7 +206,7 @@ func (s *Server) pgSignIn(tc *tls.Conn, project string, e Engine, certHash, addr
 	defer cancel()
 	u, isIAM := User{}, false
 	if strings.Contains(user, "@") {
-		u, isIAM = iamUserNamed(ctx, e, user)
+		u, isIAM = iamLoginUser(ctx, e, user)
 	}
 	if !isIAM {
 		up, err := dial()
@@ -617,7 +617,7 @@ func (s *Server) mysqlSignIn(tc *tls.Conn, project string, e Engine, certHash, a
 	defer cancel()
 	u, isIAM := User{}, false
 	if okHS && okResp && len(resp) < myMaxHandshakeResponseLen {
-		u, isIAM = iamUserNamed(ctx, e, r.user)
+		u, isIAM = iamLoginUser(ctx, e, r.user)
 	}
 	if !isIAM {
 		if _, err := up.Write(myPacket(cseq, resp)); err != nil {

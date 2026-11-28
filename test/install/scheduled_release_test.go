@@ -325,9 +325,9 @@ func newSchedRepo(t *testing.T) schedRepo {
 	// The CHANGELOG.md each branch leaves, when it adds an entry.
 	entries := map[string]string{
 		"feat/11-thing": strings.Replace(schedChangelog, "## [Unreleased]\n\n",
-			"## [Unreleased]\n\n### Added\n\n- The thing, for users (#11).\n\n", 1),
+			"## [Unreleased]\n\n### Added\n\n- The thing, for users, across two\n  wrapped lines and a third (#11).\n\n", 1),
 		"fix/21-other": strings.Replace(schedChangelog, "## [Unreleased]\n\n",
-			"## [Unreleased]\n\n### Added\n\n- The thing, for users (#11).\n\n### Fixed\n\n- The other bug (#21).\n\n", 1),
+			"## [Unreleased]\n\n### Added\n\n- The thing, for users, across two\n  wrapped lines and a third (#11).\n\n### Fixed\n\n- The other bug,\n  wrapped too (#21).\n\n", 1),
 	}
 	g("init", "-q", "-b", "main")
 	write("CHANGELOG.md", schedChangelog)
@@ -433,17 +433,127 @@ func TestScheduledReleaseReleasesMainsHeadAfter24Hours(t *testing.T) {
 	}
 	short := gitIn(t, r.dir, nil, "rev-parse", "--short", r.head)
 	want := "<!-- cloudburrow-release-notes: generated -->\n" +
-		"Built from [`" + short + "`](https://github.com/o/r/commit/" + r.head + ") on main after its full CI run passed,\n" +
-		"compatibility shards included. Changes since [v0.3.0](https://github.com/o/r/releases/tag/v0.3.0):\n" +
-		"[full diff](https://github.com/o/r/compare/v0.3.0...v0.4.0). Only a row marked Verified in\n" +
+		"Built from [`" + short + "`](https://github.com/o/r/commit/" + r.head + ") on main after its full CI run passed, " +
+		"compatibility shards included. Changes since [v0.3.0](https://github.com/o/r/releases/tag/v0.3.0): " +
+		"[full diff](https://github.com/o/r/compare/v0.3.0...v0.4.0). Only a row marked Verified in " +
 		"[docs/compatibility.md](docs/compatibility.md) is a support claim.\n\n" +
-		"### Added\n\n- The thing, for users (#11).\n\n### Fixed\n\n- The other bug (#21).\n\n" +
-		"<details><summary>Pull requests</summary>\n\n" +
-		"- README: a new logo (#204)\n- docs: refresh README branding (#2203)\n\n" +
-		"Fixes to CI and the tests are left out; the [full diff](https://github.com/o/r/compare/v0.3.0...v0.4.0) has every change.\n\n" +
-		"</details>\n"
+		"### Added\n\n- The thing, for users, across two wrapped lines and a third (#11).\n\n" +
+		"### Fixed\n\n- The other bug, wrapped too (#21).\n"
 	if notes != want {
 		t.Errorf("got:\n%s\nwant:\n%s", notes, want)
+	}
+}
+
+// TestScheduledReleaseNotesUnwrapped: CHANGELOG.md is wrapped at about 100
+// columns and a GitHub release body shows every newline as a line break, so
+// v0.8.0's notes broke mid-sentence. Every paragraph and list item is one
+// line; only blank lines, headings and code fences separate them. And no
+// Pull requests section: for v0.8.0 it named only the two last-minute fixes
+// and left out the landings that carried the work.
+func TestScheduledReleaseNotesUnwrapped(t *testing.T) {
+	r := newSchedRepo(t)
+	_, notes := r.plan(t, 30, green(r.head))
+	if notes == "" {
+		t.Fatal("no notes")
+	}
+	for _, banned := range []string{"Pull requests", "<details>", "</details>", "<summary>"} {
+		if strings.Contains(notes, banned) {
+			t.Errorf("the notes hold %q:\n%s", banned, notes)
+		}
+	}
+	lines := strings.Split(strings.TrimSuffix(notes, "\n"), "\n")
+	fence := false
+	for i, line := range lines {
+		if strings.HasPrefix(line, "```") {
+			fence = !fence
+			continue
+		}
+		if fence || i == 0 {
+			continue
+		}
+		prev := lines[i-1]
+		if line == "" || prev == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(prev, "#") ||
+			strings.HasPrefix(prev, "```") || strings.HasPrefix(prev, "<!--") {
+			continue
+		}
+		if !strings.HasPrefix(line, "- ") {
+			t.Errorf("line %d continues the paragraph or list item before it (a line break inside it): %q after %q", i+1, line, prev)
+		}
+	}
+	if fence {
+		t.Error("a code fence is left open")
+	}
+}
+
+// unwrap runs scripts/unwrap-markdown.sh on s.
+func unwrap(t *testing.T, s string) string {
+	t.Helper()
+	cmd := exec.Command("sh", filepath.Join("..", "..", "scripts", "unwrap-markdown.sh"))
+	cmd.Stdin = strings.NewReader(s)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("unwrap-markdown.sh: %v\n%s", err, out)
+	}
+	return string(out)
+}
+
+// TestUnwrapMarkdown: what joins and what is left alone, and that a second
+// pass changes nothing.
+func TestUnwrapMarkdown(t *testing.T) {
+	in := "## [1.0.0]\n\n### Added\n\n" +
+		"- One item\n  wrapped twice\n  here (#1).\n- Two (#2).\n  - Nested\n    item.\n" +
+		"1. Numbered\n   item.\n\n" +
+		"A paragraph\nover two lines.\n\n" +
+		"```sh\nkeep\n  this\n```\n\n" +
+		"<details>\n| a | b |\n> quoted\n> twice\n"
+	want := "## [1.0.0]\n\n### Added\n\n" +
+		"- One item wrapped twice here (#1).\n- Two (#2).\n  - Nested item.\n" +
+		"1. Numbered item.\n\n" +
+		"A paragraph over two lines.\n\n" +
+		"```sh\nkeep\n  this\n```\n\n" +
+		"<details>\n| a | b |\n> quoted\n> twice\n"
+	got := unwrap(t, in)
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+	if again := unwrap(t, got); again != got {
+		t.Errorf("a second pass changed the text:\n%s", again)
+	}
+}
+
+// TestReleaseTemplateUnwrapped: the prose release.yml adds after the notes
+// is one echo per paragraph, and the notes themselves go through
+// unwrap-markdown.sh (a hand-written ## [X.Y.Z] section is wrapped too).
+func TestReleaseTemplateUnwrapped(t *testing.T) {
+	publish := job(t, releaseJobs(t), "publish")
+	for _, want := range []string{
+		"sh scripts/unwrap-markdown.sh < section.md > section.unwrapped.md\n",
+		"cat section.unwrapped.md\n",
+		"docs/status.md) before installing — it is explicit about what does not.\"\n",
+		"`dependencies.json\\`, included in every archive.\"\n",
+		"index digest \\`${LOCAL_AI_DIGEST}\\`. This release's CLI defaults \\`--local-ai-image\\` to exactly that digest",
+		"is created) are unmodified copies of OSV-Scanner and of the OSV database snapshots this release pins, which ",
+		"echo \"${gatekeeper} See [Gatekeeper](",
+	} {
+		if !strings.Contains(publish, want) {
+			t.Errorf("release.yml's publish job lacks %q", want)
+		}
+	}
+	// Every echo of prose in the notes ends a sentence, a heading or a code line.
+	notes := publish[strings.Index(publish, "echo \"## CloudBurrow ${VERSION}\""):strings.Index(publish, "} > notes.md")]
+	echo := regexp.MustCompile(`(?m)^\s*(?:echo|[a-z]+=)\s*"(.*)"\s*$`)
+	for _, m := range echo.FindAllStringSubmatch(notes, -1) {
+		text := m[1]
+		if text == "" || strings.HasPrefix(text, "#") || strings.HasPrefix(text, "brew ") || strings.HasPrefix(text, "curl ") ||
+			strings.HasPrefix(text, "gh ") || strings.HasPrefix(text, "sha256sum ") {
+			continue
+		}
+		if !strings.HasSuffix(text, ".") {
+			t.Errorf("release.yml's notes wrap a paragraph: %q does not end it", text)
+		}
+	}
+	if strings.Contains(notes, "Pull requests") {
+		t.Error("release.yml's notes add a Pull requests section")
 	}
 }
 

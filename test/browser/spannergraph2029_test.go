@@ -19,7 +19,9 @@ import (
 // query (a label expression over two element tables) and shows its rows,
 // and its Explanation draws the plan: a Union all of each table's Table
 // scan. Explain of an OPTIONAL MATCH draws its Outer apply, and of a
-// quantified path its Recursive union over a Recursive spool scan. The
+// quantified path its Recursive union over a Recursive spool scan, of a
+// quantified path pattern of two edges its Recursive union, and of a MATCH
+// no element table matches its Empty relation. The
 // plan view passes the WCAG checks, and a card is reached and opened with
 // the keyboard.
 func TestSpannerStudioGraphQueryPlans(t *testing.T) {
@@ -123,4 +125,13 @@ func TestSpannerStudioGraphQueryPlans(t *testing.T) {
 	p.run(chromedp.Click(chromedp.CSS(`#spanner-explain`)))
 	p.waitFor(fmt.Sprintf(`(() => { const n = %s; return n.includes("Recursive union") })()`, cardNames))
 	p.waitFor(`[...document.querySelectorAll(".spanner-plan-card")].some((c) => c.textContent.includes("Recursive spool scan"))`)
+	// a quantified path pattern of two edges: a Recursive union of the
+	// subpath's rows under the COUNT's aggregate (the plan before has none);
+	// a MATCH no element table matches: an Empty relation
+	setSQL("GRAPH FinGraph MATCH ((a:Account)-[t:Transfers]->(b:Account)-[u:Transfers]->(c:Account)){1,2} RETURN COUNT(*) AS n")
+	p.run(chromedp.Click(chromedp.CSS(`#spanner-explain`)))
+	p.waitFor(fmt.Sprintf(`(() => { const n = %s; return n.includes("Recursive union") && n.some((x) => x.endsWith(" aggregate")) })()`, cardNames))
+	setSQL("GRAPH FinGraph MATCH (a:Account)-[o:Owns]->(b:Account) RETURN COUNT(*) AS n")
+	p.run(chromedp.Click(chromedp.CSS(`#spanner-explain`)))
+	p.waitFor(fmt.Sprintf(`%s.includes("Empty relation")`, cardNames))
 }

@@ -134,10 +134,40 @@ func TestWorkbenchJupyterLabFromTheConsole(t *testing.T) {
 	// BigQuery with Google's client, run with Shift+Enter.
 	lab.eval(shownCard+`.click(), true`, nil)
 	lab.waitForWithin(`document.querySelector(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .cm-content") !== null`, 2*time.Minute)
-	// The kernel is idle before the cell is run: the toolbar's kernel
-	// name shows it, and its status no longer reads starting or busy.
-	lab.waitForWithin(`(() => { const s = document.querySelector(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-Notebook-ExecutionIndicator");
-		return !!s && s.getAttribute("data-status") === "idle"; })()`, 2*time.Minute)
+	// The notebook's kernel is started, connected and idle before the cell
+	// is run, as a user waits for it. The toolbar's indicator alone does
+	// not say so: JupyterLab draws it "idle" from the start, before the
+	// notebook's session has a kernel at all, and a cell run then (its
+	// kernel still initializing) is cleared, not executed: its prompt
+	// [ ], the kernel idle a moment later, no output (Landing 170 run
+	// 46015879838; main run 45680873104). So the server's session for
+	// this notebook is read too: a kernel, idle, with the page's
+	// websocket connected to it.
+	kernelReady := func() {
+		t.Helper()
+		const ready = `(async () => {
+			const tab = document.querySelector("#jp-main-dock-panel .lm-TabBar-tab.lm-mod-current .lm-TabBar-tabLabel");
+			const s = document.querySelector(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-Notebook-ExecutionIndicator");
+			if (!tab || !tab.textContent.endsWith(".ipynb") || !s || s.getAttribute("data-status") !== "idle") return false;
+			const r = await fetch("/api/sessions");
+			if (!r.ok) return false;
+			return (await r.json()).some((x) => x.path.split("/").pop() === tab.textContent && !!x.kernel &&
+				x.kernel.execution_state === "idle" && x.kernel.connections > 0);
+		})()`
+		for deadline := time.Now().Add(2 * time.Minute); ; time.Sleep(500 * time.Millisecond) {
+			var ok bool
+			lab.eval(ready, &ok, awaitPromise)
+			if ok {
+				return
+			}
+			if time.Now().After(deadline) {
+				var sessions string
+				lab.eval(`fetch("/api/sessions").then((r) => r.text())`, &sessions, awaitPromise)
+				t.Fatalf("the notebook's kernel was not started, connected and idle in 2 minutes: sessions %s", sessions)
+			}
+		}
+	}
+	kernelReady()
 	cell := fmt.Sprintf(`from google.cloud import bigquery; client = bigquery.Client(); client.query("CREATE TABLE %[1]s.answers AS SELECT 42 AS answer UNION ALL SELECT 958").result(); print("total", list(client.query("SELECT SUM(answer) AS s FROM %[1]s.answers").result())[0].s)`, dataset)
 	lab.run(chromedp.Click(chromedp.CSS(`.jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .cm-content`)))
 	lab.run(chromedp.SendKeys(chromedp.CSS(`.jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .cm-content`), cell))
@@ -147,8 +177,7 @@ func TestWorkbenchJupyterLabFromTheConsole(t *testing.T) {
 	// this left the cell unrun: its prompt [ ], the kernel idle, no output.
 	lab.waitForWithin(`(() => { const a = document.activeElement;
 		return !!a && !!a.closest(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-Cell .cm-editor") && /print\("total"/.test(a.closest(".cm-editor").textContent); })()`, time.Minute)
-	lab.waitForWithin(`(() => { const s = document.querySelector(".jp-NotebookPanel:not(.lm-mod-hidden) .jp-Notebook-ExecutionIndicator");
-		return !!s && s.getAttribute("data-status") === "idle"; })()`, 2*time.Minute)
+	kernelReady()
 	lab.run(chromedp.KeyEvent(kb.Enter, chromedp.KeyModifiers(chromedp.ModifierShift)))
 	// The kernel takes the cell: its prompt leaves [ ]. Not resent: a page
 	// that drops the input is a failure.

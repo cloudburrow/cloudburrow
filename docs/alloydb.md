@@ -20,6 +20,16 @@ a cluster's page creates its instances, read pools and secondary clusters, edits
 (machine, flags, Managed Connection Pooling), exports and imports, promotes and switches over a
 secondary, and backs up and restores.
 
+Since #2251 the cluster's page also has Google's System insights (a Cluster (all instances) view
+and one an instance: summary cards, charts and the events timeline), Query insights (an
+instance's Database load chart and its queries, with Edit), the Overview's metrics chart, the
+Maintenance window's Edit, an instance row's Edit with the database flags picker (Add flag, a flag
+from the supported list, its value), and Create backup's Description and Labels; the Backups page
+edits a backup's labels. Since #2253 System insights has Log errors, Query latency, Wait time
+and Wait count and an instance's node charts, Query insights has each instance's Tags, and a
+query or tag opens its details: Database load, Latency (P50, P95, P99, and P99 latency across the
+cluster) and, for a query, its Query plan samples, each opening the plan's operations.
+
 ## The engine: PostgreSQL, or AlloyDB Omni
 
 Google publishes AlloyDB Omni, AlloyDB's own engine, as the
@@ -262,6 +272,63 @@ the protection windows, and `clusters.restore` with `backupdrBackupSource` or `b
 makes a new cluster from a vault's backup or at a point in time inside a window. Those fields are
 served over JSON (they are in AlloyDB's REST discovery document, not in the published
 `alloydbpb`). See [backupdr.md](backupdr.md#alloydb-clusters-and-filestore-instances-1524).
+
+## Monitoring and insights (#2251)
+
+With Cloud Monitoring served, every 60 seconds CloudBurrow reads each running instance's server
+and records Google's alloydb.googleapis.com metrics on the `alloydb.googleapis.com/Cluster`,
+`Instance` and `Database` monitored resources, so Metrics Explorer, alert policies,
+`ListTimeSeries` and the console read the same series:
+
+- the pod's CPU time and working set from the kubelet: `instance/cpu/average_utilization`,
+  `maximum_utilization`, `vcpus_allocated` and `memory/min_available_memory` (the machine's
+  8 GB a vCPU less the working set);
+- `pg_stat_activity` and `pg_stat_database`: connections by state and application, the
+  connection limit, transactions, commits and rollbacks, blocks, tuples, temporary files,
+  deadlocks and new connections, per instance and per database;
+- the transaction ID utilization and the oldest transaction's age, by type;
+- a read pool's replay lag, as `replication/maximum_lag` on its primary, labelled
+  `replica_instance_id`;
+- `pg_stat_statements` (preloaded on every server): `insights/aggregate` execution, IO and lock
+  time, rows and shared blocks, and the statements executed, by operation type, as DELTAs;
+- the cluster's storage (its databases' size and the primary's WAL, #2253) and its last backups'
+  times.
+
+Query insights lists the top 100 normalized queries by total time from `pg_stat_statements` on the
+chosen instance, with Google's Database and User filters. Its Edit sets `query_insights_config`
+(query lengths 256 to 4500, a sampling rate up to 20), which the API checks as Google's does.
+[gaps.md](gaps.md) lists what has no local reading.
+
+## The servers' own telemetry (#2253)
+
+Each PostgreSQL server CloudBurrow runs for an instance (not an Omni one) starts with
+`logging_collector` writing csvlog files it rotates every minute, `log_min_duration_statement=0`,
+`compute_query_id=on`, and `auto_explain` (JSON, with ANALYZE and BUFFERS) preloaded beside
+`pg_stat_statements`. Every second CloudBurrow, as the cluster's management role, with its own
+session's logging off:
+
+- samples `pg_stat_activity`: each client backend's wait event while it is active, as
+  `instance/postgresql/wait_count` (the waits begun) and `wait_time` (microseconds waited), and
+  the time sessions wait on a lock, by user, database, client address, lock type, query and tag,
+  as the `insights` `lock_time` metrics (sampled, so a wait shorter than a second may be missed);
+- reads the log files' new lines with `pg_read_binary_file` (every 5 seconds): each statement's
+  duration becomes the `insights/aggregate`, `perquery` and `pertag` `latencies` distributions
+  (wall-clock µs, 64 exponential buckets, growth 1.4) and `pertag/execution_time`; a statement's
+  sqlcommenter comment (`action`, `application`, `controller`, `db_driver`, `framework`,
+  `route`) is its tags, when the instance's Store application tags is on; the client address is
+  the line's connection, when Store client IP addresses is on; every other line the server logs
+  under the instance's flags, and a duration line only where the instance's own
+  `log_min_duration_statement` would log it, is written to Cloud Logging as `projects/P/logs/alloydb.googleapis.com%2Fpostgres.log` on the
+  `alloydb.googleapis.com/Instance` resource, which System insights' Log errors counts (severity
+  ERROR and above, the last day) and opens in Logs Explorer;
+- keeps auto_explain's plans, at most the instance's Maximum sampling rate a minute per query,
+  tuning `auto_explain.sample_rate` (with `ALTER SYSTEM` and a reload, every minute) to the
+  executions it sees; Query plan sampling off sets `auto_explain.log_min_duration` to -1.
+
+Where an instance's one node is its server (a primary, or a read pool of one node), its metrics
+are also published as Google's `node/*` and `node/database/*` series on the
+`alloydb.googleapis.com/InstanceNode` and `NodeDatabase` resources, the node ID being the pod's
+name. A read pool of several nodes is one server, so it has none.
 
 ## Not served
 

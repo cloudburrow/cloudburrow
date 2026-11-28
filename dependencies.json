@@ -22,7 +22,7 @@
   "components": {
     "dataflow": {
       "beamFlinkJobServer": {
-        "$comment": "Dataflow (#2215): internal/beamrun runs each job's Beam pipeline on this Apache Beam 2.78.0 portable runner for Flink 1.20 (--flink-master=[local]), on a per-job docker network create --internal network whose one other peer is a relay to the instance's Cloud Storage, Pub/Sub, BigQuery and Dataflow ports.",
+        "$comment": "Dataflow (#2215): internal/beamrun runs each job's Beam pipeline on this Apache Beam 2.78.0 portable runner for Flink 1.20 (--flink-master=[local]), on a per-job docker network create --internal network whose one other peer is a relay to the instance's Cloud Storage, Pub/Sub, BigQuery and Dataflow ports. It runs with Beam 2.78.0's GreedyPCollectionFusers, FlinkBatchPortablePipelineTranslator and ExecutableStageDoFnOperator patched (internal/beamrun/assets/java/, compiled against its jar as it starts; third_party/apache-beam/PROVENANCE.md: apache/beam#34647, and @OnWindowExpiration never run).",
         "image": "apache/beam_flink1.20_job_server:2.78.0",
         "digest": "sha256:b1f7e43440a148151e9db001dfc0498eb4f87bdd4d6808904daf52ab0b532053",
         "license": "Apache-2.0 (Apache Beam, Apache Flink) and the Debian and Eclipse Temurin packages it is built on",
@@ -706,13 +706,13 @@
       "dataprocPig": {
         "$comment": "Apache Pig (#2162) for Dataproc Pig jobs: the release tarball, checked against this SHA-256, of which bin/, conf/, lib/ and the core jar are kept in <state-dir>/models/spark/dataproc.",
         "version": "0.18.0",
-        "source": "https://downloads.apache.org/pig/pig-0.18.0/pig-0.18.0.tar.gz",
+        "source": "https://dlcdn.apache.org/pig/pig-0.18.0/pig-0.18.0.tar.gz",
         "sha256": "6845adb936a3c3bcc71451765953cae4103e410ba2f6c5a47cc9becade0a434a",
         "license": "Apache-2.0",
         "redistribution": "not published: downloaded by the local CLI; nothing of it is in the CLI or the repository",
         "updateFeed": "apache-dist",
         "verification": "sha256",
-        "skipDiscovery": "downloads.apache.org; depcheck only discovers GitHub-sourced components."
+        "skipDiscovery": "dlcdn.apache.org (then downloads.apache.org and archive.apache.org); depcheck only discovers GitHub-sourced components."
       },
       "dataprocJupyterPackages": {
         "$comment": "The JUPYTER optional component (#2162): an image built locally FROM the cluster's Spark image (internal/sparkproc/jupyter/Dockerfile) with JupyterLab 3.6.8 and ipykernel 6.29.5 and every package they need, installed by pip --require-hashes --no-deps --only-binary :all: from internal/sparkproc/jupyter/requirements.txt (uv pip compile --universal --generate-hashes of requirements.in, for Python 3.8 and later), labelled with the instance and removed with it.",
@@ -2795,6 +2795,15 @@
         "source": "https://github.com/GoogleCloudPlatform/cloud-spanner-emulator",
         "license": "Apache-2.0",
         "licenseNote": "The emulator's source is published under Apache-2.0, unlike the Cloud SDK emulators, whose licence could not be established.",
+        "patchedBuild": {
+          "$comment": "#2029: CloudBurrow's patched build of the same release, from source (third_party/spanner-emulator: sources.json pins the tag v1.5.58 = a081a7e71aba5f4d05fc8c6b21ef1a269dcbac28 and GoogleSQL 2026.7.2; PROVENANCE.md lists each patch). The release's spanner-emulator job (or make spanner-binaries) builds it with scripts/spanner-emulator-binaries.sh; up builds the image dev.local/cloudburrow-spanner-emulator from the embedded build on build.spannerEmulatorBase and runs it, and runs the image above, with a warning, only from a CLI that embeds no build.",
+          "source": "https://github.com/GoogleCloudPlatform/cloud-spanner-emulator",
+          "tag": "v1.5.58",
+          "commit": "a081a7e71aba5f4d05fc8c6b21ef1a269dcbac28",
+          "license": "Apache-2.0",
+          "googlesql": {"source": "https://github.com/google/googlesql", "tag": "2026.7.2", "license": "Apache-2.0"},
+          "redistribution": "embedded: each CLI embeds gzip-compressed linux/amd64 and linux/arm64 archives of emulator_main and gateway_main and the licence files of every Bazel dependency linked into them (internal/spannerimage); `up` builds the image dev.local/cloudburrow-spanner-emulator from them on build.spannerEmulatorBase and loads it into kind. Release archives carry the licences as LICENSES-spanner-emulator.txt."
+        },
         "redistribution": "not-redistributed",
         "redistributionPlan": "Pulled from Google's registry by digest at run time. Nothing is vendored or re-hosted.",
         "platforms": [
@@ -3868,6 +3877,20 @@
         "notes": "Runtime base for the prediction fixture (testdata/predictor) and the worker fixture (testdata/worker). Pinned so the image that proved the contract is the image a later run rebuilds.",
         "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
       },
+      "spannerEmulatorBase": {
+        "image": "gcr.io/distroless/cc-debian13",
+        "digest": "sha256:dac90a25ffe03ebaace90cda886b081e61ab6cd77ac47eda51f7bcc15c320765",
+        "license": "Apache-2.0",
+        "redistribution": "pull-only",
+        "updateFeed": "gcr-tag-list",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "notes": "The base of the patched Spanner emulator image `up` builds locally from the embedded build (#2029): distroless cc as upstream's own release stage uses, but Debian 13's, whose libstdc++ (GCC 14) covers the GCC 13 build, where upstream copies GCC 13's libstdc++ over Debian 12's; so the CLI embeds no library of the compiler's. internal/spannerimage.Base duplicates it.",
+        "skipDiscovery": "GCR tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
+      },
       "storageServerBase": {
         "image": "gcr.io/distroless/static-debian12",
         "digest": "sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2",
@@ -4440,6 +4463,24 @@
         "verification": "image-digest",
         "updateFeed": "docker-hub-tags",
         "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest (the multi-platform index's) with `docker buildx imagetools inspect docker:<version>-dind`."
+      },
+      "busybox": {
+        "image": "busybox:1.37.0",
+        "version": "1.37.0",
+        "digest": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+        "source": "https://hub.docker.com/_/busybox",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "license": "GPL-2.0-only (BusyBox); pulled at test time only, never vendored into the repository or shipped",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest by scripts/remote-compute-shard.sh, in CI's remotehosts shard or by a developer; never by cloudburrow.",
+        "scope": "test-only",
+        "usedBy": ".github/workflows/ci.yml, compat job, remotehosts shard: CLOUDBURROW_TEST_REMOTE_IMAGE for internal/remotecompute's stand-in tests (#2209, #2259): the container their carries, mirrors and host mounts run on the stand-in hosts (sh, nc and httpd, and no VOLUME)",
+        "verification": "image-digest",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest (the multi-platform index's) with `docker buildx imagetools inspect busybox:<version>`."
       },
       "pipelineTaskImage": {
         "image": "python:3.15.2-alpine3.24",

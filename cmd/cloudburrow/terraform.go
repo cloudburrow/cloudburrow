@@ -347,6 +347,24 @@ var terraformEndpoints = []terraformEndpoint{
 	// UNIMPLEMENTED, locally.
 	{config.ServiceCompute, "network_connectivity_custom_endpoint", "GOOGLE_NETWORK_CONNECTIVITY_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	{config.ServiceCompute, "network_connectivityv1_custom_endpoint", "GOOGLE_NETWORK_CONNECTIVITYV1_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Certificate Manager, Network Security, Network Services, Identity-Aware
+	// Proxy and Serverless VPC Access (#2153, #2160, #1578), each on the
+	// Compute Engine port under /v1/ beside Compute Engine's /compute/v1/,
+	// which tells them apart by collection (cmd/cloudburrow/compute.go).
+	// Refused locally before #1578's third round though the port served
+	// them. Their resources apply, read back, plan clean, update and
+	// destroy in terraform_compute1578_test.go.
+	{config.ServiceCompute, "certificate_manager_custom_endpoint", "GOOGLE_CERTIFICATE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{config.ServiceCompute, "network_security_custom_endpoint", "GOOGLE_NETWORK_SECURITY_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{config.ServiceCompute, "network_services_custom_endpoint", "GOOGLE_NETWORK_SERVICES_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{config.ServiceCompute, "iap_custom_endpoint", "GOOGLE_IAP_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	{config.ServiceCompute, "vpc_access_custom_endpoint", "GOOGLE_VPC_ACCESS_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Dataproc (#2156, #2162), on its own port, JSON under /v1/ as gcloud's
+	// override is: google_dataproc_autoscaling_policy,
+	// _workflow_template and _session_template in
+	// TestTerraformDataprocTemplatesAndPolicy (#1578). Refused locally
+	// before #1578's third round though the port served them.
+	{config.ServiceDataproc, "dataproc_custom_endpoint", "GOOGLE_DATAPROC_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Document AI (#1953), on the local AI endpoint: the provider's base
 	// path is https://{{location}}-documentai.googleapis.com/v1/, and the
 	// resources' URLs carry projects/{project}/locations/{location}, so the
@@ -427,6 +445,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceCompute:          cfg.Endpoints.Compute,
 		config.ServiceFilestore:        cfg.Endpoints.Filestore,
 		config.ServiceDataflow:         cfg.Endpoints.Dataflow,
+		config.ServiceDataproc:         cfg.Endpoints.Dataproc,
 		config.ServiceWorkflows:        cfg.Endpoints.Workflows,
 		config.ServiceParameterManager: cfg.Endpoints.ParameterManager,
 		config.ServiceDataform:         cfg.Endpoints.Dataform,
@@ -455,6 +474,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 	enabled[config.ServiceAppHub] = appHubEnabled(cfg)
 	enabled[config.ServiceAlloyDB] = alloyDBEnabled(cfg)
 	enabled[config.ServiceDataflow] = dataflowEnabled(cfg)
+	enabled[config.ServiceDataproc] = dataprocEnabled(cfg)
 	enabled[localAIEndpoint] = localAIServed(cfg)
 	enabled[storageTransferService] = storageJobsEnabled(cfg)
 	enabled[storageInsightsService] = storageJobsEnabled(cfg)

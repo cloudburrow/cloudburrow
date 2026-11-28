@@ -306,13 +306,15 @@ func TestDataflowProvidedTemplatesMore(t *testing.T) {
 			t.Fatalf("the job is %s %s:\n%s", j.CurrentState, j.Type, jobMessages(t, ctx, c, project, id))
 		}
 		// The job's subscription to the topic is made as it starts reading:
-		// publish until its read has counted one.
+		// publish until its window step (WINDOWDURATION Window, after Read
+		// PubSub Events) has counted one. Any step's count would not do:
+		// the read's Impulse counts its one element before a message is read.
 		for deadline := time.Now().Add(5 * time.Minute); ; {
 			if _, err := ps.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: topic, Messages: []*pubsubpb.PubsubMessage{{Data: []byte("kiwi")}}}); err != nil {
 				t.Fatal(err)
 			}
 			time.Sleep(10 * time.Second)
-			if read(t, ctx, c, project, id) > 0 {
+			if read(t, ctx, c, project, id, " Window") > 0 {
 				break
 			}
 			if time.Now().After(deadline) {
@@ -328,7 +330,14 @@ func TestDataflowProvidedTemplatesMore(t *testing.T) {
 		}
 		got := readPrefix(t, ctx, sc, bucket, "pstext/messages-")
 		if len(got) == 0 || got[0] != "kiwi" {
-			t.Errorf("the windowed files hold %v; want the kiwi messages", got)
+			// What the write left (its temporary files, under
+			// userTempLocation, say which of its stages did not run).
+			var left []string
+			it := sc.Bucket(bucket).Objects(ctx, &storage.Query{Prefix: "pstext"})
+			for a, err := it.Next(); err == nil; a, err = it.Next() {
+				left = append(left, a.Name)
+			}
+			t.Errorf("the windowed files hold %v; want the kiwi messages (objects: %v):\n%s", got, left, jobMessages(t, ctx, c, project, id))
 		}
 	})
 
@@ -367,7 +376,7 @@ func TestDataflowProvidedTemplatesMore(t *testing.T) {
 		// Google once a minute. Both guards.
 		t.Setenv("SPANNER_EMULATOR_HOST", spannerAddr)
 		t.Setenv("SPANNER_DISABLE_BUILTIN_METRICS", "true")
-		sp, err := localclient.SpannerWithConfig(ctx, db, spanner.ClientConfig{DisableNativeMetrics: true}, spannerOpts(spannerAddr)...)
+		sp, err := localclient.Spanner(ctx, db, spannerOpts(spannerAddr)...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -379,16 +388,22 @@ func TestDataflowProvidedTemplatesMore(t *testing.T) {
 		done(t, "Spanner_to_GCS_Text", launch(t, "Spanner_to_GCS_Text", "provided-spanner-text", map[string]string{
 			"spannerProjectId": project, "spannerInstanceId": spInstance, "spannerDatabaseId": spDB, "spannerTable": "Fruit",
 			"textWritePrefix": "gs://" + bucket + "/spanner/fruit"}))
-		if got := readPrefix(t, ctx, sc, bucket, "spanner/fruit"); strings.Join(got, ",") != `"apple",3,"kiwi",2` &&
-			strings.Join(got, ",") != "apple,3,kiwi,2" {
+		// The template writes TEXTWRITEPREFIX-SHARD.csv, each value quoted
+		// (SpannerConverters.StructCsvPrinter, QuoteMode.ALL_NON_NULL), and
+		// its table's schema, column name to Spanner type, as
+		// TEXTWRITEPREFIXschema (exportSchema, on by default).
+		if got := readPrefix(t, ctx, sc, bucket, "spanner/fruit-"); strings.Join(got, ",") != `"apple","3","kiwi","2"` {
 			t.Errorf("the export holds %q; want the table's two rows as CSV", got)
+		}
+		if got := readPrefix(t, ctx, sc, bucket, "spanner/fruitschema"); strings.Join(got, ",") != `{"Name":"STRING(64)","N":"INT64"}` {
+			t.Errorf("the export's schema file holds %q; want the table's columns and types", got)
 		}
 	})
 }
 
-// read is the count of elements a job's first step has output so far
-// (its largest ElementCount), 0 for none.
-func read(t *testing.T, ctx context.Context, c dataflowClients, project, id string) float64 {
+// read is the count of elements the job's steps named with step have
+// output so far (their largest ElementCount), 0 for none.
+func read(t *testing.T, ctx context.Context, c dataflowClients, project, id, step string) float64 {
 	t.Helper()
 	m, err := c.metrics.GetJobMetrics(ctx, &dataflowpb.GetJobMetricsRequest{ProjectId: project, Location: "us-central1", JobId: id})
 	if err != nil {
@@ -396,7 +411,8 @@ func read(t *testing.T, ctx context.Context, c dataflowClients, project, id stri
 	}
 	n := 0.0
 	for _, u := range m.Metrics {
-		if u.GetName().GetName() == "ElementCount" && u.GetScalar().GetNumberValue() > n {
+		if u.GetName().GetName() == "ElementCount" && strings.Contains(u.GetName().GetContext()["output_user_name"], step) &&
+			u.GetScalar().GetNumberValue() > n {
 			n = u.GetScalar().GetNumberValue()
 		}
 	}

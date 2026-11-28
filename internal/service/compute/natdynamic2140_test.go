@@ -2,6 +2,7 @@ package compute
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -14,8 +15,12 @@ import (
 // Endpoint-Independent Mapping maps each internal IP:port to one NAT port
 // of the VM's range whatever the destination.
 func TestNATDynamicPortsAndEndpointIndependentMapping2140(t *testing.T) {
+	// The clock is read by operation goroutines too (an insert's finish
+	// stamps endTime under s.mu), so advance it under its own lock.
+	var clockMu sync.Mutex
 	now := time.Date(2026, 11, 22, 8, 30, 0, 0, time.UTC)
-	s, err := New(Options{VMs: fakeVMs{free: 1 << 40}, Now: func() time.Time { return now }})
+	advance := func(d time.Duration) { clockMu.Lock(); now = now.Add(d); clockMu.Unlock() }
+	s, err := New(Options{VMs: fakeVMs{free: 1 << 40}, Now: func() time.Time { clockMu.Lock(); defer clockMu.Unlock(); return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,13 +96,13 @@ func TestNATDynamicPortsAndEndpointIndependentMapping2140(t *testing.T) {
 	if pr := ports(); pr[ip["a"]][1]-pr[ip["a"]][0] != 127 {
 		t.Fatalf("shrunk at once: %v", pr)
 	}
-	now = now.Add(natShrinkAfter)
+	advance(natShrinkAfter)
 	s.SetNATPortUsage(key, map[string]int{ip["a"]: 2})
 	if pr := ports(); pr[ip["a"]][1]-pr[ip["a"]][0] != 63 {
 		t.Fatalf("not halved: %v", pr)
 	}
 	for i := 0; i < 4; i++ {
-		now = now.Add(natShrinkAfter)
+		advance(natShrinkAfter)
 		s.SetNATPortUsage(key, map[string]int{})
 	}
 	if pr := ports(); pr[ip["a"]][1]-pr[ip["a"]][0] != 31 {

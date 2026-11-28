@@ -182,7 +182,7 @@ check in shape.
 ### The Cloud SQL ephemeral nightly
 
 `.github/workflows/nightly-sql-ephemeral.yml` ("Cloud SQL ephemeral nightly", #1752) runs the
-compat job's `sql` and `sqlreplicas` shards, as `scripts/compat-shards.sh` defines them (services,
+compat job's `sql`, `sqlreplicas` and `alloydb` shards, as `scripts/compat-shards.sh` defines them (services,
 `-run`/`-skip` patterns and `go test -timeout`), each on an instance brought up with
 `--mode ephemeral`, nightly at 06:47 UTC and by hand (`gh workflow run nightly-sql-ephemeral.yml`).
 The compat job runs the shard on a persistent instance only, and a created Cloud SQL server keeps
@@ -249,6 +249,28 @@ which ci.yml and `scripts/verify-local.sh` both call, and `cmd/cloudburrow`'s
 `TestBrowserTestsRunWhereTheirScreensAreServed` fails unless every browser test but the never-run
 ones is selected by exactly one browser shard whose `--services` draw each screen it names with
 `needService`.
+
+### The remotehosts shard
+
+The compat job's `remotehosts` shard (#2259) runs the remote compute and bring-your-own-cloud
+tests (#2209), which need hosts no other shard has: Docker-in-Docker sshd stand-ins
+(`testdata/remotehost`, started by `scripts/remote-compute-standin.sh`, every one on 127.0.0.1)
+and the local fakes of AWS and Azure (`test/tools/byocfakes`). `scripts/remote-compute-shard.sh`
+does the work, for ci.yml and `scripts/verify-local.sh` alike:
+
+- `hosts` runs the stand-in tests of `internal/remotecompute` (`TestStandIn*`,
+  `TestProvisionedVMBecomesTheInstancesCompute`, `TestSessionManagerTunnelReachesTheStandIn`) and
+  `cmd/cloudburrow` (`TestProvisionedCompute*`) against two stand-ins that accept one bootstrap
+  key, with the pinned busybox image (`dependencies.json`'s `realTools.busybox`), and fails unless
+  every one passed; then it starts the stand-in the shard's instance runs on (`up --compute`), its
+  own key already authorized.
+- The compat suite runs `^TestRemoteCompute` against that instance, with the `DOCKER_HOST` and
+  ingress `compat_remote_exports` reads from `cloudburrow env`; compat-coverage counts them, and
+  no `never` entry hides them.
+- The browser step runs `TestRemoteComputeConsole` there, then `walkthrough` runs
+  `TestByocFirstRunWalkThrough` on an instance of its own on the runner's Docker, started with
+  `CLOUDBURROW_BYOC_FAKES`, whose AWS and Azure VMs boot as two more stand-ins
+  (`BROWSER_OWN_INSTANCE` in `compat_browser_select`); its result joins the suite's, which must pass.
 
 ### The localaispeech shard
 

@@ -20,6 +20,16 @@ var writableResources = map[string]bool{
 // resource list publishes them
 // (docs.cloud.google.com/monitoring/api/resources).
 var resourceDescriptors = []*monitoredres.MonitoredResourceDescriptor{
+	res("alloydb.googleapis.com/Cluster", "AlloyDB cluster", "Monitored resource representing an AlloyDB cluster.",
+		"resource_container", "location", "cluster_id"),
+	res("alloydb.googleapis.com/Database", "AlloyDB database", "Monitored resource representing a database on AlloyDB instance.",
+		"resource_container", "location", "cluster_id", "instance_id", "database"),
+	res("alloydb.googleapis.com/Instance", "AlloyDB instance", "Monitored resource representing an AlloyDB instance.",
+		"resource_container", "location", "cluster_id", "instance_id"),
+	res("alloydb.googleapis.com/InstanceNode", "AlloyDB node", "Monitored resource representing a physical node in AlloyDB instance.",
+		"resource_container", "location", "cluster_id", "instance_id", "node_id"),
+	res("alloydb.googleapis.com/NodeDatabase", "AlloyDB Node Database", "Monitored resource to capture database metrics reported by a specific AlloyDB node.",
+		"resource_container", "location", "cluster_id", "instance_id", "node_id", "database"),
 	res("aws_ec2_instance", "Amazon EC2 Instance", "A VM instance in Amazon EC2.",
 		"project_id", "instance_id", "region", "aws_account"),
 	res("cloud_run_job", "Cloud Run Job", "A Cloud Run job.",

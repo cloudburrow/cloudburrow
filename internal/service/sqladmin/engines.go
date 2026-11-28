@@ -79,7 +79,10 @@ func (p *Postgres) Instance() string        { return p.Name }
 func (p *Postgres) DatabaseVersion() string { return p.Version }
 func (p *Postgres) Addr() string            { return p.HostAddr() }
 
-func (p *Postgres) conn(ctx context.Context) (*pgx.Conn, error) {
+func (p *Postgres) conn(ctx context.Context) (*pgx.Conn, error) { return p.connDB(ctx, p.Database) }
+
+// connDB is a connection to the server's database db.
+func (p *Postgres) connDB(ctx context.Context, db string) (*pgx.Conn, error) {
 	host, port, err := net.SplitHostPort(p.HostAddr())
 	if err != nil {
 		return nil, Errorf(http.StatusServiceUnavailable, "the PostgreSQL tunnel is not up")
@@ -89,7 +92,7 @@ func (p *Postgres) conn(ctx context.Context) (*pgx.Conn, error) {
 		user, password = p.AdminUser, p.AdminPassword
 	}
 	u := url.URL{Scheme: "postgres", User: url.UserPassword(user, password), Host: net.JoinHostPort(host, port),
-		Path: "/" + p.Database, RawQuery: "sslmode=disable"}
+		Path: "/" + db, RawQuery: "sslmode=disable"}
 	c, err := pgx.Connect(ctx, u.String())
 	if err != nil {
 		return nil, Errorf(http.StatusServiceUnavailable, "cannot reach PostgreSQL: %v", err)
@@ -246,9 +249,11 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]User, error) {
 	// still.
 	rows, err := c.Query(ctx, `SELECT r.rolname, COALESCE((SELECT g.rolname FROM pg_catalog.pg_auth_members m
 		JOIN pg_catalog.pg_roles g ON g.oid = m.roleid
-		WHERE m.member = r.oid AND g.rolname IN ('`+pgIAMUserGroup+`', '`+pgIAMServiceAccountGroup+`') LIMIT 1), '')
+		WHERE m.member = r.oid AND g.rolname IN ('`+pgIAMUserGroup+`', '`+pgIAMServiceAccountGroup+`',
+			'`+pgIAMGroupRole+`', '`+pgIAMGroupUserRole+`', '`+pgIAMGroupServiceAccountRole+`') LIMIT 1), '')
 		FROM pg_catalog.pg_roles r
-		WHERE (r.rolcanlogin OR EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting s, unnest(s.setconfig) x
+		WHERE (r.rolcanlogin OR EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles g ON g.oid = m.roleid
+			WHERE m.member = r.oid AND g.rolname = '`+pgIAMGroupRole+`') OR EXISTS (SELECT 1 FROM pg_catalog.pg_db_role_setting s, unnest(s.setconfig) x
 			WHERE s.setrole = r.oid AND s.setdatabase = 0 AND x = '`+pgFailedCheckSetting+`=on'))
 		AND r.rolname NOT LIKE 'pg\_%' AND r.rolname NOT IN ('`+pgAdminUser+`', '`+pgAlloyDBAdminUser+`') ORDER BY r.rolname`)
 	if err != nil {
@@ -267,6 +272,12 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]User, error) {
 			u.Type, u.IAMEmail = TypeIAMUser, u.Name
 		case pgIAMServiceAccountGroup:
 			u.Type, u.IAMEmail = TypeIAMServiceAccount, u.Name+saSuffix
+		case pgIAMGroupRole:
+			u.Type, u.IAMEmail = TypeIAMGroup, u.Name
+		case pgIAMGroupUserRole:
+			u.Type, u.IAMEmail = TypeIAMGroupUser, u.Name
+		case pgIAMGroupServiceAccountRole:
+			u.Type, u.IAMEmail = TypeIAMGroupServiceAccount, u.Name+saSuffix
 		}
 		out = append(out, u)
 	}
@@ -726,6 +737,10 @@ func (m *MySQL) ListUsers(ctx context.Context) ([]User, error) {
 		}
 		irows.Close()
 	}
+	groups, err := m.myIAMGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := db.QueryContext(ctx, `SELECT User, Host FROM mysql.user ORDER BY User, Host`)
 	if err != nil {
 		return nil, myError(err)
@@ -742,6 +757,9 @@ func (m *MySQL) ListUsers(ctx context.Context) ([]User, error) {
 		}
 		if t, ok := iam[u.Name]; ok && u.Host == "%" {
 			u.Type, u.IAMEmail = t[0], t[1]
+		}
+		if email, ok := groups[[2]string{u.Name, u.Host}]; ok {
+			u.Type, u.IAMEmail = TypeIAMGroup, email
 		}
 		out = append(out, u)
 	}

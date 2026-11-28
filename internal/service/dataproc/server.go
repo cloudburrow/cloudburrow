@@ -661,6 +661,14 @@ func (s *Server) restartClusters() {
 			s.setClusterStateLocked(c, dataprocpb.ClusterStatus_STOPPED, "")
 		case dataprocpb.ClusterStatus_STOPPED, dataprocpb.ClusterStatus_ERROR:
 		default:
+			// Its nodes are not there until startCluster has started them
+			// again: STARTING, as a cluster being started is, not the
+			// RUNNING the last run saved, which would let a client that
+			// waits for RUNNING submit a job no node can run yet (#2248).
+			// A cluster still CREATING stays so.
+			if c.GetStatus().GetState() != dataprocpb.ClusterStatus_CREATING {
+				s.setClusterStateLocked(c, dataprocpb.ClusterStatus_STARTING, "")
+			}
 			s.wg.Add(1)
 			go s.startCluster(name, "", true)
 		}

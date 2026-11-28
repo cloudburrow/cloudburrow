@@ -394,7 +394,17 @@ func (s *Server) UpdateTrustConfig(_ context.Context, req *cmpb.UpdateTrustConfi
 		return nil, apierror.Aborted("The etag '%s' does not match the trust config's current etag.", in.GetEtag())
 	}
 	next := proto.Clone(cur).(*cmpb.TrustConfig)
-	if err := applyMask(next, in, req.GetUpdateMask(), "description", "labels", "trust_stores", "allowlisted_certificates", "spiffe_trust_stores"); err != nil {
+	updatable := []string{"description", "labels", "trust_stores", "allowlisted_certificates", "spiffe_trust_stores"}
+	mask := req.GetUpdateMask()
+	if len(mask.GetPaths()) == 0 {
+		// hashicorp/google's google_certificate_manager_trust_config
+		// PATCHes the whole resource with no updateMask (its generated
+		// Update sets none, 8.12.0, #1578), and its updates apply against
+		// Google, so a missing mask is AIP-134's implied one: every
+		// updatable field the request populates.
+		mask = impliedMask(in, updatable...)
+	}
+	if err := applyMask(next, in, mask, updatable...); err != nil {
 		return nil, err
 	}
 	if err := checkTrust(next); err != nil {

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/dataflow/apiv1beta3/dataflowpb"
@@ -45,8 +46,11 @@ type dataflowService struct {
 	// registryToken is the token a Flex Template's image is read from
 	// the Artifact Registry with; nil reads it with none.
 	registryToken func() string
-	server        *grpctransport.Server
-	api           *dataflow.Server
+	// private answers the private services addresses on a job's VPC
+	// network (beamrun.Docker.Private); nil for none.
+	private func(project, network, subnetwork, region string) []beamrun.PrivateService
+	server  *grpctransport.Server
+	api     *dataflow.Server
 	// snapTmp is an ephemeral instance's snapshots directory, removed
 	// when it stops.
 	snapTmp string
@@ -120,16 +124,23 @@ func (s *dataflowService) Start(ctx context.Context) error {
 		Registry:      func() string { return s.liveAddrs()["run"] },
 		RegistryToken: s.registryToken,
 		Snapshots:     snaps,
+		Private:       s.private,
 		Logf:          func(format string, args ...any) { fmt.Printf("cloudburrow: "+format+"\n", args...) }}
-	opts := dataflow.Options{State: state, Engine: dataflowEngine{d: s.docker}, Launcher: flexLauncher{d: s.docker},
+	launcher := flexLauncher{d: s.docker}
+	opts := dataflow.Options{State: state, Engine: dataflowEngine{d: s.docker},
 		Logf: func(format string, args ...any) { fmt.Printf("cloudburrow: "+format+"\n", args...) }}
 	if s.live != nil && serviceEnabled(s.cfg, config.ServiceStorage) {
 		st := &dataprocStorage{live: s.live}
 		opts.Storage = st
 		// Google-provided templates, built once per state directory.
-		opts.Provided = &providedTemplates{p: &beamrun.Provided{D: s.docker, Cache: s.cfg.StateDir}, storage: st,
-			project: func() string { return s.cfg.DefaultProject() }}
+		launcher.provided = &beamrun.Provided{D: s.docker, Cache: s.cfg.StateDir}
+		pt := &providedTemplates{p: launcher.provided, storage: st,
+			project: func() string { return s.cfg.DefaultProject() }, runAddr: func() string { return s.liveAddrs()["run"] }}
+		opts.Provided = pt
+		launcher.seedYAML = pt.seedYAML
+		launcher.read = st.Read
 	}
+	opts.Launcher = launcher
 	if s.live != nil {
 		opts.Logs = dataflowLogger{logging: func() string { return s.live()["logging"] }}
 	}
@@ -163,6 +174,12 @@ func (s *dataflowService) Stop(ctx context.Context) error {
 		errs = append(errs, s.server.Stop(ctx))
 	}
 	if s.api != nil {
+		// A running job's containers are removed at once, not cancelled
+		// through the runner: stop has its shutdown timeout for every
+		// service.
+		if s.docker != nil {
+			s.docker.Shutdown()
+		}
 		s.api.Close()
 	}
 	// What a run's cleanup did not reach (the CLI stopping mid-run).
@@ -190,13 +207,69 @@ func (r *dataflowResetter) ResetProject(_ context.Context, project string) error
 	return api.Reset(project)
 }
 
-// flexLauncher runs the API's Flex Template launches on beamrun.
-type flexLauncher struct{ d *beamrun.Docker }
+// flexLauncher runs the API's Flex Template launches on beamrun. A
+// Google-provided Flex Template's image (beamrun.ProvidedFlexImage) is
+// its build in provided.
+type flexLauncher struct {
+	d        *beamrun.Docker
+	provided *beamrun.Provided
+	// seedYAML readies Google's YAML template's packages
+	// (providedTemplates.seedYAML).
+	seedYAML func(context.Context) error
+	// read reads a Cloud Storage object (gs://BUCKET/OBJECT) of the
+	// instance's: a YAML template's pipeline file.
+	read func(context.Context, string) ([]byte, error)
+}
+
+// yamlPipelineText is the Beam YAML pipeline a Yaml_Template launch
+// runs: its yaml_pipeline, or its yaml_pipeline_file's content.
+func (l flexLauncher) yamlPipelineText(ctx context.Context, args []string) string {
+	var text []string
+	for _, a := range args {
+		if v, ok := strings.CutPrefix(a, "--yaml_pipeline="); ok {
+			text = append(text, v)
+		}
+		if v, ok := strings.CutPrefix(a, "--yaml_pipeline_file="); ok && strings.HasPrefix(v, "gs://") && l.read != nil {
+			if b, err := l.read(ctx, v); err == nil {
+				text = append(text, string(b))
+			}
+		}
+	}
+	return strings.Join(text, "\n")
+}
 
 func (l flexLauncher) Launch(ctx context.Context, f dataflow.FlexLaunch) error {
-	return l.d.LaunchFlex(ctx, beamrun.Flex{Project: f.Project, Location: f.Location, JobName: f.JobName, Image: f.Image, Args: f.Args,
+	fl := beamrun.Flex{Project: f.Project, Location: f.Location, JobName: f.JobName, Image: f.Image, Args: f.Args,
 		TempLocation: f.TempLocation, StagingLocation: f.StagingLocation, MaxWorkers: f.MaxWorkers, Update: f.Update,
-		TransformNameMapping: f.TransformNameMapping})
+		TransformNameMapping: f.TransformNameMapping, Network: f.Network, Subnetwork: f.Subnetwork}
+	if name, ok := beamrun.ProvidedFlexTemplate(f.Image); ok && l.provided != nil {
+		tpl, dir, found, err := l.provided.FlexTemplate(ctx, name)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("the image %s is not a Google-provided Flex Template's", f.Image)
+		}
+		fl.Provided, fl.ProvidedDir = &tpl, dir
+		if tpl.Language == "YAML" {
+			if l.seedYAML != nil {
+				if err := l.seedYAML(ctx); err != nil {
+					return err
+				}
+			}
+			y, err := l.provided.BuildYAMLLauncher(ctx)
+			if err != nil {
+				return err
+			}
+			fl.ProvidedImage = y.Image
+			// The Java expansion services its Java providers' transforms
+			// need, which Beam would download from Maven Central.
+			if fl.ProvidedJars, err = l.provided.YAMLJars(ctx, l.yamlPipelineText(ctx, f.Args)); err != nil {
+				return err
+			}
+		}
+	}
+	return l.d.LaunchFlex(ctx, fl)
 }
 
 // dataflowEngine runs the API's jobs on beamrun.
@@ -207,7 +280,13 @@ var pythonVersionRE = regexp.MustCompile(`Python (\d+\.\d+)`)
 func (e dataflowEngine) Run(ctx context.Context, run dataflow.Run, r dataflow.Reporter) dataflow.Outcome {
 	job := beamrun.Job{Project: run.Project, JobID: run.JobID, Name: run.Name, Streaming: run.Streaming,
 		PipelineURL: run.PipelineURL, Options: run.Options, SDK: run.SDK, SDKVersion: run.SDKVersion,
-		Workers: run.MaxWorkers, Drain: run.Drain, Snapshot: run.SnapshotID}
+		Workers: run.MaxWorkers, Drain: run.Drain, Snapshot: run.SnapshotID,
+		Network: run.Network, Subnetwork: run.Subnetwork, Region: run.Location}
+	// A Google-provided template's Python workers install its
+	// requirements' dependencies from the packages seeded for it.
+	if run.Labels["goog-dataflow-provided-template-name"] != "" && run.SDK == "Python" {
+		job.PipIndex = beamrun.ProvidedPythonIndex
+	}
 	if m := pythonVersionRE.FindStringSubmatch(sdkName(run)); m != nil {
 		job.PythonVersion = m[1]
 	}

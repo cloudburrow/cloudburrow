@@ -306,6 +306,10 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 			Epoch: spec.RebuildEpoch}
 		if ext := spec.External; ext != nil {
 			src.Password, src.User, src.Logical = ext.Password, ext.User, !spec.MySQL()
+			src.CACert, src.ClientCert, src.ClientKey, src.DumpFlags = ext.CACert, ext.ClientCert, ext.ClientKey, ext.DumpFlags
+			if spec.MySQL() {
+				src.Databases = ext.Databases
+			}
 			if ext.Instance == "" {
 				src.Port = ext.Port
 			}
@@ -354,12 +358,33 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 // (CLOUDSQL_PRIMARY_USER) is given its databases only, as before.
 const mysqlReplicaSetup = `set -e
 ` + mysqlRootEnv + `if [ -n "$(mysql $MYSQL_LOCAL -N -e 'SHOW REPLICA STATUS')" ]; then exit 0; fi
-src() { MYSQL_PWD="$CLOUDSQL_REPLICATION_PASSWORD" "$@" -h "$CLOUDSQL_PRIMARY_HOST" -P "${CLOUDSQL_PRIMARY_PORT:-3306}" -u "${CLOUDSQL_PRIMARY_USER:-` + components.SQLReplicaUser + `}"; }
+` + mysqlSourceTLS + `src() { MYSQL_PWD="$CLOUDSQL_REPLICATION_PASSWORD" "$@" $srcssl -h "$CLOUDSQL_PRIMARY_HOST" -P "${CLOUDSQL_PRIMARY_PORT:-3306}" -u "${CLOUDSQL_PRIMARY_USER:-` + components.SQLReplicaUser + `}"; }
+# An external source with gtid_mode OFF (#2257) is replicated by binary log
+# position: the dump records it (--source-data), and the replica, whose
+# GTIDs are on, gives the source's anonymous transactions GTIDs of its own.
+gtid=ON
+if [ -n "${CLOUDSQL_PRIMARY_USER:-}" ]; then gtid=$(src mysql -N -e 'SELECT @@GLOBAL.gtid_mode'); fi
+pos=""
 if [ -z "${CLOUDSQL_SEEDED:-}" ]; then # a replica seeded from dumpFilePath, or demoted by demoteMaster, has the data (#1524)
-dbs=$(src mysql -N -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','sys','information_schema','performance_schema')")
+dbs="${CLOUDSQL_DATABASES:-}"
+if [ -z "$dbs" ]; then
+  dbs=$(src mysql -N -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','sys','information_schema','performance_schema')")
+fi
 mysql $MYSQL_LOCAL -e 'RESET BINARY LOGS AND GTIDS' 2>/dev/null || mysql $MYSQL_LOCAL -e 'RESET MASTER' # MySQL 8.0's name
-if [ -n "$dbs" ]; then
-  src mysqldump --single-transaction --set-gtid-purged=ON --routines --triggers --events --databases $dbs | mysql $MYSQL_LOCAL
+if [ "$gtid" = OFF ]; then
+  f=$(mktemp)
+  if [ -n "$dbs" ]; then
+    src mysqldump --single-transaction --source-data=2 --set-gtid-purged=OFF --routines --triggers --events ${CLOUDSQL_DUMP_FLAGS:-} --databases $dbs > "$f"
+    pos=$(sed -n "s/^-- CHANGE .* TO [A-Z]*_LOG_FILE='\([^']*\)', *[A-Z]*_LOG_POS=\([0-9]*\).*/\1 \2/p" "$f" | head -n 1)
+    mysql $MYSQL_LOCAL < "$f"
+  else
+    pos=$(src mysql -N -e 'SHOW BINARY LOG STATUS' 2>/dev/null || src mysql -N -e 'SHOW MASTER STATUS')
+    pos=$(printf '%s\n' "$pos" | awk 'NR==1{print $1, $2}')
+  fi
+  rm -f "$f"
+  if [ -z "$pos" ]; then echo "the dump of $CLOUDSQL_PRIMARY_HOST recorded no binary log position" >&2; exit 1; fi
+elif [ -n "$dbs" ]; then
+  src mysqldump --single-transaction --set-gtid-purged=ON --routines --triggers --events ${CLOUDSQL_DUMP_FLAGS:-} --databases $dbs | mysql $MYSQL_LOCAL
 else
   mysql $MYSQL_LOCAL -e "SET GLOBAL gtid_purged = '$(src mysql -N -e 'SELECT @@GLOBAL.gtid_executed')'"
 fi
@@ -374,8 +399,35 @@ if [ -z "${CLOUDSQL_PRIMARY_USER:-}" ]; then
     echo "the replica refused some of its primary's account statements; the others were applied" >&2
 fi
 fi
+position="SOURCE_AUTO_POSITION = 1"
+if [ -n "$pos" ]; then
+  set -- $pos
+  position="SOURCE_LOG_FILE = '$1', SOURCE_LOG_POS = $2, SOURCE_AUTO_POSITION = 0, ASSIGN_GTIDS_TO_ANONYMOUS_TRANSACTIONS = LOCAL"
+fi
 mysql $MYSQL_LOCAL -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST = '$CLOUDSQL_PRIMARY_HOST', SOURCE_PORT = ${CLOUDSQL_PRIMARY_PORT:-3306}, SOURCE_USER = '${CLOUDSQL_PRIMARY_USER:-` +
-	components.SQLReplicaUser + `}', SOURCE_PASSWORD = '$CLOUDSQL_REPLICATION_PASSWORD', SOURCE_AUTO_POSITION = 1, SOURCE_SSL = 1; START REPLICA; SET PERSIST super_read_only = ON"
+	components.SQLReplicaUser + `}', SOURCE_PASSWORD = '$CLOUDSQL_REPLICATION_PASSWORD', $position, $srcchange; START REPLICA; SET PERSIST super_read_only = ON"
+`
+
+// mysqlSourceTLS writes an external MySQL source's certificates beside
+// the replica's data (#2257) and sets srcssl, the client options that
+// verify the source's certificate against the CA (and present the client
+// certificate), and srcchange, the replication channel's: SOURCE_SSL_CA
+// makes the channel verify the CA, as the client's VERIFY_CA does. With
+// no CA the connection is encrypted and unverified, as before.
+const mysqlSourceTLS = `srcssl=""; srcchange="SOURCE_SSL = 1"
+if [ -n "${CLOUDSQL_PRIMARY_SSL_CA:-}" ]; then
+  tlsdir=/var/lib/mysql
+  printf '%s\n' "$CLOUDSQL_PRIMARY_SSL_CA" > "$tlsdir/cloudsql-source-ca.pem"
+  srcssl="--ssl-mode=VERIFY_CA --ssl-ca=$tlsdir/cloudsql-source-ca.pem"
+  srcchange="SOURCE_SSL = 1, SOURCE_SSL_CA = '$tlsdir/cloudsql-source-ca.pem'"
+  if [ -n "${CLOUDSQL_PRIMARY_SSL_CERT:-}" ]; then
+    printf '%s\n' "$CLOUDSQL_PRIMARY_SSL_CERT" > "$tlsdir/cloudsql-source-cert.pem"
+    (umask 077; printf '%s\n' "$CLOUDSQL_PRIMARY_SSL_KEY" > "$tlsdir/cloudsql-source-key.pem")
+    srcssl="$srcssl --ssl-cert=$tlsdir/cloudsql-source-cert.pem --ssl-key=$tlsdir/cloudsql-source-key.pem"
+    srcchange="$srcchange, SOURCE_SSL_CERT = '$tlsdir/cloudsql-source-cert.pem', SOURCE_SSL_KEY = '$tlsdir/cloudsql-source-key.pem'"
+  fi
+  chown mysql:mysql "$tlsdir"/cloudsql-source-*.pem 2>/dev/null || true
+fi
 `
 
 // mysqlLegacyFirstStart starts a MySQL 5.7 or 5.6 server's binary log
@@ -696,8 +748,12 @@ func replicaSetup(spec sqladmin.Spec) string {
 			" CLOUDSQL_SYNC_ID=" + fmt.Sprintf("%08x", crc32.ChecksumIEEE([]byte(spec.Project+":"+spec.Name))) + "\n" + pgExternalSetup
 	case !spec.MySQL():
 		return ""
+	case ext != nil && ext.SyncMode == "OFFLINE" && ext.DumpFile != "":
+		// A one-time sync from a dump file (#2257): startExternalSync
+		// loaded it (loadSyncDump), and nothing replicates after.
+		return ""
 	case ext != nil && ext.SyncMode == "OFFLINE":
-		return mysqlOfflineSetup
+		return mysqlDatabases(ext) + mysqlOfflineSetup
 	case ext != nil && ext.Physical:
 		// Restored from an XtraBackup backup (#1570, sqlphysical.go).
 		return mysqlPhysicalSetup
@@ -707,7 +763,16 @@ func replicaSetup(spec sqladmin.Spec) string {
 	case ext != nil && (ext.DumpFile != "" || ext.Demoted):
 		return "export CLOUDSQL_SEEDED=1\n" + mysqlReplicaSetup
 	}
-	return mysqlReplicaSetup
+	return mysqlDatabases(ext) + mysqlReplicaSetup
+}
+
+// mysqlDatabases exports the databases an external MySQL source's sync
+// dumps (#2257, selectedObjects), or "" for every one.
+func mysqlDatabases(ext *sqladmin.ExternalSource) string {
+	if ext == nil || len(ext.Databases) == 0 {
+		return ""
+	}
+	return "export CLOUDSQL_DATABASES=" + shellQuote(strings.Join(ext.Databases, " ")) + "\n"
 }
 
 // mysqlOfflineSetup copies an external source's databases into the
@@ -715,10 +780,13 @@ func replicaSetup(spec sqladmin.Spec) string {
 const mysqlOfflineSetup = `set -e
 ` + mysqlRootEnv + `marker=/var/lib/mysql/cloudsql-external-synced
 if [ -f "$marker" ]; then exit 0; fi
-src() { MYSQL_PWD="$CLOUDSQL_REPLICATION_PASSWORD" "$@" -h "$CLOUDSQL_PRIMARY_HOST" -P "${CLOUDSQL_PRIMARY_PORT:-3306}" -u "$CLOUDSQL_PRIMARY_USER"; }
-dbs=$(src mysql -N -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','sys','information_schema','performance_schema')")
+` + mysqlSourceTLS + `src() { MYSQL_PWD="$CLOUDSQL_REPLICATION_PASSWORD" "$@" $srcssl -h "$CLOUDSQL_PRIMARY_HOST" -P "${CLOUDSQL_PRIMARY_PORT:-3306}" -u "$CLOUDSQL_PRIMARY_USER"; }
+dbs="${CLOUDSQL_DATABASES:-}"
+if [ -z "$dbs" ]; then
+  dbs=$(src mysql -N -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','sys','information_schema','performance_schema')")
+fi
 if [ -n "$dbs" ]; then
-  src mysqldump --single-transaction --set-gtid-purged=OFF --routines --triggers --events --databases $dbs | mysql $MYSQL_LOCAL
+  src mysqldump --single-transaction --set-gtid-purged=OFF --routines --triggers --events ${CLOUDSQL_DUMP_FLAGS:-} --databases $dbs | mysql $MYSQL_LOCAL
 fi
 touch "$marker"
 `
@@ -738,6 +806,19 @@ export PGPASSWORD="$CLOUDSQL_REPLICATION_PASSWORD"
 conn="host=$CLOUDSQL_PRIMARY_HOST port=${CLOUDSQL_PRIMARY_PORT:-5432} user=$CLOUDSQL_PRIMARY_USER"
 # An empty "password=" would take the next keyword as its value.
 if [ -n "$CLOUDSQL_REPLICATION_PASSWORD" ]; then conn="$conn password=$CLOUDSQL_REPLICATION_PASSWORD"; fi
+# A source's CA certificate (#2257): its certificate is verified against
+# it, and a client certificate presented, by the copy and the subscriptions.
+if [ -n "${CLOUDSQL_PRIMARY_SSL_CA:-}" ]; then
+  tlsdir="$(dirname "$PGDATA")"
+  printf '%s\n' "$CLOUDSQL_PRIMARY_SSL_CA" > "$tlsdir/cloudsql-source-ca.pem"
+  conn="$conn sslmode=verify-ca sslrootcert=$tlsdir/cloudsql-source-ca.pem"
+  if [ -n "${CLOUDSQL_PRIMARY_SSL_CERT:-}" ]; then
+    printf '%s\n' "$CLOUDSQL_PRIMARY_SSL_CERT" > "$tlsdir/cloudsql-source-cert.pem"
+    (umask 077; printf '%s\n' "$CLOUDSQL_PRIMARY_SSL_KEY" > "$tlsdir/cloudsql-source-key.pem")
+    conn="$conn sslcert=$tlsdir/cloudsql-source-cert.pem sslkey=$tlsdir/cloudsql-source-key.pem"
+  fi
+  chown postgres "$tlsdir"/cloudsql-source-*.pem 2>/dev/null || true
+fi
 dst() { PGPASSWORD= psql -U postgres -v ON_ERROR_STOP=1 -qAt "$@"; }
 dbs="$CLOUDSQL_DATABASES"
 if [ -z "$dbs" ]; then

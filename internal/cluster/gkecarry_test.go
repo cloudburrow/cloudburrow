@@ -99,3 +99,67 @@ func TestCarryImagesVerifiesTheArchive(t *testing.T) {
 		}
 	}
 }
+
+// TestUpgradeControlPlaneVerifiesTheArchive (Landing 170 run 46073901317,
+// TestGKEServedUpgradeThroughTheBrowser: the control plane's import read a
+// short archive): the new version's control-plane images are exported and
+// imported with --local, the export read back in full and renamed from a
+// .part name, and the copy imported only with the export's checksum; an
+// export that printed none is never copied in.
+func TestUpgradeControlPlaneVerifiesTheArchive(t *testing.T) {
+	const sum = "fd90b142b93effa63ddd214f93c33a01447d052b364623ef29e4ef0974d83fa4"
+	kind := OwnerPrefix + "c"
+	cp, helper := kind+"-control-plane", kind+"-upgrade"
+	run := func(exportOut string) ([]string, error) {
+		var calls []string
+		r := &funcRunner{fn: func(cmd string) (string, error) {
+			calls = append(calls, cmd)
+			switch {
+			case strings.HasPrefix(cmd, "docker exec "+helper+" sh -c"):
+				return exportOut, nil
+			case strings.HasPrefix(cmd, "docker exec "+cp+" sh -c") && !strings.Contains(cmd, "images import"):
+				// The step after the import ends the run here.
+				return "", errStopAfterImport
+			}
+			return "", nil
+		}}
+		g := &GKE{Dir: t.TempDir(), Runner: r}
+		return calls, g.UpgradeControlPlane(context.Background(), kind, "kindest/node:v1.36.4")
+	}
+
+	calls, err := run("amd64 " + sum + "\n")
+	if !errors.Is(err, errStopAfterImport) {
+		t.Fatalf("the upgrade stopped at %v, not after the import", err)
+	}
+	var export, imp string
+	for _, c := range calls {
+		switch {
+		case strings.HasPrefix(c, "docker exec "+helper+" sh -c"):
+			export = c
+		case strings.HasPrefix(c, "docker exec "+cp+" sh -c") && strings.Contains(c, "images import"):
+			imp = c
+		}
+	}
+	for _, want := range []string{"images export --local ", "/upgrade-images.tar.part", "tar -tf /upgrade-images.tar.part", "mv /upgrade-images.tar.part /upgrade-images.tar", "sha256sum"} {
+		if !strings.Contains(export, want) {
+			t.Errorf("the export %q lacks %q", export, want)
+		}
+	}
+	for _, want := range []string{"sha256sum -c", "images import --local ", " sh /kind/upgrade-images.tar " + sum + " amd64"} {
+		if !strings.Contains(imp, want) {
+			t.Errorf("the import %q lacks %q", imp, want)
+		}
+	}
+
+	calls, err = run("amd64\n")
+	if err == nil {
+		t.Error("an export with no checksum was imported")
+	}
+	for _, c := range calls {
+		if strings.HasPrefix(c, "docker cp ") {
+			t.Errorf("copied after an export with no checksum: %q", c)
+		}
+	}
+}
+
+var errStopAfterImport = errors.New("stop after the import")

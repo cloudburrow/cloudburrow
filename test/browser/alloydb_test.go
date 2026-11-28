@@ -82,6 +82,9 @@ func TestAlloyDBThroughThePage(t *testing.T) {
 	p.clickText(`#view [role="tab"]`, "Overview")
 	p.waitFor(`document.querySelector("#view").textContent.includes("primary")`)
 
+	// Add user account is at the top of Users, and Create backup of Data
+	// protection, as Google's are (#2251).
+	p.clickText(`#view [role="tab"]`, "Users")
 	where := p.findAction("Add user account")
 	if where == "" {
 		t.Fatal("the cluster's page offers no Add user account")
@@ -93,6 +96,7 @@ func TestAlloyDBThroughThePage(t *testing.T) {
 		t.Errorf("the user is not on the cluster's Users: %s", got)
 	}
 
+	p.clickText(`#view [role="tab"]`, "Data protection")
 	where = p.findAction("Create backup")
 	if where == "" {
 		t.Fatal("the cluster's page offers no Create backup")
@@ -145,13 +149,17 @@ func TestAlloyDBReplicationAndTransfersThroughThePage(t *testing.T) {
 	ready := func(name string) {
 		t.Helper()
 		deadline := time.Now().Add(8 * time.Minute)
+		// A state is a status field's value, the cluster's in the summary
+		// and each instance's in its row: the page also has a section
+		// headed "Maintenance" (#2251), which is not a state.
 		busy := func(d string) bool {
 			for _, s := range []string{"CREATING", "BOOTSTRAPPING", "MAINTENANCE", "PROMOTING", "UPDATING", "Creating", "Maintenance"} {
-				if strings.Contains(d, `"`+s+`"`) {
+				if strings.Contains(d, `"status":"`+s+`"`) || strings.Contains(d, `"Status":"`+s+`"`) ||
+					strings.Contains(d, `{"label":"Status","value":"`+s+`"}`) {
 					return true
 				}
 			}
-			return !strings.Contains(d, `"Ready"`)
+			return !strings.Contains(d, `{"label":"Status","value":"Ready"}`)
 		}
 		for d := detail(name); busy(d); d = detail(name) {
 			if time.Now().After(deadline) {

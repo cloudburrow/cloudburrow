@@ -9,7 +9,9 @@
 #
 # What each shard starts and runs is read from scripts/compat-shards.sh, the
 # file ci.yml's compat job sources, so the two cannot drift. It needs no CI
-# variable: it makes its own instances, each named verify-<time>-<shard> at
+# variable: it makes its own instances, each named verify-<run>-<shard> (<run>
+# is the run's start time in base 36, so every shard's name fits an
+# instance name's 32 characters) at
 # --port-base (default 41000, clear of a default instance's 9000-9090), in a
 # state directory of its own, so a running instance is never touched.
 #
@@ -19,7 +21,7 @@
 #   --shards A,B,...  the shards to run, in order; default every one:
 #                     storage,served,gke,gkeupgrade,computevms,vpcvms,run,crossservice,scale,emulators,
 #                     memorystore,sql,
-#                     sqlreplicas,acceptance,iam,localai,localaispeech
+#                     sqlreplicas,alloydb,acceptance,iam,localai,localaispeech,remotehosts
 #                     (localai and localaispeech, #1985, need make build-onnx's CLI, which it builds
 #                     unless --no-build, ONNXRUNTIME_LIB, and the pinned
 #                     generation model at CLOUDBURROW_LOCALAI_MODEL:
@@ -30,6 +32,7 @@
 #   --no-sdk-suites   skip the Node.js and Python client suites
 #   --no-browser      skip the console's headless-browser suite
 #   --keep-images     keep the Docker images this run pulled or built
+#   --names           print each shard's instance name and exit
 #
 # The result is <out>/<UTC time>-<os>-<arch>.json, with each suite's pass,
 # fail and skip counts and the failed tests, and the logs beside it. Exit 0
@@ -53,7 +56,7 @@ cd "$ROOT"
 . scripts/compat-shards.sh
 
 shards=${COMPAT_SHARDS// /,} port_base=41000 out=verify-local
-build=1 sdk=1 browser=1 keep_images=""
+build=1 sdk=1 browser=1 keep_images="" names=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --shards) shards=${2:?--shards needs a list}; shift 2 ;;
@@ -66,6 +69,7 @@ while [ $# -gt 0 ]; do
     --no-sdk-suites) sdk=""; shift ;;
     --no-browser) browser=""; shift ;;
     --keep-images) keep_images=1; shift ;;
+    --names) names=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "verify-local: unknown argument $1" >&2; usage; exit 2 ;;
   esac
@@ -86,6 +90,29 @@ for s in "${SHARD_LIST[@]}"; do
     *) echo "verify-local: unknown shard $s (one of: $COMPAT_SHARDS)" >&2; exit 2 ;;
   esac
 done
+
+# Each shard's instance is verify-<run>-<shard>. <run> is this run's start,
+# UTC seconds since 1970 in base 36: 6 characters until 2039, unique to the
+# second as the date stamp it replaces was, and short enough that every
+# shard's name fits an instance name's 32 characters (internal/config;
+# verify-<yymmddHHMMSS>-localaispeech was 33, and up refused it).
+base36() {
+  local n=$1 digits=0123456789abcdefghijklmnopqrstuvwxyz s=""
+  while [ "$n" -gt 0 ]; do s=${digits:n%36:1}$s; n=$((n / 36)); done
+  printf '%s' "${s:-0}"
+}
+RUN_ID=$(base36 "$(date -u +%s)")
+instance_name() { printf 'verify-%s-%s' "$RUN_ID" "$1"; }
+for s in $COMPAT_SHARDS; do
+  n=$(instance_name "$s")
+  if [ "${#n}" -gt 32 ]; then
+    echo "verify-local: shard $s's instance name $n is ${#n} characters; an instance name is at most 32" >&2; exit 2
+  fi
+done
+if [ -n "$names" ]; then
+  for s in "${SHARD_LIST[@]}"; do echo "$s $(instance_name "$s")"; done
+  exit 0
+fi
 
 # The harness refuses these (test/compat/harness.go), and a run with them set
 # could reach Google with a developer's own account; refuse before starting
@@ -116,7 +143,6 @@ docker info >/dev/null 2>&1 || { echo "verify-local: docker is not running" >&2;
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-RUN_ID=$(date -u +%y%m%d%H%M%S)
 OS=$(go env GOOS) ARCH=$(go env GOARCH)
 LOGS="$out/$STAMP-$OS-$ARCH"
 RESULT="$LOGS.json"
@@ -149,6 +175,8 @@ cleanup() {
       kind delete cluster --name "$cluster" >/dev/null 2>&1 || log "could not delete kind cluster $cluster"
     fi
   done
+  # The remotehosts shard's stand-in hosts and fakes, by ID and PID.
+  [ ! -d "$WORK/remotecompute" ] || scripts/remote-compute-shard.sh cleanup "$WORK/remotecompute" >/dev/null 2>&1
   if [ -z "$keep_images" ]; then
     docker images -q --no-trunc | sort -u | comm -13 "$IMAGES_BEFORE" - | while read -r id; do
       docker rmi "$id" >/dev/null 2>&1 || log "kept image $id (in use, or shared with a tag present before)"
@@ -225,12 +253,28 @@ settle_retries() {  # <log>
 }
 
 run_shard() {
-  local shard=$1 name="verify-$RUN_ID-$1" dir="$LOGS/$1" t0 rc
+  local shard=$1 name dir="$LOGS/$1" t0 rc
+  name=$(instance_name "$1")
   t0=$(date +%s)
   mkdir -p "$dir"
   SUITES="$WORK/$shard.suites" CHECKS="$WORK/$shard.checks"
   : > "$SUITES"; : > "$CHECKS"
   compat_shard "$shard"
+  if [ "$shard" = remotehosts ]; then
+    # As in CI: the stand-in tests, then the stand-in host this shard's
+    # instance runs on, whose target compat_shard reads (#2259).
+    log "$shard: the stand-in remote hosts and their tests"
+    local HOSTS_ENV
+    if ! HOSTS_ENV=$(scripts/remote-compute-shard.sh hosts "$WORK/remotecompute" "$STATE" "$name" "$dir/standin.log" 2> "$dir/standin.err"); then
+      go_suite "stand-in tests" "$dir/standin.log" "" strict
+      check "the stand-in remote hosts" fail "$(tail -n 3 "$dir/standin.err" | tr '\n' ' ')"
+      shard_done "$shard" "$name" "$t0"
+      return
+    fi
+    go_suite "stand-in tests" "$dir/standin.log" "" strict
+    eval "$HOSTS_ENV"
+    compat_shard "$shard"
+  fi
   # The localai shard's instance is the onnx build (#1985), as in CI; the
   # functions this calls see this CLI too.
   local CLI=$CLI
@@ -294,6 +338,8 @@ run_shard() {
   local COMPAT_ENV
   COMPAT_ENV=$(scripts/compat-env.sh --only "$TEST_VARS" --env-json "$WORK/env.json" --cli "$CLI" -- "${CB[@]}" 2> "$dir/compat-env.err" || true)
   eval "$COMPAT_ENV"
+  # As in CI: the remotehosts shard's DOCKER_HOST and ingress.
+  compat_remote_exports "$shard" "$WORK/env.json" 2>> "$dir/compat-env.err" || check "the remote instance's DOCKER_HOST and ingress" fail
   local unset_vars
   unset_vars=$(sed -n 's/^compat-env: not set, so the tests that need them skip: //p' "$dir/compat-env.err")
   [ -z "$unset_vars" ] || check "compat-env.sh sets every shard variable" skip "unset: $unset_vars"
@@ -330,7 +376,8 @@ run_shard() {
     # The iam shard runs only the enforcement tests (COMPAT_RUN, #1879).
     local select_run=()
     [ -n "$COMPAT_RUN" ] && select_run=(-run "$COMPAT_RUN")
-    # The sql shard skips the replica tests, which sqlreplicas runs.
+    # The sql shard skips the replica tests, which sqlreplicas runs, and
+    # the AlloyDB and Database Migration Service tests, which alloydb runs.
     [ -n "$COMPAT_SKIP" ] && select_run+=(-skip "$COMPAT_SKIP")
     go test -tags=compat -count=1 -timeout "$COMPAT_TIMEOUT" -v ${select_run[@]+"${select_run[@]}"} ./test/compat/... > "$dir/compat.log" 2>&1 || rc=$?
     if [ "$rc" -ne 0 ]; then
@@ -339,6 +386,9 @@ run_shard() {
     fi
     go_suite compat "$dir/compat.log"
   fi
+  # The remotehosts shard's DOCKER_HOST is the running up's socket, gone
+  # after the stop below: the rest of the shard uses this machine's Docker.
+  unset DOCKER_HOST
 
   if [ -n "$sdk" ] && { [ "$shard" = storage ] || [ "$shard" = emulators ]; }; then
     node_suite "$shard" "$dir" "${CB[*]}"
@@ -433,6 +483,8 @@ run_shard() {
   fi
   cp "$UPLOG" "$dir/up.log" 2>/dev/null || true
   shard_done "$shard" "$name" "$t0"
+  unset DOCKER_HOST
+  [ "$shard" != remotehosts ] || scripts/remote-compute-shard.sh cleanup "$WORK/remotecompute" >/dev/null 2>&1 || true
 }
 
 node_suite() {  # <shard> <dir> <flags>
@@ -461,7 +513,8 @@ browser_suite() {  # <shard> <dir> <flags...>
   # As in CI: each shard's -run and -skip patterns, from
   # compat_browser_select (scripts/compat-shards.sh).
   compat_browser_select "$shard"
-  select=(-skip "$BROWSER_SKIP"); [ -z "$BROWSER_RUN" ] || select+=(-run "$BROWSER_RUN")
+  # BROWSER_OWN_INSTANCE's tests start an instance of their own, after.
+  select=(-skip "$BROWSER_SKIP${BROWSER_OWN_INSTANCE:+|$BROWSER_OWN_INSTANCE}"); [ -z "$BROWSER_RUN" ] || select+=(-run "$BROWSER_RUN")
   for c in "${CLOUDBURROW_TEST_CHROME:-}" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
     "$(command -v google-chrome || true)" "$(command -v google-chrome-stable || true)" "$(command -v chromium || true)"; do
     if [ -n "$c" ] && [ -x "$c" ]; then chrome=$c; break; fi
@@ -516,6 +569,12 @@ browser_suite() {  # <shard> <dir> <flags...>
     compat_browser_prepare "$shard" 2>> "$dir/browser-prepare.err" || true
     export CLOUDBURROW_TEST_CHROME="$chrome" CLOUDBURROW_TEST_SCREENSHOTS="$dir/browser-screenshots"
     go test -tags=browser -count=1 -timeout "$timeout" -v "${select[@]}" ./test/browser/ > "$dir/browser.log" 2>&1 || true
+    # As in CI: the remotehosts shard's walk-through, on its own
+    # instance and stand-ins (#2259), its results with the suite's.
+    if [ "$shard" = remotehosts ] && [ -n "$BROWSER_OWN_INSTANCE" ]; then
+      scripts/remote-compute-shard.sh walkthrough "$WORK/remotecompute" "$CLI" "$dir/walk.log" 2>> "$dir/browser-prepare.err" || true
+      cat "$dir/walk.log" >> "$dir/browser.log" 2>/dev/null || true
+    fi
   )
   go_suite browser "$dir/browser.log" "$("$chrome" --version 2>/dev/null || echo chrome)" strict
   # As in CI: every test of this shard's selection must have passed, so one
@@ -566,10 +625,10 @@ done
 
 # ci.yml's compat-coverage job: with every compat shard run, each compat
 # test passed or failed in one of them, but for the never-run list, read
-# from ci.yml so the two cannot drift.
+# from ci.yml so the two cannot drift, and the nightly spark shard's.
 compat_coverage() {
   local s never none
-  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
+  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb iam localai localaispeech remotehosts; do
     case " ${SHARD_LIST[*]} " in *" $s "*) ;; *) return 0 ;; esac
   done
   SUITES="$WORK/coverage.suites" CHECKS="$WORK/coverage.checks"
@@ -578,10 +637,12 @@ compat_coverage() {
   go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > "$WORK/all.txt"
   # A shard without restart probes has no probe-*.log, and cat's exit 1
   # for the unmatched glob would end the script under set -e.
-  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas iam localai localaispeech; do
+  for s in storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb iam localai localaispeech remotehosts; do
     cat "$LOGS/$s"/compat.log "$LOGS/$s"/probe-*.log 2>/dev/null || true
   done | grep -oE -- '^--- (PASS|FAIL): Test[A-Za-z0-9_]+' | awk '{print $3}' | sort -u > "$WORK/ran.txt"
-  none=$(comm -23 "$WORK/all.txt" "$WORK/ran.txt" | grep -vE "${never:-^$}" || true)
+  # And the nightly spark and dataflow shards' (COMPAT_NIGHTLY_TESTS), which
+  # ci.yml's job leaves to nightly-sql-ephemeral.yml the same way (#2245).
+  none=$(comm -23 "$WORK/all.txt" "$WORK/ran.txt" | grep -vE "${never:-^$}" | grep -vE "$COMPAT_NIGHTLY_TESTS" || true)
   printf '%s\n' "$none" > "$LOGS/ran-in-no-shard.txt"
   if [ -z "$never" ]; then
     check "every compat test ran in a shard" fail "no never= list in ci.yml"

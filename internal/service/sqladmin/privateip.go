@@ -257,6 +257,11 @@ type PrivateEndpoint struct {
 	// connection pooler beside its server's, which its private IP and its
 	// Private Service Connect endpoints serve too (#2141).
 	PoolerPort int
+	// HostAddr is the host address the instance's server is reached at
+	// ("" while its tunnel is down), and PoolerHostAddr its pooler's: what
+	// a Dataflow job's private services relay sends the private IP's
+	// connections to (#2215).
+	HostAddr, PoolerHostAddr string
 }
 
 // PrivateEndpoints are every created instance's private IPs, for Compute
@@ -314,6 +319,12 @@ func (s *Server) endpointSnapshot() endpoints {
 				DatabaseVersion: sp.DatabaseVersion}
 			if sp.PGPooling() {
 				ep.PoolerPort = PoolerPort
+			}
+			if c.engine != nil {
+				ep.HostAddr = c.engine.Addr()
+				if p, ok := c.engine.(interface{ PoolerAddr() string }); ok && ep.PoolerPort != 0 {
+					ep.PoolerHostAddr = p.PoolerAddr()
+				}
 			}
 			if sp.PrivateIP != "" {
 				out.private = append(out.private, ep)

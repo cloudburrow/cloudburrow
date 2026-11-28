@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -14,8 +16,12 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"github.com/jackc/pgx/v5"
+	"google.golang.org/genproto/googleapis/api/monitoredres"
+	ltype "google.golang.org/genproto/googleapis/logging/type"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -23,6 +29,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/alloydb"
+	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -49,6 +56,9 @@ type alloyDBService struct {
 	// backupDR resolves the Backup and DR backups and data sources a
 	// cluster is restored from (#1524); nil without backupdr.
 	backupDR alloydb.BackupDR
+	// logging is the instance's Cloud Logging, which the servers' log
+	// lines are written to (#2253); nil, or nil from it, writes none.
+	logging func() *logging.Server
 
 	server *grpctransport.Server
 	api    *alloydb.Server
@@ -240,7 +250,50 @@ func (s *alloyDBService) Start(ctx context.Context) error {
 			}
 		}
 	}()
+	// Query insights' per-execution readings and the servers' logs in
+	// Cloud Logging (#2253).
+	if s.logging != nil {
+		api.SetLogSink(alloyDBLogWriter(s.logging))
+	}
+	go api.RunTelemetry(s.stop)
 	return nil
+}
+
+// alloyDBLogWriter writes the servers' log lines to Cloud Logging as
+// alloydb.googleapis.com/postgres.log on their instance's
+// alloydb.googleapis.com/Instance (the names Google's Database Migration
+// Service logging page filters on), through its own WriteLogEntries, so
+// exclusions and sinks apply. UNVERIFIED: the entry's payload; Google
+// publishes no AlloyDB postgres.log entry, and this is a textPayload in
+// Cloud SQL for PostgreSQL's log_line_prefix. Docs re-read 2026-11-25,
+// still unanswered ("The PostgreSQL database logs", no payload format):
+// https://docs.cloud.google.com/logging/docs/api/platform-logs.
+func alloyDBLogWriter(api func() *logging.Server) func(alloydb.LogLine) {
+	return func(l alloydb.LogLine) {
+		srv := api()
+		if srv == nil {
+			return
+		}
+		sev := ltype.LogSeverity(ltype.LogSeverity_value[l.Severity])
+		labels := map[string]string{}
+		for _, k := range []string{"process_id", "session_id", "session_line_num", "sql_state_code", "command_tag", "application_name", "backend_type"} {
+			if v := l.Fields[k]; v != "" {
+				labels[k] = v
+			}
+		}
+		h := fnv.New64a()
+		fmt.Fprint(h, l.Instance, l.Fields["session_id"], l.Fields["session_line_num"], l.At.UnixNano())
+		e := &loggingpb.LogEntry{
+			LogName: "projects/" + l.Project + "/logs/alloydb.googleapis.com%2Fpostgres.log",
+			Resource: &monitoredres.MonitoredResource{Type: "alloydb.googleapis.com/Instance", Labels: map[string]string{
+				"resource_container": l.Project, "location": l.Location, "cluster_id": l.Cluster, "instance_id": l.InstanceID}},
+			Payload:   &loggingpb.LogEntry_TextPayload{TextPayload: l.Text},
+			Timestamp: timestamppb.New(l.At), Severity: sev, Labels: labels, InsertId: fmt.Sprintf("%016x", h.Sum64()),
+		}
+		if _, err := srv.WriteLogEntries(context.Background(), &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}}); err != nil {
+			log.Printf("alloydb: writing a server log line: %v", err)
+		}
+	}
 }
 
 func (s *alloyDBService) Stop(ctx context.Context) error {
@@ -324,6 +377,12 @@ func (e *alloyDBEngine) backend(spec alloydb.ServerSpec) components.Backend {
 			b.Args = []string{"postgres"}
 		}
 		b.Args = append(append([]string{}, b.Args...), pgPITRArgs()...)
+	}
+	if !spec.Omni.Accepted() {
+		// The server's csvlog, pg_stat_statements and auto_explain, which
+		// Query insights' per-execution readings and System insights' Log
+		// errors come from (#2253, alloydb.TelemetryArgs).
+		b.Args = alloydb.TelemetryArgs(b.Args)
 	}
 	if spec.ReplicaOf != "" {
 		b = components.CloudSQLReplicaBackend(b, false, components.SQLReplicaSource{Host: spec.ReplicaOf, Epoch: int(spec.Epoch)})

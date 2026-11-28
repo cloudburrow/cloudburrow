@@ -147,6 +147,7 @@ var Services = map[string]*Service{
 	"google.cloud.workflows.executions.v1.Executions":           Workflows,
 	"google.cloud.parametermanager.v1.ParameterManager":         ParameterManager,
 	"google.cloud.apphub.v1.AppHub":                             AppHub,
+	"google.cloud.clouddms.v1.DataMigrationService":             DataMigration,
 }
 
 // ForMethod is the service and method row of a gRPC full method on the

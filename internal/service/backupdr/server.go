@@ -41,6 +41,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
@@ -156,8 +157,9 @@ type Server struct {
 	// Observe, if set, is called once per request with the method name and
 	// the answer's HTTP status.
 	Observe func(method string, code int)
-	// now is the clock, for tests.
-	now func() time.Time
+	// clock is what now reads, swappable by tests through setNow while an
+	// operation's goroutine (a backup finishing) reads it.
+	clock atomic.Pointer[func() time.Time]
 	// kms is Cloud KMS, for a vault's encryptionConfig (#1501); nil when
 	// it is not enabled. mu guards it.
 	kms KeyService
@@ -272,7 +274,8 @@ type backup struct {
 // NewServer serves at addr once started, backing up through sql. With a
 // state file the records are kept there and survive a restart.
 func NewServer(addr string, sql CloudSQL, stateFile string) *Server {
-	s := &Server{addr: addr, sql: sql, state: stateFile, ops: map[string]map[string]any{}, now: time.Now}
+	s := &Server{addr: addr, sql: sql, state: stateFile, ops: map[string]map[string]any{}}
+	s.setNow(time.Now)
 	s.st = state{Vaults: map[string]*vault{}, Plans: map[string]*plan{}, Associations: map[string]*association{},
 		DataSources: map[string]*dataSource{}, Backups: map[string]*backup{}}
 	if stateFile != "" {
@@ -412,6 +415,12 @@ func decode(r *http.Request, v any) error {
 	}
 	return nil
 }
+
+// now is the server's clock.
+func (s *Server) now() time.Time { return (*s.clock.Load())() }
+
+// setNow replaces the clock; safe while operations are in flight.
+func (s *Server) setNow(f func() time.Time) { s.clock.Store(&f) }
 
 func (s *Server) stamp() string { return s.now().UTC().Format(time.RFC3339Nano) }
 

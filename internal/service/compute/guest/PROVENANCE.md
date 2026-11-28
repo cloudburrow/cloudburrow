@@ -2,7 +2,7 @@
 
 Written for CloudBurrow (MIT): the Dockerfiles and every file under `root/`.
 
-At first use, `docker build` on the user's machine pulls these official container images, pinned by index digest (read 2026-11-19 from Docker Hub), and installs the distribution's own packages (systemd, OpenSSH, sudo, curl, iproute2, procps) from that distribution's archive. None of it is vendored into this repository or linked into the CloudBurrow binary; the packages carry their own licences (several GPL) inside the built image only.
+At first use, `docker build` on the user's machine pulls these official container images, pinned by index digest (read 2026-11-19 from Docker Hub), and installs the distribution's own packages (systemd, OpenSSH, sudo, curl, iproute2, procps, nftables, conntrack) from that distribution's archive, read through its snapshot service at one fixed time (`APT_SNAPSHOT` in `Dockerfile.debian`, 20261120T000000Z: `http://snapshot.debian.org/archive/debian/` and `debian-security/`, `https://snapshot.ubuntu.com/ubuntu/`), so every build installs the same package versions and none depends on a live mirror (#2258). apt reaches snapshot.ubuntu.com with the CA bundle of `gcr.io/distroless/static-debian12@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2` (Google's image, Apache-2.0; the bundle is Mozilla's, MPL-2.0), copied into the image at `/etc/apt/cloudburrow-snapshot-ca.crt`. None of it is vendored into this repository or linked into the CloudBurrow binary; the packages carry their own licences (several GPL) inside the built image only.
 
 | Image | Reference | Source |
 |---|---|---|

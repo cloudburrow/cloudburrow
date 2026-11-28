@@ -18,6 +18,7 @@ require (
 	cloud.google.com/go/billing v1.28.1
 	cloud.google.com/go/certificatemanager v1.17.1
 	cloud.google.com/go/cloudbuild v1.35.0
+	cloud.google.com/go/clouddms v1.16.1
 	cloud.google.com/go/cloudquotas v1.14.1
 	cloud.google.com/go/cloudsqlconn v1.24.0
 	cloud.google.com/go/cloudtasks v1.20.0

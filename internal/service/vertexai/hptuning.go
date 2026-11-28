@@ -48,9 +48,9 @@ package vertexai
 //
 // UNVERIFIED (Google does not document them; re-read 2026-11-24,
 // https://cloud.google.com/vertex-ai/docs/training/hyperparameter-tuning-overview): the default algorithm's
-// method beyond "Bayesian optimization" (here a Gaussian process with
-// expected improvement over the scaled space, after random first trials,
-// seeded by the job's name); a grid's order (the parameters' cartesian
+// method beyond "Bayesian optimization" (here open-source Vizier's
+// GP-UCB-PE with its default output warping, over the scaled space, the
+// first trial the space's centre, seeded by the job's name); a grid's order (the parameters' cartesian
 // product, the first parameter slowest) and that a job whose grid is
 // exhausted ends with fewer trials; how many failed trials fail a job
 // whose max_failed_trial_count is 0 beyond the first (here: more failed
@@ -73,6 +73,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -558,6 +559,8 @@ type suggester struct {
 	// seen are the suggested points' keys, so a discrete space is not
 	// tried twice while untried points remain.
 	seen map[string]bool
+	// obsAtLast is how many trials had completed at the last suggestion.
+	obsAtLast int
 }
 
 func newSuggester(name string, ss *aiplatformpb.StudySpec, maxTrials int) *suggester {
@@ -607,7 +610,8 @@ func (s *suggester) fresh(draw func() []float64, n int) []float64 {
 }
 
 // suggest is the next trial's values; false when a grid is exhausted.
-func (s *suggester) suggest(obs []hpObservation) ([]*hpValue, bool) {
+// pending are the points of the trials still running.
+func (s *suggester) suggest(obs []hpObservation, pending [][]float64) ([]*hpValue, bool) {
 	var vals []*hpValue
 	switch s.algo {
 	case aiplatformpb.StudySpec_GRID_SEARCH:
@@ -619,114 +623,245 @@ func (s *suggester) suggest(obs []hpObservation) ([]*hpValue, bool) {
 	case aiplatformpb.StudySpec_RANDOM_SEARCH:
 		vals = assign(s.dims, s.fresh(s.randomPoint, 50))
 	default:
-		vals = assign(s.dims, s.bayesian(obs))
+		vals = assign(s.dims, s.bayesian(obs, pending))
 	}
 	s.seen[valuesKey(vals)] = true
 	return vals, true
 }
 
-// bayesian is the default algorithm's next point: random until there are
-// as many observations as dimensions plus one (at least 2), then the
-// candidate of most expected improvement under a Gaussian process fitted
-// to the observations (an RBF kernel on the scaled space, the objective
-// standardized).
-func (s *suggester) bayesian(obs []hpObservation) []float64 {
+// bayesian is the default algorithm's next point, as open-source Vizier's
+// GP-UCB-PE (gp_ucb_pe.py, read 2026-11-27) makes it:
+//
+//   - The first trial is the centre of the space (num_seed_trials 1).
+//   - A Gaussian process (an RBF kernel on the scaled space, the objective
+//     standardized) is fitted to the completed trials for its mean; its
+//     standard deviation is conditioned on the running trials too, so a
+//     point beside one already running is not uncertain any more.
+//   - When a trial has completed since the newest running one was
+//     suggested, the point of most UCB (mean + 1.8 standard deviations) is
+//     chosen, or with probability 0.1 the PE point; otherwise the PE
+//     point, or with probability 0.25 (when any trial has completed) the
+//     UCB one.
+//   - PE (pure exploration) is the point of most standard deviation among
+//     those still promising: below the threshold (the mean at the point of
+//     most UCB) a point's mean + 0.5 standard deviations costs 10 times the
+//     shortfall.
+//
+// So the trials of a batch spread out over the promising region instead
+// of crowding the current optimum, as the expected improvement fitted to
+// completed trials alone did: 12 trials three at a time missed lr=0.3 by
+// more than 0.1 for 119 of 2000 job names.
+func (s *suggester) bayesian(obs []hpObservation, pending [][]float64) []float64 {
 	d := len(s.dims)
-	if len(obs) < max(2, d+1) {
-		return s.fresh(s.randomPoint, 50)
+	fresh := len(pending) == 0 || len(obs) > s.obsAtLast
+	s.obsAtLast = len(obs)
+	if len(obs) == 0 && len(pending) == 0 {
+		u := make([]float64, d)
+		for i := range u {
+			u[i] = 0.5
+		}
+		return u
 	}
 	if len(obs) > 200 {
 		obs = obs[len(obs)-200:]
 	}
-	n := len(obs)
+	n0 := len(obs)
+	warped := warpOutputs(obs)
 	mean, sd := 0.0, 0.0
-	for _, o := range obs {
-		mean += o.y
+	for _, y := range warped {
+		mean += y
 	}
-	mean /= float64(n)
-	for _, o := range obs {
-		sd += (o.y - mean) * (o.y - mean)
+	if n0 > 0 {
+		mean /= float64(n0)
 	}
-	sd = math.Sqrt(sd / float64(n))
+	for _, y := range warped {
+		sd += (y - mean) * (y - mean)
+	}
+	if n0 > 0 {
+		sd = math.Sqrt(sd / float64(n0))
+	}
 	if sd == 0 {
 		sd = 1
 	}
-	y := make([]float64, n)
-	best := math.Inf(-1)
+	y := make([]float64, n0)
 	bestI := 0
-	for i, o := range obs {
-		y[i] = (o.y - mean) / sd
-		if y[i] > best {
-			best, bestI = y[i], i
+	for i := range obs {
+		y[i] = (warped[i] - mean) / sd
+		if y[i] > y[bestI] {
+			bestI = i
 		}
 	}
 	ls := 0.25 * math.Sqrt(float64(d))
-	kern := func(a, b []float64) float64 {
-		s := 0.0
-		for i := range a {
-			s += (a[i] - b[i]) * (a[i] - b[i])
+	gram := func(pts [][]float64) ([][]float64, bool) {
+		K := make([][]float64, len(pts))
+		for i := range K {
+			K[i] = make([]float64, len(pts))
+			for j := range K[i] {
+				K[i][j] = rbf(pts[i], pts[j], ls)
+			}
+			K[i][i] += 1e-4
 		}
-		return math.Exp(-s / (2 * ls * ls))
+		return cholesky(K)
 	}
-	K := make([][]float64, n)
-	for i := range K {
-		K[i] = make([]float64, n)
-		for j := range K[i] {
-			K[i][j] = kern(obs[i].u, obs[j].u)
-		}
-		K[i][i] += 1e-4
+	done := make([][]float64, n0)
+	for i, o := range obs {
+		done[i] = o.u
 	}
-	L, ok := cholesky(K)
-	if !ok {
+	all := append(append([][]float64(nil), done...), pending...)
+	Ld, ok1 := gram(done)
+	La, ok2 := gram(all)
+	if !ok1 || !ok2 {
 		return s.fresh(s.randomPoint, 50)
 	}
-	alpha := cholSolve(L, y)
-	ei := func(u []float64) float64 {
-		k := make([]float64, n)
-		for i := range k {
-			k[i] = kern(u, obs[i].u)
+	var alpha []float64
+	if n0 > 0 {
+		alpha = cholSolve(Ld, y)
+	}
+	// mu is the mean from the completed trials; sigma the standard
+	// deviation given the completed and the running ones.
+	predict := func(u []float64) (mu, sigma float64) {
+		for i := range done {
+			mu += rbf(u, done[i], ls) * alpha[i]
 		}
-		mu := 0.0
-		for i := range k {
-			mu += k[i] * alpha[i]
+		k := make([]float64, len(all))
+		for i := range all {
+			k[i] = rbf(u, all[i], ls)
 		}
-		v := forwardSub(L, k)
-		varr := 1.0
-		for _, x := range v {
-			varr -= x * x
+		v := 1.0
+		for _, x := range forwardSub(La, k) {
+			v -= x * x
 		}
-		if varr < 1e-12 {
-			return 0
-		}
-		sig := math.Sqrt(varr)
-		z := (mu - best - 0.01) / sig
-		return (mu-best-0.01)*normCDF(z) + sig*normPDF(z)
+		return mu, math.Sqrt(math.Max(v, 0))
 	}
 	var cands [][]float64
 	for i := 0; i < 400; i++ {
 		cands = append(cands, s.randomPoint())
 	}
-	for i := 0; i < 100; i++ {
-		c := append([]float64(nil), obs[bestI].u...)
-		for j := range c {
-			c[j] = math.Min(math.Max(c[j]+s.rng.NormFloat64()*0.08, 0), 1)
+	if n0 > 0 {
+		for i := 0; i < 100; i++ {
+			c := append([]float64(nil), obs[bestI].u...)
+			for j := range c {
+				c[j] = math.Min(math.Max(c[j]+s.rng.NormFloat64()*0.08, 0), 1)
+			}
+			cands = append(cands, c)
 		}
-		cands = append(cands, c)
 	}
-	var pick []float64
-	top := math.Inf(-1)
+	type scored struct {
+		u         []float64
+		mu, sigma float64
+	}
+	var pts []scored
 	for _, c := range cands {
 		if s.seen[valuesKey(assign(s.dims, c))] {
 			continue
 		}
-		if e := ei(c); e > top {
-			top, pick = e, c
-		}
+		mu, sigma := predict(c)
+		pts = append(pts, scored{c, mu, sigma})
 	}
-	if pick == nil {
+	if len(pts) == 0 {
 		return s.fresh(s.randomPoint, 50)
 	}
-	return pick
+	const ucbCoef, exploreCoef, penalty = 1.8, 0.5, 10.0
+	ucbI := 0
+	for i, p := range pts {
+		if p.mu+ucbCoef*p.sigma > pts[ucbI].mu+ucbCoef*pts[ucbI].sigma {
+			ucbI = i
+		}
+	}
+	useUCB := n0 > 0 && (fresh && s.rng.Float64() >= 0.1 || !fresh && s.rng.Float64() < 0.25)
+	if useUCB {
+		return pts[ucbI].u
+	}
+	threshold := pts[ucbI].mu
+	peI, top := 0, math.Inf(-1)
+	for i, p := range pts {
+		v := p.sigma
+		if n0 > 0 {
+			v += penalty * math.Min(p.mu+exploreCoef*p.sigma-threshold, 0)
+		}
+		if v > top {
+			peI, top = i, v
+		}
+	}
+	return pts[peI].u
+}
+
+// warpOutputs is Vizier's default output warping (output_warpers.py,
+// read 2026-11-27): the half below the median replaced by normal
+// quantiles of its rank, scaled as the good half spreads, then the log
+// warp of offset 1.5, so one very bad trial does not flatten the model's
+// view of the good region.
+func warpOutputs(obs []hpObservation) []float64 {
+	n := len(obs)
+	ys := make([]float64, n)
+	for i, o := range obs {
+		ys[i] = o.y
+	}
+	if n == 0 {
+		return ys
+	}
+	sorted := append([]float64(nil), ys...)
+	sort.Float64s(sorted)
+	median := sorted[n/2]
+	if n%2 == 0 {
+		median = (sorted[n/2-1] + sorted[n/2]) / 2
+	}
+	var uniq []float64
+	for i, v := range sorted {
+		if i == 0 || v != sorted[i-1] {
+			uniq = append(uniq, v)
+		}
+	}
+	idx := sort.SearchFloat64s(uniq, median)
+	denom := float64(idx)
+	if idx < len(uniq) && uniq[idx] == median {
+		denom += 0.5
+	}
+	good, cnt := 0.0, 0
+	for _, v := range ys {
+		if v >= median {
+			good += (v - median) * (v - median)
+			cnt++
+		}
+	}
+	std := math.Sqrt(good / float64(cnt))
+	if !(std > 0) {
+		all := 0.0
+		for _, v := range ys {
+			all += (v - median) * (v - median)
+		}
+		std = math.Sqrt(all / float64(n))
+	}
+	out := make([]float64, n)
+	for i, v := range ys {
+		out[i] = v
+		if v < median && denom > 0 && std > 0 {
+			rank := float64(sort.SearchFloat64s(uniq, v) + 1)
+			q := 0.5 * (rank - 0.5) / denom
+			out[i] = math.Sqrt2*math.Erfinv(2*q-1)*std + median
+		}
+	}
+	lo, hi := out[0], out[0]
+	for _, v := range out {
+		lo, hi = math.Min(lo, v), math.Max(hi, v)
+	}
+	if hi > lo {
+		const offset = 1.5
+		for i, v := range out {
+			d := (hi - v) / (hi - lo)
+			out[i] = 0.5 - math.Log1p(d*(offset-1))/math.Log(offset)
+		}
+	}
+	return out
+}
+
+// rbf is the squared exponential kernel of length scale ls.
+func rbf(a, b []float64, ls float64) float64 {
+	s := 0.0
+	for i := range a {
+		s += (a[i] - b[i]) * (a[i] - b[i])
+	}
+	return math.Exp(-s / (2 * ls * ls))
 }
 
 func cholesky(a [][]float64) ([][]float64, bool) {
@@ -996,7 +1131,8 @@ func (s *Server) runHPJob(ctx context.Context, e *hpJobEntry, parent string, onE
 	maxTrials, parallel, maxFailed := int(spec.GetMaxTrialCount()), int(spec.GetParallelTrialCount()), int(spec.GetMaxFailedTrialCount())
 	sug := newSuggester(spec.GetName(), ss, maxTrials)
 	results := make(chan trialDone, parallel)
-	running := map[string]string{} // trial id -> custom job
+	running := map[string]string{}     // trial id -> custom job
+	pendingU := map[string][]float64{} // a running trial's point
 	var obs []hpObservation
 	started, failed, succeeded := 0, 0, 0
 	var firstEnded *bool
@@ -1093,7 +1229,14 @@ func (s *Server) runHPJob(ctx context.Context, e *hpJobEntry, parent string, onE
 				stopStudy(why)
 				break
 			}
-			vals, ok := sug.suggest(obs)
+			// In trial order, so a suggestion does not depend on map order.
+			var pending [][]float64
+			for i := 1; i <= started; i++ {
+				if u, ok := pendingU[strconv.Itoa(i)]; ok {
+					pending = append(pending, u)
+				}
+			}
+			vals, ok := sug.suggest(obs, pending)
 			if !ok {
 				exhausted = true
 				break
@@ -1135,6 +1278,7 @@ func (s *Server) runHPJob(ctx context.Context, e *hpJobEntry, parent string, onE
 				continue
 			}
 			running[id] = cj.GetName()
+			pendingU[id] = trialPoint(sug.dims, trial)
 			dirs[id] = dir
 			setTrial(id, func(t *aiplatformpb.Trial) { t.CustomJob = cj.GetName() })
 		}
@@ -1154,6 +1298,7 @@ func (s *Server) runHPJob(ctx context.Context, e *hpJobEntry, parent string, onE
 			r = <-results
 		}
 		delete(running, r.id)
+		delete(pendingU, r.id)
 		delete(dirs, r.id)
 		why, early := earlyStopped[r.id]
 		delete(earlyStopped, r.id)

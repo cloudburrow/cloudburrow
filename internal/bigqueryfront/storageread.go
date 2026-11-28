@@ -253,6 +253,13 @@ func (s *storageRead) handle(_ any, ss grpc.ServerStream) error {
 		return s.upstream.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true, ClientStreams: true}, method,
 			grpc.ForceCodec(frameCodec{}))
 	}
+	if strings.HasPrefix(method, betaService) {
+		// v1beta1 (storagev1beta1.go): its session is made by v1's.
+		return s.beta(ss, method, func() (grpc.ClientStream, error) {
+			return s.upstream.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true, ClientStreams: true}, createReadSession,
+				grpc.ForceCodec(frameCodec{}))
+		})
+	}
 	switch method {
 	case createReadSession:
 		return s.createSession(ss, open)

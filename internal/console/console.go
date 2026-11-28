@@ -531,7 +531,9 @@ type Field struct {
 	// period under Enable message retention (#1847). A hidden field is not
 	// validated; it is still sent, so the provider reads it only when its
 	// condition holds. Conditions joined by "&" must all hold:
-	// "type=Distribution&bucket_type=Linear" (#1863).
+	// "type=Distribution&bucket_type=Linear" (#1863). "!name" holds while
+	// that checkbox is unchecked: Create a schedule's Start time shows
+	// until Use CRON expression is on (#2260).
 	ShowWhen string `json:"showWhen,omitempty"`
 	// DeriveFrom names another field this one follows until it is edited
 	// (#1864): its value lowercased, other characters made dashes, as

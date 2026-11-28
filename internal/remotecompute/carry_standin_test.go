@@ -119,9 +119,34 @@ func TestStandInMoveRoundTripKeepsData(t *testing.T) {
 	// The data was written to the volumes; a second write on the host comes
 	// back too.
 	must(remote, "exec", ctr, "sh", "-c", "echo kept >> /data/state")
+	// While the instance was away, another container here was given its
+	// address (#2259): the move back is refused before anything stops, the
+	// instance running on the host still, until the address is free.
+	squatter := instance + "-squatter"
+	must(local, "run", "-d", "--name", squatter, "--network", net, "--ip", "10.231.77.9", image, "sleep", "600")
+	defer func() { _, _ = on(local, "rm", "-f", squatter) }()
+	if _, err := StartCarry(ctx, CarryOptions{Instance: instance, From: DockerEndpoint{Host: remote.Host, Helper: image}, To: DockerEndpoint{Helper: image}}); err == nil ||
+		!strings.Contains(err.Error(), "gives 10.231.77.9 to "+squatter) || !strings.Contains(err.Error(), "nothing was moved") {
+		t.Fatalf("a move back onto an address another container holds: %v", err)
+	}
+	if st := must(remote, "inspect", "--format", "{{.State.Running}}", ctr); st != "true" {
+		t.Fatalf("the refused move stopped the instance's container on the host (running %s)", st)
+	}
+	must(local, "rm", "-f", squatter)
 	leg(DockerEndpoint{Host: remote.Host, Helper: image}, DockerEndpoint{Helper: image}, "this machine again")
 	if out := must(local, "exec", ctr, "cat", "/data/state"); out != "kept\nkept" {
 		t.Fatalf("after the round trip /data/state is %q", out)
+	}
+	// The moves' images (#2259): none on the host, and here only the one
+	// the moved container runs from.
+	moveImages := func(side DockerEndpoint) []string {
+		return strings.Fields(must(side, "image", "ls", "-q", "--no-trunc", "--filter", "label=io.cloudburrow.move-instance="+instance))
+	}
+	if left := moveImages(remote); len(left) != 0 {
+		t.Errorf("the host keeps the moves' images %v", left)
+	}
+	if left, runs := moveImages(local), must(local, "container", "inspect", "--format", "{{.Image}}", ctr); len(left) != 1 || left[0] != runs {
+		t.Errorf("this machine keeps the moves' images %v; want only %s, which %s runs from", left, runs, ctr)
 	}
 
 	// A carry that cannot finish rolls back: the target already holds a

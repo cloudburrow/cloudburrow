@@ -30,6 +30,7 @@ package browser
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -611,6 +612,15 @@ func decodeRemoteObject(v *runtime.RemoteObject, res any) error {
 // started again in the new context, within the same 30 seconds; so is one
 // a form's own submission navigated away from mid-evaluation ("Inspected
 // target navigated or closed"), unless the tab's context is gone.
+//
+// An expression that throws a TypeError, as one reading a property of an
+// element the page has not drawn yet does ("Cannot read properties of null
+// (reading 'textContent')"), is not true yet: a page draws a resource's
+// heading only once the resource has loaded, so the element is absent for
+// as long as the request takes, and how many frames that is is a race.
+// The poll goes on, and a page that never draws it fails at the deadline
+// with the error the expression last threw. Any other exception (a
+// ReferenceError or SyntaxError, a mistake in the test) fails at once.
 func (p *tab) waitFor(expr string) {
 	p.t.Helper()
 	p.waitForWithin(expr, 30*time.Second)
@@ -621,10 +631,20 @@ func (p *tab) waitFor(expr string) {
 func (p *tab) waitForWithin(expr string, limit time.Duration) {
 	p.t.Helper()
 	deadline := time.Now().Add(limit)
+	// The expression goes in as written, as chromedp's own "return (%s);"
+	// takes it: not through eval, which the console's Content-Security-
+	// Policy (no 'unsafe-eval') refuses.
+	pending := fmt.Sprintf("(() => { try { const v = (%s\n); window.__waitForThrew = \"\"; return v; } catch (e) { if (e instanceof TypeError) { window.__waitForThrew = String(e); return false; } throw e; } })()", expr)
 	for {
-		ok, err := chromedp.Run(p.ctx, chromedp.Poll[bool](expr, chromedp.WithPollingTimeout(time.Until(deadline))))
+		ok, err := chromedp.Run(p.ctx, chromedp.Poll[bool](pending, chromedp.WithPollingTimeout(time.Until(deadline))))
 		if err == nil && ok {
 			return
+		}
+		if errors.Is(err, chromedp.ErrPollingTimeout) {
+			var threw string
+			if _, e := chromedp.Run(p.ctx, evaluateInto(`window.__waitForThrew || ""`, &threw)); e == nil && threw != "" {
+				err = fmt.Errorf("%w (the expression last threw %s)", err, threw)
+			}
 		}
 		// Only a replaced context is polled again, and only while the tab
 		// itself lives: the expression must still turn true before the

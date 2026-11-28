@@ -115,7 +115,16 @@ func TestProvisionedComputeRunsDockerOnTheVM(t *testing.T) {
 	if !rec.Provisioned || rec.Target.Host != host.Host || rec.Target.Port != host.Port {
 		t.Errorf("the record after connect = %+v, want the VM's current address, still provisioned", rec)
 	}
-	if _, err := os.Stat(cfg.InstanceDir() + "/remote"); !os.IsNotExist(err) {
-		t.Errorf("a key directory was made for a provisioned VM: %v", err)
+	// The key is the keychain's: no key directory (remote/<user>_at_<host>)
+	// is made. remote/masters records the connection's SSH master while it
+	// runs, which a move back to this machine reads (#2209).
+	entries, err := os.ReadDir(cfg.InstanceDir() + "/remote")
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "masters" {
+			t.Errorf("a key directory was made for a provisioned VM: remote/%s", e.Name())
+		}
 	}
 }

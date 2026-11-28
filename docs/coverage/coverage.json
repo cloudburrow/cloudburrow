@@ -13434,7 +13434,9 @@
           "test/compat/gcloudspannerplans2029_test.go:26 TestGcloudSpannerExecuteSQLQueryModes",
           "test/compat/spannercmek1950_test.go:63 TestSpannerCMEK",
           "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback",
-          "test/compat/spannergraph2029c_test.go:142 TestSpannerGraphQueryPlansOfEveryStatement",
+          "test/compat/spannergraph2029c_test.go:140 TestSpannerGraphQueryPlansOfEveryStatement",
+          "test/compat/spannergraph2029d_test.go:29 TestSpannerGraphOnThePatchedEmulator",
+          "test/compat/spannergraph2029e_test.go:31 TestSpannerGraphQueryPlansOfEveryPattern",
           "test/compat/spannerplans2029_test.go:230 TestSpannerQueryPlans",
           "test/compat/spannerplans2029b_test.go:182 TestSpannerQueryPlansForEveryShape",
           "test/compat/spannerplans2029b_test.go:323 TestSpannerGraphQueryPlans",
@@ -13448,7 +13450,10 @@
         "tests": [
           "test/compat/iamenforcementround9_1879_test.go:161 TestIAMEnforcementSpanner",
           "test/compat/optional_test.go:266 TestSpannerSchemaAndQuery",
-          "test/compat/spannergraph2029c_test.go:142 TestSpannerGraphQueryPlansOfEveryStatement",
+          "test/compat/spannergraph2029c_test.go:140 TestSpannerGraphQueryPlansOfEveryStatement",
+          "test/compat/spannergraph2029d_test.go:29 TestSpannerGraphOnThePatchedEmulator",
+          "test/compat/spannergraph2029e_test.go:31 TestSpannerGraphQueryPlansOfEveryPattern",
+          "test/compat/spannerinfoschema2215_test.go:26 TestSpannerColumnOptionsIsInherited",
           "test/compat/spannerplans2029_test.go:230 TestSpannerQueryPlans",
           "test/compat/spannerplans2029b_test.go:182 TestSpannerQueryPlansForEveryShape",
           "test/compat/spannerplans2029b_test.go:323 TestSpannerGraphQueryPlans",
@@ -15634,6 +15639,7 @@
         "tests": [
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
+          "test/compat/cloudsqliamgroups1524_test.go:47 TestCloudSQLIAMGroupAuthentication",
           "test/compat/consolecloudsqldataapi_test.go:28 TestConsoleCloudSQLDataAPIAndProjectBackups",
           "test/compat/terraform_sql_provision_test.go:54 TestTerraformSQLProvisionScript"
         ]
@@ -16194,6 +16200,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
+          "test/compat/cloudsqliamgroups1524_test.go:47 TestCloudSQLIAMGroupAuthentication",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
           "test/compat/cloudsqlmysqlroot1993_test.go:277 TestCloudSQLMySQLRootDeletedReplica",
           "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers",
@@ -16206,6 +16213,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
+          "test/compat/cloudsqliamgroups1524_test.go:47 TestCloudSQLIAMGroupAuthentication",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
           "test/compat/cloudsqluserpolicy2009_test.go:41 TestCloudSQLUserPasswordPolicy",
           "test/compat/sqladmin_test.go:282 TestSQLAdminDatabasesAndUsersAreTheServers"
@@ -16218,6 +16226,7 @@
           "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqlfields_test.go:65 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
+          "test/compat/cloudsqliamgroups1524_test.go:47 TestCloudSQLIAMGroupAuthentication",
           "test/compat/cloudsqlinstances_test.go:58 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
           "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
@@ -16239,6 +16248,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqliam1944_test.go:48 TestCloudSQLIAMDatabaseAuthentication",
+          "test/compat/cloudsqliamgroups1524_test.go:47 TestCloudSQLIAMGroupAuthentication",
           "test/compat/cloudsqlmysql57_test.go:45 TestCloudSQLMySQL57",
           "test/compat/cloudsqlmysql57_test.go:50 TestCloudSQLMySQL56",
           "test/compat/cloudsqlmysqlroot1993_test.go:113 TestCloudSQLMySQLRootDeleted",
@@ -19257,7 +19267,7 @@
         "method": "compute.routers.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
+          "test/compat/cloudnat2140_test.go:104 TestCloudNATTranslatesVMTraffic2140",
           "test/compat/cloudnateim2140_test.go:35 TestCloudNATEndpointIndependentMappingAndDynamicPorts2140",
           "test/compat/routerbgp2140_test.go:37 TestCloudRouterBGPWithARouterApplianceVM2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
@@ -19293,7 +19303,7 @@
         "method": "compute.routers.getNatIpInfo",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
+          "test/compat/cloudnat2140_test.go:104 TestCloudNATTranslatesVMTraffic2140",
           "test/compat/routers2140_test.go:34 TestCloudRouterAndNATThroughTheGoClient"
         ]
       },
@@ -19301,7 +19311,7 @@
         "method": "compute.routers.getNatMappingInfo",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
+          "test/compat/cloudnat2140_test.go:104 TestCloudNATTranslatesVMTraffic2140",
           "test/compat/cloudnateim2140_test.go:35 TestCloudNATEndpointIndependentMappingAndDynamicPorts2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
           "test/compat/routers2140_test.go:34 TestCloudRouterAndNATThroughTheGoClient"
@@ -19327,7 +19337,7 @@
         "method": "compute.routers.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudnat2140_test.go:103 TestCloudNATTranslatesVMTraffic2140",
+          "test/compat/cloudnat2140_test.go:104 TestCloudNATTranslatesVMTraffic2140",
           "test/compat/cloudnateim2140_test.go:35 TestCloudNATEndpointIndependentMappingAndDynamicPorts2140",
           "test/compat/routerbgp2140_test.go:37 TestCloudRouterBGPWithARouterApplianceVM2140",
           "test/compat/routers2140_test.go:211 TestCloudNATGivesVMsWithoutExternalIPsEgress",
@@ -21819,6 +21829,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudidentity1812_test.go:64 TestCloudIdentityGroups1812",
+          "test/compat/cloudsqliamgroups1524_test.go:47 TestCloudSQLIAMGroupAuthentication",
           "test/compat/terraform_served1578_test.go:52 TestTerraformCloudIdentityGroupAndMembership"
         ]
       },
@@ -24942,21 +24953,24 @@
         "method": "google.cloud.dataproc.v1.AutoscalingPolicyService/CreateAutoscalingPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:169 TestDataprocClusters"
+          "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
+          "test/compat/terraform_compute1578_test.go:875 TestTerraformDataprocTemplatesAndPolicy"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.AutoscalingPolicyService/DeleteAutoscalingPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:169 TestDataprocClusters"
+          "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
+          "test/compat/terraform_compute1578_test.go:875 TestTerraformDataprocTemplatesAndPolicy"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.AutoscalingPolicyService/GetAutoscalingPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:169 TestDataprocClusters"
+          "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
+          "test/compat/terraform_compute1578_test.go:875 TestTerraformDataprocTemplatesAndPolicy"
         ]
       },
       {
@@ -24970,7 +24984,8 @@
         "method": "google.cloud.dataproc.v1.AutoscalingPolicyService/UpdateAutoscalingPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:169 TestDataprocClusters"
+          "test/compat/dataproc2162_test.go:169 TestDataprocClusters",
+          "test/compat/terraform_compute1578_test.go:875 TestTerraformDataprocTemplatesAndPolicy"
         ]
       },
       {
@@ -25213,21 +25228,24 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions",
-          "test/compat/dataproc2162c_test.go:379 TestDataprocKernelGateway"
+          "test/compat/dataproc2162c_test.go:379 TestDataprocKernelGateway",
+          "test/compat/terraform_compute1578_test.go:875 TestTerraformDataprocTemplatesAndPolicy"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.SessionTemplateController/DeleteSessionTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions",
+          "test/compat/terraform_compute1578_test.go:875 TestTerraformDataprocTemplatesAndPolicy"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.SessionTemplateController/GetSessionTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions",
+          "test/compat/terraform_compute1578_test.go:875 TestTerraformDataprocTemplatesAndPolicy"
         ]
       },
       {
@@ -25241,28 +25259,32 @@
         "method": "google.cloud.dataproc.v1.SessionTemplateController/UpdateSessionTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions"
+          "test/compat/dataproc2156_test.go:417 TestDataprocServerlessSessions",
+          "test/compat/terraform_compute1578_test.go:875 TestTerraformDataprocTemplatesAndPolicy"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.WorkflowTemplateService/CreateWorkflowTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:476 TestDataprocWorkflowTemplates"
+          "test/compat/dataproc2162_test.go:476 TestDataprocWorkflowTemplates",
+          "test/compat/terraform_compute1578_test.go:875 TestTerraformDataprocTemplatesAndPolicy"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.WorkflowTemplateService/DeleteWorkflowTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:476 TestDataprocWorkflowTemplates"
+          "test/compat/dataproc2162_test.go:476 TestDataprocWorkflowTemplates",
+          "test/compat/terraform_compute1578_test.go:875 TestTerraformDataprocTemplatesAndPolicy"
         ]
       },
       {
         "method": "google.cloud.dataproc.v1.WorkflowTemplateService/GetWorkflowTemplate",
         "status": "Verified",
         "tests": [
-          "test/compat/dataproc2162_test.go:476 TestDataprocWorkflowTemplates"
+          "test/compat/dataproc2162_test.go:476 TestDataprocWorkflowTemplates",
+          "test/compat/terraform_compute1578_test.go:875 TestTerraformDataprocTemplatesAndPolicy"
         ]
       },
       {
@@ -25308,7 +25330,16 @@
         "tests": [
           "test/compat/dataflowflex2215_test.go:134 TestPythonDataflowFlexTemplate",
           "test/compat/dataflowflexpkg2215_test.go:183 TestPythonDataflowFlexTemplatePackages",
-          "test/compat/dataflowflexpkg2215_test.go:275 TestJavaDataflowFlexTemplate"
+          "test/compat/dataflowflexpkg2215_test.go:275 TestJavaDataflowFlexTemplate",
+          "test/compat/dataflowjdbc2215_test.go:144 TestDataflowProvidedJdbcToBigQuery",
+          "test/compat/dataflowparquet2215_test.go:38 TestDataflowProvidedBigQueryToParquet",
+          "test/compat/dataflowprovidedflex2215_test.go:38 TestDataflowProvidedFlexTemplates",
+          "test/compat/dataflowprovidedflexmore2215_test.go:39 TestDataflowProvidedFlexTemplatesMore",
+          "test/compat/dataflowprovidedflexv2255_test.go:49 TestDataflowProvidedFlexTemplatesV2",
+          "test/compat/dataflowprovidedmodules2255_test.go:87 TestDataflowProvidedFlexModules",
+          "test/compat/dataflowyaml2255_test.go:80 TestGcloudDataflowYAMLRun",
+          "test/compat/dataflowyaml2256_test.go:116 TestGcloudDataflowYAMLRunUserPackages",
+          "test/compat/dataflowyaml2256_test.go:209 TestGcloudDataflowYAMLRunJavaProvider"
         ]
       },
       {
@@ -25439,6 +25470,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/dataflowprovided2215_test.go:46 TestDataflowProvidedTemplates",
+          "test/compat/dataflowprovidedflex2215_test.go:38 TestDataflowProvidedFlexTemplates",
           "test/compat/dataflowtools_test.go:104 TestGcloudDataflow"
         ]
       },
@@ -25446,8 +25478,315 @@
         "method": "google.dataflow.v1beta3.TemplatesService/LaunchTemplate",
         "status": "Verified",
         "tests": [
+          "test/compat/dataflowjdbc2215_test.go:144 TestDataflowProvidedJdbcToBigQuery",
           "test/compat/dataflowprovided2215_test.go:46 TestDataflowProvidedTemplates",
+          "test/compat/dataflowprovidedio2215_test.go:163 TestDataflowProvidedBigQueryToTFRecord",
+          "test/compat/dataflowprovidedio2215_test.go:40 TestDataflowProvidedSpanner",
           "test/compat/dataflowtools_test.go:104 TestGcloudDataflow"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "datamigration",
+    "Title": "Database Migration Service (v1)",
+    "counts": {
+      "Implemented": 2,
+      "Unimplemented": 20,
+      "Verified": 19
+    },
+    "rows": [
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/ApplyConversionWorkspace",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/CommitConversionWorkspace",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/ConvertConversionWorkspace",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/CreateConnectionProfile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration2257_test.go:233 TestDataMigrationMySQLExistingInstanceNoGTID",
+          "test/compat/datamigration2257_test.go:361 TestDataMigrationPostgresExistingAlloyDBObjects",
+          "test/compat/datamigration2257_test.go:497 TestDataMigrationPostgresVerifiedSSLForwardSSH",
+          "test/compat/datamigration2257_test.go:600 TestDataMigrationMySQLClientCertReverseSSH",
+          "test/compat/datamigration2257_test.go:714 TestDataMigrationMySQLDumpPath",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL",
+          "test/compat/datamigration_test.go:410 TestDataMigrationPostgresToAlloyDB",
+          "test/compat/datamigration_test.go:509 TestDataMigrationMySQLToCloudSQL"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/CreateConversionWorkspace",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/CreateMappingRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/CreateMigrationJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration2257_test.go:233 TestDataMigrationMySQLExistingInstanceNoGTID",
+          "test/compat/datamigration2257_test.go:361 TestDataMigrationPostgresExistingAlloyDBObjects",
+          "test/compat/datamigration2257_test.go:497 TestDataMigrationPostgresVerifiedSSLForwardSSH",
+          "test/compat/datamigration2257_test.go:600 TestDataMigrationMySQLClientCertReverseSSH",
+          "test/compat/datamigration2257_test.go:714 TestDataMigrationMySQLDumpPath",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL",
+          "test/compat/datamigration_test.go:410 TestDataMigrationPostgresToAlloyDB",
+          "test/compat/datamigration_test.go:509 TestDataMigrationMySQLToCloudSQL"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/CreatePrivateConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration_test.go:621 TestDataMigrationUnserved"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/DeleteConnectionProfile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration2257_test.go:497 TestDataMigrationPostgresVerifiedSSLForwardSSH",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/DeleteConversionWorkspace",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/DeleteMappingRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/DeleteMigrationJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration2257_test.go:233 TestDataMigrationMySQLExistingInstanceNoGTID",
+          "test/compat/datamigration2257_test.go:497 TestDataMigrationPostgresVerifiedSSLForwardSSH",
+          "test/compat/datamigration2257_test.go:600 TestDataMigrationMySQLClientCertReverseSSH",
+          "test/compat/datamigration2257_test.go:714 TestDataMigrationMySQLDumpPath",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL",
+          "test/compat/datamigration_test.go:410 TestDataMigrationPostgresToAlloyDB",
+          "test/compat/datamigration_test.go:509 TestDataMigrationMySQLToCloudSQL"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/DeletePrivateConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration_test.go:621 TestDataMigrationUnserved"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/DescribeConversionWorkspaceRevisions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/DescribeDatabaseEntities",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/FetchStaticIps",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration_test.go:621 TestDataMigrationUnserved"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/GenerateSshScript",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/GenerateTcpProxyScript",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/GetConnectionProfile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/GetConversionWorkspace",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/GetMappingRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/GetMigrationJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/GetPrivateConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration_test.go:621 TestDataMigrationUnserved"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/ImportMappingRules",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/ListConnectionProfiles",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/ListConversionWorkspaces",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/ListMappingRules",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/ListMigrationJobs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/ListPrivateConnections",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration_test.go:621 TestDataMigrationUnserved"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/PromoteMigrationJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration2257_test.go:233 TestDataMigrationMySQLExistingInstanceNoGTID",
+          "test/compat/datamigration2257_test.go:361 TestDataMigrationPostgresExistingAlloyDBObjects",
+          "test/compat/datamigration2257_test.go:600 TestDataMigrationMySQLClientCertReverseSSH",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL",
+          "test/compat/datamigration_test.go:410 TestDataMigrationPostgresToAlloyDB",
+          "test/compat/datamigration_test.go:509 TestDataMigrationMySQLToCloudSQL"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/RestartMigrationJob",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/ResumeMigrationJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/RollbackConversionWorkspace",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/SearchBackgroundJobs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/SeedConversionWorkspace",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/StartMigrationJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration2257_test.go:233 TestDataMigrationMySQLExistingInstanceNoGTID",
+          "test/compat/datamigration2257_test.go:361 TestDataMigrationPostgresExistingAlloyDBObjects",
+          "test/compat/datamigration2257_test.go:497 TestDataMigrationPostgresVerifiedSSLForwardSSH",
+          "test/compat/datamigration2257_test.go:600 TestDataMigrationMySQLClientCertReverseSSH",
+          "test/compat/datamigration2257_test.go:714 TestDataMigrationMySQLDumpPath",
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL",
+          "test/compat/datamigration_test.go:410 TestDataMigrationPostgresToAlloyDB",
+          "test/compat/datamigration_test.go:509 TestDataMigrationMySQLToCloudSQL"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/StopMigrationJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration_cli_test.go:26 TestGcloudDatabaseMigration",
+          "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/UpdateConnectionProfile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL"
+        ]
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/UpdateConversionWorkspace",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/UpdateMigrationJob",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.clouddms.v1.DataMigrationService/VerifyMigrationJob",
+        "status": "Verified",
+        "tests": [
+          "test/compat/datamigration2257_test.go:233 TestDataMigrationMySQLExistingInstanceNoGTID",
+          "test/compat/datamigration2257_test.go:497 TestDataMigrationPostgresVerifiedSSLForwardSSH",
+          "test/compat/datamigration2257_test.go:600 TestDataMigrationMySQLClientCertReverseSSH",
+          "test/compat/datamigration2257_test.go:714 TestDataMigrationMySQLDumpPath",
+          "test/compat/datamigration_test.go:223 TestDataMigrationPostgresToCloudSQL",
+          "test/compat/datamigration_test.go:509 TestDataMigrationMySQLToCloudSQL"
         ]
       }
     ]
@@ -26314,6 +26653,7 @@
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/CreateConnector",
         "status": "Verified",
         "tests": [
+          "test/compat/terraform_compute1578_test.go:739 TestTerraformVPCAccessConnector",
           "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient",
           "test/compat/vpctraffic2140_test.go:320 TestRunReachesVMsThroughConnectorsAndDirectVPCEgress2140"
         ]
@@ -26322,6 +26662,7 @@
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/DeleteConnector",
         "status": "Verified",
         "tests": [
+          "test/compat/terraform_compute1578_test.go:739 TestTerraformVPCAccessConnector",
           "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient",
           "test/compat/vpctraffic2140_test.go:320 TestRunReachesVMsThroughConnectorsAndDirectVPCEgress2140"
         ]
@@ -26330,6 +26671,7 @@
         "method": "google.cloud.vpcaccess.v1.VpcAccessService/GetConnector",
         "status": "Verified",
         "tests": [
+          "test/compat/terraform_compute1578_test.go:739 TestTerraformVPCAccessConnector",
           "test/compat/vpcaccess2140_test.go:88 TestServerlessVPCAccessConnectorsThroughTheGoClient"
         ]
       },
@@ -26346,8 +26688,8 @@
     "Key": "certificatemanager",
     "Title": "Certificate Manager (v1)",
     "counts": {
-      "Implemented": 5,
-      "Verified": 25
+      "Implemented": 2,
+      "Verified": 28
     },
     "rows": [
       {
@@ -26359,8 +26701,10 @@
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/CreateCertificateIssuanceConfig",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/terraform_compute1578_test.go:57 TestTerraformCertificateManager"
+        ]
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/CreateCertificateMap",
@@ -26387,7 +26731,8 @@
         "method": "google.cloud.certificatemanager.v1.CertificateManager/CreateTrustConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:57 TestTerraformCertificateManager"
         ]
       },
       {
@@ -26399,8 +26744,10 @@
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/DeleteCertificateIssuanceConfig",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/terraform_compute1578_test.go:57 TestTerraformCertificateManager"
+        ]
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/DeleteCertificateMap",
@@ -26427,7 +26774,8 @@
         "method": "google.cloud.certificatemanager.v1.CertificateManager/DeleteTrustConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:57 TestTerraformCertificateManager"
         ]
       },
       {
@@ -26439,8 +26787,10 @@
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/GetCertificateIssuanceConfig",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/terraform_compute1578_test.go:57 TestTerraformCertificateManager"
+        ]
       },
       {
         "method": "google.cloud.certificatemanager.v1.CertificateManager/GetCertificateMap",
@@ -26467,7 +26817,8 @@
         "method": "google.cloud.certificatemanager.v1.CertificateManager/GetTrustConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:57 TestTerraformCertificateManager"
         ]
       },
       {
@@ -26547,7 +26898,8 @@
         "method": "google.cloud.certificatemanager.v1.CertificateManager/UpdateTrustConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:57 TestTerraformCertificateManager"
         ]
       }
     ]
@@ -26578,21 +26930,24 @@
         "method": "google.cloud.networksecurity.v1.AddressGroupService/CreateAddressGroup",
         "status": "Verified",
         "tests": [
-          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient"
+          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.AddressGroupService/DeleteAddressGroup",
         "status": "Verified",
         "tests": [
-          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient"
+          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.AddressGroupService/GetAddressGroup",
         "status": "Verified",
         "tests": [
-          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient"
+          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
@@ -26620,14 +26975,16 @@
         "method": "google.cloud.networksecurity.v1.AddressGroupService/UpdateAddressGroup",
         "status": "Verified",
         "tests": [
-          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient"
+          "test/compat/addressgroups2160_test.go:48 TestCloudArmorAddressGroupsThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateAuthorizationPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:795 TestTerraformNetworkSecurityAuthorizationPolicy"
         ]
       },
       {
@@ -26643,21 +27000,24 @@
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateBackendAuthenticationConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient"
+          "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateClientTlsPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateGatewaySecurityPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
@@ -26665,6 +27025,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity",
           "test/compat/vmidentity2160_test.go:45 TestVMIdentityThroughALoadBalancerAndSecureWebProxy"
         ]
       },
@@ -26672,28 +27033,32 @@
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateServerTlsPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateTlsInspectionPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/CreateUrlList",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteAuthorizationPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:795 TestTerraformNetworkSecurityAuthorizationPolicy"
         ]
       },
       {
@@ -26708,56 +27073,64 @@
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteBackendAuthenticationConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient"
+          "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteClientTlsPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteGatewaySecurityPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteGatewaySecurityPolicyRule",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteServerTlsPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteTlsInspectionPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/DeleteUrlList",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetAuthorizationPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:795 TestTerraformNetworkSecurityAuthorizationPolicy"
         ]
       },
       {
@@ -26771,49 +27144,56 @@
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetBackendAuthenticationConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient"
+          "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetClientTlsPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetGatewaySecurityPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetGatewaySecurityPolicyRule",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetServerTlsPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetTlsInspectionPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/GetUrlList",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
@@ -26883,7 +27263,8 @@
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateAuthorizationPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:795 TestTerraformNetworkSecurityAuthorizationPolicy"
         ]
       },
       {
@@ -26898,21 +27279,24 @@
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateBackendAuthenticationConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient"
+          "test/compat/addressgroups2160_test.go:259 TestBackendMutualTLSThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateClientTlsPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateGatewaySecurityPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
@@ -26920,6 +27304,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity",
           "test/compat/vmidentity2160_test.go:45 TestVMIdentityThroughALoadBalancerAndSecureWebProxy"
         ]
       },
@@ -26927,21 +27312,24 @@
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateServerTlsPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer"
+          "test/compat/mtls2160_test.go:83 TestMutualTLSAndAuthorizationThroughALoadBalancer",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateTlsInspectionPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
         "method": "google.cloud.networksecurity.v1.NetworkSecurity/UpdateUrlList",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:223 TestTerraformNetworkSecurity"
         ]
       },
       {
@@ -27004,7 +27392,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/authzcustom2160_test.go:82 TestCustomAuthorizationThroughALoadBalancer",
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:416 TestTerraformNetworkServices"
         ]
       },
       {
@@ -27027,7 +27416,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/authzcustom2160_test.go:82 TestCustomAuthorizationThroughALoadBalancer",
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:416 TestTerraformNetworkServices"
         ]
       },
       {
@@ -27049,7 +27439,8 @@
         "method": "google.cloud.networkservices.v1.DepService/GetAuthzExtension",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:416 TestTerraformNetworkServices"
         ]
       },
       {
@@ -27093,7 +27484,8 @@
         "method": "google.cloud.networkservices.v1.DepService/UpdateAuthzExtension",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:416 TestTerraformNetworkServices"
         ]
       },
       {
@@ -27120,7 +27512,8 @@
         "method": "google.cloud.networkservices.v1.NetworkServices/CreateEndpointPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:416 TestTerraformNetworkServices"
         ]
       },
       {
@@ -27128,6 +27521,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:416 TestTerraformNetworkServices",
           "test/compat/vmidentity2160_test.go:45 TestVMIdentityThroughALoadBalancerAndSecureWebProxy"
         ]
       },
@@ -27185,14 +27579,16 @@
         "method": "google.cloud.networkservices.v1.NetworkServices/DeleteEndpointPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:416 TestTerraformNetworkServices"
         ]
       },
       {
         "method": "google.cloud.networkservices.v1.NetworkServices/DeleteGateway",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:416 TestTerraformNetworkServices"
         ]
       },
       {
@@ -27249,14 +27645,16 @@
         "method": "google.cloud.networkservices.v1.NetworkServices/GetEndpointPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:416 TestTerraformNetworkServices"
         ]
       },
       {
         "method": "google.cloud.networkservices.v1.NetworkServices/GetGateway",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:416 TestTerraformNetworkServices"
         ]
       },
       {
@@ -27397,14 +27795,16 @@
         "method": "google.cloud.networkservices.v1.NetworkServices/UpdateEndpointPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:416 TestTerraformNetworkServices"
         ]
       },
       {
         "method": "google.cloud.networkservices.v1.NetworkServices/UpdateGateway",
         "status": "Verified",
         "tests": [
-          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients"
+          "test/compat/swp2160_test.go:39 TestSecureWebProxyThroughTheGoClients",
+          "test/compat/terraform_compute1578_test.go:416 TestTerraformNetworkServices"
         ]
       },
       {
@@ -27461,35 +27861,40 @@
         "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/CreateTunnelDestGroup",
         "status": "Verified",
         "tests": [
-          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:603 TestTerraformIdentityAwareProxy"
         ]
       },
       {
         "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/DeleteTunnelDestGroup",
         "status": "Verified",
         "tests": [
-          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:603 TestTerraformIdentityAwareProxy"
         ]
       },
       {
         "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:603 TestTerraformIdentityAwareProxy"
         ]
       },
       {
         "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/GetIapSettings",
         "status": "Verified",
         "tests": [
-          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:603 TestTerraformIdentityAwareProxy"
         ]
       },
       {
         "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/GetTunnelDestGroup",
         "status": "Verified",
         "tests": [
-          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:603 TestTerraformIdentityAwareProxy"
         ]
       },
       {
@@ -27505,7 +27910,8 @@
         "tests": [
           "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient",
           "test/compat/iap2160_test.go:224 TestGcloudStartIAPTunnel",
-          "test/compat/iap2160_test.go:55 TestIAPBrowserSignInThroughAGoClient"
+          "test/compat/iap2160_test.go:55 TestIAPBrowserSignInThroughAGoClient",
+          "test/compat/terraform_compute1578_test.go:603 TestTerraformIdentityAwareProxy"
         ]
       },
       {
@@ -27519,14 +27925,16 @@
         "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/UpdateIapSettings",
         "status": "Verified",
         "tests": [
-          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:603 TestTerraformIdentityAwareProxy"
         ]
       },
       {
         "method": "google.cloud.iap.v1.IdentityAwareProxyAdminService/UpdateTunnelDestGroup",
         "status": "Verified",
         "tests": [
-          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient"
+          "test/compat/certmanageriap2160_test.go:271 TestIdentityAwareProxyThroughTheGoClient",
+          "test/compat/terraform_compute1578_test.go:603 TestTerraformIdentityAwareProxy"
         ]
       },
       {

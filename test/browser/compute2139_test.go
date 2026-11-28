@@ -74,7 +74,7 @@ func TestComputeEngineParityScreens2139(t *testing.T) {
 	// Instance schedules.
 	p.navigate("/compute/instanceSchedules" + q)
 	p.clickText("#view button", "Create schedule")
-	p.submitForm(map[string]string{"name": "browser-office", "region": "us-central1", "startSchedule": "0 8 * * *",
+	p.submitForm(map[string]string{"name": "browser-office", "region": "us-central1", "useCron": "true", "startSchedule": "0 8 * * *",
 		"stopSchedule": "0 17 * * *", "timeZone": "UTC"}, "name")
 	p.waitFor(`location.pathname === "/compute/instanceSchedules" && ` + rowReady("browser-office"))
 	if body := list("compute-instance-schedules"); !strings.Contains(body, `"Start schedule":"0 8 * * *"`) {

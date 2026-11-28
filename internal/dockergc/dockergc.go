@@ -27,6 +27,18 @@ import (
 // container was made for.
 const InstanceLabel = "io.cloudburrow.instance"
 
+// MoveLabel names the instance a move's image was committed for (#2209,
+// #2259): `cloudburrow cloud move` commits each of the instance's
+// containers (its kind nodes among them) into cloudburrow.local/move-*
+// and carries the image to the destination, where the container runs
+// from it. It is not InstanceLabel, which the container created from the
+// image inherits, and a container with InstanceLabel is a workload's that
+// stop and delete remove (removeWorkloadContainers): a node's must never
+// be one. Stop and delete remove the instance's move images by this label
+// like its other images, once no container uses them, and a move removes
+// those it no longer needs (CleanMoveImages).
+const MoveLabel = "io.cloudburrow.move-instance"
+
 // legacyVolumeLabel is the label Cloud Build's host workspace volumes have
 // carried since #1382; they are CloudBurrow's too.
 const legacyVolumeLabel = "cloudburrow.instance"
@@ -87,8 +99,14 @@ type Image struct {
 	Reason string
 }
 
-// Instance is the instance the image is labelled for, if any.
-func (i Image) Instance() string { return i.Labels[InstanceLabel] }
+// Instance is the instance the image is labelled for, if any: its
+// InstanceLabel, or the MoveLabel of a move's image.
+func (i Image) Instance() string {
+	if v := i.Labels[InstanceLabel]; v != "" {
+		return v
+	}
+	return i.Labels[MoveLabel]
+}
 
 // Short is the image's ID as docker images prints it.
 func (i Image) Short() string {
@@ -169,13 +187,55 @@ func inspectImages(ctx context.Context, r Runner, ids []string) ([]Image, error)
 	return imgs, nil
 }
 
-// labelledImages is every image carrying the instance label.
+// labelledImages is every image carrying the instance label or a move's.
 func labelledImages(ctx context.Context, r Runner) ([]Image, error) {
-	out, err := r.Run(ctx, "docker", "image", "ls", "-q", "--no-trunc", "--filter", "label="+InstanceLabel)
-	if err != nil {
-		return nil, fmt.Errorf("docker image ls: %w", err)
+	var ids []string
+	for _, key := range []string{InstanceLabel, MoveLabel} {
+		out, err := r.Run(ctx, "docker", "image", "ls", "-q", "--no-trunc", "--filter", "label="+key)
+		if err != nil {
+			return nil, fmt.Errorf("docker image ls: %w", err)
+		}
+		ids = append(ids, lines(out)...)
 	}
-	return inspectImages(ctx, r, uniq(lines(out)))
+	return inspectImages(ctx, r, uniq(ids))
+}
+
+// CleanMoveImages removes the images a move committed for instance
+// (MoveLabel) that no container on r's Docker uses: run on each end of a
+// move once it is done or rolled back, it leaves only the images the
+// instance's containers run from. Never forced.
+func CleanMoveImages(ctx context.Context, r Runner, instance string) (Result, error) {
+	var res Result
+	if instance == "" {
+		return res, errors.New("no instance name")
+	}
+	out, err := r.Run(ctx, "docker", "image", "ls", "-q", "--no-trunc", "--filter", "label="+MoveLabel+"="+instance)
+	if err != nil {
+		return res, fmt.Errorf("docker image ls: %w", err)
+	}
+	imgs, err := inspectImages(ctx, r, uniq(lines(out)))
+	if err != nil || len(imgs) == 0 {
+		return res, err
+	}
+	containers, err := containerImages(ctx, r)
+	if err != nil {
+		return res, err
+	}
+	for _, img := range imgs {
+		if img.Labels[MoveLabel] != instance {
+			continue
+		}
+		if containers.uses(img) {
+			res.Kept = append(res.Kept, Kept{img, "a container uses it"})
+			continue
+		}
+		if err := RemoveImage(ctx, r, img); err != nil {
+			res.Errors = append(res.Errors, err)
+			continue
+		}
+		res.Removed = append(res.Removed, img)
+	}
+	return res, nil
 }
 
 // inUse is what containers on the host use: image IDs and the references

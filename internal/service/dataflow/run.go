@@ -3,6 +3,7 @@ package dataflow
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	"cloud.google.com/go/dataflow/apiv1beta3/dataflowpb"
@@ -20,7 +21,8 @@ func (s *Server) startLocked(key string, r *jobRec) {
 		Streaming:   j.Type == dataflowpb.JobType_JOB_TYPE_STREAMING,
 		PipelineURL: optString(opts, "pipelineUrl", "pipeline_url"),
 		Options:     opts, SDK: lowerSDK(sdk), SDKVersion: ver, SDKName: sdk, MaxWorkers: maxWorkers(j),
-		SnapshotID: j.CreatedFromSnapshotId}
+		SnapshotID: j.CreatedFromSnapshotId, Labels: maps.Clone(j.Labels)}
+	run.Network, run.Subnetwork = workerNetwork(j)
 	ctx, cancel := context.WithCancel(context.Background())
 	drain := make(chan struct{})
 	r.cancel, r.drain, r.drained, r.done = cancel, drain, false, make(chan struct{})

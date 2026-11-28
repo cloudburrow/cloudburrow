@@ -95,7 +95,7 @@ func (s *Server) StudioSQL(ctx context.Context, l StudioLogin, stmt string, rowL
 		if err != nil {
 			return nil, "", ErrStudioSignIn{err}
 		}
-		u, ok := iamUserNamed(ctx, e, name)
+		u, ok := iamLoginUser(ctx, e, name)
 		if !ok {
 			return nil, name, ErrStudioSignIn{fmt.Errorf("%s is not an IAM user of instance %s: add it on the instance's Users page", l.IAMEmail, l.Instance)}
 		}

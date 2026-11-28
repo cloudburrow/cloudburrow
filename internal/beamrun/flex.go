@@ -14,6 +14,7 @@ package beamrun
 // one route is the instance's APIs, as a job's pipeline is.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -54,6 +55,22 @@ type Flex struct {
 	MaxWorkers                    int32
 	Update                        bool
 	TransformNameMapping          string
+	// Network and Subnetwork are the workers' VPC network and
+	// subnetwork, given to the program as its runner's options.
+	Network, Subnetwork string
+	// Provided, when set, is the Google-provided Flex Template f.Image
+	// stands for (ProvidedFlexImage), and ProvidedDir its module's build:
+	// the launcher runs its main class on that build, in the Java SDK
+	// image, instead of reading an image from Artifact Registry.
+	Provided    *ProvidedTemplate
+	ProvidedDir string
+	// ProvidedImage is the launcher image of a provided template whose
+	// program is Python (Google's YAML template: BuildYAMLLauncher).
+	ProvidedImage string
+	// ProvidedJars are the Java expansion services Google's YAML
+	// template's pipeline uses (Provided.YAMLJars), mounted at Beam's
+	// jar cache in its launcher.
+	ProvidedJars []string
 }
 
 // flexTimeout bounds a launcher's run: its program submits the job and,
@@ -78,6 +95,12 @@ func (f Flex) pythonOptions() []string {
 	if f.TransformNameMapping != "" {
 		o = append(o, "--transform_name_mapping="+f.TransformNameMapping)
 	}
+	if f.Network != "" {
+		o = append(o, "--network="+f.Network)
+	}
+	if f.Subnetwork != "" {
+		o = append(o, "--subnetwork="+f.Subnetwork)
+	}
 	return o
 }
 
@@ -98,6 +121,12 @@ func (f Flex) javaOptions() []string {
 	}
 	if f.TransformNameMapping != "" {
 		o = append(o, "--transformNameMapping="+f.TransformNameMapping)
+	}
+	if f.Network != "" {
+		o = append(o, "--network="+f.Network)
+	}
+	if f.Subnetwork != "" {
+		o = append(o, "--subnetwork="+f.Subnetwork)
 	}
 	return o
 }
@@ -190,9 +219,52 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, flexTimeout)
 	defer cancel()
-	local, env, err := d.registryImage(ctx, f.Image)
-	if err != nil {
-		return err
+	var local string
+	var env map[string]string
+	var mounts, extra []string
+	if f.Provided != nil && f.Provided.Language == "YAML" {
+		// Google's YAML template's launcher image (yaml.go): main.py, run
+		// as Google's Python launcher runs FLEX_TEMPLATE_PYTHON_PY_FILE.
+		// Its pip, and the SDK's stager's, read the packages the
+		// instance's Python index is seeded with (ProvidedPythonIndex),
+		// as a launcher with internet access reads PyPI.
+		if f.ProvidedImage == "" {
+			return fmt.Errorf("the Google-provided template %s has no launcher image", f.Provided.Name)
+		}
+		local = f.ProvidedImage
+		env = map[string]string{"FLEX_TEMPLATE_PYTHON_PY_FILE": "main.py", "PIP_INDEX_URL": ProvidedPythonIndex}
+		for _, l := range providedLabels(f.Provided.Name) {
+			extra = append(extra, "--labels="+l)
+		}
+		for _, j := range f.ProvidedJars {
+			mounts = append(mounts, "-v", j+":/root/.apache_beam/cache/jars/"+filepath.Base(j)+":ro")
+		}
+	} else if f.Provided != nil {
+		// Google's Java launcher image, built by its templates-maven-plugin
+		// with Jib, puts the module's classes and libraries under /template
+		// and sets FLEX_TEMPLATE_JAVA_MAIN_CLASS; here they are the
+		// module's build, mounted.
+		local = JavaImages[providedJava]
+		env = map[string]string{"FLEX_TEMPLATE_JAVA_MAIN_CLASS": f.Provided.MainClass, "FLEX_TEMPLATE_JAVA_CLASSPATH": "/t/classes:/t/deps/*"}
+		mounts = []string{"-v", f.ProvidedDir + ":/t:ro"}
+		labels := fmt.Sprintf(`{"goog-dataflow-provided-template-name":"%s","goog-dataflow-provided-template-version":"%s","goog-dataflow-provided-template-type":"flex"}`,
+			strings.ToLower(f.Provided.Name), strings.ToLower(TemplatesRelease))
+		// The program validates its BigQuery datasets and Pub/Sub topics
+		// before it submits the job, through the clients its options root
+		// (BigQueryOptions.bigQueryEndpoint, PubsubOptions.pubsubRootUrl),
+		// which default to Google's: they are the instance's, through the
+		// relay. Every DataflowTemplates module has Beam's Google Cloud
+		// I/O, whose options these are; an image's own program may not.
+		extra = []string{fmt.Sprintf("--pubsubRootUrl=http://%s:%d", relayName, pubsubPort),
+			fmt.Sprintf("--bigQueryEndpoint=http://%s:%d", relayName, bigqueryPort), "--labels=" + labels}
+		if bytes.Contains(f.Provided.Metadata, []byte(`"spannerHost"`)) {
+			extra = append(extra, "--spannerHost="+relaySpannerHost)
+		}
+	} else {
+		var err error
+		if local, env, err = d.registryImage(ctx, f.Image); err != nil {
+			return err
+		}
 	}
 	main, py := env["FLEX_TEMPLATE_JAVA_MAIN_CLASS"], env["FLEX_TEMPLATE_PYTHON_PY_FILE"]
 	if main == "" && py == "" {
@@ -214,9 +286,22 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 	suffix = strings.Trim(suffix, "-")
 	network, relay, launch := "cb-df-net-flex-"+suffix, "cb-df-relay-flex-"+suffix, "cb-df-flex-"+suffix
 	label := InstanceLabel + "=" + d.Instance
-	if main != "" {
+	if main != "" && f.Provided != nil {
+		if err := d.providedCredentials(ctx, f.ProvidedDir, dir, label); err != nil {
+			return err
+		}
+	} else if main != "" {
 		if err := d.flexCredentials(ctx, local, env, dir, label, "cb-df-flexcp-"+suffix); err != nil {
 			return err
+		}
+	}
+	if f.Provided != nil {
+		// Google's launcher VM has its metadata server, which a template's
+		// own clients' application default credentials come from, and a
+		// template's client may dial a Google host at its default endpoint
+		// (googleHosts): both are the instance's, through the relay.
+		if a := live["metadata"]; a != "" {
+			live[launcherMetadata] = a
 		}
 	}
 	relayIP, stop, err := d.jobNetwork(ctx, network, relay, dir, PythonImages["3.12"], label, live)
@@ -231,19 +316,38 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 			cenv[i] += ":" + env["PYTHONPATH"]
 		}
 	}
-	args := append([]string{"run", "--rm", "--name", launch, "--label", label, "--network", network, "-v", dir + ":/cb:ro"}, cenv...)
+	args := append(append([]string{"run", "--rm", "--name", launch, "--label", label, "--network", network, "-v", dir + ":/cb:ro"}, mounts...), cenv...)
+	if f.Provided != nil {
+		if live[launcherMetadata] != "" {
+			args = append(args, "-e", fmt.Sprintf("GCE_METADATA_HOST=%s:%d", relayIP, metadataPort))
+		}
+	}
+	args = append(args, googleHostArgs(live, relayIP)...)
 	program := main
 	if main != "" {
 		cp := env["FLEX_TEMPLATE_JAVA_CLASSPATH"]
 		if cp == "" {
 			cp = "/template/*"
 		}
-		args = append(args, "--entrypoint", "java", local, "-cp", "/cb/cbcred:"+cp, main)
+		if f.Provided != nil {
+			// The launcher's JVM trusts the job's CA, whose certificate the
+			// relay answers a Google host's TLS with (pool.sh's trust).
+			script := `set -e; TRUST=""; if [ -f /cb/tls/ca.pem ]; then ` +
+				`JH="${JAVA_HOME:-$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")}"; ` +
+				`cp "$JH/lib/security/cacerts" /tmp/cb-trust.jks; chmod 600 /tmp/cb-trust.jks; ` +
+				`keytool -importcert -noprompt -alias cloudburrow-dataflow -file /cb/tls/ca.pem -keystore /tmp/cb-trust.jks -storepass changeit >/dev/null 2>&1; ` +
+				`TRUST="-Djavax.net.ssl.trustStore=/tmp/cb-trust.jks -Djavax.net.ssl.trustStorePassword=changeit"; fi; ` +
+				`exec java $TRUST "$@"`
+			args = append(args, "--entrypoint", "sh", local, "-c", script, "launch", "-cp", "/cb/cbcred:"+cp, main)
+		} else {
+			args = append(args, "--entrypoint", "java", local, "-cp", "/cb/cbcred:"+cp, main)
+		}
 		args = append(args, f.Args...)
 		args = append(args, f.javaOptions()...)
 		args = append(args, "--runner=DataflowRunner", "--apiRootUrl=http://"+relayName+"/",
 			fmt.Sprintf("--gcsEndpoint=http://%s:%d/storage/v1/", relayName, storagePort),
 			"--credentialFactoryClass=CbCredentialFactory")
+		args = append(args, extra...)
 	} else {
 		program = py
 		pip, _ := pipIndexEnv(env)
@@ -253,6 +357,7 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 		run = append(run, f.pythonOptions()...)
 		run = append(run, pythonPackageOptions(env)...)
 		run = append(run, "--runner=DataflowRunner", "--dataflow_endpoint=http://"+relayName)
+		run = append(run, extra...)
 		// The requirements are installed in the launcher before its
 		// program runs, so that the program can import them.
 		script := `set -e; if [ -n "$FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE" ]; then ` +
@@ -267,10 +372,46 @@ func (d *Docker) LaunchFlex(ctx context.Context, f Flex) error {
 	}()
 	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("the template's program %s exited: %v: %s", program, err, lastLines(string(out), 3))
+		return fmt.Errorf("the template's program %s exited: %v: %s", program, err, launcherCause(string(out)))
 	}
 	return nil
 }
+
+// providedLabels are the labels Dataflow gives a Google-provided Flex
+// Template's job, as key=value (the templates-maven-plugin's spec files'
+// defaultEnvironment.additionalUserLabels, with the release).
+func providedLabels(name string) []string {
+	return []string{"goog-dataflow-provided-template-name=" + strings.ToLower(name),
+		"goog-dataflow-provided-template-type=flex",
+		"goog-dataflow-provided-template-version=" + strings.ToLower(TemplatesRelease)}
+}
+
+// launcherCause is what a launcher's failed program said: a Java stack
+// trace's exception and its last cause (a trace's last lines are frames),
+// else its last lines.
+func launcherCause(text string) string {
+	var first, cause string
+	for _, l := range strings.Split(text, "\n") {
+		l = strings.TrimSpace(l)
+		switch {
+		case first == "" && (strings.HasPrefix(l, "Exception in thread ") || javaThrowRE.MatchString(l)):
+			first = l
+		case first != "" && strings.HasPrefix(l, "Caused by: "):
+			cause = l
+		}
+	}
+	if first == "" {
+		return lastLines(text, 3)
+	}
+	if cause != "" {
+		return first + " | " + cause
+	}
+	return first
+}
+
+// javaThrowRE is a stack trace's first line, a Throwable's class and
+// message (java.lang.IllegalArgumentException: ...).
+var javaThrowRE = regexp.MustCompile(`^([a-z][a-z0-9_]*\.)+[A-Z][A-Za-z0-9_$]*(Exception|Error)(: |$)`)
 
 // flexCredentials compiles CbCredentialFactory into dir/cbcred against a
 // Java template's own classpath (Beam's CredentialFactory and Google's
@@ -320,6 +461,20 @@ func (d *Docker) flexCredentials(ctx context.Context, local string, env map[stri
 		return fmt.Errorf("compile the launcher's credentials against the template's classpath: %v: %s", err, lastLines(string(out), 3))
 	}
 	return os.RemoveAll(filepath.Join(dir, "cp"))
+}
+
+// providedCredentials compiles CbCredentialFactory into dir/cbcred
+// against a provided template's build (build, its classes/ and deps/).
+func (d *Docker) providedCredentials(ctx context.Context, build, dir, label string) error {
+	if err := os.MkdirAll(filepath.Join(dir, "cbcred"), 0o777); err != nil {
+		return err
+	}
+	args := []string{"run", "--rm", "--network", "none", "--label", label, "-v", dir + ":/cb", "-v", build + ":/t:ro", "--entrypoint", "javac",
+		JavaImages[providedJava], "-nowarn", "-d", "/cb/cbcred", "-cp", "/t/classes:/t/deps/*", "/cb/java/CbCredentialFactory.java"}
+	if out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("compile the launcher's credentials against the template's classpath: %v: %s", err, lastLines(string(out), 3))
+	}
+	return nil
 }
 
 // lastLines are text's last n non-empty lines, joined.

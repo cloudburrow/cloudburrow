@@ -24,6 +24,20 @@
 # TestDockerfilesPinTheInventory fails when the two disagree. Re-resolve with
 # `docker buildx imagetools inspect debian:trixie-slim`.
 FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS build
+# The Debian archive at one fixed time through snapshot.debian.org (#2258), so
+# a rebuild installs the same package versions and no build depends on a live
+# mirror's health; the snapshot's Release files are past their Valid-Until,
+# their signatures still checked against the base's keyring. Retried.
+RUN printf '%s\n' 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80cloudburrow-snapshot \
+ && printf '%s\n' \
+      'Types: deb' 'URIs: http://snapshot.debian.org/archive/debian/20261120T000000Z' \
+      'Suites: trixie trixie-updates' 'Components: main' \
+      'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' 'Check-Valid-Until: no' '' \
+      'Types: deb' 'URIs: http://snapshot.debian.org/archive/debian-security/20261120T000000Z' \
+      'Suites: trixie-security' 'Components: main' \
+      'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' 'Check-Valid-Until: no' \
+      > /etc/apt/sources.list.d/debian.sources \
+ && rm -f /etc/apt/sources.list
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git git-lfs clang lld python3 python3-dev \
@@ -101,6 +115,20 @@ RUN case "${TARGETARCH}" in \
 
 # The runtime image carries the binary and nothing that built it.
 FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+# The Debian archive at one fixed time through snapshot.debian.org (#2258), so
+# a rebuild installs the same package versions and no build depends on a live
+# mirror's health; the snapshot's Release files are past their Valid-Until,
+# their signatures still checked against the base's keyring. Retried.
+RUN printf '%s\n' 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80cloudburrow-snapshot \
+ && printf '%s\n' \
+      'Types: deb' 'URIs: http://snapshot.debian.org/archive/debian/20261120T000000Z' \
+      'Suites: trixie trixie-updates' 'Components: main' \
+      'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' 'Check-Valid-Until: no' '' \
+      'Types: deb' 'URIs: http://snapshot.debian.org/archive/debian-security/20261120T000000Z' \
+      'Suites: trixie-security' 'Components: main' \
+      'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' 'Check-Valid-Until: no' \
+      > /etc/apt/sources.list.d/debian.sources \
+ && rm -f /etc/apt/sources.list
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates libstdc++6 \
     && rm -rf /var/lib/apt/lists/*

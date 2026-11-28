@@ -222,7 +222,7 @@ func TestTrial(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "backupdr.json")
 	s := NewServer("", &fakeSQL{runs: map[string]Run{}}, state)
 	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	s.now = func() time.Time { return now }
+	s.setNow(func() time.Time { return now })
 	us := "/v1/projects/p/locations/us"
 	if code, out := call(t, s, "GET", us+"/trial", ""); code != 200 || out["state"] != "ELIGIBLE" || out["name"] != "projects/p/locations/us/trial" {
 		t.Fatalf("getTrial: %d %v", code, out)
@@ -245,7 +245,7 @@ func TestTrial(t *testing.T) {
 	}
 	// It survives a restart.
 	s2 := NewServer("", &fakeSQL{runs: map[string]Run{}}, state)
-	s2.now = func() time.Time { return now.Add(31 * 24 * time.Hour) }
+	s2.setNow(func() time.Time { return now.Add(31 * 24 * time.Hour) })
 	if code, out := call(t, s2, "GET", us+"/trial", ""); code != 200 || out["state"] != "EXPIRED" {
 		t.Errorf("after 31 days: %d %v", code, out)
 	}

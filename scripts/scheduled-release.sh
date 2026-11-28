@@ -36,11 +36,13 @@
 # scripts/release-notes.sh looks for in an annotated tag's message: its
 # `## [X.Y.Z]` section for the version when there is one, else the entries
 # added under ## [Unreleased] since the last tag (release-notes.sh
-# --unreleased), under their ### headings. Then a collapsed list of the pull
-# requests, without the ones that only fix CI or the tests ("Fix main CI",
-# "Landing N", "round N", "flaky", "CI: ..."), and a link to the full diff.
-# Branch names and issue titles are never used: they name work, not what a
-# release does. With no entries nothing is released: `release` is false,
+# --unreleased), under their ### headings, after a paragraph that links the
+# full diff. No list of pull requests: the landings that carry the work are
+# merges of many branches, so a list of them says little and a list without
+# them misleads. Branch names and issue titles are never used: they name
+# work, not what a release does. CHANGELOG.md is hard-wrapped and a GitHub
+# release body shows every newline as a line break, so each paragraph and
+# list item is joined into one line (scripts/unwrap-markdown.sh). With no entries nothing is released: `release` is false,
 # `blocked` is true and `reason` starts "CHANGELOG Unreleased is empty", so
 # a dry run shows what to write and scheduled-release.yml fails rather than
 # tag. Nothing is committed to main.
@@ -173,45 +175,12 @@ if ! news="$(sh "${here}/release-notes.sh" "${next}" "${changelog_at}" 2>/dev/nu
 fi
 rm -f "${changelog_at}"
 
-# Pull requests that only fix CI or the tests, or merge a landing (whose
-# branches the entries above describe), are not news: the full diff has them.
-internal='^(Fix main CI|CI: )|Landing [0-9]+|[Rr]ound [0-9]+|[Ff]laky|main run [0-9]+'
-# A subject's trailing pull request references, "(#2202) (#2203)", become the
-# last one, the pull request that merged it.
-one_ref() {
-	sed -E -e ':a' -e 's/ \(#[0-9]+\)( \(#[0-9]+\))$/\1/' -e 'ta'
-}
-landings="$(git rev-list --first-parent --merges "${last_tag}..${sha}")"
 {
 	echo "${marker}"
-	echo "Built from [\`$(git rev-parse --short "${sha}")\`](${url}/commit/${sha}) on main after its full CI run passed,"
-	echo "compatibility shards included. Changes since [${last_tag}](${url}/releases/tag/${last_tag}):"
-	echo "[full diff](${url}/compare/${last_tag}...${next}). Only a row marked Verified in"
-	echo "[docs/compatibility.md](docs/compatibility.md) is a support claim."
+	echo "Built from [\`$(git rev-parse --short "${sha}")\`](${url}/commit/${sha}) on main after its full CI run passed, compatibility shards included. Changes since [${last_tag}](${url}/releases/tag/${last_tag}): [full diff](${url}/compare/${last_tag}...${next}). Only a row marked Verified in [docs/compatibility.md](docs/compatibility.md) is a support claim."
 	echo
 	printf '%s\n' "${news}"
-	{
-		for m in ${landings}; do
-			subject="$(git log -1 --format=%s "${m}")"
-			title="$(git log -1 --format=%b "${m}" | sed -n 1p)"
-			pr="$(printf '%s\n' "${subject}" | sed -n 's/^Merge pull request #\([0-9][0-9]*\) from .*/#\1/p')"
-			line="${title:-${subject}}${pr:+ (${pr})}"
-			printf '%s\n' "${line}"
-		done
-		git log --first-parent --no-merges --format='%s' "${last_tag}..${sha}"
-	} | grep -Ev "${internal}" | one_ref | awk 'NF && !seen[$0]++ { print "- " $0 }' > "${notes}.landed" || true
-	if [ -s "${notes}.landed" ]; then
-		echo
-		echo "<details><summary>Pull requests</summary>"
-		echo
-		cat "${notes}.landed"
-		echo
-		echo "Fixes to CI and the tests are left out; the [full diff](${url}/compare/${last_tag}...${next}) has every change."
-		echo
-		echo "</details>"
-	fi
-	rm -f "${notes}.landed"
-} > "${notes}"
+} | sh "${here}/unwrap-markdown.sh" > "${notes}"
 
 out release true
 out tag "${next}"

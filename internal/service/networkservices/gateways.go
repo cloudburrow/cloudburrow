@@ -240,9 +240,10 @@ func (s *Server) CreateGateway(_ context.Context, req *nsvpb.CreateGatewayReques
 	}
 	g.SelfLink = ""
 	if g.GetType() == nsvpb.Gateway_SECURE_WEB_GATEWAY {
-		if g.GetIpVersion() == nsvpb.Gateway_IP_VERSION_UNSPECIFIED {
-			g.IpVersion = nsvpb.Gateway_IPV4
-		}
+		// An unset ip_version stays unset (IPv4 is the only one served):
+		// Google does not fill it in, as hashicorp/google's
+		// google_network_services_gateway, whose ip_version is not
+		// computed, plans clean against it only if it is left out (#1578).
 		project, loc, err := parseParent(req.GetParent())
 		if err == nil && loc != "global" {
 			s.mu.Lock()

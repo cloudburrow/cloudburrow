@@ -87,6 +87,14 @@
 # sql shard took 3,185 s of its 60m in main run 44617241748 and passed 60m
 # in 44645694075 (no test hung; TestTerraformSQLProvisionScript had run
 # 16 s), and these 28 tests are 1,666 s of its 3,260.
+#
+# And alloydb, the sql shard's instance a third time, for the AlloyDB and
+# Database Migration Service tests (COMPAT_SQL_ALLOYDB_TESTS), which the sql
+# shard skips too: Landing 170's Database Migration Service tests (#2252,
+# #2257), about 490 s, took the sql shard past its 60m in run 45935899624
+# (128 of its tests run, TestGcloudSQLConnectInContainer cut off at 47 s),
+# and sqlreplicas had about 15 minutes to spare. The AlloyDB tests are
+# about 600 s more.
 
 # An eleventh, localai, is an instance of a -tags onnx build (make
 # build-onnx, run with ONNXRUNTIME_LIB) started with the pinned Gemma 4 E2B
@@ -232,11 +240,16 @@ COMPAT_GKE_UPGRADE_TESTS="^Test($(echo "$COMPAT_GKE_UPGRADE_TEST_NAMES" | tr -s 
 # Hyperdisk Balanced HA, the volume's ciphertext and regional disks' HA,
 # 986 s in all) took served's suite from about 2,560 s to 3,840 s, and its
 # job past its 90m with the browser step (run 45680873104): they run here.
+# vpcvms has Cloud NAT's VM traffic tests too (#2245), whose echo target
+# runs in the VM image their own VM builds, and Shared VPC's, which make
+# their host and service projects through Resource Manager, which only
+# vpcvms of the served instance's shards exports. VM access scopes
+# (TestVMAccessScopesLimitTokens2179) need IAM enforcement: the iam shard.
 COMPAT_COMPUTE_VM_TEST_NAMES="ComputeRegionalDisksThroughTheGoClient ComputeVMsThroughTheGoClient
   ComputeLabelsSchedulingAndExternalIPsThroughTheGoClient ComputeRollingUpdatesThroughTheGoClient2139
   TerraformComputeInstance ComputeRegionalGroupsThroughTheGoClient GcloudComputeInstances
   ComputeOpsAgentWritesLogsAndMetrics ComputeAutoscalerScalesOnRealCPU
-  ShieldedVMHTTPSMetadataServer2179 VMAccessScopesLimitTokens2179 VMMetadataServerFromInsideTheVM2177
+  ShieldedVMHTTPSMetadataServer2179 VMMetadataServerFromInsideTheVM2177
   ComputeDiskEncryptionAndInstancePoliciesThroughTheGoClient ComputeHyperdiskBalancedHAThroughTheGoClient
   ComputeDiskVolumeIsCiphertextWhileTheVMWrites ComputeRegionalDisksHAThroughTheGoClient
   ComputeConcurrentVMBootsAnswerSSH2250"
@@ -245,11 +258,30 @@ COMPAT_VPC_VM_TEST_NAMES="CloudRouterBGPWithARouterApplianceVM2140 ComputeVMNetw
   RelayedConnectionsFollowTheEgressFirewall ComputeIPv6ThroughTheGoClient
   CloudNATGivesVMsWithoutExternalIPsEgress GcloudStartIAPTunnel
   RegionalAndInternalIPv6ForwardingRules2140 IPv6OnlyVMsAndGlobalIPv6LoadBalancing2140
-  InternalLBAndPSCEndpointCarryVMTraffic2140 VMIdentityThroughALoadBalancerAndSecureWebProxy"
+  InternalLBAndPSCEndpointCarryVMTraffic2140 VMIdentityThroughALoadBalancerAndSecureWebProxy
+  CloudNATTranslatesVMTraffic2140 CloudNATEndpointIndependentMappingAndDynamicPorts2140
+  SharedVPCThroughTheGoClient2140 SharedVPCIndividualSubnetsThroughTheGoClient2140"
 COMPAT_VPC_VM_TESTS="^Test($(echo "$COMPAT_VPC_VM_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 
+# The nightly spark shard's tests (COMPAT_SPARK_TESTS): BigQuery's Spark
+# procedures and the Dataproc API's, which run spark-submit in the pinned
+# apache/spark images, so in nightly-sql-ephemeral.yml's spark job, not in
+# ci.yml's compat job. That job fails unless every one of them passed, and
+# ci.yml's compat-coverage leaves them to it by this pattern rather than by
+# name (#2245), so a new Dataproc test is checked there the night it lands.
+# With Terraform's Dataproc tests (#1578), and Workbench's JupyterLab
+# plugins with Dataproc served (#2198), whose success path only this
+# instance gives.
+COMPAT_SPARK_TESTS='^Test(BigQuerySpark|BqSpark|Dataproc|GcloudDataproc|TerraformDataproc|WorkbenchJupyterLabBearerAndIdentity$)'
+# And the nightly dataflow shard's (COMPAT_DATAFLOW_TESTS), the same
+# instance for the Dataflow tests (#2215) in nightly-sql-ephemeral.yml's
+# dataflow job, which fails the same way unless every one of them passed.
+COMPAT_DATAFLOW_TESTS='^Test(PythonDataflow|JavaDataflow|GoDataflow|DataflowJobsAPI|DataflowSnapshots|DataflowProvided|GcloudDataflow|TerraformDataflow)'
+# Both nightly patterns, which compat-coverage leaves to those jobs.
+COMPAT_NIGHTLY_TESTS="$COMPAT_SPARK_TESTS|$COMPAT_DATAFLOW_TESTS"
+
 # The shards, in the order ci.yml's matrix lists them.
-COMPAT_SHARDS="storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas acceptance iam localai localaispeech"
+COMPAT_SHARDS="storage served gke gkeupgrade computevms vpcvms run crossservice scale emulators memorystore sql sqlreplicas alloydb acceptance iam localai localaispeech remotehosts"
 
 # The crossservice shard's tests (COMPAT_CROSSSERVICE_TESTS), which the run shard skips:
 # Eventarc's, whose triggers route events from Cloud Storage, Pub/Sub,
@@ -272,6 +304,12 @@ COMPAT_SHARDS="storage served gke gkeupgrade computevms vpcvms run crossservice 
 # BigQuery (#2112, Resource Manager with BigQuery), and its analysis of
 # Pub/Sub topics and Cloud Run services under a scope (#2112, Resource
 # Manager with Pub/Sub and Cloud Run), which no other shard serves together.
+# And Compute Engine with Cloud Storage or Cloud Run (#2245): image import
+# from a Cloud Storage tarball and a virtual disk, booted as VMs, and Cloud
+# Run's Serverless VPC Access connectors and Direct VPC egress to VMs
+# (TestRun*2140), as COMPUTE; and the Vertex AI Pipelines jobs,
+# schedules (#2173) and resolver and limits (#2205), whose tasks run in the pipeline task image ci.yml
+# pulls for this shard, on the Vertex AI endpoint Cloud Run starts.
 # And Cloud Run's own tests (TestRun*) with gcloud's and Terraform's of
 # Cloud Run and Cloud Functions (about 1,430 s): main run 44905534820 cancelled the run
 # shard at its 90m, its suite at 4,021 s (3,157 s in 44858607986) and its
@@ -286,7 +324,9 @@ COMPAT_CROSSSERVICE_TEST_NAMES="ArtifactRegistryCleanupPolicies
   ServiceDisabledFirestore StorageBatchOperationsRewriteToKMSKey
   StorageDataAccessAuditLogs StorageDataAccessAuditLogsOffByDefault
   StorageInsightsActivityViews StorageInsightsDatasetConfigChecks
-  StorageInsightsLinkedDataset TerraformStorageInsightsDatasetConfig"
+  StorageInsightsLinkedDataset TerraformStorageInsightsDatasetConfig
+  ComputeImageImportFromCloudStorageThroughTheGoClient ComputeImageImportFromAVirtualDiskThroughTheGoClient
+  VertexAIPipelineJobs VertexAIPipelineSchedules VertexAIPipelineResolverAndLimits"
 COMPAT_CROSSSERVICE_TESTS="^Test((Gcloud|Terraform|GcloudAndTerraform)?Eventarc[A-Za-z0-9_]*|((Gcloud|Terraform)(Run|CloudRun|CloudFunctions)|Run)[A-Za-z0-9_]*|$(echo "$COMPAT_CROSSSERVICE_TEST_NAMES" | tr -s ' \n' '||' | sed 's/^|//; s/|$//'))\$"
 
 # The sqlreplicas shard's tests, by name: every Cloud SQL test of high
@@ -304,6 +344,10 @@ COMPAT_SQL_NETWORK_TESTS='^Test(CloudSQLZonesPrivateIPAndPSCEndpoints|CloudSQLPr
 # (#2208), and Backup and DR's Compute Engine round trips (#1433, #2206).
 COMPAT_SQL_HEAVY_TESTS='^Test(CloudSQLPasswordAuthentication|BackupDRComputeVMAndDiskRoundTrip|BackupDRRegionalDiskRoundTrip)$'
 COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica|BlueGreen|External|Switchover|Demote|Failover|Promote)|'"$COMPAT_SQL_NETWORK_TESTS"'|'"$COMPAT_SQL_HEAVY_TESTS"
+# The alloydb shard's tests: AlloyDB's own, gcloud's and Terraform's, Backup
+# and DR's of AlloyDB, and Database Migration Service's, whose destinations
+# are this instance's Cloud SQL instances and AlloyDB clusters.
+COMPAT_SQL_ALLOYDB_TESTS='^Test(AlloyDB|GcloudAlloyDB|TerraformAlloyDB|BackupDRAlloyDB|DataMigration|GcloudDatabaseMigration)[A-Za-z0-9_]*$'
 
 # The console's headless-browser suite (#594) runs in the storage, run,
 # emulators, memorystore and sql shards: the Cloud KMS and Cloud Run
@@ -392,7 +436,7 @@ COMPAT_SQL_REPLICA_TESTS='^Test[A-Za-z]*SQL[A-Za-z0-9]*(HighAvailability|Replica
 # already takes 18 of its 20 minutes with the Kubernetes Engine pages, and
 # computevms's compat suite most of its job, so they run in vpcvms, the
 # served shard's instance again (COMPAT_BROWSER_VPCVMS_TEST_NAMES).
-COMPAT_BROWSER_SHARDS="storage served vpcvms run crossservice emulators memorystore sql localai"
+COMPAT_BROWSER_SHARDS="storage served vpcvms run crossservice emulators memorystore sql localai remotehosts"
 COMPAT_BROWSER_VPCVMS_TEST_NAMES="ComputeA1Screens ComputeA1ScreensMeetWCAG
   ComputeGroupWorkloadPolicyThroughTheBrowser
   ShieldedVMConsole2181 ShieldedVMConsole2181MeetsWCAG
@@ -436,7 +480,9 @@ COMPAT_BROWSER_MEMORYSTORE_SHARD_TESTS='^Test(Memorystore|CreateImageFromCloudSt
 # AlloyDB's pages (TestAlloyDB*, #2191) need AlloyDB, and its exports and
 # imports Cloud Storage beside it, which only the sql shard's instance
 # serves.
-COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS|ConnectionPolicies|AlloyDB)'
+# Database Migration Service's pages (TestDataMigration*, #2252) need its
+# Cloud SQL and AlloyDB destinations: the sql shard's.
+COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR|PrivateCAKMS|ConnectionPolicies|AlloyDB|DataMigration)'
 # The Studio's local models (#1396) and the Embeddings page's image (#1454),
 # audio and Cloud Storage objects (#1651) and its scanned PDF read with
 # document_ocr (#1733) need a -tags onnx build started with
@@ -474,6 +520,15 @@ COMPAT_BROWSER_LOCALAI_SHARD_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbedd
 # JupyterLab through the Component Gateway (#2198), on a Dataproc cluster.
 COMPAT_BROWSER_NIGHTLY_SHARDS="spark"
 COMPAT_BROWSER_SPARK_SHARD_TESTS='^Test(BigQueryStudioNotebookRuntimeThroughThePage|BigQueryStudioConnectToARuntimeThroughThePage|BigQuerySparkNotebookManageSessionsThroughThePage|BigQuerySparkNotebookThroughThePage|Dataproc[A-Za-z0-9]*ThroughThePage|DataprocJupyterLabThroughComponentGateway|Dataflow[A-Za-z0-9]*Page)$'
+# The remotehosts shard's (#2209, #2259): TestRemoteComputeConsole on
+# its instance, whose compute is a stand-in remote host (up --compute), and
+# TestByocFirstRunWalkThrough, which needs an instance of its own on this
+# machine's Docker, started with CLOUDBURROW_BYOC_FAKES, and two more
+# stand-ins as the AWS and Azure VMs: compat_browser_select names it in
+# BROWSER_OWN_INSTANCE, which the browser step leaves to
+# scripts/remote-compute-shard.sh walkthrough after the suite.
+COMPAT_BROWSER_REMOTEHOSTS_SHARD_TESTS='^Test(RemoteComputeConsole|ByocFirstRunWalkThrough)$'
+COMPAT_BROWSER_REMOTEHOSTS_OWN_INSTANCE_TESTS='^TestByocFirstRunWalkThrough$'
 # Browser tests no shard runs: Functions' Edit, Download and Permissions
 # builds a function from source with Google's builder, as the compat
 # suite's Functions tests do, so it runs only when asked for
@@ -486,14 +541,19 @@ COMPAT_BROWSER_NEVER_TESTS='^(TestCloudRunFunctionsEditDownloadAndPermissionsThr
 # compat_browser_select <shard>: sets, for that shard's browser step,
 #   BROWSER_RUN   its go test -run pattern (every test when empty)
 #   BROWSER_SKIP  its go test -skip pattern
+#   BROWSER_OWN_INSTANCE  the selected tests that run against an instance
+#                 of their own (scripts/remote-compute-shard.sh walkthrough),
+#                 not the shard's: the suite skips them too ("" for none)
 # and returns 1 for a shard that runs no browser test. Every test the two
 # select must pass: ci.yml, verify-local.sh and nightly-sql-ephemeral.yml's
 # spark job read both, and
 # cmd/cloudburrow's TestBrowserTestsRunWhereTheirScreensAreServed holds
 # each test to one shard whose instance draws every screen it needs.
 compat_browser_select() {
-  BROWSER_RUN=""
+  BROWSER_RUN="" BROWSER_OWN_INSTANCE=""
   BROWSER_SKIP=$COMPAT_BROWSER_NEVER_TESTS
+  # And the remotehosts shard's, which need its stand-in hosts.
+  [ "$1" = remotehosts ] || BROWSER_SKIP="$COMPAT_BROWSER_REMOTEHOSTS_SHARD_TESTS|$BROWSER_SKIP"
   # The localai shard's tests are kept out of every other shard: the run
   # shard's pattern (TestSpeech*) names one, whose transcription needs that
   # shard's local models.
@@ -511,6 +571,7 @@ compat_browser_select() {
     served) BROWSER_RUN=$COMPAT_BROWSER_SERVED_SHARD_TESTS ;;
     vpcvms) BROWSER_RUN=$COMPAT_BROWSER_VPCVMS_SHARD_TESTS ;;
     localai) BROWSER_RUN=$COMPAT_BROWSER_LOCALAI_SHARD_TESTS ;;
+    remotehosts) BROWSER_RUN=$COMPAT_BROWSER_REMOTEHOSTS_SHARD_TESTS BROWSER_OWN_INSTANCE=$COMPAT_BROWSER_REMOTEHOSTS_OWN_INSTANCE_TESTS ;;
     # Nightly (COMPAT_BROWSER_NIGHTLY_SHARDS).
     spark) BROWSER_RUN=$COMPAT_BROWSER_SPARK_SHARD_TESTS ;;
     # The rest of the suite.
@@ -635,7 +696,10 @@ compat_shard() {
         COMPAT_RUN=$COMPAT_COMPUTE_VM_TESTS
       elif [ "$1" = vpcvms ]; then
         # The served shard's instance again, for the VPC tests that carry
-        # VM traffic (COMPAT_VPC_VM_TESTS).
+        # VM traffic (COMPAT_VPC_VM_TESTS), and Resource Manager, which every
+        # instance serves, for Shared VPC's host and service projects (#2245):
+        # COMPAT_RUN keeps its own suite in the storage shard.
+        TEST_VARS+=,RESOURCEMANAGER
         COMPAT_RUN=$COMPAT_VPC_VM_TESTS
       elif [ "$1" = gkeupgrade ]; then
         # The served shard's instance again, for Kubernetes Engine's
@@ -735,7 +799,7 @@ compat_shard() {
         # The run shard's instance again, for COMPAT_CROSSSERVICE_TESTS only, with
         # the plain names of the services they read: COMPAT_RUN keeps every
         # other suite those names would select to its own shard.
-        TEST_VARS+=,STORAGE,STORAGE_BATCH,STORAGE_INSIGHTS,PUBSUB,BIGQUERY,FIRESTORE,SERVICEUSAGE,KMS,LOGGING,RESOURCEMANAGER,MONITORING
+        TEST_VARS+=,STORAGE,STORAGE_BATCH,STORAGE_INSIGHTS,PUBSUB,BIGQUERY,FIRESTORE,SERVICEUSAGE,KMS,LOGGING,RESOURCEMANAGER,MONITORING,COMPUTE
         COMPAT_RUN=$COMPAT_CROSSSERVICE_TESTS
       else
         COMPAT_SKIP=$COMPAT_CROSSSERVICE_TESTS
@@ -761,6 +825,18 @@ compat_shard() {
       # the storage suite does not run here.
       SERVICES=run,secretmanager,storage
       TEST_VARS+=,SCALE_RUN,SCALE_SECRETS,PREDICTION,RUN_STORAGE,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE ;;
+    remotehosts)
+      # Remote compute (#2209, #2259): the instance's Docker is a stand-in
+      # remote host (scripts/remote-compute-shard.sh hosts starts it and
+      # exports CLOUDBURROW_TEST_REMOTE_HOST, after the stand-in tests of
+      # internal/remotecompute and cmd/cloudburrow), with the default
+      # services, which TestRemoteComputeServesTheDefaultServices drives
+      # with Google's Go clients; only the TestRemoteCompute* tests run
+      # here, as the other suites ran on local compute in their shards.
+      SERVICES=storage,pubsub,tasks,run,secretmanager
+      UP_FLAGS=(--compute "${CLOUDBURROW_TEST_REMOTE_HOST:-}")
+      COMPAT_RUN='^TestRemoteCompute'
+      TEST_VARS+=,STORAGE,PUBSUB,TASKS,RUN,SECRETS ;;
     acceptance)
       # The acceptance workflow uploads, publishes and runs a Cloud Run
       # worker; test/k8s needs the cluster and Knative.
@@ -799,7 +875,9 @@ compat_shard() {
       # (#2112): BigQuery, Spanner, Bigtable, Cloud KMS, Compute Engine and
       # Resource Manager's tags on one instance, which only this shard serves
       # together.
-      COMPAT_RUN='^Test(IAMEnforcement|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$|CloudAssetAnalyzeIamPolicyEveryAssetType$)' ;;
+      # And a VM's access scopes, which limit its service account's tokens
+      # only where IAM is enforced (#2179, #2245).
+      COMPAT_RUN='^Test(IAMEnforcement|VMAccessScopesLimitTokens2179$|WorkloadIdentityFederationStorage$|WorkforceIdentityFederationStorage$|WorkforceIdentityFederationSAML$|WorkforcePoolIAMPolicy$|WorkforceScimProvisioning$|CloudAssetAnalyzeIamPolicyEveryAssetType$)' ;;
     spark|dataflow)
       # BigQuery's stored procedures for Apache Spark (#2104), nightly only
       # (nightly-sql-ephemeral.yml's spark job), not one of ci.yml's
@@ -819,7 +897,8 @@ compat_shard() {
       SERVICES=bigquery,storage,logging,run,kms,dataproc,pubsub,dataflow,datastore,bigtable,spanner
       # And, for the shard's browser tests (#2234), Dataform, which BigQuery
       # Studio's notebooks are, and Kubernetes Engine, whose cluster Dataproc
-      # on GKE's page runs on.
+      # on GKE's page and its virtual cluster's compat test
+      # (TestDataprocOnGKE, as GKE, #2245) run on.
       [ "$1" = dataflow ] || SERVICES+=,dataform,gke
       # --allow-unconfined-containers (#2162): the Dataproc DOCKER component's
       # rootless daemons run unconfined, so only with it; TestDataprocDockerComponent
@@ -833,6 +912,7 @@ compat_shard() {
       # local refusal. Workbench is on the Vertex AI port (PREDICTION),
       # which Cloud Run starts.
       TEST_VARS+=,PREDICTION
+      [ "$1" = dataflow ] || TEST_VARS+=,GKE
       export CLOUDBURROW_TEST_SPARK=1
       # The dataflow shard (#2215), nightly-sql-ephemeral.yml's dataflow job,
       # is the same instance for the Dataflow tests alone: together they
@@ -840,12 +920,11 @@ compat_shard() {
       # of Dataflow and 4,475 s of the rest when go test's alarm stopped
       # TestDataprocHDFS, with the HDFS and YARN tests, GcloudDataproc and
       # the Workbench test never run).
-      COMPAT_DATAFLOW_RUN='^Test(PythonDataflow|JavaDataflow|GoDataflow|DataflowJobsAPI|DataflowSnapshots|DataflowProvided|GcloudDataflow|TerraformDataflow)'
       if [ "$1" = dataflow ]; then
-        COMPAT_RUN=$COMPAT_DATAFLOW_RUN
+        COMPAT_RUN=$COMPAT_DATAFLOW_TESTS
         COMPAT_TIMEOUT=120m
       else
-        COMPAT_RUN='^Test(BigQuerySpark|BqSpark|Dataproc|GcloudDataproc|WorkbenchJupyterLabBearerAndIdentity$)'
+        COMPAT_RUN=$COMPAT_SPARK_TESTS
         COMPAT_TIMEOUT=150m
       fi ;;
     localai|localaispeech)
@@ -934,7 +1013,7 @@ compat_shard() {
       # with and without persistence_config (#1557).
       PROBE_TESTS="TestMemorystoreAcrossRestart TestMemorystoreCreatedAcrossRestart TestMemorystoreRDBAcrossRestart TestMemorystoreClustersAcrossRestart"
       PROBE_VARS=MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT ;;
-    sql|sqlreplicas)
+    sql|sqlreplicas|alloydb)
       # Cloud SQL for PostgreSQL (#311, #584) and for MySQL with its
       # generated password (#297), the Cloud SQL Admin API over both
       # servers (#1301), and the Backup and DR Service over their backups
@@ -971,14 +1050,19 @@ compat_shard() {
       # Cloud Monitoring as SQL_MONITORING (#2163), for managed connection
       # pooling's metrics; MONITORING is not exported, so the Monitoring
       # suites stay in theirs.
-      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging,compute,monitoring,alloydb
-      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,CLOUDSQL_PASSWORD,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING,SQL_COMPUTE,SQL_MONITORING,ALLOYDB,ALLOYDB_CONNECTOR,ALLOYDB_TLS,ALLOYDB_CA
-      # The replica tests run in sqlreplicas, against the same instance,
-      # and the restart probes in sql.
+      # Database Migration Service (#2252), whose destinations are this
+      # shard's Cloud SQL instances and AlloyDB clusters.
+      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms,privateca,logging,compute,monitoring,alloydb,datamigration
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,CLOUDSQL_PASSWORD,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE,SQL_RESOURCEMANAGER,SQL_SERVICEUSAGE,SQL_PRIVATECA,SQL_LOGGING,SQL_COMPUTE,SQL_MONITORING,ALLOYDB,ALLOYDB_CONNECTOR,ALLOYDB_TLS,ALLOYDB_CA,DATAMIGRATION
+      # The replica tests run in sqlreplicas and the AlloyDB and Database
+      # Migration Service tests in alloydb, against the same instance, and
+      # the restart probes in sql.
       if [ "$1" = sqlreplicas ]; then
         COMPAT_RUN=$COMPAT_SQL_REPLICA_TESTS
+      elif [ "$1" = alloydb ]; then
+        COMPAT_RUN=$COMPAT_SQL_ALLOYDB_TESTS
       else
-        COMPAT_SKIP=$COMPAT_SQL_REPLICA_TESTS
+        COMPAT_SKIP="$COMPAT_SQL_REPLICA_TESTS|$COMPAT_SQL_ALLOYDB_TESTS"
         # Cloud SQL for PostgreSQL (#701): a table with a row.
         SETUP_TESTS="TestCloudSQLRestartSetup"
         PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"
@@ -990,7 +1074,7 @@ compat_shard() {
   # bq's (#696) run in the emulators shard, with BigQuery, and gcloud sql's
   # in the sql shard.
   case "$1" in
-    storage|served|gke|gkeupgrade|computevms|vpcvms|run|crossservice|scale|emulators|memorystore|sql|sqlreplicas) TEST_VARS+=,GCLOUD ;;
+    storage|served|gke|gkeupgrade|computevms|vpcvms|run|crossservice|scale|emulators|memorystore|sql|sqlreplicas|alloydb) TEST_VARS+=,GCLOUD ;;
   esac
 }
 
@@ -1016,6 +1100,20 @@ EOF2
       )
       [ "$code" = 200 ] || { echo "loading embeddinggemma-2-onnx-community answered $code" >&2; return 1; } ;;
   esac
+}
+
+# compat_remote_exports <shard> <env.json>: what the remotehosts shard's
+# compat tests read beside compat-env.sh's variables: the DOCKER_HOST
+# `cloudburrow env` names for the instance, so docker and kind reach the
+# host, and the instance's ingress, which the host publishes and the
+# instance forwards here (test/compat/README.md).
+compat_remote_exports() {
+  [ "$1" = remotehosts ] || return 0
+  local docker ingress
+  docker=$(jq -r '.DOCKER_HOST // empty' "$2")
+  ingress=$(jq -r '.CLOUDBURROW_INGRESS // empty | sub("^.*:"; "")' "$2")
+  [ -n "$docker" ] && [ -n "$ingress" ] || { echo "the remotehosts instance's env names no DOCKER_HOST or ingress: is it on its host?" >&2; return 1; }
+  export DOCKER_HOST="$docker" CLOUDBURROW_TEST_REMOTE_INGRESS="127.0.0.1:$ingress"
 }
 
 # compat_setup_exports <shard> <dir>: exports what the shard's restart

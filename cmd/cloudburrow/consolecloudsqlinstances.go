@@ -27,6 +27,9 @@ import (
 // writes through the Admin API itself, so the page shows what the API and
 // gcloud and Terraform see.
 type cloudSQLInstancesProvider struct {
+	// migrate is whether Database Migration Service is served (#2252):
+	// the Instances page then has Google's Migrate button.
+	migrate bool
 	// endpoint is the Admin API's host:port.
 	endpoint string
 	// versions are the databaseVersion values the instance's images provide.
@@ -123,6 +126,15 @@ func (p cloudSQLInstancesProvider) List(ctx context.Context, project string) (co
 // has Create instance, and its create page ends in Create Instance, as
 // docs.cloud.google.com/sql/docs/mysql/create-instance words both (#1933).
 func (cloudSQLInstancesProvider) CreateSubmit() string { return "Create Instance" }
+
+// ListActions is the Instances page's Migrate button (#2252), which opens
+// Database Migration Service's migration jobs.
+func (p cloudSQLInstancesProvider) ListActions(context.Context, string) []console.Action {
+	if !p.migrate {
+		return nil
+	}
+	return []console.Action{dmsMigrateAction()}
+}
 
 func (p cloudSQLInstancesProvider) CreateForm() (string, []console.Field) {
 	return "Create instance", p.sqlCreateForm()

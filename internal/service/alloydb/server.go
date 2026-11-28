@@ -196,6 +196,14 @@ type Server struct {
 	// omniTerms is the acceptance `up` was given for every new cluster;
 	// nil accepts nothing.
 	omniTerms *OmniAcceptance
+	// tel is the telemetry collector's state by instance (#2253), and
+	// logSink where it sends the servers' log lines; telMu guards both.
+	telMu   sync.Mutex
+	tel     map[string]*telemetryState
+	logSink func(LogLine)
+	// userEvents are the users created, updated and deleted, for System
+	// insights' events timeline (#2253).
+	userEvents []UserEvent
 	// bdr is each cluster's Backup and DR protection (#1524), and bdrAPI
 	// the service that resolves its backups and data sources.
 	bdr    map[string]*bdrState

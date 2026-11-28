@@ -86,6 +86,7 @@ import (
 	_ "cloud.google.com/go/certificatemanager/apiv1/certificatemanagerpb"
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudbuild/apiv2/cloudbuildpb"
+	_ "cloud.google.com/go/clouddms/apiv1/clouddmspb"
 	_ "cloud.google.com/go/cloudquotas/apiv1/cloudquotaspb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	_ "cloud.google.com/go/container/apiv1/containerpb"
@@ -415,6 +416,10 @@ var areas = []area{
 	{Key: "dataflow", Title: "Dataflow (v1b3): jobs, messages, metrics, snapshots and templates", Own: true, Services: []string{
 		"google.dataflow.v1beta3.JobsV1Beta3", "google.dataflow.v1beta3.MessagesV1Beta3", "google.dataflow.v1beta3.MetricsV1Beta3",
 		"google.dataflow.v1beta3.SnapshotsV1Beta3", "google.dataflow.v1beta3.TemplatesService", "google.dataflow.v1beta3.FlexTemplatesService"}},
+	// Database Migration Service (#2252): CloudBurrow's own, gRPC and JSON
+	// on one port; its Locations, Operations and IAM mixins are other
+	// areas' rows.
+	{Key: "datamigration", Title: "Database Migration Service (v1)", Own: true, Services: []string{"google.cloud.clouddms.v1.DataMigrationService"}},
 	// App Hub (#2110): CloudBurrow's own, gRPC and JSON on one port; its
 	// Locations, Operations and IAM mixins are other areas' rows.
 	{Key: "apphub", Title: "App Hub (v1)", Own: true, Services: []string{"google.cloud.apphub.v1.AppHub"}},

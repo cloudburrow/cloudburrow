@@ -169,6 +169,11 @@ const (
 	// instances PostgreSQL servers in the cluster, and the connectors'
 	// server-side proxy on port 5433.
 	ServiceAlloyDB Service = "alloydb"
+	// ServiceDataMigration is Database Migration Service
+	// (datamigration.googleapis.com v1, #2252), served in the CLI process
+	// on its own port; its migration jobs copy a MySQL or PostgreSQL
+	// source into the instance's Cloud SQL or AlloyDB and replicate it.
+	ServiceDataMigration Service = "datamigration"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -181,7 +186,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceDataproc, ServiceAlloyDB, ServiceFilestore, ServiceDataflow}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceDataproc, ServiceAlloyDB, ServiceFilestore, ServiceDataflow, ServiceDataMigration}
 }
 
 // KnownServices lists every selectable service.
@@ -242,7 +247,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceDataproc, ServiceAlloyDB, ServiceFilestore, ServiceDataflow:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR, ServicePrivateCA, ServiceGKE, ServiceMonitoring, ServiceCompute, ServiceWorkflows, ServiceParameterManager, ServiceDataform, ServiceAppHub, ServiceTrace, ServiceDataproc, ServiceAlloyDB, ServiceFilestore, ServiceDataflow, ServiceDataMigration:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -458,6 +463,9 @@ type Endpoints struct {
 	// (alloydb.googleapis.com, #2191): gRPC and JSON on one port, v1,
 	// v1beta and v1alpha.
 	AlloyDB int `json:"alloydb"`
+	// DataMigration is the host port of Database Migration Service
+	// (datamigration.googleapis.com v1, #2252): gRPC and JSON on one port.
+	DataMigration int `json:"dataMigration"`
 	// ONNX is the host port of the ONNX runner (#1711), which runs BigQuery
 	// ML's imported ONNX models for the BigQuery front, published to the
 	// cluster through cloudburrow-host. CloudBurrow's own API, not a
@@ -554,6 +562,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"dataflow", &e.Dataflow},
 		{"trace", &e.Trace},
 		{"alloydb", &e.AlloyDB},
+		{"datamigration", &e.DataMigration},
 		{"onnx", &e.ONNX},
 		{"tfconvert", &e.TFConvert},
 		{"spark", &e.Spark},
@@ -648,6 +657,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.Trace
 	case ServiceAlloyDB:
 		return e.AlloyDB
+	case ServiceDataMigration:
+		return e.DataMigration
 	default:
 		return 0
 	}
@@ -1080,6 +1091,9 @@ func Default() Config {
 			Trace: 9052,
 			// AlloyDB (#2191): past the ports open branches took.
 			AlloyDB: 9063,
+			// Database Migration Service (#2252): 9075 is left to open
+			// branches.
+			DataMigration: 9076,
 			// The Spark procedure runner (#2104): the next free port after
 			// App Hub's 9048.
 			Spark: 9049,

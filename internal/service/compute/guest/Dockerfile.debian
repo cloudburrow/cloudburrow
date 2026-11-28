@@ -2,11 +2,53 @@
 # Debian or Ubuntu container image, by pinned digest, with systemd, sshd and
 # CloudBurrow's guest scripts. Distribution packages are installed from the
 # distribution's own archive; nothing here is linked into CloudBurrow.
+#
+# The archive is read through its snapshot service at one fixed time,
+# APT_SNAPSHOT (#2258): snapshot.debian.org for Debian, snapshot.ubuntu.com
+# for Ubuntu (whose archive.ubuntu.com carries arm64 as well as amd64, so
+# one snapshot serves both), so a build installs the same package versions
+# every time and does not depend on a live mirror's health (a debian-12
+# build failed in CI on a mirror download error, apt-get exit 100). The
+# snapshot's Release files are past their Valid-Until, so the snapshot
+# sources alone skip that check; their signatures are still verified
+# against the base's own archive keyring. Downloads are retried.
+# snapshot.ubuntu.com is HTTPS only and the base has no CA certificates,
+# so apt is given distroless's bundle (the image dependencies.json pins
+# for internal/storageimage) for that one host.
+# Move APT_SNAPSHOT with the bases' digests.
+#
+# conntrack (conntrack-tools) lists a Cloud NAT gateway pod's connections
+# over netlink: Ubuntu's and many distributions' kernels are built without
+# CONFIG_NF_CONNTRACK_PROCFS, so /proc/net/nf_conntrack is absent on them.
 ARG BASE
+FROM gcr.io/distroless/static-debian12@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2 AS ca
 FROM ${BASE}
 ENV container=docker DEBIAN_FRONTEND=noninteractive
-RUN apt-get update \
- && apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server sudo curl ca-certificates iproute2 procps less nftables netcat-openbsd socat e2fsprogs \
+ARG APT_SNAPSHOT=20261120T000000Z
+COPY --from=ca /etc/ssl/certs/ca-certificates.crt /etc/apt/cloudburrow-snapshot-ca.crt
+RUN . /etc/os-release \
+ && printf '%s\n' 'Acquire::Retries "5";' 'Acquire::https::snapshot.ubuntu.com::CaInfo "/etc/apt/cloudburrow-snapshot-ca.crt";' \
+      > /etc/apt/apt.conf.d/80cloudburrow-snapshot \
+ && case "$ID" in \
+      debian) printf '%s\n' \
+        'Types: deb' "URIs: http://snapshot.debian.org/archive/debian/${APT_SNAPSHOT}" \
+        "Suites: ${VERSION_CODENAME} ${VERSION_CODENAME}-updates" 'Components: main' \
+        'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' 'Check-Valid-Until: no' '' \
+        'Types: deb' "URIs: http://snapshot.debian.org/archive/debian-security/${APT_SNAPSHOT}" \
+        "Suites: ${VERSION_CODENAME}-security" 'Components: main' \
+        'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' 'Check-Valid-Until: no' \
+        > /etc/apt/sources.list.d/debian.sources ;; \
+      ubuntu) printf '%s\n' \
+        'Types: deb' "URIs: https://snapshot.ubuntu.com/ubuntu/${APT_SNAPSHOT}" \
+        "Suites: ${VERSION_CODENAME} ${VERSION_CODENAME}-updates ${VERSION_CODENAME}-backports ${VERSION_CODENAME}-security" \
+        'Components: main universe restricted multiverse' \
+        'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' 'Check-Valid-Until: no' \
+        > /etc/apt/sources.list.d/ubuntu.sources ;; \
+      *) echo "no archive snapshot for $ID" >&2; exit 1 ;; \
+    esac \
+ && rm -f /etc/apt/sources.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server sudo curl ca-certificates iproute2 procps less nftables conntrack netcat-openbsd socat e2fsprogs \
  && apt-get clean && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/ssh/ssh_host_* \
  && (userdel -r ubuntu 2>/dev/null || true)

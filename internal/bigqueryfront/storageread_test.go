@@ -186,6 +186,14 @@ const testRows = `[
 // client of the front and the fakes.
 func storageReadFront(t *testing.T, ctx context.Context, records *jobRecords) (storagepb.BigQueryReadClient, *fakeReadServer, *fakeRows) {
 	t.Helper()
+	conn, emu, rest := storageReadFrontConn(t, ctx, records)
+	return storagepb.NewBigQueryReadClient(conn), emu, rest
+}
+
+// storageReadFrontConn is storageReadFront's, with the client's
+// connection to the front.
+func storageReadFrontConn(t *testing.T, ctx context.Context, records *jobRecords) (*grpc.ClientConn, *fakeReadServer, *fakeRows) {
+	t.Helper()
 	rest := &fakeRows{rows: map[string]string{"ds.t": testRows}}
 	emu := &fakeReadServer{arrow: emulatorArrowSchema(t), avro: emulatorAvroSchema}
 	up, err := net.Listen("tcp", "127.0.0.1:0")
@@ -214,7 +222,7 @@ func storageReadFront(t *testing.T, ctx context.Context, records *jobRecords) (s
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	return storagepb.NewBigQueryReadClient(conn), emu, rest
+	return conn, emu, rest
 }
 
 // readAll reads a stream from offset: its answers, or the error.

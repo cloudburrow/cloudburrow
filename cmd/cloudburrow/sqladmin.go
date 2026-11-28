@@ -19,6 +19,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/iameval"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
@@ -125,8 +126,39 @@ func sqlAdminEnabled(cfg config.Config) bool {
 // instance's IAM evaluator for the principal's permission on the
 // instance, whether or not --iam-enforcement is on: an IAM sign-in is
 // always checked, as Memorystore's IAM auth is.
-func sqlAdminIAM(creds *metadata.Credentials, e *iameval.Enforcer) sqladmin.IAMSource {
+func sqlAdminIAM(creds *metadata.Credentials, e *iameval.Enforcer, registry func() *resourcemanager.Registry) sqladmin.IAMSource {
+	reg := func() *resourcemanager.Registry {
+		if registry == nil {
+			return nil
+		}
+		return registry()
+	}
 	return sqladmin.IAMSource{
+		// IAM group authentication (#1524) reads this instance's Cloud
+		// Identity groups.
+		Groups: func(email string) []string {
+			r := reg()
+			if r == nil {
+				return nil
+			}
+			rels, err := r.TransitiveGroups(email)
+			if err != nil {
+				return nil
+			}
+			out := make([]string, 0, len(rels))
+			for _, x := range rels {
+				out = append(out, x.Group.Email)
+			}
+			return out
+		},
+		GroupExists: func(email string) bool {
+			r := reg()
+			if r == nil {
+				return false
+			}
+			_, err := r.LookupGroup(strings.ToLower(email), "")
+			return err == nil
+		},
 		Token: func(hash string, now time.Time) (string, time.Time, bool) {
 			for _, t := range creds.LiveTokens(now) {
 				if t.Hash == hash {

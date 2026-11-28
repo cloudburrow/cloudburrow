@@ -65,13 +65,14 @@ Do not edit these files by hand.
 | [Dataform (v1beta1)](dataformv1beta1.md) | 81 | 81 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Dataproc (v1): clusters, jobs, workflow templates, autoscaling policies and Serverless for Apache Spark](dataproc.md) | 44 | 44 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Dataflow (v1b3): jobs, messages, metrics, snapshots and templates](dataflow.md) | 18 | 18 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Database Migration Service (v1)](datamigration.md) | 41 | 19 | 0 | 20 | 2 | 0 | 0 | 0 |
 | [App Hub (v1)](apphub.md) | 31 | 31 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [AlloyDB for PostgreSQL (v1)](alloydb.md) | 37 | 37 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Filestore (v1)](filestore.md) | 18 | 18 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Filestore (v1beta1)](filestorev1beta1.md) | 23 | 10 | 0 | 0 | 13 | 0 | 0 | 0 |
 | [Cloud Trace API (v1 and v2)](trace.md) | 5 | 5 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Serverless VPC Access (v1)](vpcaccess.md) | 4 | 4 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Certificate Manager (v1)](certificatemanager.md) | 30 | 25 | 0 | 0 | 5 | 0 | 0 | 0 |
+| [Certificate Manager (v1)](certificatemanager.md) | 30 | 28 | 0 | 0 | 2 | 0 | 0 | 0 |
 | [Network Security (v1)](networksecurity.md) | 63 | 54 | 0 | 0 | 9 | 0 | 0 | 0 |
 | [Network Services (v1)](networkservices.md) | 83 | 15 | 0 | 68 | 0 | 0 | 0 | 0 |
 | [Identity-Aware Proxy (v1)](iap.md) | 19 | 13 | 0 | 0 | 6 | 0 | 0 | 0 |

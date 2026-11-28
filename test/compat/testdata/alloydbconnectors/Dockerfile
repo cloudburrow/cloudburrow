@@ -4,6 +4,20 @@
 # testdata/egress (Node, Python, iptables), plus a JDK and Maven to fetch the
 # Java connector's jars. The sink and the probes are mounted at /egress.
 FROM node:24.11.1-bookworm-slim@sha256:48abc13a19400ca3985071e287bd405a1d99306770eb81d61202fb6b65cf0b57
+# The Debian archive at one fixed time through snapshot.debian.org (#2258), so
+# a rebuild installs the same package versions and no build depends on a live
+# mirror's health; the snapshot's Release files are past their Valid-Until,
+# their signatures still checked against the base's keyring. Retried.
+RUN printf '%s\n' 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80cloudburrow-snapshot \
+ && printf '%s\n' \
+      'Types: deb' 'URIs: http://snapshot.debian.org/archive/debian/20261120T000000Z' \
+      'Suites: bookworm bookworm-updates' 'Components: main' \
+      'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' 'Check-Valid-Until: no' '' \
+      'Types: deb' 'URIs: http://snapshot.debian.org/archive/debian-security/20261120T000000Z' \
+      'Suites: bookworm-security' 'Components: main' \
+      'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' 'Check-Valid-Until: no' \
+      > /etc/apt/sources.list.d/debian.sources \
+ && rm -f /etc/apt/sources.list
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv iptables iproute2 ca-certificates \
     openjdk-17-jdk-headless maven curl \
  && rm -rf /var/lib/apt/lists/*

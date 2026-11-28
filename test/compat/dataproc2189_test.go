@@ -287,7 +287,11 @@ func TestDataprocYARNHighAvailability(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the new active ResourceManager through the gateway: %d %.300s; %d %.300s; %d %.500s", c1, b1, c2, b2, c3, b3)
+			// The nodes the new active one knows, in every state, and the
+			// NodeManagers' last lines: which one did not re-register, and why (#2248).
+			c4, b4 := get(yarnUI, "/ws/v1/cluster/nodes?states=NEW,RUNNING,UNHEALTHY,DECOMMISSIONED,LOST,REBOOTED,DECOMMISSIONING,SHUTDOWN", "", nil)
+			t.Fatalf("the new active ResourceManager through the gateway: %d %.300s; %d %s; %d %.500s; nodes %d %.2000s\n%s",
+				c1, b1, c2, b2, c3, b3, c4, b4, dataprocNodeManagerLogs(ctx, uuid))
 		}
 		time.Sleep(5 * time.Second)
 	}
@@ -386,4 +390,22 @@ func TestDataprocYARNHighAvailability(t *testing.T) {
 	if !strings.Contains(refusal, "User root does not have permission to submit") || !strings.Contains(refusal, "to queue default") {
 		t.Fatalf("a job the yarn-dataproc policy denies, on the ResourceManager of %s:\n%s", next, refusal)
 	}
+}
+
+// dataprocNodeManagerLogs are the last lines of the cluster's
+// NodeManagers' logs, for a failure's message.
+func dataprocNodeManagerLogs(ctx context.Context, uuid string) string {
+	out, err := exec.CommandContext(ctx, "docker", "ps", "-a", "--format", "{{.Names}}", "--filter", "label=cloudburrow.dataproc.cluster="+uuid).Output()
+	if err != nil {
+		return "docker ps: " + err.Error()
+	}
+	var b strings.Builder
+	for _, n := range strings.Fields(string(out)) {
+		if !strings.HasSuffix(n, "-nm") {
+			continue
+		}
+		logs, _ := exec.CommandContext(ctx, "docker", "logs", "--tail", "40", n).CombinedOutput()
+		fmt.Fprintf(&b, "== %s\n%s\n", n, logs)
+	}
+	return b.String()
 }

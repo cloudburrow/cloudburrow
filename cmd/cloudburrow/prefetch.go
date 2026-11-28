@@ -22,6 +22,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/images"
 	"github.com/cloudburrow/cloudburrow/internal/osvscan"
 	"github.com/cloudburrow/cloudburrow/internal/prefetch"
+	"github.com/cloudburrow/cloudburrow/internal/spannerimage"
 	"github.com/cloudburrow/cloudburrow/internal/storageimage"
 	"github.com/cloudburrow/cloudburrow/internal/terminal"
 	"github.com/cloudburrow/cloudburrow/internal/tfconvert"
@@ -64,6 +65,16 @@ func offlinePlan(ctx context.Context, cfg config.Config, r prefetch.Runner) pref
 		plan.BigQuery = true
 		if tag, err := bigqueryimage.TagFor(plan.Arch); err == nil {
 			plan.BigQueryImage = tag
+		}
+	}
+	// The patched Spanner emulator this CLI embeds (#2029) is built, not
+	// pulled; without one, Images keeps Google's image, which up runs.
+	if serviceEnabled(cfg, config.ServiceSpanner) {
+		if tag, err := spannerimage.TagFor(plan.Arch); err == nil {
+			plan.SpannerImage = tag
+			if refs := plan.Images[components.SpannerImage]; len(refs) == 1 && refs[0] == "spanner" {
+				delete(plan.Images, components.SpannerImage)
+			}
 		}
 	}
 	if comps.NeedsKnative() {
@@ -124,6 +135,9 @@ func runPrefetch(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		},
 		BuildBigQuery: func(ctx context.Context) (string, error) {
 			return bigqueryimage.Build(ctx, images.ExecRunner{}, plan.Arch, cfg.Name)
+		},
+		BuildSpanner: func(ctx context.Context) (string, error) {
+			return spannerimage.Build(ctx, images.ExecRunner{}, plan.Arch, cfg.Name)
 		},
 		Node:     throwawayNode(cfg.Cluster.NodeImage),
 		Platform: "linux/" + plan.Arch,

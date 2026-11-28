@@ -133,3 +133,86 @@ def test_query_plan_and_profile(project, suffix):
                     assert "latency" in dict(n.execution_stats), n.display_name
     finally:
         instance.delete()
+
+
+_FINGRAPH_DDL = [
+    "CREATE TABLE Person (id INT64 NOT NULL, name STRING(MAX)) PRIMARY KEY (id)",
+    "CREATE TABLE Account (id INT64 NOT NULL, is_blocked BOOL, nick_name STRING(MAX)) PRIMARY KEY (id)",
+    "CREATE TABLE PersonOwnAccount (id INT64 NOT NULL, account_id INT64 NOT NULL, "
+    "FOREIGN KEY (account_id) REFERENCES Account (id)) PRIMARY KEY (id, account_id), INTERLEAVE IN PARENT Person ON DELETE CASCADE",
+    "CREATE TABLE AccountTransferAccount (id INT64 NOT NULL, to_id INT64 NOT NULL, amount FLOAT64, seq INT64 NOT NULL, "
+    "FOREIGN KEY (to_id) REFERENCES Account (id)) PRIMARY KEY (id, to_id, seq), INTERLEAVE IN PARENT Account ON DELETE CASCADE",
+    "CREATE PROPERTY GRAPH FinGraph NODE TABLES (Account, Person) EDGE TABLES ("
+    "PersonOwnAccount SOURCE KEY (id) REFERENCES Person (id) DESTINATION KEY (account_id) REFERENCES Account (id) LABEL Owns, "
+    "AccountTransferAccount SOURCE KEY (id) REFERENCES Account (id) DESTINATION KEY (to_id) REFERENCES Account (id) LABEL Transfers)",
+    "CREATE PROPERTY GRAPH G2 NODE TABLES (Account LABEL Acct PROPERTIES (id, UPPER(nick_name) AS up, id * 2 AS dbl))",
+]
+
+
+def test_graph_query_plans_and_profiles(project, suffix):
+    """#2029: PLAN and PROFILE of Spanner Graph queries through
+    google-cloud-spanner's execute_sql, on Google's FinGraph rows: a
+    quantified path pattern of two edges, a path mode on a part of a path,
+    path functions grouped by their alias, a MATCH no element table matches
+    (an Empty Relation), and properties a graph defines by expressions.
+    PROFILE returns NORMAL's rows, PLAN's operators, each with execution
+    statistics, and a root that counts the rows returned."""
+    require("SPANNER_EMULATOR_HOST")
+    from google.cloud.spanner_admin_instance_v1 import Instance
+    from google.cloud.spanner_v1 import ExecuteSqlRequest
+
+    spanner_helpers._cloud_region = "global"
+    client = spanner.Client(project=project, disable_builtin_metrics=True)
+    iid = f"pygraph-{suffix}"
+    client.instance_admin_api.create_instance(
+        parent=f"projects/{project}", instance_id=iid,
+        instance=Instance(config=f"projects/{project}/instanceConfigs/emulator-config", display_name="CloudBurrow graph plans",
+                          node_count=1, edition=Instance.Edition.ENTERPRISE)).result(timeout=60)
+    instance = client.instance(iid)
+    try:
+        database = instance.database("fingraph", ddl_statements=_FINGRAPH_DDL)
+        database.create().result(timeout=120)
+        with database.batch() as batch:
+            batch.insert(table="Account", columns=("id", "is_blocked", "nick_name"),
+                         values=[(7, False, "Vacation Fund"), (16, True, "Vacation Fund"), (20, False, "Rainy Day Fund")])
+            batch.insert(table="Person", columns=("id", "name"), values=[(1, "Alex"), (2, "Dana"), (3, "Lee")])
+            batch.insert(table="AccountTransferAccount", columns=("id", "to_id", "amount", "seq"),
+                         values=[(7, 16, 300.0, 1), (7, 16, 100.0, 2), (16, 20, 300.0, 3), (20, 7, 500.0, 4), (20, 16, 200.0, 5)])
+            batch.insert(table="PersonOwnAccount", columns=("id", "account_id"), values=[(1, 7), (2, 20), (3, 16)])
+
+        for sql, want, ops in (
+            ("GRAPH FinGraph MATCH ((a:Account)-[t:Transfers]->(b:Account)-[u:Transfers]->(c:Account)){1,2} RETURN COUNT(*) AS n",
+             [[24]], {"Recursive Union", "Aggregate"}),
+            ("GRAPH FinGraph MATCH (a:Account)-[t:Transfers]->(b:Account) (ACYCLIC (b)-[u:Transfers]->(c:Account)-[w:Transfers]->(d:Account)) "
+             "RETURN COUNT(*) AS n", [[7]], {"Cross Apply", "Aggregate"}),
+            ("GRAPH FinGraph MATCH p=(a:Account)-[t:Transfers]->(b)-[u:Transfers]->(c) RETURN IS_ACYCLIC(p) AS ac, COUNT(*) AS n GROUP BY ac",
+             [[False, 2], [True, 5]], {"Aggregate"}),
+            ("GRAPH FinGraph MATCH (a:Account)-[o:Owns]->(b:Account) RETURN COUNT(*) AS n", [[0]], {"Empty Relation", "Aggregate"}),
+            ("GRAPH G2 MATCH (a:Acct) WHERE a.dbl > 20 RETURN a.id AS i, a.up AS u",
+             [[16, "VACATION FUND"], [20, "RAINY DAY FUND"]], {"Scan"}),
+        ):
+            with database.snapshot() as snap:
+                normal = sorted(list(snap.execute_sql(sql)))
+            assert normal == want, (sql, normal)
+            with database.snapshot() as snap:
+                res = snap.execute_sql(sql, query_mode=ExecuteSqlRequest.QueryMode.PLAN)
+                assert list(res) == []
+                plan = list(res.stats.query_plan.plan_nodes)
+            assert plan and all(n.index == i for i, n in enumerate(plan)), sql
+            assert not any(n.execution_stats for n in plan), sql
+            assert ops <= {n.display_name for n in plan}, (sql, [n.display_name for n in plan])
+            with database.snapshot() as snap:
+                res = snap.execute_sql(sql, query_mode=ExecuteSqlRequest.QueryMode.PROFILE)
+                rows = sorted(list(res))
+                stats = res.stats
+            assert rows == want, (sql, rows)
+            pplan = list(stats.query_plan.plan_nodes)
+            assert [(n.display_name, n.kind) for n in pplan] == [(n.display_name, n.kind) for n in plan], sql
+            assert dict(pplan[0].execution_stats)["rows"]["total"] == str(len(want)), sql
+            assert dict(stats.query_stats)["rows_returned"] == str(len(want)), sql
+            PlanNode = type(pplan[0])
+            for n in pplan:
+                if n.kind == PlanNode.Kind.RELATIONAL:
+                    assert "latency" in dict(n.execution_stats), (sql, n.display_name)
+    finally:
+        instance.delete()

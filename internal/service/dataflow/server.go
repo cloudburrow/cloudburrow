@@ -90,6 +90,9 @@ type FlexLaunch struct {
 	MaxWorkers                    int32
 	Update                        bool
 	TransformNameMapping          string
+	// Network and Subnetwork are the launch environment's, the workers'
+	// VPC network and subnetwork.
+	Network, Subnetwork string
 }
 
 // Options are the server's collaborators.
@@ -125,7 +128,8 @@ type Server struct {
 	mu   sync.Mutex
 	// jobs by key (project/location/id).
 	jobs map[string]*jobRec
-	// base is cancelled by Close: it ends the snapshots being taken.
+	// base is cancelled by Close: it ends the snapshots being taken and
+	// the Flex Template launchers running.
 	base     context.Context
 	stopBase context.CancelFunc
 	// snaps are the snapshots by key (project/location/id).

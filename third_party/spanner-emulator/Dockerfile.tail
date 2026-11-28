@@ -1,0 +1,41 @@
+# CloudBurrow (#2029): the rest of the emulator's build/docker/Dockerfile.ubuntu
+# (Apache-2.0, Google LLC), changed so that an interrupted build keeps its
+# work and so that it yields the binaries, not an image:
+# scripts/spanner-emulator-binaries.sh keeps the upstream file up to its
+# "Build GoogleSQL to cache it" step and appends this. Bazel's output base is
+# a BuildKit cache mount, so GoogleSQL is built once, in the same step as the
+# emulator, and --jobs bounds the compilers' memory (BAZEL_JOBS). The
+# `binaries` stage is what the script exports; `up` layers it on a pinned
+# distroless base as upstream's release stage does (internal/spannerimage).
+# The `patch-tests` stage runs the patches' regression tests.
+WORKDIR /src
+
+# Copy over the emulator code base into the container.
+COPY . .
+
+# Make enum NodeTag compatible with both C and C++.
+RUN find third_party/spanner_pg -name "nodes.h" -exec sed -i 's/enum NodeTag : int/enum NodeTag/g' {} +
+
+ENV EXTRA_BAZEL_ARGS="--tool_java_runtime_version=local_jdk"
+ARG BAZEL_JOBS=4
+RUN --mount=type=cache,id=cloudburrow-spanner-emulator-bazel,target=/root/.cache/bazel \
+    bazel build -c opt --jobs=${BAZEL_JOBS} \
+      //binaries:emulator_main \
+      //binaries:gateway_main \
+    && mkdir -p /out \
+    && cp bazel-bin/binaries/emulator_main bazel-bin/binaries/gateway_main_/gateway_main /out/ \
+    && for file in $(find -L bazel-src/external -name "LICENSE" -o -name "COPYING"); do \
+         echo "----"; echo $file; echo "----"; cat $file; \
+       done > /out/licenses.txt \
+    && gzip /out/licenses.txt
+
+# The patches' regression tests (patches/cloud-spanner-emulator/0003), in the
+# same Bazel output base, so only the test binary is compiled.
+FROM build AS patch-tests
+ARG BAZEL_JOBS=4
+RUN --mount=type=cache,id=cloudburrow-spanner-emulator-bazel,target=/root/.cache/bazel \
+    bazel test -c opt --jobs=${BAZEL_JOBS} --test_output=all \
+      --test_filter='*Gql*' //backend/query:query_engine_test
+
+FROM scratch AS binaries
+COPY --from=build /out/ /

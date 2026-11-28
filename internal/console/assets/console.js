@@ -456,6 +456,17 @@ const ROUTES = [
   // Snapshots (#2215): a project's snapshots of streaming jobs.
   { path: "/dataflow/snapshots", service: "dataflow-snapshots", icon: "dataflow", title: "Snapshots", kind: "Snapshot",
     section: "Databases", product: "dataflow", productTitle: "Dataflow" },
+  // Database Migration Service (#2252), Google's menu in its order:
+  // Migration jobs, Conversion workspaces, Connection profiles, Private
+  // connectivity configurations.
+  { path: "/dbmigrate/migrations", service: "datamigration", title: "Migration jobs", kind: "Migration job",
+    section: "Databases", product: "datamigration", productTitle: "Database Migration Service" },
+  { path: "/dbmigrate/conversion-workspaces", service: "datamigration-conversion", icon: "datamigration", title: "Conversion workspaces", kind: "Conversion workspace",
+    section: "Databases", product: "datamigration", productTitle: "Database Migration Service" },
+  { path: "/dbmigrate/connection-profiles", service: "datamigration-profiles", icon: "datamigration", title: "Connection profiles", kind: "Connection profile",
+    section: "Databases", product: "datamigration", productTitle: "Database Migration Service" },
+  { path: "/dbmigrate/private-connections", service: "datamigration-private", icon: "datamigration", title: "Private connectivity configurations", kind: "Private connectivity configuration",
+    section: "Databases", product: "datamigration", productTitle: "Database Migration Service" },
 
   // Storage Transfer Service (#1957), Google's Data Transfer pages: Transfer
   // jobs, with each job's run history, and Agent pools for POSIX file
@@ -1300,6 +1311,8 @@ const ICONS = {
   // Filestore: a file folder over a server's drive.
   filestore: '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v4H3z"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 17h2"/>',
   // Dataflow: a pipeline's steps joined top to bottom.
+  // Database Migration Service (#2252): a source database, an arrow, a destination.
+  datamigration: '<ellipse cx="6" cy="6" rx="3.5" ry="1.5"/><path d="M2.5 6v7c0 .8 1.6 1.5 3.5 1.5s3.5-.7 3.5-1.5V6"/><ellipse cx="18" cy="11" rx="3.5" ry="1.5"/><path d="M14.5 11v7c0 .8 1.6 1.5 3.5 1.5s3.5-.7 3.5-1.5v-7M8 18.5h4l-1.5-1.5M12 18.5l-1.5 1.5"/>',
   dataflow: '<rect x="4" y="3" width="7" height="5" rx="1"/><rect x="13" y="10" width="7" height="5" rx="1"/><rect x="4" y="16" width="7" height="5" rx="1"/><path d="M7.5 8v8M11 12.5h2"/>',
   // App Hub: three components grouped in one application.
   apphub: '<rect x="3" y="3" width="18" height="18" rx="3"/><rect x="6" y="6" width="5" height="5" rx="1"/><rect x="13" y="6" width="5" height="5" rx="1"/><rect x="6" y="13" width="12" height="5" rx="1"/>',
@@ -4604,18 +4617,26 @@ async function renderDetail(view, route, resourcePath) {
   const kindTitled = Boolean(route.kind) && segments.length === 1;
   const up = segments.length > 1 ? detailHref(route, segments.slice(0, -1)) : back.pathname + back.search;
   const nameLine = kindTitled ? el("p", { class: "resource-name", text: name }) : null;
+  // Inside BigQuery Studio's tab (#1861) the page is a tab's content,
+  // under the Studio's own h1.
+  const heading = el(view.dataset.embedded === "true" ? "h2" : "h1", { text: kindTitled ? `${route.kind} details` : name });
+  const backLink = backArrow(up, segments.length > 1 ? "Back" : `Back to ${route.title}`);
   const crumb = el("div", { class: "page-header" },
     // A breadcrumb, because a screen you can only leave with the browser
     // button is a screen you are stuck in.
     el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" }, ...trail),
     el("div", { class: "page-title-row" },
-      backArrow(up, segments.length > 1 ? "Back" : `Back to ${route.title}`),
-      // Inside BigQuery Studio's tab (#1861) the page is a tab's content,
-      // under the Studio's own h1.
-      el(view.dataset.embedded === "true" ? "h2" : "h1", { text: kindTitled ? `${route.kind} details` : name }),
+      backLink,
       el("div", { class: "page-header-actions" })),
     nameLine,
     el("p", { class: "subtitle", text: (project ? `Project ${project}` : "All projects") + scopeSubtitle(route.service) }));
+  // The heading is drawn once the resource has answered, as Google's
+  // resource pages draw "<Kind> details" and the details under it only when
+  // they have loaded: while it loads the page is the breadcrumb and the
+  // skeleton, so a loading page never reads as the loaded one (a Backup and
+  // DR data source's page was read as loaded while still loading). Every
+  // outcome — loaded, cancelled, failed, a prompt — draws it.
+  const showHeading = () => { if (!heading.parentNode) backLink.after(heading); };
   const header = [crumb];
   // A provider-drawn trail, for a page whose path is not its hierarchy: an
   // object's crumbs are its bucket and folders (#790).
@@ -4641,12 +4662,14 @@ async function renderDetail(view, route, resourcePath) {
   try {
     data = await api(path, { signal: cancel.signal });
   } catch (err) {
+    showHeading();
     return setChildren(view, ...header,
       isCancelled(err)
         ? cancelledState(`${name} not loaded`, () => renderDetail(view, route, segments))
         : errorState(`${name} unavailable`, String(err.message),
                      () => renderDetail(view, route, segments)));
   }
+  showHeading();
   // The prompt is checked first, for the same reason it is on the list
   // screen: needing a project is a precondition, not a failure, and it must
   // never be rendered as one.
@@ -4971,7 +4994,15 @@ async function renderDetail(view, route, resourcePath) {
   // filter already applied — so a reader who wants the live stream and the full
   // control set gets there without rebuilding the query.
   const drawLogsSection = (into, section, note) => {
-    setChildren(into, note, loadingState(4));
+    // The tab's own bar and note (Cloud Tasks' Enable logs) stay where they
+    // are while the entries load; only what is under them is redrawn. Put
+    // back into the panel with the entries, they left the document for a
+    // moment, and a press on Enable logs made just before the entries
+    // arrived was a click Chrome dispatched to nothing: no prompt opened
+    // (Landing 171 run 46064522048, TestTasksPromptsAndCheckedTasksAsGoogles).
+    const body = el("div", { class: "logs-section-body" });
+    setChildren(into, note, body);
+    setChildren(body, loadingState(4));
     const query = new URLSearchParams({ resource: section.resource, limit: "200" });
     if (project) query.set("project", project);
     const explorer = new URLSearchParams({ resource: section.resource });
@@ -4981,10 +5012,10 @@ async function renderDetail(view, route, resourcePath) {
       const entries = data.entries || [];
       // Which store the lines are from: with Cloud Logging served, what
       // clients write through its API is here beside the pods' output.
-      if (data.cloudLogging === false && !note) {
-        note = el("p", { class: "unavailable",
-          text: "Cloud Logging is not served by this instance, so these are the containers' own lines only." });
-      }
+      const notice = data.cloudLogging === false && !note
+        ? el("p", { class: "unavailable",
+            text: "Cloud Logging is not served by this instance, so these are the containers' own lines only." })
+        : null;
       const link = el("a", { class: "button-link secondary",
         href: `/logs?${explorer}`,
         text: "Open in Logs Explorer" });
@@ -4992,7 +5023,7 @@ async function renderDetail(view, route, resourcePath) {
         // Which kind of empty. A pod's log line often carries no project, so a
         // project-scoped read of a noisy resource can come back empty while the
         // instance holds hundreds of its lines.
-        return setChildren(into, note,
+        return setChildren(body, notice,
           emptyState(`No entries for ${name}`,
             `This instance holds ${data.held || 0} entries, ${data.unattributed || 0} of ` +
             "which carry no project. A pod's line usually cannot be attributed to one, " +
@@ -5013,11 +5044,10 @@ async function renderDetail(view, route, resourcePath) {
           fields: { Severity: e.severity, Source: e.source || "—", Message: e.message },
         })),
       };
-      setChildren(into);
-      renderTableInto(into, [note, el("div", { class: "card-actions" }, link)].filter(Boolean),
+      renderTableInto(body, [notice, el("div", { class: "card-actions" }, link)].filter(Boolean),
                       listing, "entries", () => drawPanel(), route, {});
     }).catch((err) => {
-      setChildren(into, note,
+      setChildren(body,
         errorState("Logs unavailable", String(err.message), () => drawPanel()));
     });
   };
@@ -8536,15 +8566,19 @@ function buildCreateForm(spec) {
     if (!cond) continue;
     // "name=a|b" holds for either choice: Create table's File format is
     // shown for Google Cloud Storage and for Upload (#1861).
+    // "!name" holds while a checkbox is unchecked (or a field empty):
+    // Create a schedule's Start time and Frequency show until Use CRON
+    // expression is turned on (#2260).
     const terms = cond.split("&").map((t) => {
-      const [name, choice] = t.split("=");
-      return { other: byName.get(name), choice };
+      const not = t.startsWith("!");
+      const [name, choice] = (not ? t.slice(1) : t).split("=");
+      return { other: byName.get(name), choice, not };
     }).filter((t) => t.other);
     if (!terms.length) continue;
     const show = () => {
-      const on = terms.every(({ other, choice }) => choice === undefined
+      const on = terms.every(({ other, choice, not }) => (choice === undefined
         ? (other.isCheck ? other.control.checked : !!other.control.value)
-        : choice.split("|").includes(radioValue(other)));
+        : choice.split("|").includes(radioValue(other))) !== not);
       entry.node.hidden = !on;
       if (!on) markValid(entry);
     };
@@ -8714,7 +8748,7 @@ function buildCreateForm(spec) {
       m.slot = null;
       m.openPanel = () => openPanel(m);
       for (const n of [...Object.keys(m.field.visibleWhen || {}),
-        ...(m.field.showWhen || "").split("&").map((t) => t.split("=")[0])]) {
+        ...(m.field.showWhen || "").split("&").map((t) => t.replace(/^!/, "").split("=")[0])]) {
         const other = byName.get(n);
         if (other) other.control.addEventListener("change", refresh);
       }
@@ -13018,6 +13052,7 @@ async function renderComputeCreate(view) {
   const priceHourly = el("p", { class: "muted", id: "compute-price-hourly" });
   const priceDetail = el("p", { class: "form-help", id: "compute-price-detail" });
   let sizeList = [];
+  let chosenPreset = null;
 
   const chosenSize = () => {
     const r = sizes.querySelector("input[name=compute-size]:checked");
@@ -13047,10 +13082,25 @@ async function renderComputeCreate(view) {
       `. Billed by ${CLOUD_TITLES[conn().cloud]} to ${conn().account_id}; ${s.price_source || "on-demand Linux price"}. ` +
       (stop ? "Auto-stop ends the hourly VM charge while it is idle." : "Without auto-stop it is billed until you stop it.");
   };
-  const loadPermissions = async () => {
+  // Each change of the account or the region starts a load of its regions,
+  // sizes and permissions; a response that arrives after a newer load
+  // began is dropped, and Create stays disabled until the newest load's
+  // sizes are on the page. A load that finished late replaced the sizes
+  // (and disabled Create) just as Create was clicked, and the click did
+  // nothing (#2259).
+  let load = 0;
+  const current = (n) => n === load && location.pathname === path;
+  const startLoad = () => {
+    load++;
+    create.disabled = true;
+    setChildren(permissions, el("p", { class: "muted", text: "Checking permissions…" }));
+    return load;
+  };
+  const loadPermissions = async (n) => {
     setChildren(permissions, el("p", { class: "muted", text: "Checking permissions…" }));
     try {
       const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(connection.value)}/permissions?region=${encodeURIComponent(region.value)}`);
+      if (!current(n)) return;
       const missing = res.report.missing || [];
       setChildren(permissions, missing.length
         ? el("div", { class: "form-error", id: "compute-permissions-missing" },
@@ -13058,47 +13108,60 @@ async function renderComputeCreate(view) {
             el("ul", {}, ...missing.map((m) => el("li", {}, el("code", { text: m.action }), el("span", { text: `: ${m.why}` })))))
         : el("p", { class: "muted", id: "compute-permissions-ok", text: res.summary }));
     } catch (err) {
+      if (!current(n)) return;
       setChildren(permissions, el("p", { class: "form-error", text: `The permissions could not be checked: ${err.message}` }));
     }
   };
-  const loadSizes = async () => {
+  const loadSizes = async (n) => {
     create.disabled = true;
     setChildren(sizes, el("p", { class: "muted", text: "Reading sizes and prices…" }));
+    let list;
     try {
       const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(connection.value)}/sizes?region=${encodeURIComponent(region.value)}`);
-      sizeList = res.sizes || [];
+      list = res.sizes || [];
     } catch (err) {
+      if (!current(n)) return;
       setChildren(sizes, el("p", { class: "form-error", text: `The sizes could not be read: ${err.message}` }));
       return;
     }
+    if (!current(n)) return;
+    sizeList = list;
+    // The size chosen stays chosen when the new list has it.
+    const keep = sizeList.some((s) => s.preset === chosenPreset);
     setChildren(sizes, ...sizeList.map((s, i) => el("label", { class: "check-line compute-size", "data-preset": s.preset },
-      el("input", { type: "radio", name: "compute-size", value: s.preset, checked: i === 0, onchange: drawPrice }),
+      el("input", { type: "radio", name: "compute-size", value: s.preset, checked: keep ? s.preset === chosenPreset : i === 0,
+        onchange: () => { chosenPreset = s.preset; drawPrice(); } }),
       el("span", {},
         el("strong", { text: PRESET_TITLES[s.preset] || s.preset }),
         el("span", { text: ` · ${s.name} · ${sizeSummary(s)} · ` }),
         el("span", { class: "compute-size-price", text: hourly(s) }),
         s.note ? el("span", { class: "form-help compute-size-note", text: ` ${s.note}` }) : null))));
+    chosenPreset = (chosenSize() || {}).preset;
     drawPrice();
     create.disabled = false;
   };
   const loadRegions = async () => {
+    const n = startLoad();
     region.disabled = true;
     setChildren(region, el("option", { text: "Reading regions…" }));
     try {
       const res = await computeJSON(`/api/compute/connections/${encodeURIComponent(connection.value)}/regions`);
+      if (!current(n)) return;
       setChildren(region, ...res.regions.map((r) => el("option", { value: r.name, selected: r.name === res.default,
         text: r.display_name ? `${r.name} (${r.display_name})` : r.name })));
       region.disabled = false;
+      error.hidden = true;
     } catch (err) {
+      if (!current(n)) return;
       setChildren(region, el("option", { text: "No regions" }));
       error.textContent = `The regions could not be read: ${err.message}`;
       error.hidden = false;
       return;
     }
-    await Promise.all([loadSizes(), loadPermissions()]);
+    await Promise.all([loadSizes(n), loadPermissions(n)]);
   };
   connection.addEventListener("change", loadRegions);
-  region.addEventListener("change", () => Promise.all([loadSizes(), loadPermissions()]));
+  region.addEventListener("change", () => { const n = startLoad(); return Promise.all([loadSizes(n), loadPermissions(n)]); });
   autoStop.addEventListener("change", drawPrice);
 
   const submit = async (e) => {
@@ -13112,7 +13175,11 @@ async function renderComputeCreate(view) {
       return;
     }
     const s = chosenSize();
-    if (!s) return;
+    if (!s) {
+      error.textContent = "Choose a machine configuration.";
+      error.hidden = false;
+      return;
+    }
     setBusy(create, true);
     const op = recordOperation(`Create VM ${name}`);
     try {
@@ -29288,9 +29355,19 @@ function renderIAMAnalyzer(view) {
     el("form", { class: "card", novalidate: true, onsubmit: submit }, error, ...fields.nodes, el("div", { class: "modal-actions" }, run, save, exp)),
     results);
   const savedPanel = el("div", { id: "analyzer-saved", role: "tabpanel", "aria-labelledby": "analyzer-tab-saved", hidden: true });
+  // Each visit to the tab lists the scope's saved queries afresh. Until the
+  // list answers, the panel is the loading skeleton, as Google's tables are
+  // while they load: never the rows of the last visit, whose Run and Delete
+  // would act on a list about to be replaced (a Delete clicked in the stale
+  // table was lost when the fresh one replaced it). Only the latest listing
+  // draws, so a slow earlier one never overwrites it.
+  let savedSeq = 0;
   const loadSaved = async () => {
+    const seq = ++savedSeq;
+    setChildren(savedPanel, loadingState(3, { what: "saved queries" }));
     try {
       const r = await iamCall("saved-list", { scope: fields.values().scope });
+      if (seq !== savedSeq) return;
       const qs = r.savedQueries || [];
       setChildren(savedPanel, qs.length ? el("table", { class: "table", id: "saved-queries-table" },
         el("caption", { class: "visually-hidden", text: "Saved queries" }),
@@ -29308,11 +29385,18 @@ function renderIAMAnalyzer(view) {
                 setChildren(results, el("h2", { text: "Query results" }), table("analyze-table", r.mainAnalysis));
               } catch (err) { fail(err); }
             } }),
-            el("button", { type: "button", class: "link", text: "Delete", "aria-label": `Delete ${q.name.split("/").pop()}`, onclick: async () => {
-              await iamCall("saved-delete", { name: q.name });
+            el("button", { type: "button", class: "link", text: "Delete", "aria-label": `Delete ${q.name.split("/").pop()}`, onclick: async (ev) => {
+              ev.currentTarget.disabled = true;
+              try {
+                await iamCall("saved-delete", { name: q.name });
+                notify(`Deleted saved query ${q.name.split("/").pop()}`);
+              } catch (err) {
+                notify(`Saved query ${q.name.split("/").pop()} not deleted: ${err.message}`, "error");
+              }
               loadSaved();
             } })))))) : el("p", { class: "unavailable", id: "saved-queries-empty", text: "No saved queries in this scope." }));
     } catch (err) {
+      if (seq !== savedSeq) return;
       setChildren(savedPanel, el("p", { class: "form-error", role: "alert", text: err.message }));
     }
   };

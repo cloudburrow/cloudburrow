@@ -43,6 +43,24 @@ section and add its link at the bottom.
   rest with a customer-managed key, enforced performance limits and export `ip_ranges` (#2194).
 - Spanner query plans for `PLAN` and `PROFILE`, including Spanner Graph's documented statements,
   with Spanner Studio's Run options and Query execution timeline (part of #2029).
+- Spanner `PLAN` and `PROFILE` now plan quantified path patterns of several edges, path modes on
+  part of a path, graph element and path functions, properties defined by expressions, and SQL
+  lambdas, subscripts, `WINDOW` clauses and `TABLESAMPLE` of a subquery (part of #2029).
+- Cloud SQL IAM group authentication: `CLOUD_IAM_GROUP` users on PostgreSQL and MySQL 8.0+, whose
+  Cloud Identity group members sign in with their own tokens and get their accounts and roles
+  from the groups (part of #1524).
+- The AlloyDB console follows Google's more closely: the Clusters list in Google's columns, the
+  Data protection tab's backup and recovery policies, database version upgrades, changing a user's
+  password, System insights and Query insights from AlloyDB's metrics in Cloud Monitoring, the
+  maintenance window, the database flags picker and backup labels (#2251).
+- AlloyDB insights from the servers' own telemetry: query latency distributions, wait events,
+  lock time, sampled query plans and tags in Query insights, the servers' logs in Cloud Logging
+  with System insights' Log errors card, and node metrics (#2253).
+- Database Migration Service: connection profiles, one-time and continuous migration jobs from
+  MySQL and PostgreSQL to Cloud SQL and AlloyDB, private connectivity, and its console pages with
+  Migrate on the Cloud SQL and AlloyDB pages (#2252); existing destination instances and
+  clusters, MySQL sources without GTIDs, verified SSL, SSH tunnels, object selection and MySQL dump
+  flags (part of #2257).
 
 ### Data and analytics
 
@@ -51,6 +69,13 @@ section and add its link at the bottom.
   console with its Job graph, running Apache Beam pipelines (Python, Java, Go and Beam YAML) on a
   local runner (part of #2215). Beam YAML pipelines run from the Beam SDK (`apache_beam.yaml.main`);
   Google's YAML template (`Yaml_Template`) is not served yet (#2255).
+- More Google-provided Dataflow templates: Spanner import and export, Text Files to Spanner,
+  BigQuery to TFRecords, Parquet and Bigtable, JDBC to BigQuery and Pub/Sub, Pub/Sub to JDBC and
+  Avro, File Format Conversion, MySQL and PostgreSQL to BigQuery, Streaming Data Generator and more
+  Pub/Sub and Cloud Storage Flex Templates; job workers reach Cloud SQL private IPs on the job's
+  network, and the BigQuery Storage API v1beta1 is served (part of #2215).
+- Google's Dataflow YAML template (`gcloud dataflow yaml run`) runs with no network access off the
+  instance (#2255).
 - Real JupyterLab in Vertex AI Workbench instances, Colab Enterprise runtimes and Dataproc
   Component Gateway, with Google's JupyterLab plugins (#2198).
 
@@ -69,9 +94,27 @@ section and add its link at the bottom.
 
 - Cloud Build repositories (2nd gen): connections, linked repositories and their triggers, against
   the instance's own git server (#2197).
+- `cloudburrow terraform` points the Certificate Manager, Network Security, Network Services,
+  Identity-Aware Proxy, Serverless VPC Access and Dataproc resources at the instance instead of
+  refusing them (part of #1578).
 
 ### Fixed
 
+- A resource page's Logs tab no longer drops a click on its own buttons (Cloud Tasks' Enable logs)
+  made just as its entries finish loading: the button stays in place while the entries are drawn
+  under it, so the prompt opens.
+- Cloud NAT flow logs (`compute.googleapis.com/nat_flows`) and dynamic port allocation's port usage
+  work on Linux hosts whose kernel has no `/proc/net/nf_conntrack`, Ubuntu's among them: the NAT
+  gateway now lists its connections over netlink with `conntrack`, which VM images now carry.
+- A Basic tier Memorystore for Redis instance with RDB persistence keeps data written just before a
+  maintenance restart: the old server now stops and writes its last snapshot before the next one
+  starts, instead of the next one sometimes loading the previous snapshot.
+- Upgrading from an earlier release: a client that signed in to Cloud SQL for PostgreSQL's
+  `cloudburrow` user without a password is now refused, because the server checks passwords from
+  v0.8.0 on (#2208). Your data is kept, and so is any password a user already had; the
+  passwordless user takes the instance's `PGPASSWORD`, so run `eval "$(cloudburrow env)"` again.
+  The nightly upgrade test signs in with that password and checks that a wrong or missing one is
+  refused (#2271). See [docs/install.md](docs/install.md#upgrading).
 - A VM's internal load balancer and Private Service Connect addresses stay reachable after the
   guest's VPC agent restarts or one of its relays exits; the agent now restarts relays that are no
   longer running.
@@ -89,6 +132,13 @@ section and add its link at the bottom.
   RECREATING with its last attempt, instead of sometimes dropping it or making one of a new name.
 - A Kubernetes Engine node's pods are reachable as soon as the node joins its pool, so a workload
   keeps serving while a surge upgrade drains the old node.
+- VM guest images and other locally built images install packages from pinned Debian and Ubuntu
+  snapshots, so a mirror's outage or update no longer breaks a build (#2258).
+- Dataflow streaming jobs that are drained write their last windows, `GroupIntoBatches` no longer
+  drops its last batch, and `cloudburrow stop` stops running Dataflow jobs at once (part of #2215).
+- A console resource page, such as a Backup and DR data source's, shows its heading only once the
+  resource has loaded, as Google's console does; while it loads the page shows the breadcrumb and
+  a loading indicator, so a page still loading no longer looks like the loaded one.
 
 ## [0.7.0] - 2026-11-25
 

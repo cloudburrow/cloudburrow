@@ -41,13 +41,14 @@ func TestCloudNATEndpointIndependentMappingAndDynamicPorts2140(t *testing.T) {
 	opts := computeOpts(t, h)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
 	t.Cleanup(cancel)
-	tg := startNATTarget(ctx, t, cluster)
 	const region, zone = "us-east4", "us-east4-a"
 	p := h.Project()
 	v := newVPCVMs(ctx, t, h, zone)
 	sfx := strconv.Itoa(int(time.Now().UnixNano() % 1e6))
 	vm := "ct-eim-" + sfx
 	v.make(map[string]*computepb.NetworkInterface{vm: {Network: proto.String("global/networks/default")}})
+	// The target after the VM, whose image it runs (#2245).
+	tg := startNATTarget(ctx, t, cluster)
 	routers, err := computeapi.NewRoutersRESTClient(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
@@ -103,11 +104,12 @@ func TestCloudNATEndpointIndependentMappingAndDynamicPorts2140(t *testing.T) {
 	}
 	nodes, _ := exec.CommandContext(ctx, "docker", "ps", "--filter", "label=io.x-k8s.kind.cluster="+cluster, "--format", "{{.Names}}").Output()
 	// natPorts are the NAT source ports of the nodes' UDP flows from
-	// natIP to the target's port dport.
+	// natIP to the target's port dport, listed over netlink (Ubuntu's
+	// kernels have no /proc/net/nf_conntrack).
 	natPorts := func(natIP string, dport int) map[int]bool {
 		out := map[int]bool{}
 		for _, node := range strings.Fields(string(nodes)) {
-			ct, _ := exec.CommandContext(ctx, "docker", "exec", node, "cat", "/proc/net/nf_conntrack").Output()
+			ct, _ := exec.CommandContext(ctx, "docker", "exec", node, "conntrack", "-L", "-o", "extended").Output()
 			for _, l := range strings.Split(string(ct), "\n") {
 				if !strings.Contains(l, " udp ") || !strings.Contains(l, " src="+natIP+" dst="+tg.ip+" ") || !strings.Contains(l, fmt.Sprintf(" dport=%d ", dport)) {
 					continue

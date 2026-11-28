@@ -41,6 +41,12 @@ type byocConsole struct {
 
 func openByoc(t *testing.T) *byocConsole {
 	t.Helper()
+	return openByocWith(t, nil)
+}
+
+// openByocWith is openByoc with the console's handler wrapped.
+func openByocWith(t *testing.T, wrap func(http.Handler) http.Handler) *byocConsole {
+	t.Helper()
 	b := &byocConsole{aws: awsfake.New(), az: azurefake.New(), keys: keychain.NewMemory()}
 	t.Cleanup(b.aws.Close)
 	t.Cleanup(b.az.Close)
@@ -68,7 +74,11 @@ func openByoc(t *testing.T) *byocConsole {
 		}
 		return nil
 	})
-	srv := httptest.NewServer(s.Handler())
+	h := s.Handler()
+	if wrap != nil {
+		h = wrap(h)
+	}
+	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	b.p = openAt(t, strings.TrimPrefix(srv.URL, "http://"))
 	t.Cleanup(b.p.forgive)
@@ -252,6 +262,149 @@ func TestByocConnectCreateScaleDelete(t *testing.T) {
 	p.waitFor(`document.getElementById("compute-aws-none") !== null`)
 	if n := b.keys.Names(); len(n) != 1 || !strings.HasPrefix(n[0], "connection/azure-") {
 		t.Fatalf("keychain items after Disconnect %v", n)
+	}
+}
+
+// heldRequests holds the console's responses to the requests whose path
+// and query contain a pattern until the test lets them go, so a test
+// orders the wizard's loads as a slow network would.
+type heldRequests struct {
+	mu      sync.Mutex
+	held    map[string]chan struct{}
+	arrived chan string
+}
+
+func newHeldRequests() *heldRequests {
+	return &heldRequests{held: map[string]chan struct{}{}, arrived: make(chan string, 16)}
+}
+
+func (h *heldRequests) hold(pattern string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.held[pattern] = make(chan struct{})
+}
+
+func (h *heldRequests) release(pattern string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if c, ok := h.held[pattern]; ok {
+		close(c)
+		delete(h.held, pattern)
+	}
+}
+
+// await waits for a held request to arrive.
+func (h *heldRequests) await(t *testing.T, pattern string) {
+	t.Helper()
+	deadline := time.After(30 * time.Second)
+	for {
+		select {
+		case got := <-h.arrived:
+			if got == pattern {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("no request for %s arrived", pattern)
+		}
+	}
+}
+
+func (h *heldRequests) wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.mu.Lock()
+		var wait chan struct{}
+		var pattern string
+		for p, c := range h.held {
+			if strings.Contains(r.URL.Path+"?"+r.URL.RawQuery, p) {
+				wait, pattern = c, p
+			}
+		}
+		h.mu.Unlock()
+		if wait != nil {
+			h.arrived <- pattern
+			select {
+			case <-wait:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Create VM's Create answers the click once the form says it is ready
+// (#2259). The walk-through re-selected its account and waited for the
+// form, which still showed the first load's sizes, permissions and an
+// enabled Create; the new load's answer then replaced the sizes and
+// disabled Create as it was clicked, and the click did nothing. A load
+// that arrives after a newer one began is dropped too, and the chosen
+// size survives a reload.
+func TestByocCreateFollowsTheNewestLoad(t *testing.T) {
+	held := newHeldRequests()
+	b := openByocWith(t, held.wrap)
+	p := b.p
+	b.signIn()
+	b.connectAWS()
+	b.connectAzure()
+	aws, azure := "aws-"+awsfake.DefaultAccount, "azure-"+azurefake.Subscription2
+	ready := func(account string) string {
+		return `document.getElementById("compute-permissions-ok") !== null && document.querySelectorAll("#compute-sizes input[name=compute-size]").length === 4 && ` +
+			`document.getElementById("compute-price-detail").textContent.includes("` + account + `") && !document.getElementById("compute-create-submit").disabled`
+	}
+	choose := func(conn string) {
+		p.eval(`(() => { const s = document.getElementById("compute-connection"); s.value = "`+conn+`"; s.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`, nil)
+	}
+	p.navigate("/settings/compute/create")
+	p.waitFor(ready(awsfake.DefaultAccount))
+
+	// The account chosen again, its regions slow to come: the form is not
+	// ready, and Create is disabled, until they and the rest arrive.
+	held.hold(aws + "/regions")
+	choose(aws)
+	held.await(t, aws+"/regions")
+	var early bool
+	p.eval(ready(awsfake.DefaultAccount), &early)
+	if early {
+		t.Error("while the account's regions load, the form reads as ready, with the previous load's sizes, permissions and an enabled Create")
+	}
+	var disabled bool
+	p.eval(`document.getElementById("compute-create-submit").disabled`, &disabled)
+	if !disabled {
+		t.Error("Create is enabled while the account's regions load")
+	}
+	held.release(aws + "/regions")
+	p.waitFor(ready(awsfake.DefaultAccount))
+	p.clickExpr(`document.querySelector('#compute-sizes input[value="medium"]')`)
+
+	// Azure chosen, its sizes slow; then AWS again before they come. Azure's
+	// late sizes must not replace AWS's, and Medium stays chosen.
+	held.hold(azure + "/sizes")
+	choose(azure)
+	held.await(t, azure+"/sizes")
+	choose(aws)
+	p.waitFor(ready(awsfake.DefaultAccount))
+	held.release(azure + "/sizes")
+	// Azure's answer is served; give the page its turn to (not) use it.
+	time.Sleep(time.Second)
+	var form struct {
+		Detail, Size, Sizes string
+		Disabled            bool
+	}
+	p.eval(`({ Detail: document.getElementById("compute-price-detail").textContent,
+		Size: (document.querySelector("#compute-sizes input[name=compute-size]:checked") || {}).value || "",
+		Sizes: [...document.querySelectorAll("#compute-sizes .compute-size")].map((n) => n.textContent).join("|"),
+		Disabled: document.getElementById("compute-create-submit").disabled })`, &form)
+	if !strings.Contains(form.Detail, awsfake.DefaultAccount) || !strings.Contains(form.Sizes, "m7i") || strings.Contains(form.Sizes, "Standard_") || form.Disabled {
+		t.Fatalf("after AWS was chosen again, Azure's late sizes replaced its own: %+v", form)
+	}
+	if form.Size != "medium" {
+		t.Errorf("the chosen size after the reloads is %q, want medium", form.Size)
+	}
+
+	// The click is answered.
+	p.run(chromedp.Click(chromedp.CSS(`#compute-create-submit`)))
+	if failed := b.waitOp(); failed != "" {
+		t.Fatalf("create failed: %s", failed)
 	}
 }
 

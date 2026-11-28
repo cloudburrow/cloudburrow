@@ -43,6 +43,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 	"net"
 	"os"
@@ -52,16 +53,27 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 )
 
-//go:embed assets/relay.py assets/py/cblaunch.py assets/py/cbio.py assets/py/sitecustomize.py assets/py/cbfnproxy.py assets/java/pool.sh assets/java/CbCredentialFactory.java
+//go:embed assets/relay.py assets/py/cblaunch.py assets/py/cbio.py assets/py/sitecustomize.py assets/py/cbfnproxy.py assets/py/cbnet.py assets/py/cbboot.sh assets/java/pool.sh assets/java/CbCredentialFactory.java assets/java/GreedyPCollectionFusers.java assets/java/FlinkBatchPortablePipelineTranslator.java assets/java/ExecutableStageDoFnOperator.java
 var assets embed.FS
 
 // The pinned images (dependencies.json components.dataflow).
 const (
+	// jobServerScript starts the job server (JobServerImage's
+	// flink-job-server.sh) with the patched classes before its jar, and
+	// with 70% of its container's memory as heap rather than the JVM's
+	// default quarter: Flink's local cluster clones the job graph as it
+	// submits it, and each fused stage of a large pipeline carries the
+	// pipeline's components (Text Files on Cloud Storage to Cloud
+	// Spanner's 933 steps came to about 200 MB of them, and its job failed
+	// with "Java heap space" in about half its runs).
+	jobServerScript = `javac -nowarn -d /tmp/cb-patch -cp "jars/*" /cb-patch/*.java >/tmp/cb-patch.log 2>&1 || { cat /tmp/cb-patch.log; exit 1; }
+exec java -XX:MaxRAMPercentage=70 -cp "/tmp/cb-patch:jars/*" org.apache.beam.runners.flink.FlinkJobServerDriver "$@"`
 	// JobServerImage is Beam 2.78.0's Flink 1.20 job server.
 	JobServerImage = "apache/beam_flink1.20_job_server@sha256:b1f7e43440a148151e9db001dfc0498eb4f87bdd4d6808904daf52ab0b532053"
 	// BeamVersion is the Beam release whose SDK harnesses are pinned.
@@ -125,7 +137,17 @@ const (
 	// formats' protocols), routed for Flex Template launchers only: a
 	// Python template's packages are installed from its Python
 	// repositories.
-	registryPort   = 9006
+	registryPort = 9006
+	// metadataPort is the instance's metadata server, routed for a
+	// provided Flex Template's launcher only (launcherMetadata): Google's
+	// launcher VM reads its credentials from its metadata server, and so
+	// does a template's own client built with application default
+	// credentials (BigQuery to Parquet's Storage API client).
+	metadataPort = 9007
+	// googleTLSPort answers the TLS of a Google API host a job's clients
+	// dial at its default endpoint (googleHosts), which the job's
+	// containers resolve to the relay: by the name the client asks for.
+	googleTLSPort  = 443
 	dataflowPort   = 80
 	workerPoolPort = 50000
 	// The Java worker pool the pipeline's environment names
@@ -136,7 +158,30 @@ const (
 	// The Go worker pool the pipeline's environment names (cblaunch.py's
 	// --go-harness).
 	goPoolPort = 50003
+	// privateBasePort is the relay's port for the job network's first
+	// private services address (PrivateService), the next one's the next
+	// port, and so on.
+	privateBasePort = 9100
 )
+
+// PrivateService is an address on a VPC network's private services
+// access range that a Dataflow worker on that network reaches, as a
+// Compute Engine VM there does: a Cloud SQL instance's private IP and
+// port, and the host address that serves it. The JDBC templates' guides
+// require that "the relational database must be accessible from the
+// subnet where Dataflow runs" (templates/provided/jdbc-to-bigquery, read
+// 2026-11-25), and the workers' network is their network or subnetwork
+// option, else "an auto mode VPC network named default"
+// (guides/specifying-networks, read 2026-11-25).
+type PrivateService struct {
+	// Name says what it is ("cloudsql INSTANCE").
+	Name string
+	// IP and Port are the address the workers dial.
+	IP   string
+	Port int
+	// Target is the host address (host:port) it is served at.
+	Target string
+}
 
 // Job is one job to run.
 type Job struct {
@@ -155,6 +200,18 @@ type Job struct {
 	Drain <-chan struct{}
 	// Snapshot is the snapshot the job's state is restored from ("" none).
 	Snapshot string
+	// Network and Subnetwork are the VPC network the job's workers run on
+	// (its network and subnetwork options, workerPools[].network and
+	// .subnetwork), and Region its regional endpoint: Dataflow's default
+	// network, "default", when neither is set.
+	Network, Subnetwork, Region string
+	// PipIndex is the Python package index the job's workers install its
+	// staged requirements' dependencies from (an Artifact Registry Python
+	// repository's https://LOCATION-python.pkg.dev/... URL, read through
+	// the relay), "" none: a Google-provided template's job reads the
+	// packages the instance seeds for it (ProvidedPythonIndex), as its
+	// workers on Google read PyPI.
+	PipIndex string
 }
 
 // Events receives what a job does.
@@ -221,6 +278,16 @@ type Docker struct {
 	// Snapshots is the directory the jobs' snapshots (Flink savepoints)
 	// are kept in, one directory each ("": none are taken).
 	Snapshots string
+	// Private answers the private services addresses on a job's VPC
+	// network (its project, and its network and subnetwork options as the
+	// job gives them, in region), which the job's workers reach and
+	// nothing else of the network; nil for none.
+	Private func(project, network, subnetwork, region string) []PrivateService
+
+	// closing is set once the instance stops (Shutdown): a cancelled
+	// run's containers are then removed at once, not cancelled through
+	// the runner.
+	closing atomic.Bool
 
 	runMu   sync.Mutex
 	running map[string]string // job ID: its directory
@@ -274,10 +341,17 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	}
 	live := map[string]string{}
 	if d.Live != nil {
-		live = d.Live()
+		live = maps.Clone(d.Live())
 	}
 	if live["storage"] == "" {
 		return failed("The job's staged pipeline is in Cloud Storage, which this instance does not serve.")
+	}
+	var pipEnv []string
+	if job.PipIndex != "" && d.Registry != nil {
+		if a := d.Registry(); a != "" {
+			live["registry"] = a
+			pipEnv, _ = pipIndexEnv(map[string]string{"PIP_INDEX_URL": job.PipIndex})
+		}
 	}
 	var cleanup []func()
 	defer func() {
@@ -346,7 +420,14 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 		_, _ = d.docker(c, args...)
 	}
 
-	relayIP, stopNet, err := d.jobNetwork(ctx, network, relay, dir, image, label, live)
+	var private []PrivateService
+	if d.Private != nil {
+		private = d.Private(job.Project, job.Network, job.Subnetwork, job.Region)
+	}
+	for _, p := range private {
+		d.logf("dataflow: job %s reaches %s at %s:%d", job.JobID, p.Name, p.IP, p.Port)
+	}
+	relayIP, stopNet, err := d.jobNetwork(ctx, network, relay, dir, image, label, live, private...)
 	cleanup = append(cleanup, stopNet)
 	if err != nil {
 		return failed(err.Error())
@@ -364,23 +445,52 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	// splitting runs there (a Google-provided template's SpannerIO read
 	// partitions its query when the job starts) reaches the instance's
 	// emulators, as the workers do, and never the default endpoints.
-	jsArgs := append([]string{"run", "-d", "--name", js, "--label", label, "--network", network, "--memory", "3g",
-		"-v", filepath.Join(dir, "flink") + ":/cb-flink:ro"}, env...)
+	// Its workers share its network namespace and hosts file, so they
+	// resolve the googleHosts to the relay too.
+	jsArgs := append(append([]string{"run", "-d", "--name", js, "--label", label, "--network", network, "--memory", "3g",
+		"-v", filepath.Join(dir, "flink") + ":/cb-flink:ro"}, googleHostArgs(live, relayIP)...), env...)
 	if d.Snapshots != "" {
 		if err := os.MkdirAll(d.Snapshots, 0o777); err != nil {
 			return failed(err.Error())
 		}
 		jsArgs = append(jsArgs, "-v", d.Snapshots+":"+snapshotMount)
 	}
-	jsArgs = append(jsArgs, JobServerImage, "--flink-master=[local]", "--job-host=0.0.0.0", "--flink-conf-dir=/cb-flink")
+	// The job server runs with three of Beam's classes patched
+	// (third_party/apache-beam/PROVENANCE.md): the fuser
+	// (GreedyPCollectionFusers.java, apache/beam#34647), without which a
+	// Flatten one of whose inputs is also consumed elsewhere (a Spanner
+	// export's "Combine all files") fails the job's translation ("were
+	// consumed but never produced"), and the batch translator
+	// (FlinkBatchPortablePipelineTranslator.java), whose Flatten took only
+	// inputs of one coder, and the stateful stage's operator
+	// (ExecutableStageDoFnOperator.java), which never ran a DoFn's
+	// @OnWindowExpiration (GroupIntoBatches' last batch, so an auto-sharded
+	// file write's last files, were dropped at its window's end). They are
+	// compiled against the job server's jar and put before it on the
+	// classpath (as flink-job-server.sh runs it).
+	for _, f := range []string{"GreedyPCollectionFusers.java", "FlinkBatchPortablePipelineTranslator.java", "ExecutableStageDoFnOperator.java"} {
+		jsArgs = append(jsArgs, "-v", filepath.Join(dir, "java", f)+":/cb-patch/"+f+":ro")
+	}
+	jsArgs = append(jsArgs, "--entrypoint", "sh", JobServerImage, "-c", jobServerScript, "sh",
+		"--flink-master=[local]", "--job-host=0.0.0.0", "--flink-conf-dir=/cb-flink")
 	if out, err := d.docker(ctx, jsArgs...); err != nil {
 		return failed("start the Flink job server: " + out)
 	}
 	cleanup = append(cleanup, func() { bg("rm", "-f", "-v", js) })
+	if len(private) > 0 {
+		psa := "cb-df-psa-" + suffix
+		cleanup = append(cleanup, func() { bg("rm", "-f", "-v", psa) })
+		if err := d.privateServices(ctx, js, psa, dir, image, label, relayIP, private); err != nil {
+			return failed(err.Error())
+		}
+	}
 	// The workers write their metrics' totals to metrics/ (sitecustomize).
 	poolArgs := append([]string{"run", "-d", "--name", pool, "--label", label, "--network", "container:" + js, "-v", dir + ":/cb:ro",
 		"-v", filepath.Join(dir, "metrics") + ":/cb/metrics", "-e", "CB_METRICS_DIR=/cb/metrics"}, env...)
-	poolArgs = append(poolArgs, image, "--worker_pool")
+	// Beam's worker pool, as the image's boot --worker_pool runs it, each
+	// worker started by cbboot.sh in a directory of its own.
+	poolArgs = append(append(poolArgs, pipEnv...), "--entrypoint", "python", image, "-m", "apache_beam.runners.worker.worker_pool_main",
+		fmt.Sprintf("--service_port=%d", workerPoolPort), "--container_executable=/cb/py/cbboot.sh")
 	if out, err := d.docker(ctx, poolArgs...); err != nil {
 		return failed("start the job's SDK harness: " + out)
 	}
@@ -389,7 +499,23 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	// The SDK harness's lines are the job's worker logs.
 	logCtx, stopLogs := context.WithCancel(context.Background())
 	cleanup = append(cleanup, stopLogs)
-	go d.follow(logCtx, pool, ev.Log)
+	// A worker that cannot install the job's packages (Beam's boot:
+	// "failed to install required packages") never connects, and the job
+	// would wait for it: the job fails, with boot's reason, once one
+	// says so.
+	var setupErr atomic.Pointer[string]
+	poolLog := func(severity, text string) {
+		if i := strings.Index(text, setupFailure); i >= 0 && setupErr.Load() == nil {
+			msg := text[i:]
+			if setupErr.CompareAndSwap(nil, &msg) {
+				bg("rm", "-f", "-v", launch)
+			}
+		}
+		if ev.Log != nil {
+			ev.Log(severity, text)
+		}
+	}
+	go d.follow(logCtx, pool, poolLog)
 	// A Java pipeline's, and a Python pipeline's cross-language
 	// transforms' (Java environments the expansion service added): the
 	// Java worker pool starts once the launcher finds a Java environment
@@ -441,6 +567,15 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	go func() {
 		select {
 		case <-ctx.Done():
+			if d.closing.Load() {
+				// The instance is stopping: its containers go at once, as
+				// a stopped instance's workers would, so that the stop is
+				// not held up by the runner's cancel.
+				c, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				_, _ = d.docker(c, "rm", "-f", "-v", launch, js, pool, "cb-df-psa-"+suffix, jpool, jpool+"-fn", gpool, gpool+"-boot", relay)
+				return
+			}
 			// Cancelled: the launcher cancels the Flink job.
 			_ = os.WriteFile(filepath.Join(dir, "ctl", "cancel"), nil, 0o644)
 		case <-waitDone:
@@ -463,6 +598,9 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 		if ctx.Err() != nil {
 			return Result{State: "CANCELLED"}
 		}
+		if m := setupErr.Load(); m != nil {
+			return failed("A setup error was detected in the job's workers: " + *m) // UNVERIFIED (docs re-read 2026-11-25: Google's troubleshooting page quotes no job-level message)
+		}
 		msg := "the job's launcher ended without a result"
 		if waitErr != nil {
 			msg += ": " + waitErr.Error()
@@ -475,6 +613,10 @@ func (d *Docker) Run(ctx context.Context, job Job, ev Events) Result {
 	}
 	return res
 }
+
+// setupFailure begins the line Beam's Python boot logs when a worker
+// cannot install the job's staged packages and requirements.
+const setupFailure = "failed to install required packages:"
 
 // javaPool starts the job's Java worker pool, in the job server's network
 // namespace, once the launcher has copied the job's jars and written its
@@ -589,7 +731,11 @@ func pythonVersions() []string {
 // Cloud Storage, Pub/Sub, BigQuery and Dataflow ports to the host; it
 // answers the relay's address on the network. stop undoes what was made,
 // also on an error.
-func (d *Docker) jobNetwork(ctx context.Context, network, relay, dir, image, label string, live map[string]string) (relayIP string, stop func(), err error) {
+//
+// Each private service is given a port of the relay (privateBasePort on),
+// which relays it to its target; privateServices puts its address in the
+// workers' namespace.
+func (d *Docker) jobNetwork(ctx context.Context, network, relay, dir, image, label string, live map[string]string, private ...PrivateService) (relayIP string, stop func(), err error) {
 	var cleanup []func()
 	stop = func() {
 		for i := len(cleanup) - 1; i >= 0; i-- {
@@ -620,14 +766,44 @@ func (d *Docker) jobNetwork(ctx context.Context, network, relay, dir, image, lab
 	// the instance's Storage API port (a certificate of relayName, from a
 	// CA made for the job, which the Java workers trust) and any other
 	// with its REST port.
-	storageAPI := -1
-	if live["bigquery"] != "" && live["bigquery-storage"] != "" {
-		if err := writeRelayTLS(filepath.Join(dir, "tls")); err != nil {
+	//
+	// Spanner's port answers TLS too, with the instance's Spanner: the
+	// Java SDK's SpannerIO (and DataflowTemplates' copy of it) is given a
+	// host (spannerHost, default https://batch-spanner.googleapis.com),
+	// and the Java client's SpannerOptions.Builder.setHost clears
+	// SPANNER_EMULATOR_HOST (java-spanner 6.113.0), so its channel is
+	// TLS; the Python and Go clients' plain connections still reach it.
+	tlsPorts := map[int]bool{}
+	google := jobGoogleHosts(live)
+	if (live["bigquery"] != "" && live["bigquery-storage"] != "") || live["spanner"] != "" || len(google) > 0 {
+		if err := writeRelayTLS(filepath.Join(dir, "tls"), google...); err != nil {
 			return "", stop, err
 		}
-		storageAPI = len(targets)
+	}
+	if live["bigquery"] != "" && live["bigquery-storage"] != "" {
+		tlsPorts[len(targets)] = true
 		targets = append(targets, live["bigquery-storage"])
 		ports = append(ports, bigqueryPort)
+	}
+	if live["spanner"] != "" {
+		tlsPorts[len(targets)] = true
+		targets = append(targets, live["spanner"])
+		ports = append(ports, spannerPort)
+	}
+	if a := live[launcherMetadata]; a != "" {
+		targets = append(targets, a)
+		ports = append(ports, metadataPort)
+	}
+	sni := map[int]string{}
+	for _, h := range google {
+		tlsPorts[len(targets)] = true
+		sni[len(targets)] = h
+		targets = append(targets, live[googleHosts[h]])
+		ports = append(ports, googleTLSPort)
+	}
+	for i, p := range private {
+		targets = append(targets, p.Target)
+		ports = append(ports, privateBasePort+i)
 	}
 	host, stopHost, err := d.hostTargets(ctx, targets...)
 	if err != nil {
@@ -635,7 +811,15 @@ func (d *Docker) jobNetwork(ctx context.Context, network, relay, dir, image, lab
 	}
 	cleanup = append(cleanup, stopHost)
 	for i, p := range ports {
-		if i == storageAPI {
+		if n := sni[i]; n != "" {
+			r := fmt.Sprintf("%d+tls@%s=%s", p, n, host[i])
+			if googleHTTPHosts[n] {
+				r += ";host"
+			}
+			routes = append(routes, r)
+			continue
+		}
+		if tlsPorts[i] {
 			routes = append(routes, fmt.Sprintf("%d+tls=%s", p, host[i]))
 			continue
 		}
@@ -671,6 +855,42 @@ func (d *Docker) jobNetwork(ctx context.Context, network, relay, dir, image, lab
 	return ip, stop, nil
 }
 
+// privateServices makes the job's private services addresses reachable
+// in the network namespace of js, which the workers share: cbnet.py, run
+// once with CAP_NET_ADMIN in that namespace, puts each address on its
+// loopback, and psa, the job's private services relay (relay.py, with no
+// added capability), answers each address's port there and relays it to
+// the job's relay, whose port for it reaches its target on the host. The
+// workers' namespace has no other route to the network's addresses (the
+// job's network is --internal), as Dataflow's workers reach only what
+// their VPC network routes.
+func (d *Docker) privateServices(ctx context.Context, js, psa, dir, image, label, relayIP string, private []PrivateService) error {
+	ips := []string{}
+	seen := map[string]bool{}
+	var routes []string
+	for i, p := range private {
+		if net.ParseIP(p.IP).To4() == nil || p.Port <= 0 {
+			return fmt.Errorf("the private services address %s:%d of %s is not an IPv4 address and port", p.IP, p.Port, p.Name)
+		}
+		if !seen[p.IP] {
+			seen[p.IP] = true
+			ips = append(ips, p.IP)
+		}
+		routes = append(routes, fmt.Sprintf("%s:%d=%s:%d", p.IP, p.Port, relayIP, privateBasePort+i))
+	}
+	args := append([]string{"run", "--rm", "--label", label, "--network", "container:" + js, "--cap-add", "NET_ADMIN",
+		"-v", dir + ":/cb:ro", "--entrypoint", "python", image, "/cb/py/cbnet.py"}, ips...)
+	if out, err := d.docker(ctx, args...); err != nil {
+		return errors.New("put the job's private services addresses on its workers' network: " + out)
+	}
+	args = append([]string{"run", "-d", "--name", psa, "--label", label, "--network", "container:" + js,
+		"-v", dir + ":/cb:ro", "--entrypoint", "python3", image, "/cb/relay.py"}, routes...)
+	if out, err := d.docker(ctx, args...); err != nil {
+		return errors.New("start the job's private services relay: " + out)
+	}
+	return d.waitLog(ctx, psa, "ready", 2*time.Minute)
+}
+
 func (d *Docker) clientEnv(job Job, dir, relayIP string) []string {
 	token := "cloudburrow-dataflow"
 	if d.Token != nil {
@@ -679,7 +899,7 @@ func (d *Docker) clientEnv(job Job, dir, relayIP string) []string {
 		}
 	}
 	host := relayName
-	return []string{
+	env := []string{
 		"-e", "CB_DATAFLOW=1", "-e", "CB_PROJECT=" + job.Project, "-e", "CB_ACCESS_TOKEN=" + token,
 		"-e", "PYTHONPATH=/cb/py", "-e", "CB_DRAIN=/cb/ctl/drain",
 		"-e", fmt.Sprintf("STORAGE_EMULATOR_HOST=http://%s:%d", host, storagePort),
@@ -687,10 +907,22 @@ func (d *Docker) clientEnv(job Job, dir, relayIP string) []string {
 		"-e", fmt.Sprintf("DATASTORE_EMULATOR_HOST=%s:%d", relayIP, datastorePort),
 		"-e", fmt.Sprintf("BIGTABLE_EMULATOR_HOST=%s:%d", relayIP, bigtablePort),
 		"-e", fmt.Sprintf("SPANNER_EMULATOR_HOST=%s:%d", relayIP, spannerPort),
+		// The Java Spanner client given a host (SpannerIO's spannerHost)
+		// is not in emulator mode, and so exports built-in metrics to Cloud
+		// Monitoring unless this is set; the job's network has no route
+		// there, and no client should try.
+		"-e", "SPANNER_DISABLE_BUILTIN_METRICS=true",
 		"-e", fmt.Sprintf("BIGQUERY_EMULATOR_HOST=http://%s:%d", host, bigqueryPort),
 		"-e", fmt.Sprintf("CB_BIGQUERY_URL=http://%s:%d/bigquery/v2/", host, bigqueryPort),
 		"-e", "GOOGLE_CLOUD_PROJECT=" + job.Project,
 	}
+	// pip trusts the job's CA, whose certificate the relay answers a
+	// Google host's TLS with (googleHosts: a requirement's
+	// https://storage.googleapis.com/ URL).
+	if _, err := os.Stat(filepath.Join(dir, "tls", "ca.pem")); err == nil {
+		env = append(env, "-e", "PIP_CERT=/cb/tls/ca.pem")
+	}
+	return env
 }
 
 // launcherEvent is one line the launcher prints.
@@ -807,9 +1039,65 @@ func (d *Docker) waitLog(ctx context.Context, name, want string, wait time.Durat
 	}
 }
 
+// launcherMetadata is the live address jobNetwork routes for a provided
+// Flex Template's launcher only: the instance's metadata server
+// (metadataPort).
+const launcherMetadata = "launcher-metadata"
+
+// googleHosts are the Google API hosts a job's containers (its launcher,
+// job server and workers) resolve to its relay, each answered by the
+// instance service (its live address's name) it is, through the relay's
+// certificate, which names them: a client built at its default endpoint
+// reaches the instance as on Google it reaches Google. BigQuery to
+// Parquet's launcher reads its table's schema through the BigQuery
+// Storage API's v1beta1 client (BigQueryStorageClient.create()) before
+// the job is submitted; Beam's SpannerIO of a template that has no
+// spannerHost (Spanner to BigQuery) dials batch-spanner.googleapis.com
+// (SpannerConfig's default host). The job's network has no other route,
+// so nothing reaches Google.
+var googleHosts = map[string]string{
+	"bigquerystorage.googleapis.com": "bigquery-storage",
+	"batch-spanner.googleapis.com":   "spanner",
+	"spanner.googleapis.com":         "spanner",
+	// Cloud Storage's public URLs (https://storage.googleapis.com/BUCKET/
+	// OBJECT), which a pip requirement may name: Google's YAML template's
+	// job_builder_util_transforms (yaml.go), read by the launcher's
+	// stager and by each worker.
+	"storage.googleapis.com": "storage",
+}
+
+// googleHTTPHosts are the googleHosts whose clients speak HTTP/1.1 to a
+// service that answers only its own names (internal/hostguard): the relay
+// sends their requests with the Host it dials.
+var googleHTTPHosts = map[string]bool{"storage.googleapis.com": true}
+
+// jobGoogleHosts are the googleHosts whose service the instance serves
+// (live), sorted.
+func jobGoogleHosts(live map[string]string) []string {
+	var out []string
+	for h, svc := range googleHosts {
+		if live[svc] != "" {
+			out = append(out, h)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// googleHostArgs are docker run's --add-host flags resolving the
+// googleHosts the instance serves to the relay.
+func googleHostArgs(live map[string]string, relayIP string) []string {
+	var args []string
+	for _, h := range jobGoogleHosts(live) {
+		args = append(args, "--add-host", h+":"+relayIP)
+	}
+	return args
+}
+
 // writeRelayTLS writes a CA made for the job (ca.pem), and the relay's
-// certificate of relayName signed by it (cert.pem, key.pem), into dir.
-func writeRelayTLS(dir string) error {
+// certificate of relayName and of names signed by it (cert.pem,
+// key.pem), into dir.
+func writeRelayTLS(dir string, names ...string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -834,7 +1122,7 @@ func writeRelayTLS(dir string) error {
 		return err
 	}
 	leaf := &x509.Certificate{SerialNumber: big.NewInt(now.UnixNano() + 1), Subject: pkix.Name{CommonName: relayName},
-		DNSNames: []string{relayName}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(30 * 24 * time.Hour),
+		DNSNames: append([]string{relayName}, names...), NotBefore: now.Add(-time.Hour), NotAfter: now.Add(30 * 24 * time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, leaf, caCert, &key.PublicKey, caKey)
 	if err != nil {
@@ -854,7 +1142,7 @@ func writeRelayTLS(dir string) error {
 }
 
 func writeAssets(dir string) error {
-	for _, name := range []string{"relay.py", "py/cblaunch.py", "py/cbio.py", "py/sitecustomize.py", "py/cbfnproxy.py", "java/pool.sh", "java/CbCredentialFactory.java"} {
+	for _, name := range []string{"relay.py", "py/cblaunch.py", "py/cbio.py", "py/sitecustomize.py", "py/cbfnproxy.py", "py/cbnet.py", "py/cbboot.sh", "java/pool.sh", "java/CbCredentialFactory.java", "java/GreedyPCollectionFusers.java", "java/FlinkBatchPortablePipelineTranslator.java", "java/ExecutableStageDoFnOperator.java"} {
 		b, err := assets.ReadFile("assets/" + name)
 		if err != nil {
 			return err
@@ -863,7 +1151,14 @@ func writeAssets(dir string) error {
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(p, b, 0o644); err != nil {
+		mode := os.FileMode(0o644)
+		if strings.HasSuffix(name, ".sh") {
+			mode = 0o755
+		}
+		if err := os.WriteFile(p, b, mode); err != nil {
+			return err
+		}
+		if err := os.Chmod(p, mode); err != nil {
 			return err
 		}
 	}
@@ -942,12 +1237,21 @@ func RemoveInstance(ctx context.Context, instance string) {
 		return
 	}
 	label := "label=" + InstanceLabel + "=" + instance
+	// One removal of them all: Docker removes the containers of one
+	// command concurrently, where one command each took a second or more
+	// apiece (a job has up to nine).
 	out, _ := exec.CommandContext(ctx, "docker", "ps", "-aq", "--filter", label).Output()
-	for _, id := range strings.Fields(string(out)) {
-		_ = exec.CommandContext(ctx, "docker", "rm", "-f", "-v", id).Run()
+	if ids := strings.Fields(string(out)); len(ids) > 0 {
+		_ = exec.CommandContext(ctx, "docker", append([]string{"rm", "-f", "-v"}, ids...)...).Run()
 	}
 	out, _ = exec.CommandContext(ctx, "docker", "network", "ls", "-q", "--filter", label).Output()
-	for _, id := range strings.Fields(string(out)) {
-		_ = exec.CommandContext(ctx, "docker", "network", "rm", id).Run()
+	if ids := strings.Fields(string(out)); len(ids) > 0 {
+		_ = exec.CommandContext(ctx, "docker", append([]string{"network", "rm"}, ids...)...).Run()
 	}
 }
+
+// Shutdown marks the instance as stopping: a run cancelled from now on
+// removes its containers at once (Run) rather than cancelling its job
+// through the runner, which for a streaming job can take longer than the
+// instance's whole stop may.
+func (d *Docker) Shutdown() { d.closing.Store(true) }
