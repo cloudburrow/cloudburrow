@@ -273,16 +273,31 @@ func (g *GKE) UpgradeControlPlane(ctx context.Context, kind, image string) error
 		return fmt.Errorf("start the upgrade helper: %w", err)
 	}
 	defer func() { _, _ = r.Run(context.WithoutCancel(ctx), "docker", "rm", "-f", "-v", helper) }()
+	// As carryImages does, the images are exported and imported with
+	// --local, never through containerd 2's transfer streams, which end as
+	// a clean EOF when they break: an import here read a short archive
+	// (Landing 170 run 46073901317, TestGKEServedUpgradeThroughTheBrowser:
+	// "short read: expected 47470592 bytes but got 47415296"). The export
+	// is written to a .part name, read back in full and renamed, and the
+	// copy in the control plane must have its checksum before it is
+	// imported.
 	export := `set -e
 case "$(uname -m)" in aarch64|arm64) a=arm64;; x86_64|amd64) a=amd64;; *) a=$(uname -m);; esac
 for i in $(seq 1 60); do ctr version >/dev/null 2>&1 && break; sleep 0.5; done
-ctr -n k8s.io images export --platform linux/$a /upgrade-images.tar $(ctr -n k8s.io images ls -q | grep -E '` + controlPlaneImages + `')
-echo $a`
-	arch, err := r.Run(ctx, "docker", "exec", helper, "sh", "-c", export)
+rm -f /upgrade-images.tar.part
+ctr -n k8s.io images export --local --platform linux/$a /upgrade-images.tar.part $(ctr -n k8s.io images ls -q | grep -E '` + controlPlaneImages + `')
+tar -tf /upgrade-images.tar.part >/dev/null
+mv /upgrade-images.tar.part /upgrade-images.tar
+echo $a $(sha256sum /upgrade-images.tar | cut -d' ' -f1)`
+	out, err := r.Run(ctx, "docker", "exec", helper, "sh", "-c", export)
 	if err != nil {
 		return fmt.Errorf("export %s's control-plane images: %w", version, err)
 	}
-	arch = strings.TrimSpace(arch)
+	f := strings.Fields(out)
+	if len(f) != 2 || len(f[1]) != 64 {
+		return fmt.Errorf("export %s's control-plane images: unexpected output %q", version, strings.TrimSpace(out))
+	}
+	arch, sum := f[0], f[1]
 	files := map[string]string{"/upgrade-images.tar": "upgrade-images.tar", "/usr/bin/kubeadm": "kubeadm", "/usr/bin/kubelet": "kubelet", "/usr/bin/kubectl": "kubectl"}
 	for src, dst := range files {
 		if _, err := r.Run(ctx, "docker", "cp", helper+":"+src, filepath.Join(stage, dst)); err != nil {
@@ -292,7 +307,12 @@ echo $a`
 	if _, err := r.Run(ctx, "docker", "cp", filepath.Join(stage, "upgrade-images.tar"), cp+":/kind/upgrade-images.tar"); err != nil {
 		return fmt.Errorf("copy the control-plane images in: %w", err)
 	}
-	_, err = r.Run(ctx, "docker", "exec", cp, "ctr", "-n", "k8s.io", "images", "import", "--platform", "linux/"+arch, "/kind/upgrade-images.tar")
+	import_ := `set -e
+if ! echo "$2  $1" | sha256sum -c - >/dev/null 2>&1; then
+  echo "the copied archive $1 ($(stat -c %s "$1") bytes) is not the exported one" >&2; exit 1
+fi
+ctr -n k8s.io images import --local --platform "linux/$3" "$1"`
+	_, err = r.Run(ctx, "docker", "exec", cp, "sh", "-c", import_, "sh", "/kind/upgrade-images.tar", sum, arch)
 	_, _ = r.Run(context.WithoutCancel(ctx), "docker", "exec", cp, "rm", "-f", "/kind/upgrade-images.tar")
 	if err != nil {
 		return fmt.Errorf("import the control-plane images: %w", err)
