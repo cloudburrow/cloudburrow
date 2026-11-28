@@ -7362,6 +7362,9 @@ function listingSummary(data) {
 // Studio draws Create dataset and Create table (#1861); openModal clears it.
 let MODAL_SIDE_NEXT = false;
 
+// OPEN_MODALS are the dialogs open, the topmost last: only it holds focus.
+const OPEN_MODALS = [];
+
 function openModal({ labelledBy, canClose = () => true }) {
   // A dialog still fading out goes at once when another opens. Left for its
   // exit, it holds the same IDs as the new one, so the new dialog's
@@ -7391,8 +7394,56 @@ function openModal({ labelledBy, canClose = () => true }) {
     "a[href], button, input, select, textarea, [tabindex]")]
     .filter((n) => !n.disabled && n.tabIndex !== -1 && !n.closest("[hidden]"));
 
+  // Focus stays in the topmost dialog whatever moves it (WCAG 2.1.2,
+  // 2.4.3). The page is inert, but what is exempt from that (the live
+  // region, the snackbars and their Dismiss) and what is appended to the
+  // body after the dialog opened are not: focus moved there comes back to
+  // where it was in the dialog. And a Tab pressed while focus is on none of
+  // the dialog's controls (the focused field hidden or removed under the
+  // user, as a ShowWhen does) goes into the dialog, not past it. A Tab
+  // walk of Add trigger with Cloud Audit Logs left the dialog on a CI
+  // runner (Landing 170 run 46073901317).
+  let lastInside = null;
+  const topmost = () => {
+    const open = OPEN_MODALS.filter((d) => d.isConnected && !d.inert);
+    return open[open.length - 1] === dialog;
+  };
+  const onFocusIn = (e) => {
+    if (!dialog.isConnected) { untrap(); return; }
+    if (dialog.contains(e.target)) { lastInside = e.target; return; }
+    if (!topmost() || OPEN_MODALS.some((d) => d !== dialog && d.contains(e.target))) return;
+    const items = focusable();
+    const back = lastInside && lastInside.isConnected && items.includes(lastInside) ? lastInside : items[0];
+    if (back) back.focus();
+  };
+  const onTabOutside = (e) => {
+    if (e.key !== "Tab" || !topmost() || dialog.contains(document.activeElement)) return;
+    // A control removed from the document has no place to go on from: the
+    // browser's own starting point does, and onFocusIn brings anything
+    // outside back.
+    const from = lastInside;
+    if (!from || !from.isConnected) return;
+    const items = focusable();
+    if (!items.length) return;
+    e.preventDefault();
+    // The control after (or, with Shift, before) the one focus was lost
+    // from, as the walk would have gone on.
+    const after = (n) => from.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING;
+    const next = e.shiftKey
+      ? [...items].reverse().find((n) => n !== from && !after(n)) || items[items.length - 1]
+      : items.find(after) || items[0];
+    next.focus();
+  };
+  const untrap = () => {
+    document.removeEventListener("focusin", onFocusIn, true);
+    document.removeEventListener("keydown", onTabOutside, true);
+    const i = OPEN_MODALS.indexOf(dialog);
+    if (i >= 0) OPEN_MODALS.splice(i, 1);
+  };
+
   const close = (reason = "explicit") => {
     if (!canClose(reason)) return false;
+    untrap();
     // Removed after the exit, but made inert and untouchable straight away:
     // a dialog that is on its way out must not still be clickable, and the
     // page behind it must come back immediately.
@@ -7430,6 +7481,9 @@ function openModal({ labelledBy, canClose = () => true }) {
 
   for (const n of inerted) n.inert = true;
   document.body.append(dialog);
+  OPEN_MODALS.push(dialog);
+  document.addEventListener("focusin", onFocusIn, true);
+  document.addEventListener("keydown", onTabOutside, true);
   requestAnimationFrame(() => dialog.classList.add("is-open"));
   return { dialog, close };
 }
