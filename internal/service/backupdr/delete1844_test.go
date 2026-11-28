@@ -21,7 +21,7 @@ func TestBackupDeleteWaitsForEnforcedRetention(t *testing.T) {
 	if code != 400 || !strings.Contains(strings.ToLower(out["error"].(map[string]any)["message"].(string)), "enforced retention") {
 		t.Fatalf("deleting inside the enforced retention: %d %v", code, out)
 	}
-	s.now = func() time.Time { return time.Now().Add(25 * time.Hour) }
+	s.setNow(func() time.Time { return time.Now().Add(25 * time.Hour) })
 	if code, out := call(t, s, "DELETE", "/v1/"+name, ""); code != 200 {
 		t.Fatalf("deleting after the enforced retention: %d %v", code, out)
 	}
