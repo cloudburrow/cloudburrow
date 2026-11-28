@@ -169,6 +169,9 @@ type Manager struct {
 	buildMu  sync.Mutex
 	once     sync.Once
 	desktop  bool
+	// shutdowns counts idle shutdowns still tearing their runtime down,
+	// which Close waits for.
+	shutdowns sync.WaitGroup
 }
 
 type session struct {
@@ -513,8 +516,10 @@ func (m *Manager) teardown(s *session) {
 	}
 }
 
-// Close deletes every runtime.
+// Close deletes every runtime, waiting for idle shutdowns already under
+// way to finish deleting theirs.
 func (m *Manager) Close() {
+	defer m.shutdowns.Wait()
 	m.mu.Lock()
 	keys := make([]string, 0, len(m.sessions))
 	for k := range m.sessions {

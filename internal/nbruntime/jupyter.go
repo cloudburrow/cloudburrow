@@ -585,7 +585,11 @@ func (m *Manager) watchActivity(s *session, done chan struct{}, poll time.Durati
 		m.mu.Unlock()
 		if quiet {
 			m.logf("workbench instance %s: idle shutdown", s.key)
-			go func() { _ = m.Disconnect(s.key) }()
+			m.shutdowns.Add(1)
+			go func() {
+				defer m.shutdowns.Done()
+				_ = m.Disconnect(s.key)
+			}()
 			return
 		}
 	}
